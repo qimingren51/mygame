@@ -8,7 +8,7 @@
 
 | 游戏 | 在线地址 | 简介 |
 | --- | --- | --- |
-| 提灯夜行 | <https://qimingren51.github.io/mygame/lantern/> | 横屏肉鸽割草：五行共鸣、法器进化，撑过十分钟妖潮迎来天明。建议手机横屏游玩。 |
+| 提灯夜行 | <https://qimingren51.github.io/mygame/lantern/> | 横屏肉鸽割草：五行共鸣、法器进化、夜签与奇遇让每局都不同，配有国风音效与音乐。撑过十分钟妖潮迎来天明，建议手机横屏游玩。 |
 | 贪吃蛇 | <https://qimingren51.github.io/mygame/snake/> | 经典贪吃蛇，吃到食物会变长，别撞到墙或自己。 |
 
 ## 本地运行

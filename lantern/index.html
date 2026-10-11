@@ -34,6 +34,7 @@
           <div class="hpbar"><div id="hp-fill" class="hp-fill"></div><div id="shield-fill" class="shield-fill"></div></div>
         </div>
       </div>
+      <div id="buff-chip" class="buff-chip" hidden></div>
       <div id="weapon-slots" class="slots"></div>
       <div id="passive-slots" class="slots small"></div>
     </div>
@@ -83,6 +84,18 @@
     <p id="title-info" class="title-info"></p>
     <p class="hint touch-only">左侧任意处按住拖动移动 · 攻击全自动 · 右下角闪避与燃灯</p>
     <p class="hint mouse-only">WASD / 方向键移动 · 攻击全自动 · 空格闪避 · E 燃灯 · Esc 暂停</p>
+    <div class="audio-toggles">
+      <button class="toggle" type="button" data-audio="music">音乐 开</button>
+      <button class="toggle" type="button" data-audio="sfx">音效 开</button>
+    </div>
+  </section>
+
+  <!-- 夜签 -->
+  <section id="omen-screen" class="screen dim" hidden>
+    <h2 class="brush gold screen-title">抽夜签</h2>
+    <p class="sub">今夜的规矩，三选一</p>
+    <div id="omen-cards" class="cards"></div>
+    <button id="omen-back" class="btn ghost" type="button">返回</button>
   </section>
 
   <!-- 升级三选一 -->
@@ -121,6 +134,10 @@
     <div class="row-actions">
       <button id="resume-btn" class="btn primary" type="button">继续</button>
       <button id="quit-btn" class="btn ghost" type="button">放弃本局</button>
+    </div>
+    <div class="audio-toggles">
+      <button class="toggle" type="button" data-audio="music">音乐 开</button>
+      <button class="toggle" type="button" data-audio="sfx">音效 开</button>
     </div>
   </section>
 
@@ -167,6 +184,7 @@
     <p>请将手机横过来</p>
   </div>
 
+  <script src="./audio.js"></script>
   <script src="./game.js"></script>
 </body>
 </html>

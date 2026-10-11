@@ -14,6 +14,10 @@
   };
   const fmtNum = (n) => Math.floor(n).toLocaleString('en-US');
 
+  // 音频模块（audio.js）缺失时所有音效调用都变成空操作
+  const AUDIO = typeof LanternAudio !== 'undefined' ? LanternAudio : null;
+  const SFX = AUDIO ? AUDIO.sfx : new Proxy({}, { get: () => () => {} });
+
   // localStorage 键名统一加 lantern_ 前缀
   const STORE_OIL = 'lantern_oil';
   const STORE_META = 'lantern_meta';
@@ -133,7 +137,47 @@
     fox: { name: '赤面狐', r: 24, hp: 320, speed: 58, dmg: 14, xp: 20, elite: true, body: '#2A1426', rim: '#FF6B5A', eye: '#FF6B5A', mask: '#F4EBDD' },
     ghoul: { name: '青面鬼', r: 30, hp: 900, speed: 50, dmg: 18, xp: 40, elite: true, body: '#13231F', rim: '#5FD4A0', eye: '#C8FF6B', mask: '#CFE8DC' },
     boss: { name: '夜主 · 九尾', r: 44, hp: 36000, speed: 52, dmg: 22, xp: 0, boss: true, body: '#2A1426', rim: '#FFB46B', eye: '#FFD98A', mask: '#F4EBDD' },
+    stonelord: { name: '石将', r: 28, hp: 1100, speed: 34, dmg: 16, xp: 30, elite: true, body: '#2A2119', rim: '#C9925A', eye: '#FFB46B' },
+    toad: { name: '金蟾', r: 14, hp: 70, speed: 80, dmg: 0, xp: 0, toad: true, body: '#5A4210', rim: '#FFD98A', eye: '#FFF1C2' },
   };
+  const ELITE_INFO = {
+    fox: { label: '精英 · 赤面狐', color: '#FF6B5A' },
+    ghoul: { label: '小头目 · 青面鬼', color: '#5FD4A0' },
+    stonelord: { label: '精英 · 石将', color: '#C9925A' },
+  };
+
+  // 夜签：开局三选一的本局规则，有好处也有代价
+  const OMENS = [
+    { id: 'bloodmoon', name: '血月', good: '魂火 +35%', bad: '妖物数量 +35%', apply: (m) => { m.xp *= 1.35; m.spawn *= 1.35; } },
+    { id: 'fog', name: '浓雾', good: '暴击率 +15%', bad: '灯光范围 -30%', apply: (m) => { m.crit += 0.15; m.light *= 0.7; } },
+    { id: 'glass', name: '琉璃灯', good: '伤害 +40%', bad: '生命上限 -35%', apply: (m) => { m.dmg *= 1.4; m.maxHp *= 0.65; } },
+    { id: 'foxes', name: '狐火夜', good: '宝箱至少三连', bad: '精英数量翻倍', apply: (m) => { m.chestMin = 3; m.elites = 2; } },
+    { id: 'gale', name: '疾风', good: '移动速度 +25%', bad: '妖物移速 +25%', apply: (m) => { m.speed *= 1.25; m.enemySpeed *= 1.25; } },
+    { id: 'chestrain', name: '天降宝箱', good: '每 100 秒天降宝箱', bad: '妖物血量 +25%', apply: (m) => { m.chestRain = true; m.enemyHp *= 1.25; } },
+    { id: 'element', name: '五行偏重', good: '', bad: '其他四系选项更少出现', apply: (m, o) => { m.favor = o.el; } },
+    { id: 'greed', name: '贪婪', good: '灯油收益 +50%', bad: '无法回复生命', apply: (m) => { m.oil *= 1.5; m.noHeal = true; } },
+    { id: 'quiet', name: '静夜', good: '妖物数量 -25%', bad: '升级只有两个选项', apply: (m) => { m.spawn *= 0.75; m.choices = 2; } },
+    { id: 'wonders', name: '奇遇夜', good: '奇遇出现频率翻倍', bad: '妖物血量 +15%', apply: (m) => { m.events = 2; m.enemyHp *= 1.15; } },
+  ];
+  const baseMods = () => ({
+    xp: 1, spawn: 1, crit: 0, light: 1, dmg: 1, maxHp: 1, chestMin: 1, elites: 1, speed: 1, enemySpeed: 1,
+    chestRain: false, enemyHp: 1, favor: null, oil: 1, noHeal: false, choices: 3, events: 1,
+  });
+
+  // 奇遇：地图上随机出现的事件
+  const EVENTS = {
+    toad: { name: '金蟾', icon: '蟾', color: '#FFD98A', weight: 3, hint: '追上它，打死就散财' },
+    spring: { name: '灵泉', icon: '泉', color: '#5FD4C4', weight: 2, hint: '站在泉中回复生命' },
+    shrine: { name: '古灯', icon: '灯', color: '#FF8A3D', weight: 2, hint: '触碰获得 30 秒随机增益' },
+    altar: { name: '血祭坛', icon: '祭', color: '#FF6B5A', weight: 1.5, hint: '以 25% 生命换一次强化' },
+    rift: { name: '妖潮裂隙', icon: '隙', color: '#B07CF0', weight: 1.5, hint: '击败守卫获得宝箱' },
+  };
+  const BUFFS = [
+    { id: 'fury', name: '灯焰', desc: '伤害 +50%', color: '#FF8A3D' },
+    { id: 'swift', name: '御风', desc: '移速 +40%', color: '#6FD6A0' },
+    { id: 'soul', name: '聚魂', desc: '拾取范围 ×3', color: '#5FD4C4' },
+    { id: 'iron', name: '金身', desc: '受到伤害 -60%', color: '#E9D9A6' },
+  ];
 
   const META = [
     { id: 'dmg', name: '锋芒', icon: '锋', per: '每级伤害 +4%' },
@@ -203,15 +247,31 @@
   let G = null;
   let evoTimer = 0;
   const demo = { x: 0, y: 0, t: 0 };
+  const mapSeed = { x: 0, y: 0 };
 
-  function newRun() {
+  function newRun(omen) {
+    const mods = baseMods();
+    omen.apply(mods, omen);
     G = {
+      omen,
+      mods,
+      seed: Math.floor(Math.random() * 1e9),
+      mapX: Math.floor(Math.random() * 20000) - 10000,
+      mapY: Math.floor(Math.random() * 20000) - 10000,
+      // 本局妖群组成：疾影、石妖的比例每局不同
+      mix: { wisp: rand(0.08, 0.3), golem: rand(0.05, 0.2) },
+      plan: makePlan(),
+      nextEvent: rand(28, 45),
+      events: [],
+      buff: null,
+      chestRainT: 100,
+      intensity: -1,
       t: 0,
       kills: 0,
       level: 1,
       xp: 0,
       pendingLevels: 0,
-      pendingChests: 0,
+      chestQueue: [],
       pendingEvos: [],
       player: { x: 0, y: 0, r: 11, hp: 100, faceX: 1, faceY: 0, iframe: 0, dashT: 0, dashCd: 0, dashVX: 0, dashVY: 0, shield: 0, shieldT: 0, moving: false },
       weapons: [],
@@ -254,6 +314,32 @@
     renderSlots();
   }
 
+  // 精英与妖潮的出场时间、种类每局随机
+  function makePlan() {
+    return [
+      { at: rand(150, 200), kind: 'elite', pool: ['fox', 'stonelord'] },
+      { at: rand(270, 320), kind: 'elite', pool: ['ghoul', 'stonelord', 'fox'] },
+      { at: rand(370, 420), kind: 'elite', pool: ['fox', 'ghoul', 'stonelord'] },
+      { at: rand(450, 500), kind: 'surge' },
+      { at: BOSS_TIME, kind: 'boss' },
+    ];
+  }
+
+  function drawOmens() {
+    const pool = OMENS.slice();
+    const out = [];
+    while (out.length < 3) {
+      const o = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+      if (o.id === 'element') {
+        const el = EL_ORDER[Math.floor(Math.random() * EL_ORDER.length)];
+        out.push({ ...o, el, good: `${EL[el].name}系开局即得 2 点共鸣` });
+      } else {
+        out.push(o);
+      }
+    }
+    return out;
+  }
+
   const getWeapon = (id) => G.weapons.find((w) => w.id === id);
   const getPassive = (id) => G.passives.find((p) => p.id === id);
   const plv = (id) => {
@@ -273,6 +359,7 @@
     // 满级（或已进化）的法器、满级的心法计 2 点
     for (const w of G.weapons) res[WEAPONS[w.id].el] += w.lv >= WEAPON_MAX || w.evo ? 2 : 1;
     for (const p of G.passives) res[PASSIVES[p.id].el] += p.lv >= PASSIVE_MAX ? 2 : 1;
+    if (G.mods.favor) res[G.mods.favor] += 2;
     G.res = res;
     for (const el of EL_ORDER) {
       const tier = tierOf(res[el]);
@@ -281,6 +368,7 @@
         toast(`${e.name} · ${e.res} ${res[el]}`, `共鸣激活：${e.tiers[tier - 1]}`, e.color, tier === 3);
         G.edge = { color: e.color, t: 0.9 };
         sfxFlash(e.color, 0.12);
+        SFX.resonance();
       }
       G.tier[el] = tier;
     }
@@ -299,17 +387,18 @@
     const t = G.tier;
     const s = {};
     s.area = 1 + 0.1 * plv('changming');
-    s.dmg = (1 + 0.08 * plv('luxin')) * (1 + 0.04 * meta.dmg);
-    s.critChance = 0.05 + 0.05 * plv('ruimu') + (t.metal >= 1 ? 0.1 : 0);
+    const m = G.mods;
+    s.dmg = (1 + 0.08 * plv('luxin')) * (1 + 0.04 * meta.dmg) * m.dmg;
+    s.critChance = 0.05 + 0.05 * plv('ruimu') + (t.metal >= 1 ? 0.1 : 0) + m.crit;
     s.critMult = 2 + 0.2 * plv('jianyi') + (t.metal >= 2 ? 0.5 : 0);
     s.cd = Math.max(0.6, 1 - 0.06 * plv('jingxin'));
     s.magnet = 65 * (1 + 0.25 * plv('yinhun')) * (1 + 0.08 * meta.agi);
     s.amount = [0, 1, 1, 2, 2, 3][plv('zhezhi')] + (t.wood >= 2 ? 1 : 0);
-    s.speed = 118 * (1 + 0.08 * plv('jixing')) * (1 + 0.03 * meta.agi);
-    s.maxHp = 100 + 20 * plv('houde') + 12 * meta.hp;
+    s.speed = 118 * (1 + 0.08 * plv('jixing')) * (1 + 0.03 * meta.agi) * m.speed;
+    s.maxHp = Math.round((100 + 20 * plv('houde') + 12 * meta.hp) * m.maxHp);
     s.armor = plv('houde');
     s.taken = 1 - 0.05 * plv('panshi');
-    s.regen = (t.wood >= 1 ? 0.005 * s.maxHp : 0) * (G.sheng['水生木'] ? 2 : 1);
+    s.regen = m.noHeal ? 0 : (t.wood >= 1 ? 0.005 * s.maxHp : 0) * (G.sheng['水生木'] ? 2 : 1);
     s.burnMult = G.sheng['木生火'] ? 1.3 : 1;
     s.shieldCd = G.sheng['火生土'] ? 6 : 10;
     s.kb = t.earth >= 2 ? 2 : 1;
@@ -388,7 +477,8 @@
   function hitEnemy(e, base, opt = {}) {
     if (e.dead) return;
     const s = G.stats;
-    let dmg = base * s.dmg;
+    let dmg = base * s.dmg * (G.buff && G.buff.id === 'fury' ? 1.5 : 1);
+    SFX.hit();
     const crit = opt.noCrit ? false : Math.random() < s.critChance || (e.stun > 0 && G.sheng['土生金']);
     if (crit) dmg *= s.critMult;
     if (e.frozen > 0 && G.tier.water >= 3) dmg *= 1.5;
@@ -431,6 +521,11 @@
   function killEnemy(e) {
     if (e.dead) return;
     e.dead = true;
+    SFX.kill();
+    if (e.d.toad) {
+      killToad(e);
+      return;
+    }
     G.kills++;
     G.comboT > 0 ? G.combo++ : (G.combo = 1);
     G.comboT = 2.2;
@@ -438,12 +533,13 @@
     if ([100, 300, 500, 1000].includes(G.combo)) {
       toast(`连斩 ${G.combo}`, '', '#FFD98A', G.combo >= 500);
       sfxFlash('#FFD98A', 0.08);
+      SFX.combo();
     }
     G.ult = Math.min(1, G.ult + (e.d.elite ? 0.15 : 1 / 140));
 
     const m = G.t / 60;
     if (e.d.xp > 0) {
-      const value = e.d.xp * (1 + 0.25 * m);
+      const value = e.d.xp * (1 + 0.25 * m) * G.mods.xp;
       if (e.d.elite) {
         for (let i = 0; i < 8; i++) dropGem(e.x + rand(-20, 20), e.y + rand(-20, 20), value / 8);
       } else {
@@ -454,10 +550,10 @@
       G.pickups.push({ kind: 'chest', x: e.x, y: e.y, t: 0 });
       G.pickups.push({ kind: 'bell', x: e.x + 24, y: e.y, t: 0 });
     } else if (Math.random() < 1 / 220) G.pickups.push({ kind: 'bell', x: e.x, y: e.y, t: 0 });
-    else if (Math.random() < 1 / 260) G.pickups.push({ kind: 'lotus', x: e.x, y: e.y, t: 0 });
+    else if (!G.mods.noHeal && Math.random() < 1 / 260) G.pickups.push({ kind: 'lotus', x: e.x, y: e.y, t: 0 });
 
     burst(e.x, e.y, e.d.rim, e.d.elite ? 22 : 6, e.d.elite ? 160 : 90);
-    if (G.tier.wood >= 3) G.player.hp = Math.min(G.stats.maxHp, G.player.hp + 0.4);
+    if (G.tier.wood >= 3 && !G.mods.noHeal) G.player.hp = Math.min(G.stats.maxHp, G.player.hp + 0.4);
     if (G.tier.fire >= 3) G.blasts.push({ x: e.x, y: e.y, r: 46, dmg: 8 + 4 * m, color: '#FF8A3D' });
     if (G.tier.water >= 3 && e.frozen > 0) G.blasts.push({ x: e.x, y: e.y, r: 52, dmg: 10 + 5 * m, color: '#6FB8FF' });
 
@@ -468,6 +564,21 @@
       sfxFlash('#FFF1C2', 0.6);
       G.wonAt = G.t + 0.6; // 慢镜头之后进入结算
     }
+  }
+
+  // 金蟾：被打死时散落大量魂火与灯油
+  function killToad(e) {
+    const total = xpNeed(G.level) * 1.3;
+    for (let i = 0; i < 24; i++) {
+      const a = rand(0, TAU);
+      const r = rand(10, 60);
+      dropGem(e.x + Math.cos(a) * r, e.y + Math.sin(a) * r, total / 24);
+    }
+    G.oilBonus += 30;
+    burst(e.x, e.y, '#FFD98A', 40, 220);
+    sfxFlash('#FFD98A', 0.2);
+    toast('金蟾 · 散财', '魂火满地，灯油 +30', '#FFD98A', true);
+    SFX.coins();
   }
 
   function dropGem(x, y, value) {
@@ -492,7 +603,7 @@
     const p = G.player;
     if (p.iframe > 0 || p.dashT > 0 || state !== 'play') return;
     const s = G.stats;
-    let dmg = Math.max(1, amount * s.taken - s.armor);
+    let dmg = Math.max(1, amount * s.taken * (G.buff && G.buff.id === 'iron' ? 0.4 : 1) - s.armor);
     if (p.shield > 0) {
       const absorbed = Math.min(p.shield, dmg);
       p.shield -= absorbed;
@@ -505,6 +616,7 @@
     p.iframe = 0.5;
     if (dmg <= 0) return;
     p.hp -= dmg;
+    SFX.hurt();
     G.shake = Math.max(G.shake, 5);
     G.flash = { color: '#FF3B30', a: 0.18 };
     addNumber(p.x, p.y - 18, dmg, '#FF6B5A', 15);
@@ -578,6 +690,7 @@
         const ang = Math.atan2(tgt.y - p.y, tgt.x - p.x) + (i - (count - 1) / 2) * 0.14;
         fireSword(p.x, p.y, ang, base.dmg * (w.evo ? 1.6 : 1), w.evo ? 999 : base.pierce, tgt, w.evo, false);
       }
+      SFX.sword();
     },
 
     bell(w, dt) {
@@ -589,6 +702,7 @@
         w.t = base.cd * s.cd;
         const r = base.radius * s.area * (w.evo ? 1.3 : 1);
         G.effects.push({ kind: 'ring', x: p.x, y: p.y, r0: 12, r1: r, t: 0, life: 0.45, color: '#6FB8FF', width: 3 });
+        SFX.bellPulse();
         queryEnemies(p.x, p.y, r, (e) => {
           hitEnemy(e, base.dmg * (w.evo ? 1.5 : 1), { kb: 40, from: p });
           e.slow = Math.max(e.slow, 1.5);
@@ -601,6 +715,7 @@
           w.big = 6 * s.cd;
           G.effects.push({ kind: 'ring', x: p.x, y: p.y, r0: 20, r1: viewRadius(), t: 0, life: 0.7, color: '#A8D4FF', width: 8 });
           sfxFlash('#6FB8FF', 0.18);
+          SFX.bigBell();
           for (const e of G.enemies) {
             if (e.dead || !onScreen(e)) continue;
             if (!e.d.boss) e.frozen = 1.5;
@@ -689,7 +804,7 @@
   // =====================================================================
   const hpScale = () => {
     const m = G.t / 60;
-    return 1 + 0.3 * m + 0.07 * m * m;
+    return (1 + 0.3 * m + 0.07 * m * m) * G.mods.enemyHp;
   };
 
   function spawnEnemy(type, x, y) {
@@ -697,7 +812,7 @@
     const sc = d.boss ? 1 : hpScale();
     const e = {
       type, d, x, y, r: d.r, hp: d.hp * sc, maxHp: d.hp * sc,
-      speed: d.speed * rand(0.9, 1.1), dmg: d.dmg * (1 + 0.1 * (G.t / 60)),
+      speed: d.speed * rand(0.9, 1.1) * (d.toad ? 1 : G.mods.enemySpeed), dmg: d.dmg * (1 + 0.1 * (G.t / 60)),
       flash: 0, slow: 0, slowAmt: 0, frozen: 0, stun: 0, kx: 0, ky: 0,
       burnT: 0, burnStacks: 0, burnDps: 0, burnShow: 0, burnAcc: 0, cdLamp: 0,
       dead: false, wob: Math.random() * TAU, atk: 2, summon: 7,
@@ -713,10 +828,24 @@
     return { x: p.x + Math.cos(a) * R, y: p.y + Math.sin(a) * R };
   }
 
+  function spawnElite(pool) {
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    const info = ELITE_INFO[type];
+    for (let i = 0; i < G.mods.elites; i++) {
+      const pos = ringPos();
+      spawnEnemy(type, pos.x, pos.y);
+    }
+    toast(G.mods.elites > 1 ? `${info.label} ×${G.mods.elites}` : info.label, '击败它获得宝箱', info.color);
+    SFX.warn(false);
+  }
+
   function updateSpawns(dt) {
     const m = G.t / 60;
-    let rate = 1.6 + 1.1 * m + 0.1 * m * m;
-    if (G.t >= 480 && G.t < 510) rate *= 2.5;
+    let rate = (1.6 + 1.1 * m + 0.1 * m * m) * G.mods.spawn;
+    if (G.surgeT > 0) {
+      G.surgeT -= dt;
+      rate *= 2.5;
+    }
     if (G.boss) rate *= 0.4;
     if (G.enemies.length > 360) rate = 0;
     G.spawnAcc += rate * dt;
@@ -724,52 +853,158 @@
       G.spawnAcc -= 1;
       const r = Math.random();
       let type = 'shade';
-      if (m >= 1 && r < (m >= 5 ? 0.25 : 0.15)) type = 'wisp';
-      else if (m >= 2.5 && r > (m >= 5 ? 0.82 : 0.9)) type = 'golem';
+      if (m >= 1 && r < G.mix.wisp * (m >= 5 ? 1.5 : 1)) type = 'wisp';
+      else if (m >= 2.5 && r > 1 - G.mix.golem * (m >= 5 ? 1.6 : 1)) type = 'golem';
       const pos = ringPos();
       spawnEnemy(type, pos.x, pos.y);
     }
 
-    // 每 25 秒从一个方向涌来一群，制造“妖潮”的方向感
-    const packIndex = Math.floor(G.t / 25);
-    if (G.t > 40 && !G.ev[`pack${packIndex}`] && G.enemies.length < 300) {
-      G.ev[`pack${packIndex}`] = true;
+    // 每 25 秒左右从随机方向涌来一群，制造“妖潮”的方向感
+    if (G.t > 40 && G.t >= (G.nextPack || 40) && G.enemies.length < 300) {
+      G.nextPack = G.t + rand(18, 32);
       const base = ringPos(60);
-      const n = 8 + Math.floor(m * 3);
-      for (let i = 0; i < n; i++) spawnEnemy(m > 4 && i % 3 === 0 ? 'wisp' : 'shade', base.x + rand(-40, 40), base.y + rand(-40, 40));
+      const n = Math.round((8 + m * 3) * G.mods.spawn);
+      for (let i = 0; i < n; i++) spawnEnemy(m > 4 && Math.random() < G.mix.wisp * 2 ? 'wisp' : 'shade', base.x + rand(-40, 40), base.y + rand(-40, 40));
     }
 
-    const once = (key, at, fn) => {
-      if (!G.ev[key] && G.t >= at) {
-        G.ev[key] = true;
-        fn();
-      }
-    };
-    once('fox1', 180, () => {
-      const pos = ringPos();
-      spawnEnemy('fox', pos.x, pos.y);
-      toast('精英 · 赤面狐', '击败它获得宝箱', '#FF6B5A');
-    });
-    once('ghoul', 300, () => {
-      const pos = ringPos();
-      spawnEnemy('ghoul', pos.x, pos.y);
-      toast('小头目 · 青面鬼', '击败它获得宝箱', '#5FD4A0');
-    });
-    once('surge', 480, () => {
-      for (let i = 0; i < 2; i++) {
+    // 按本局随机计划出场
+    for (const step of G.plan) {
+      if (step.done || G.t < step.at) continue;
+      step.done = true;
+      if (step.kind === 'elite') {
+        spawnElite(step.pool);
+      } else if (step.kind === 'surge') {
+        G.surgeT = 30;
+        spawnElite(['fox', 'ghoul', 'stonelord']);
+        toast('妖潮来袭', '撑过这 30 秒', '#FF6B5A', true);
+        G.shake = Math.max(G.shake, 6);
+      } else if (step.kind === 'boss') {
         const pos = ringPos();
-        spawnEnemy('fox', pos.x, pos.y);
+        G.boss = spawnEnemy('boss', pos.x, pos.y);
+        toast('夜主 · 九尾 降临', '击败它，迎来天明', '#FFB46B', true);
+        G.shake = Math.max(G.shake, 10);
+        sfxFlash('#FF6B5A', 0.2);
+        SFX.warn(true);
+        if (AUDIO) AUDIO.setMusic('boss');
       }
-      toast('妖潮来袭', '撑过这 30 秒', '#FF6B5A', true);
-      G.shake = Math.max(G.shake, 6);
-    });
-    once('boss', BOSS_TIME, () => {
-      const pos = ringPos();
-      G.boss = spawnEnemy('boss', pos.x, pos.y);
-      toast('夜主 · 九尾 降临', '击败它，迎来天明', '#FFB46B', true);
-      G.shake = Math.max(G.shake, 10);
-      sfxFlash('#FF6B5A', 0.2);
-    });
+    }
+
+    // 夜签「天降宝箱」
+    if (G.mods.chestRain) {
+      G.chestRainT -= dt;
+      if (G.chestRainT <= 0) {
+        G.chestRainT = 100;
+        const a = rand(0, TAU);
+        G.pickups.push({ kind: 'chest', x: G.player.x + Math.cos(a) * 120, y: G.player.y + Math.sin(a) * 90, t: 0 });
+        toast('天降宝箱', '就在附近', '#FFD98A');
+        SFX.event();
+      }
+    }
+
+    updateEvents(dt);
+  }
+
+  // =====================================================================
+  // 奇遇
+  // =====================================================================
+  function pickEvent() {
+    const kinds = Object.keys(EVENTS).filter((k) => !(k === 'spring' && G.mods.noHeal));
+    const total = kinds.reduce((sum, k) => sum + EVENTS[k].weight, 0);
+    let r = Math.random() * total;
+    for (const k of kinds) {
+      r -= EVENTS[k].weight;
+      if (r <= 0) return k;
+    }
+    return kinds[0];
+  }
+
+  function spawnEvent(kind) {
+    const p = G.player;
+    const a = rand(0, TAU);
+    const info = EVENTS[kind];
+    const ev = { kind, t: 0, life: 30, used: false, x: 0, y: 0 };
+    if (kind === 'toad') {
+      const R = viewRadius() * 0.55;
+      ev.ref = spawnEnemy('toad', p.x + Math.cos(a) * R, p.y + Math.sin(a) * R);
+      ev.life = 20;
+    } else if (kind === 'rift') {
+      ev.x = p.x + Math.cos(a) * 280;
+      ev.y = p.y + Math.sin(a) * 280;
+      ev.life = 12;
+      const m = G.t / 60;
+      const n = 12 + Math.floor(m * 3);
+      for (let i = 0; i < n; i++) {
+        const b = rand(0, TAU);
+        const r = rand(10, 70);
+        spawnEnemy(Math.random() < 0.3 ? 'wisp' : 'shade', ev.x + Math.cos(b) * r, ev.y + Math.sin(b) * r);
+      }
+      const guard = ['fox', 'stonelord', 'ghoul'][Math.floor(Math.random() * (m > 4 ? 3 : 2))];
+      ev.ref = spawnEnemy(guard, ev.x, ev.y);
+    } else {
+      ev.x = p.x + Math.cos(a) * 240;
+      ev.y = p.y + Math.sin(a) * 240;
+      ev.life = kind === 'spring' ? 25 : 35;
+    }
+    G.events.push(ev);
+    toast(`奇遇 · ${info.name}`, info.hint, info.color);
+    SFX.event();
+  }
+
+  function updateEvents(dt) {
+    if (!G.boss && G.t >= G.nextEvent) {
+      G.nextEvent = G.t + rand(40, 65) / G.mods.events;
+      spawnEvent(pickEvent());
+    }
+    if (G.buff) {
+      G.buff.t -= dt;
+      if (G.buff.t <= 0) G.buff = null;
+    }
+    const p = G.player;
+    const out = [];
+    for (const ev of G.events) {
+      ev.t += dt;
+      if (ev.kind === 'toad') {
+        if (ev.ref.dead) continue;
+        if (ev.t >= ev.life) {
+          ev.ref.dead = true;
+          burst(ev.ref.x, ev.ref.y, '#FFD98A', 12, 80);
+          toast('金蟾遁走了', '下次快一点', '#A9AEC2');
+          continue;
+        }
+      } else if (ev.kind === 'rift') {
+        if (ev.t >= ev.life) continue;
+      } else {
+        if (ev.used || ev.t >= ev.life) continue;
+        const d2 = (ev.x - p.x) ** 2 + (ev.y - p.y) ** 2;
+        if (ev.kind === 'spring') {
+          if (d2 < 46 * 46 && p.hp < G.stats.maxHp) {
+            const heal = G.stats.maxHp * 0.06 * dt;
+            p.hp = Math.min(G.stats.maxHp, p.hp + heal);
+            if (Math.random() < dt * 6) G.particles.push({ x: p.x + rand(-10, 10), y: p.y + 6, vx: 0, vy: -40, life: 0.5, max: 0.5, color: '#8FF0E0', size: 2 });
+            SFX.heal();
+          }
+        } else if (d2 < 30 * 30) {
+          ev.used = true;
+          if (ev.kind === 'shrine') {
+            const b = BUFFS[Math.floor(Math.random() * BUFFS.length)];
+            G.buff = { ...b, t: 30 };
+            toast(`古灯 · ${b.name}`, `${b.desc}，持续 30 秒`, b.color, true);
+            sfxFlash(b.color, 0.2);
+            SFX.resonance();
+          } else if (ev.kind === 'altar') {
+            const cost = Math.round(G.stats.maxHp * 0.25);
+            p.hp = Math.max(1, p.hp - cost);
+            addNumber(p.x, p.y - 20, cost, '#FF6B5A', 16);
+            G.chestQueue.push({ n: 1, title: '血祭 · 以血换力' });
+            sfxFlash('#FF3B30', 0.25);
+            SFX.hurt();
+          }
+          continue;
+        }
+      }
+      out.push(ev);
+    }
+    G.events = out;
   }
 
   // =====================================================================
@@ -822,8 +1057,9 @@
       p.y += p.dashVY * dt;
       if (Math.random() < 0.8) G.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.25, max: 0.25, color: '#CFE3F5', size: 9, ghost: true });
     } else {
-      p.x += mv.x * s.speed * dt;
-      p.y += mv.y * s.speed * dt;
+      const sp = s.speed * (G.buff && G.buff.id === 'swift' ? 1.4 : 1);
+      p.x += mv.x * sp * dt;
+      p.y += mv.y * sp * dt;
     }
     p.iframe = Math.max(0, p.iframe - dt);
     p.dashCd = Math.max(0, p.dashCd - dt);
@@ -846,6 +1082,12 @@
         G.effects.push({ kind: 'taiji', x: p.x, y: p.y, t: 0, life: 1 });
         for (const e of G.enemies) if (!e.dead && onScreen(e)) hitEnemy(e, 40 * (1 + 0.4 * (G.t / 60)), { bossCap: 600 });
       }
+    }
+
+    const intensity = G.t < 180 ? 0 : G.t < 390 ? 1 : 2;
+    if (intensity !== G.intensity) {
+      G.intensity = intensity;
+      if (AUDIO) AUDIO.setIntensity(intensity);
     }
 
     G.comboT -= dt;
@@ -902,21 +1144,30 @@
           sp *= 1 - e.slowAmt;
           if (e.slow <= 0) e.slowAmt = 0;
         }
-        e.x += (dx / d) * sp * dt;
-        e.y += (dy / d) * sp * dt;
+        if (e.d.toad) {
+          // 金蟾背着玩家逃，略慢于玩家，追得上
+          const wob = Math.sin(G.t * 3 + e.wob) * 0.6;
+          const ax = -dx / d;
+          const ay = -dy / d;
+          e.x += (ax * Math.cos(wob) - ay * Math.sin(wob)) * sp * dt;
+          e.y += (ax * Math.sin(wob) + ay * Math.cos(wob)) * sp * dt;
+        } else {
+          e.x += (dx / d) * sp * dt;
+          e.y += (dy / d) * sp * dt;
+        }
       }
 
       if (e.d.boss) updateBoss(e, dt, dx / d, dy / d);
 
       // 离得太远的普通妖物绕到玩家前方
-      if (!e.d.elite && !e.d.boss && d > viewRadius() * 1.7) {
+      if (!e.d.elite && !e.d.boss && !e.d.toad && d > viewRadius() * 1.7) {
         const a = Math.atan2(p.faceY, p.faceX) + rand(-0.8, 0.8);
         const R = viewRadius() + 40;
         e.x = p.x + Math.cos(a) * R;
         e.y = p.y + Math.sin(a) * R;
       }
 
-      if (d < e.r + p.r) damagePlayer(e.dmg);
+      if (d < e.r + p.r && e.dmg > 0) damagePlayer(e.dmg);
     }
 
     // 妖物之间互相推开
@@ -961,6 +1212,7 @@
     // 连锁爆炸（本帧之前排队的）
     const blasts = G.blasts;
     G.blasts = [];
+    if (blasts.length) SFX.blast();
     for (const b of blasts) {
       G.effects.push({ kind: 'blast', x: b.x, y: b.y, r: b.r, t: 0, life: 0.3, color: b.color });
       queryEnemies(b.x, b.y, b.r, (e) => hitEnemy(e, b.dmg, { noCrit: true, dot: true }));
@@ -983,7 +1235,7 @@
 
     if (G.wonAt && G.t >= G.wonAt && state === 'play') endRun(true);
     else if (G.pendingLevels > 0 && state === 'play') openLevelUp();
-    else if (G.pendingChests > 0 && state === 'play') openChest();
+    else if (G.chestQueue.length && state === 'play') openChest();
   }
 
   function updateBoss(e, dt, ux, uy) {
@@ -1073,6 +1325,7 @@
   function sealImpact(fx) {
     G.effects.push({ kind: 'sealHit', x: fx.x, y: fx.y, r: fx.r, t: 0, life: 0.4, evo: fx.evo });
     G.shake = Math.max(G.shake, fx.evo ? 7 : 3);
+    SFX.seal();
     burst(fx.x, fx.y, '#C9925A', fx.evo ? 18 : 8, 120);
     queryEnemies(fx.x, fx.y, fx.r, (e) => {
       hitEnemy(e, fx.dmg, { kb: 90, from: fx });
@@ -1101,7 +1354,8 @@
 
   function updateGems(dt) {
     const p = G.player;
-    const mag2 = G.stats.magnet * G.stats.magnet;
+    const mag = G.stats.magnet * (G.buff && G.buff.id === 'soul' ? 3 : 1);
+    const mag2 = mag * mag;
     const out = [];
     for (const g of G.gems) {
       const dx = p.x - g.x;
@@ -1119,6 +1373,7 @@
         g.y += g.vy * dt;
         if (d < p.r + 8) {
           addXp(g.v);
+          SFX.gem();
           continue;
         }
       }
@@ -1144,15 +1399,17 @@
       const d2 = (k.x - p.x) ** 2 + (k.y - p.y) ** 2;
       if (d2 < (p.r + 16) ** 2) {
         if (k.kind === 'chest') {
-          G.pendingChests++;
+          G.chestQueue.push({});
         } else if (k.kind === 'bell') {
           for (const g of G.gems) g.pulled = true;
           toast('引魂铃', '魂火尽归', '#5FD4C4');
           sfxFlash('#5FD4C4', 0.15);
+          SFX.soulBell();
         } else if (k.kind === 'lotus') {
           const heal = G.stats.maxHp * 0.3;
           p.hp = Math.min(G.stats.maxHp, p.hp + heal);
           addNumber(p.x, p.y - 20, heal, '#6FD6A0', 15, '+');
+          SFX.heal();
         }
         continue;
       }
@@ -1211,6 +1468,7 @@
     p.dashVY = p.faceY * 720;
     p.iframe = Math.max(p.iframe, 0.3);
     p.dashCd = 2.4;
+    SFX.dash();
   }
 
   function ultimate() {
@@ -1219,6 +1477,7 @@
     const p = G.player;
     G.effects.push({ kind: 'ring', x: p.x, y: p.y, r0: 20, r1: viewRadius() * 1.1, t: 0, life: 0.6, color: '#FFD98A', width: 10 });
     sfxFlash('#FFD98A', 0.55);
+    SFX.ult();
     G.shake = 12;
     G.slowT = 0.35;
     const dmg = 120 * (1 + 0.4 * (G.t / 60));
@@ -1253,7 +1512,12 @@
       for (const id of Object.keys(PASSIVES)) if (!getPassive(id)) opts.push({ type: 'pnew', id, weight: 5 });
     }
     // 已投入的五行更容易出现，帮助玩家凑共鸣
-    for (const o of opts) if (o.type !== 'evo' && G.res[elOf(o)] >= 2) o.weight *= 1.5;
+    for (const o of opts) {
+      if (o.type === 'evo') continue;
+      const el = elOf(o);
+      if (G.res[el] >= 2) o.weight *= 1.5;
+      if (G.mods.favor) o.weight *= el === G.mods.favor ? 1.3 : 0.6;
+    }
     return opts;
   }
 
@@ -1275,8 +1539,15 @@
 
   function rollChoices() {
     const opts = buildOptions();
-    if (!opts.length) return [{ type: 'heal' }, { type: 'oil' }];
-    return pickWeighted(opts, 3);
+    G.lingguang = false;
+    if (!opts.length) return G.mods.noHeal ? [{ type: 'oil' }] : [{ type: 'heal' }, { type: 'oil' }];
+    let n = G.mods.choices;
+    // 灵光一闪：小概率四选一
+    if (n === 3 && Math.random() < 0.1) {
+      n = 4;
+      G.lingguang = true;
+    }
+    return pickWeighted(opts, n);
   }
 
   function applyOption(o) {
@@ -1385,9 +1656,11 @@
   function openLevelUp() {
     setState('levelup');
     G.pendingLevels--;
-    $('levelup-sub').textContent = `Lv ${G.level - G.pendingLevels - 1} → ${G.level - G.pendingLevels} · 三选一`;
     currentChoices = rollChoices();
+    const how = G.lingguang ? '灵光一闪 · 四选一' : currentChoices.length === 2 ? '二选一' : '三选一';
+    $('levelup-sub').textContent = `Lv ${G.level - G.pendingLevels - 1} → ${G.level - G.pendingLevels} · ${how}`;
     renderCards();
+    SFX.levelUp();
   }
 
   function renderCards() {
@@ -1421,6 +1694,7 @@
 
   function chooseOption(i) {
     if (state !== 'levelup') return;
+    SFX.select();
     applyOption(currentChoices[i]);
     afterChoice();
   }
@@ -1428,7 +1702,7 @@
   function afterChoice() {
     if (G.pendingEvos.length) showEvolution(G.pendingEvos.shift());
     else if (G.pendingLevels > 0) openLevelUp();
-    else if (G.pendingChests > 0) openChest();
+    else if (G.chestQueue.length) openChest();
     else setState('play');
   }
 
@@ -1436,11 +1710,12 @@
   // 宝箱
   // =====================================================================
   function openChest() {
-    G.pendingChests--;
+    const q = G.chestQueue.shift();
     setState('chest');
     const r = Math.random() + meta.luck * 0.03;
-    const n = r > 0.93 ? 5 : r > 0.68 ? 3 : 1;
-    $('chest-title').textContent = n === 5 ? '五连 · 天降鸿运' : n === 3 ? '三连宝箱' : '宝箱';
+    const n = q.n || Math.max(G.mods.chestMin, r > 0.93 ? 5 : r > 0.68 ? 3 : 1);
+    $('chest-title').textContent = q.title || (n === 5 ? '五连 · 天降鸿运' : n === 3 ? '三连宝箱' : '宝箱');
+    SFX.chest(n);
     const wrap = $('chest-items');
     wrap.innerHTML = '';
     for (let i = 0; i < n; i++) {
@@ -1475,6 +1750,7 @@
     $('evo-recipe').textContent = `${def.name} Lv8 ＋ ${PASSIVES[def.evoPassive].name} → ${EL[def.el].name} · 天品法器`;
     $('evo-desc').textContent = def.evoDesc;
     evoTimer = 2.1;
+    SFX.evolution();
     G.edge = { color: '#FFD98A', t: 1.5 };
   }
 
@@ -1490,7 +1766,9 @@
       boss: won ? 300 : 0,
       bonus: G.oilBonus,
     };
-    const total = parts.time + parts.kills + parts.boss + parts.bonus;
+    const total = Math.round((parts.time + parts.kills + parts.boss + parts.bonus) * G.mods.oil);
+    if (AUDIO) AUDIO.setMusic('none');
+    won ? SFX.victory() : SFX.defeat();
     oil += total;
     save(STORE_OIL, oil);
 
@@ -1501,9 +1779,9 @@
     const title = $('result-title');
     title.textContent = won ? '天明' : '灯灭';
     title.classList.toggle('lost', !won);
-    $('result-sub').innerHTML = won
+    $('result-sub').innerHTML = `${won
       ? `存活 ${fmtTime(survived)} · 击败夜主「九尾」`
-      : `倒在第 ${fmtTime(survived)}<br>离天明还有 ${fmtTime(Math.max(0, RUN_LENGTH - survived))}`;
+      : `倒在第 ${fmtTime(survived)}<br>离天明还有 ${fmtTime(Math.max(0, RUN_LENGTH - survived))}`}<br>夜签「${G.omen.name}」`;
     const rec = $('result-record');
     rec.hidden = !newRecord;
     rec.textContent = newRecord;
@@ -1594,6 +1872,7 @@
   // =====================================================================
   const SCREENS = {
     title: 'title-screen',
+    omen: 'omen-screen',
     levelup: 'levelup-screen',
     chest: 'chest-screen',
     evo: 'evo-screen',
@@ -1605,20 +1884,53 @@
   function setState(next) {
     state = next;
     for (const [k, id] of Object.entries(SCREENS)) $(id).hidden = k !== next;
-    $('hud').hidden = !G || next === 'title' || next === 'over' || next === 'meta';
+    $('hud').hidden = !G || next === 'title' || next === 'over' || next === 'meta' || next === 'omen';
     $('hud').classList.toggle('inactive', next !== 'play');
     if (next !== 'play') {
       input.joy = null;
       $('joystick').hidden = true;
     }
+    if (AUDIO) {
+      AUDIO.muffle(next !== 'play' && next !== 'title' && next !== 'omen' && next !== 'over');
+      if (next === 'title' || next === 'omen') AUDIO.setMusic('title');
+    }
     if (next === 'title') renderTitleInfo();
     if (next === 'meta') renderMeta();
+    if (next === 'title' || next === 'paused') syncAudioButtons();
   }
 
+  // 出发：先抽夜签
   function startRun() {
-    newRun();
-    setState('play');
+    if (AUDIO) AUDIO.init();
     tryFullscreen();
+    const omens = drawOmens();
+    const wrap = $('omen-cards');
+    wrap.innerHTML = '';
+    omens.forEach((o) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'card omen';
+      btn.innerHTML = `
+        <div class="omen-name brush">${o.name}</div>
+        <div class="omen-line good">＋ ${o.good}</div>
+        <div class="omen-line bad">－ ${o.bad}</div>`;
+      btn.addEventListener('click', () => beginRun(o));
+      wrap.appendChild(btn);
+    });
+    setState('omen');
+    SFX.event();
+  }
+
+  function beginRun(omen) {
+    if (state !== 'omen') return;
+    SFX.select();
+    newRun(omen);
+    if (AUDIO) {
+      AUDIO.setMusic('play', G.seed);
+      AUDIO.setIntensity(0);
+    }
+    setState('play');
+    toast(`夜签 · ${omen.name}`, `${omen.good}；${omen.bad}`, '#FFD98A');
   }
 
   function pauseGame() {
@@ -1669,7 +1981,16 @@
     setWidth('hp-fill', (p.hp / s.maxHp) * 100);
     setWidth('shield-fill', p.shield > 0 ? (p.shield / (p.shieldMax || 1)) * 100 : 0);
     setText('timer', fmtTime(G.t));
-    setText('phase', G.boss ? '决战' : G.t < 180 ? '生存期' : G.t < 390 ? '构筑期' : G.t < RUN_LENGTH ? '割草期' : '长夜');
+    const phase = G.boss ? '决战' : G.t < 180 ? '生存期' : G.t < 390 ? '构筑期' : G.t < RUN_LENGTH ? '割草期' : '长夜';
+    setText('phase', `${phase} · ${G.omen.name}`);
+    const buff = $('buff-chip');
+    if (G.buff) {
+      buff.hidden = false;
+      buff.style.setProperty('--c', G.buff.color);
+      setText('buff-chip', `${G.buff.name} ${Math.ceil(G.buff.t)}s · ${G.buff.desc}`);
+    } else if (!buff.hidden) {
+      buff.hidden = true;
+    }
     setText('kills', fmtNum(G.kills));
 
     const combo = $('combo');
@@ -1779,7 +2100,7 @@
     const cy1 = Math.floor(bottom / C) + 1;
     for (let cx = cx0; cx <= cx1; cx++) {
       for (let cy = cy0; cy <= cy1; cy++) {
-        const r = seeded(hash2(cx, cy));
+        const r = seeded(hash2(cx + mapSeed.x, cy + mapSeed.y));
         const bx = cx * C;
         const by = cy * C;
         if (r() < 0.55) {
@@ -1851,6 +2172,151 @@
           ctx.fill();
         }
       }
+    }
+  }
+
+  // 奇遇：地面部分（在黑夜遮罩之下）
+  function drawEventsGround() {
+    for (const ev of G.events) {
+      if (ev.kind === 'toad') continue;
+      const fade = clamp((ev.life - ev.t) / 3, 0, 1);
+      ctx.globalAlpha = fade;
+      if (ev.kind === 'spring') {
+        ctx.fillStyle = 'rgba(95, 212, 196, 0.22)';
+        ctx.strokeStyle = 'rgba(143, 240, 224, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(ev.x, ev.y, 46, 32, 0, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+        const rip = (demo.t * 0.8) % 1;
+        ctx.globalAlpha = fade * (1 - rip);
+        ctx.beginPath();
+        ctx.ellipse(ev.x, ev.y, 46 * rip, 32 * rip, 0, 0, TAU);
+        ctx.stroke();
+      } else if (ev.kind === 'shrine') {
+        ctx.fillStyle = '#262F47';
+        ctx.strokeStyle = '#3A4466';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(ev.x - 16, ev.y - 16, 32, 32, 4);
+        ctx.fill();
+        ctx.stroke();
+        ctx.save();
+        ctx.translate(ev.x, ev.y);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = '#313B58';
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.restore();
+      } else if (ev.kind === 'altar') {
+        ctx.fillStyle = '#2A1620';
+        ctx.strokeStyle = '#5A2A30';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(ev.x - 20, ev.y - 14, 40, 28, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else if (ev.kind === 'rift') {
+        ctx.strokeStyle = '#3A2460';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(ev.x - 50, ev.y - 10);
+        ctx.lineTo(ev.x - 18, ev.y + 6);
+        ctx.lineTo(ev.x + 6, ev.y - 8);
+        ctx.lineTo(ev.x + 30, ev.y + 10);
+        ctx.lineTo(ev.x + 52, ev.y - 4);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 奇遇：发光部分（在黑夜遮罩之上，远处也看得见）
+  function drawEventsGlow() {
+    for (const ev of G.events) {
+      if (ev.kind === 'toad') continue;
+      const fade = clamp((ev.life - ev.t) / 3, 0, 1);
+      const pulse = 0.75 + Math.sin(demo.t * 4) * 0.25;
+      const color = EVENTS[ev.kind].color;
+      ctx.globalAlpha = fade * 0.22 * pulse;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(ev.x, ev.y, 34, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = fade;
+      if (ev.kind === 'shrine') {
+        drawFlame(ev.x, ev.y - 2, 8, fade);
+      } else if (ev.kind === 'altar') {
+        ctx.strokeStyle = '#FF6B5A';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ev.x, ev.y, 9 + pulse * 2, 0, TAU);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ev.x, ev.y - 7);
+        ctx.lineTo(ev.x, ev.y + 7);
+        ctx.moveTo(ev.x - 6, ev.y);
+        ctx.lineTo(ev.x + 6, ev.y);
+        ctx.stroke();
+      } else if (ev.kind === 'rift') {
+        ctx.strokeStyle = '#C9A0FF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(ev.x - 50, ev.y - 10);
+        ctx.lineTo(ev.x - 18, ev.y + 6);
+        ctx.lineTo(ev.x + 6, ev.y - 8);
+        ctx.lineTo(ev.x + 30, ev.y + 10);
+        ctx.lineTo(ev.x + 52, ev.y - 4);
+        ctx.stroke();
+      } else if (ev.kind === 'spring') {
+        ctx.fillStyle = '#8FF0E0';
+        for (let i = 0; i < 3; i++) {
+          const a = demo.t * 1.5 + (i * TAU) / 3;
+          ctx.beginPath();
+          ctx.arc(ev.x + Math.cos(a) * 24, ev.y + Math.sin(a) * 16, 1.6, 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 屏幕外的奇遇：在屏幕边缘画指引
+  function drawEventArrows(camX, camY, k) {
+    const W2 = canvas.width / 2;
+    const H2 = canvas.height / 2;
+    const inset = 30 * view.dpr;
+    for (const ev of G.events) {
+      const tx = ev.kind === 'toad' ? ev.ref.x : ev.x;
+      const ty = ev.kind === 'toad' ? ev.ref.y : ev.y;
+      const dx = (tx - camX) * k;
+      const dy = (ty - camY) * k;
+      if (Math.abs(dx) < W2 - inset && Math.abs(dy) < H2 - inset) continue;
+      const t = Math.min((W2 - inset) / Math.abs(dx || 1e-6), (H2 - inset - 20 * view.dpr) / Math.abs(dy || 1e-6));
+      const x = W2 + dx * t;
+      const y = H2 + dy * t;
+      const a = Math.atan2(dy, dx);
+      const info = EVENTS[ev.kind];
+      const r = 13 * view.dpr;
+      ctx.fillStyle = info.color;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * (r + 8 * view.dpr), y + Math.sin(a) * (r + 8 * view.dpr));
+      ctx.lineTo(x + Math.cos(a + 0.5) * r, y + Math.sin(a + 0.5) * r);
+      ctx.lineTo(x + Math.cos(a - 0.5) * r, y + Math.sin(a - 0.5) * r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(14, 18, 32, 0.9)';
+      ctx.strokeStyle = info.color;
+      ctx.lineWidth = 1.5 * view.dpr;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = info.color;
+      ctx.font = `900 ${Math.round(12 * view.dpr)}px "Noto Serif SC", serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(info.icon, x, y + 0.5);
     }
   }
 
@@ -1977,8 +2443,17 @@
       ctx.lineTo(3, -3);
       ctx.stroke();
     }
-    if (e.type === 'golem') {
-      ctx.strokeStyle = '#3A2E24';
+    if (d.toad) {
+      // 背上的铜钱
+      ctx.fillStyle = '#FFD98A';
+      ctx.beginPath();
+      ctx.arc(0, 2, 5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#5A4210';
+      ctx.fillRect(-1.6, 0.4, 3.2, 3.2);
+    }
+    if (e.type === 'golem' || e.type === 'stonelord') {
+      ctx.strokeStyle = e.type === 'stonelord' ? '#6A5238' : '#3A2E24';
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(-6, 4);
@@ -2009,6 +2484,12 @@
     const k = e.r / 15;
     const ox = (dx / d) * 1.5 * k;
     const oy = (dy / d) * 1.5 * k - 3 * k + Math.sin(e.wob) * 0.6;
+    if (e.d.toad) {
+      ctx.fillStyle = 'rgba(255, 217, 138, 0.22)';
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r * 2, 0, TAU);
+      ctx.fill();
+    }
     ctx.fillStyle = e.frozen > 0 ? '#CFE3F5' : e.d.eye;
     const ex = e.d.mask ? 6.5 : 4.5;
     ctx.beginPath();
@@ -2334,7 +2815,10 @@
     let camY;
     let sx = 0;
     let sy = 0;
-    if (G && state !== 'title') {
+    const playing = G && state !== 'title' && state !== 'omen';
+    mapSeed.x = playing ? G.mapX : 0;
+    mapSeed.y = playing ? G.mapY : 0;
+    if (playing) {
       camX = G.player.x;
       camY = G.player.y;
       if (G.shake > 0) {
@@ -2357,8 +2841,8 @@
     const bottom = camY + view.h / 2 + 20;
     drawGround(left, top, right, bottom);
 
-    const playing = G && state !== 'title';
     if (playing) {
+      drawEventsGround();
       for (const z of G.zones) {
         ctx.globalAlpha = 0.5 * (z.life / z.max);
         ctx.strokeStyle = '#3A2E24';
@@ -2393,12 +2877,13 @@
 
     // 黑夜遮罩（屏幕坐标）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const lightR = (playing ? 200 * Math.sqrt(G.stats.area) : 210) * k;
+    const lightR = (playing ? 200 * Math.sqrt(G.stats.area) * G.mods.light : 210) * k;
     drawDarkness(canvas.width / 2 + sx, canvas.height / 2 + sy, lightR);
     ctx.setTransform(k, 0, 0, k, ox, oy);
 
     if (playing) {
       const p = G.player;
+      drawEventsGlow();
       drawGemsAndPickups();
       for (const e of G.enemies) if (!e.dead && Math.abs(e.x - camX) < view.w / 2 + 40 && Math.abs(e.y - camY) < view.h / 2 + 40) drawEnemyEyes(e);
       drawEffects();
@@ -2412,6 +2897,7 @@
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (playing) drawEventArrows(camX, camY, k);
     if (playing && G.edge) {
       ctx.globalAlpha = clamp(G.edge.t, 0, 1) * 0.5;
       ctx.strokeStyle = G.edge.color;
@@ -2448,7 +2934,7 @@
       evoTimer -= realDt;
       if (evoTimer <= 0) afterChoice();
     }
-    if (G && state !== 'title' && state !== 'over' && state !== 'meta') updateHud();
+    if (G && state !== 'title' && state !== 'over' && state !== 'meta' && state !== 'omen') updateHud();
     render(realDt);
     requestAnimationFrame(frame);
   }
@@ -2476,9 +2962,12 @@
       }
     } else if (state === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) {
       setState('play');
-    } else if (state === 'levelup' && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
+    } else if (state === 'levelup' && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) {
       const i = Number(e.code.slice(-1)) - 1;
       if (currentChoices[i]) chooseOption(i);
+    } else if (state === 'omen' && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
+      const card = $('omen-cards').children[Number(e.code.slice(-1)) - 1];
+      if (card) card.click();
     } else if (state === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
       e.preventDefault();
       startRun();
@@ -2530,6 +3019,39 @@
   $('pause-btn').addEventListener('click', pauseGame);
 
   $('start-btn').addEventListener('click', startRun);
+  $('omen-back').addEventListener('click', () => setState('title'));
+
+  // 音频：第一次触摸或按键时解锁（浏览器要求用户手势）
+  const unlockAudio = () => {
+    if (!AUDIO) return;
+    AUDIO.init();
+    if (state === 'title' || state === 'omen') AUDIO.setMusic('title');
+  };
+  document.addEventListener('pointerdown', unlockAudio);
+  document.addEventListener('keydown', unlockAudio);
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.btn, .card')) SFX.click();
+  });
+
+  function syncAudioButtons() {
+    const st = AUDIO ? AUDIO.settings : { music: false, sfx: false };
+    document.querySelectorAll('[data-audio]').forEach((btn) => {
+      const kind = btn.dataset.audio;
+      const on = st[kind];
+      btn.setAttribute('aria-pressed', String(on));
+      btn.textContent = `${kind === 'music' ? '音乐' : '音效'} ${on ? '开' : '关'}`;
+    });
+  }
+  document.querySelectorAll('[data-audio]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!AUDIO) return;
+      AUDIO.init();
+      const kind = btn.dataset.audio;
+      AUDIO.setEnabled(kind, !AUDIO.settings[kind]);
+      syncAudioButtons();
+    });
+  });
+  syncAudioButtons();
   $('again-btn').addEventListener('click', startRun);
   $('meta-btn').addEventListener('click', () => {
     metaReturn = 'title';
@@ -2582,6 +3104,8 @@
       setSpeed: (n) => {
         debugSteps = n;
       },
+      spawnEvent: (k) => spawnEvent(k),
+      audio: () => AUDIO,
     };
   }
 

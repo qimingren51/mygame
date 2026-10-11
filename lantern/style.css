@@ -461,6 +461,48 @@ button {
 }
 .levelup-bar .res-chips { margin: 0; }
 
+/* 夜签 */
+.card.omen {
+  --rc: #3A4466;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  min-height: 180px;
+  background: #121726;
+}
+.card.omen:hover, .card.omen:focus-visible { border-color: var(--gold); }
+.omen-name { font-size: 42px; line-height: 1; color: var(--gold-l); text-shadow: 0 0 16px rgba(242, 181, 68, 0.4); }
+.omen-line { font-size: 13px; line-height: 1.5; }
+.omen-line.good { color: #8FF0E0; }
+.omen-line.bad { color: #FF9A8A; }
+
+/* 古灯增益 */
+.buff-chip {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--c);
+  background: rgba(14, 18, 32, 0.8);
+  color: var(--c);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 音频开关 */
+.audio-toggles { display: flex; gap: 8px; margin-top: 4px; }
+.toggle {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  border: 1px solid #3A4466;
+  background: rgba(21, 26, 43, 0.8);
+  color: var(--muted);
+  font-size: 12px;
+}
+.toggle[aria-pressed="true"] { color: var(--gold-l); border-color: rgba(242, 181, 68, 0.6); }
+
 /* 宝箱 */
 .chest-items { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 760px; }
 .chest-item {
@@ -612,6 +654,8 @@ button {
   .result-title { font-size: 46px; }
   .stat-box b { font-size: 16px; }
   .meta-card { padding: 11px; gap: 6px; }
+  .card.omen { min-height: 150px; }
+  .omen-name { font-size: 34px; }
 }
 @media (max-width: 640px) {
   .cards { gap: 8px; }
