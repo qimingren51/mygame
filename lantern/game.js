@@ -273,7 +273,7 @@
       pendingLevels: 0,
       chestQueue: [],
       pendingEvos: [],
-      player: { x: 0, y: 0, r: 11, hp: 100, faceX: 1, faceY: 0, iframe: 0, dashT: 0, dashCd: 0, dashVX: 0, dashVY: 0, shield: 0, shieldT: 0, moving: false },
+      player: { x: 0, y: 0, r: 11, hp: 100, side: 1, faceX: 1, faceY: 0, iframe: 0, dashT: 0, dashCd: 0, dashVX: 0, dashVY: 0, shield: 0, shieldT: 0, moving: false },
       weapons: [],
       passives: [],
       enemies: [],
@@ -1049,6 +1049,7 @@
     if (p.moving) {
       const len = Math.hypot(mv.x, mv.y);
       p.faceX = mv.x / len;
+      if (Math.abs(p.faceX) > 0.2) p.side = p.faceX > 0 ? 1 : -1;
       p.faceY = mv.y / len;
     }
     if (p.dashT > 0) {
@@ -1901,7 +1902,7 @@
 
   // 出发：先抽夜签
   function startRun() {
-    if (AUDIO) AUDIO.init();
+    if (AUDIO) AUDIO.unlock();
     tryFullscreen();
     const omens = drawOmens();
     const wrap = $('omen-cards');
@@ -1947,13 +1948,54 @@
     renderResChips(wrap.querySelector('.res-chips'));
   }
 
-  function tryFullscreen() {
-    if (!coarse) return;
+  // 全屏：安卓与电脑用全屏接口；iPhone 不支持，需“添加到主屏幕”后从桌面打开
+  const fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const isStandalone = () =>
+    navigator.standalone === true || window.matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+
+  function enterFullscreen() {
     const el = document.documentElement;
-    if (document.fullscreenElement || !el.requestFullscreen) return;
-    el.requestFullscreen({ navigationUI: 'hide' })
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req || isFullscreen()) return;
+    let result;
+    try {
+      result = req.call(el, { navigationUI: 'hide' });
+    } catch {
+      return;
+    }
+    Promise.resolve(result)
       .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
       .catch(() => {});
+  }
+
+  function exitFullscreen() {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit && isFullscreen()) exit.call(document);
+  }
+
+  function tryFullscreen() {
+    if (coarse) enterFullscreen();
+  }
+
+  function syncFullscreenButtons() {
+    document.querySelectorAll('[data-fs]').forEach((btn) => {
+      btn.hidden = !fsSupported();
+      btn.textContent = isFullscreen() ? '退出全屏' : '全屏';
+    });
+  }
+
+  function showFullscreenHint() {
+    const hint = $('fs-hint');
+    const ua = navigator.userAgent;
+    const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (/MicroMessenger|QQ\//i.test(ua)) {
+      hint.textContent = '微信 / QQ 内无法全屏和横屏：点右上角「…」→「在浏览器打开」';
+      hint.hidden = false;
+    } else if (ios && !fsSupported() && !isStandalone()) {
+      hint.textContent = 'iPhone 全屏：点 Safari 的「分享」→「添加到主屏幕」，再从桌面图标打开';
+      hint.hidden = false;
+    }
   }
 
   // =====================================================================
@@ -2151,26 +2193,7 @@
           ctx.arc(bx + r() * C, by + r() * C, 2 + r() * 3, 0, TAU);
           ctx.fill();
         }
-        if (r() < 0.05) {
-          const x = bx + C / 2;
-          const y = by + C / 2;
-          ctx.fillStyle = '#1E2538';
-          ctx.strokeStyle = '#2F3954';
-          ctx.beginPath();
-          ctx.roundRect(x - 11, y - 11, 22, 22, 3);
-          ctx.fill();
-          ctx.stroke();
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.rotate(Math.PI / 4);
-          ctx.fillStyle = '#262F47';
-          ctx.fillRect(-8, -8, 16, 16);
-          ctx.restore();
-          ctx.fillStyle = 'rgba(255, 217, 138, 0.5)';
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, TAU);
-          ctx.fill();
-        }
+        if (r() < 0.05) drawStoneLantern(bx + C / 2, by + C / 2, 1, false);
       }
     }
   }
@@ -2195,25 +2218,24 @@
         ctx.ellipse(ev.x, ev.y, 46 * rip, 32 * rip, 0, 0, TAU);
         ctx.stroke();
       } else if (ev.kind === 'shrine') {
-        ctx.fillStyle = '#262F47';
-        ctx.strokeStyle = '#3A4466';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(ev.x - 16, ev.y - 16, 32, 32, 4);
-        ctx.fill();
-        ctx.stroke();
-        ctx.save();
-        ctx.translate(ev.x, ev.y);
-        ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = '#313B58';
-        ctx.fillRect(-12, -12, 24, 24);
-        ctx.restore();
+        drawStoneLantern(ev.x, ev.y + 14, 1.5, true);
       } else if (ev.kind === 'altar') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.beginPath();
+        ctx.ellipse(ev.x, ev.y + 12, 24, 6, 0, 0, TAU);
+        ctx.fill();
         ctx.fillStyle = '#2A1620';
         ctx.strokeStyle = '#5A2A30';
         ctx.lineWidth = 1.5;
+        ctx.fillRect(ev.x - 20, ev.y - 2, 40, 14);
+        ctx.strokeRect(ev.x - 20, ev.y - 2, 40, 14);
+        ctx.fillStyle = '#3A1E26';
         ctx.beginPath();
-        ctx.roundRect(ev.x - 20, ev.y - 14, 40, 28, 4);
+        ctx.moveTo(ev.x - 20, ev.y - 2);
+        ctx.lineTo(ev.x + 20, ev.y - 2);
+        ctx.lineTo(ev.x + 15, ev.y - 12);
+        ctx.lineTo(ev.x - 15, ev.y - 12);
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
       } else if (ev.kind === 'rift') {
@@ -2245,18 +2267,18 @@
       ctx.fill();
       ctx.globalAlpha = fade;
       if (ev.kind === 'shrine') {
-        drawFlame(ev.x, ev.y - 2, 8, fade);
+        drawFlame(ev.x, ev.y - 22, 5, fade);
       } else if (ev.kind === 'altar') {
         ctx.strokeStyle = '#FF6B5A';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(ev.x, ev.y, 9 + pulse * 2, 0, TAU);
+        ctx.ellipse(ev.x, ev.y - 7, 8 + pulse * 2, 3 + pulse, 0, 0, TAU);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(ev.x, ev.y - 7);
-        ctx.lineTo(ev.x, ev.y + 7);
-        ctx.moveTo(ev.x - 6, ev.y);
-        ctx.lineTo(ev.x + 6, ev.y);
+        ctx.moveTo(ev.x, ev.y - 20);
+        ctx.lineTo(ev.x, ev.y - 9);
+        ctx.moveTo(ev.x - 4, ev.y - 16);
+        ctx.lineTo(ev.x + 4, ev.y - 16);
         ctx.stroke();
       } else if (ev.kind === 'rift') {
         ctx.strokeStyle = '#C9A0FF';
@@ -2320,74 +2342,60 @@
     }
   }
 
-  function drawPlayerBody(x, y, alpha) {
-    ctx.globalAlpha = alpha;
+  // 主角造型见 sprites.js
+  function drawHero(x, y, side, moving, t, alpha) {
+    LanternSprites.drawHero(ctx, x, y, side, moving, t, alpha);
+  }
+  function drawHeroLantern(x, y, side, moving, t) {
+    LanternSprites.drawLantern(ctx, x, y, side, moving, t);
+  }
+
+  // 斜俯视的石灯笼（地面装饰与奇遇「古灯」）
+  function drawStoneLantern(x, y, sc, lit) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(sc, sc);
     ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.beginPath();
-    ctx.ellipse(x, y + 10, 15, 6, 0, 0, TAU);
+    ctx.ellipse(0, 0, 12, 4, 0, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = '#262B44';
-    ctx.strokeStyle = '#3B4266';
+    ctx.fillStyle = '#2A3148';
+    ctx.strokeStyle = '#3A4466';
     ctx.lineWidth = 1;
+    ctx.fillRect(-9, -5, 18, 5);
+    ctx.strokeRect(-9, -5, 18, 5);
+    ctx.fillStyle = '#262F47';
+    ctx.fillRect(-3.5, -16, 7, 11);
+    ctx.fillStyle = '#2F3954';
+    ctx.fillRect(-7, -26, 14, 10);
+    ctx.strokeRect(-7, -26, 14, 10);
+    ctx.fillStyle = lit ? '#FFC861' : '#141A2C';
+    ctx.fillRect(-3, -23.5, 6, 5);
+    ctx.fillStyle = '#343F5E';
     ctx.beginPath();
-    ctx.arc(x, y + 2, 15, 0, TAU);
+    ctx.moveTo(-13, -26);
+    ctx.lineTo(13, -26);
+    ctx.lineTo(8, -31);
+    ctx.lineTo(-8, -31);
+    ctx.closePath();
     ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#6B5332';
-    ctx.strokeStyle = '#8E7044';
-    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(x, y, 13, 0, TAU);
+    ctx.arc(0, -33, 2, 0, TAU);
     ctx.fill();
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(x, y, 8.5, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = '#8E7044';
-    ctx.beginPath();
-    ctx.arc(x, y, 3.5, 0, TAU);
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
-  function lanternPos(x, y, fx, fy) {
-    // 灯笼提在身体右前方
-    const lx = x + fx * 14 - fy * 9;
-    const ly = y + fy * 14 + fx * 9 - 6;
-    return { lx, ly };
-  }
-
-  function drawLantern(x, y, fx, fy, t) {
-    const { lx, ly } = lanternPos(x, y, fx, fy);
-    ctx.strokeStyle = '#5A4630';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x + fx * 6 - fy * 6, y + fy * 6 + fx * 6);
-    ctx.lineTo(lx, ly);
-    ctx.stroke();
-    const flicker = 1 + Math.sin(t * 13) * 0.05 + Math.sin(t * 7.3) * 0.04;
-    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, 22 * flicker);
-    g.addColorStop(0, 'rgba(255, 241, 194, 0.9)');
-    g.addColorStop(0.4, 'rgba(255, 200, 97, 0.35)');
-    g.addColorStop(1, 'rgba(255, 200, 97, 0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(lx, ly, 22 * flicker, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#FFD98A';
-    ctx.strokeStyle = '#FFF1C2';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(lx, ly, 5, 0, TAU);
-    ctx.fill();
-    ctx.stroke();
-  }
+  // 妖物悬浮起伏：轻飘的妖物浮得更明显
+  const bobOf = (e) => Math.sin(e.wob) * (e.type === 'golem' || e.type === 'stonelord' || e.d.toad ? 0.6 : 1.8);
 
   function drawEnemyBody(e) {
     const d = e.d;
     const k = e.r / 15;
-    const bob = Math.sin(e.wob) * 0.6;
+    const bob = bobOf(e) - (d.toad || e.type === 'golem' || e.type === 'stonelord' ? 0 : 3);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+    ctx.beginPath();
+    ctx.ellipse(e.x, e.y + e.r * 0.95, e.r * 0.75, e.r * 0.28, 0, 0, TAU);
+    ctx.fill();
     ctx.save();
     ctx.translate(e.x, e.y + bob);
     if (d.boss) {
@@ -2483,7 +2491,8 @@
     const d = Math.hypot(dx, dy) || 1;
     const k = e.r / 15;
     const ox = (dx / d) * 1.5 * k;
-    const oy = (dy / d) * 1.5 * k - 3 * k + Math.sin(e.wob) * 0.6;
+    const lift = e.d.toad || e.type === 'golem' || e.type === 'stonelord' ? 0 : 3;
+    const oy = (dy / d) * 1.5 * k - 3 * k + bobOf(e) - lift;
     if (e.d.toad) {
       ctx.fillStyle = 'rgba(255, 217, 138, 0.22)';
       ctx.beginPath();
@@ -2828,8 +2837,9 @@
     } else {
       demo.x += dt * 14;
       demo.y += dt * 6;
-      camX = demo.x;
-      camY = demo.y;
+      // 标题页：人物放在右下方，不被按钮挡住
+      camX = demo.x - view.w * 0.3;
+      camY = demo.y - view.h * 0.14;
     }
     const ox = canvas.width / 2 - camX * k + sx;
     const oy = canvas.height / 2 - camY * k + sy;
@@ -2860,25 +2870,33 @@
         ctx.fill();
         ctx.globalAlpha = 1;
       }
-      for (const e of G.enemies) if (!e.dead && Math.abs(e.x - camX) < view.w / 2 + 80 && Math.abs(e.y - camY) < view.h / 2 + 80) drawEnemyBody(e);
+      // 斜俯视：按纵坐标从远到近绘制，近处的挡住远处的
       const p = G.player;
+      const list = [p];
+      for (const e of G.enemies) if (!e.dead && Math.abs(e.x - camX) < view.w / 2 + 80 && Math.abs(e.y - camY) < view.h / 2 + 80) list.push(e);
+      list.sort((a, b) => a.y - b.y);
       const blink = p.iframe > 0 && Math.floor(demo.t * 20) % 2 === 0;
-      drawPlayerBody(p.x, p.y, blink ? 0.5 : 1);
+      for (const it of list) {
+        if (it === p) drawHero(p.x, p.y, p.side, p.moving, demo.t, blink ? 0.5 : 1);
+        else drawEnemyBody(it);
+      }
       if (p.shield > 0) {
         ctx.strokeStyle = 'rgba(226, 181, 136, 0.6)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 20, 0, TAU);
+        ctx.ellipse(p.x, p.y - 6, 20, 24, 0, 0, TAU);
         ctx.stroke();
       }
     } else {
-      drawPlayerBody(camX, camY, 1);
+      drawHero(demo.x, demo.y, 1, true, demo.t, 1);
     }
 
     // 黑夜遮罩（屏幕坐标）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const lightR = (playing ? 200 * Math.sqrt(G.stats.area) * G.mods.light : 210) * k;
-    drawDarkness(canvas.width / 2 + sx, canvas.height / 2 + sy, lightR);
+    const lightX = playing ? canvas.width / 2 + sx : demo.x * k + ox;
+    const lightY = playing ? canvas.height / 2 + sy : demo.y * k + oy;
+    drawDarkness(lightX, lightY, lightR);
     ctx.setTransform(k, 0, 0, k, ox, oy);
 
     if (playing) {
@@ -2888,12 +2906,12 @@
       for (const e of G.enemies) if (!e.dead && Math.abs(e.x - camX) < view.w / 2 + 40 && Math.abs(e.y - camY) < view.h / 2 + 40) drawEnemyEyes(e);
       drawEffects();
       drawWeapons();
-      drawLantern(p.x, p.y, p.faceX, p.faceY, demo.t);
+      drawHeroLantern(p.x, p.y, p.side, p.moving, demo.t);
       drawFoes();
       drawParticles();
       drawNumbers();
     } else {
-      drawLantern(camX, camY, 1, 0.3, demo.t);
+      drawHeroLantern(demo.x, demo.y, 1, true, demo.t);
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3019,16 +3037,24 @@
   $('pause-btn').addEventListener('click', pauseGame);
 
   $('start-btn').addEventListener('click', startRun);
+  document.querySelectorAll('[data-fs]').forEach((btn) => {
+    btn.addEventListener('click', () => (isFullscreen() ? exitFullscreen() : enterFullscreen()));
+  });
+  document.addEventListener('fullscreenchange', syncFullscreenButtons);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenButtons);
+  syncFullscreenButtons();
+  showFullscreenHint();
   $('omen-back').addEventListener('click', () => setState('title'));
 
   // 音频：第一次触摸或按键时解锁（浏览器要求用户手势）
   const unlockAudio = () => {
     if (!AUDIO) return;
-    AUDIO.init();
+    AUDIO.unlock();
     if (state === 'title' || state === 'omen') AUDIO.setMusic('title');
   };
-  document.addEventListener('pointerdown', unlockAudio);
-  document.addEventListener('keydown', unlockAudio);
+  for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) {
+    document.addEventListener(type, unlockAudio, true);
+  }
   document.addEventListener('click', (e) => {
     if (e.target.closest('.btn, .card')) SFX.click();
   });
@@ -3045,7 +3071,7 @@
   document.querySelectorAll('[data-audio]').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (!AUDIO) return;
-      AUDIO.init();
+      AUDIO.unlock();
       const kind = btn.dataset.audio;
       AUDIO.setEnabled(kind, !AUDIO.settings[kind]);
       syncAudioButtons();

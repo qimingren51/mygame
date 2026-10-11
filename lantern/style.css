@@ -502,6 +502,7 @@ button {
   font-size: 12px;
 }
 .toggle[aria-pressed="true"] { color: var(--gold-l); border-color: rgba(242, 181, 68, 0.6); }
+.fs-hint { max-width: 520px; text-align: center; color: var(--gold-l); opacity: 0.85; }
 
 /* 宝箱 */
 .chest-items { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 760px; }

@@ -79,6 +79,63 @@ const LanternAudio = (() => {
     setInterval(schedule, 50);
   }
 
+  // 解锁音频。iPhone 上有三个坑：
+  // 1. 只有“松手 / 点击”算用户手势，按下不算；所以每次手势都尝试恢复。
+  // 2. 需要在手势里真正播放一次声音才会解锁；这里播放一个空白缓冲。
+  // 3. 侧边静音键会静音网页合成的声音；把音频会话切到“播放”类型可以绕过。
+  let silentEl = null;
+  function unlock() {
+    init();
+    if (!ctx) return;
+    if (ctx.state !== 'running' && !document.hidden) ctx.resume().catch(() => {});
+    if (ctx.state !== 'running') {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, 22050);
+      src.connect(ctx.destination);
+      src.start(0);
+    }
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      try {
+        navigator.audioSession.type = 'playback';
+      } catch {
+        // 不支持时忽略
+      }
+    }
+    if (!silentEl) {
+      // 循环播放一段静音音频，让 iOS 把页面当作媒体播放，从而无视静音键
+      silentEl = document.createElement('audio');
+      silentEl.setAttribute('playsinline', '');
+      silentEl.setAttribute('x-webkit-airplay', 'deny');
+      silentEl.loop = true;
+      silentEl.src = URL.createObjectURL(makeSilentWav());
+    }
+    if (silentEl.paused && !document.hidden) silentEl.play().catch(() => {});
+  }
+
+  function makeSilentWav() {
+    const rate = 8000;
+    const samples = rate / 2;
+    const buf = new ArrayBuffer(44 + samples * 2);
+    const v = new DataView(buf);
+    const str = (o, t) => {
+      for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i));
+    };
+    str(0, 'RIFF');
+    v.setUint32(4, 36 + samples * 2, true);
+    str(8, 'WAVE');
+    str(12, 'fmt ');
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true);
+    v.setUint32(28, rate * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    str(36, 'data');
+    v.setUint32(40, samples * 2, true);
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+
   function makeNoise(sec) {
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * sec), ctx.sampleRate);
     const d = buf.getChannelData(0);
@@ -510,9 +567,14 @@ const LanternAudio = (() => {
 
   document.addEventListener('visibilitychange', () => {
     if (!ctx) return;
-    if (document.hidden) ctx.suspend();
-    else ctx.resume();
+    if (document.hidden) {
+      ctx.suspend();
+      if (silentEl) silentEl.pause();
+    } else {
+      ctx.resume().catch(() => {});
+      if (silentEl) silentEl.play().catch(() => {});
+    }
   });
 
-  return { init, sfx, setMusic, setIntensity, muffle, setEnabled, settings };
+  return { init, unlock, sfx, setMusic, setIntensity, muffle, setEnabled, settings };
 })();

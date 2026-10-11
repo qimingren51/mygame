@@ -6,6 +6,11 @@
   <meta name="theme-color" content="#0B0F1C">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="提灯夜行">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
   <title>提灯夜行</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -87,7 +92,9 @@
     <div class="audio-toggles">
       <button class="toggle" type="button" data-audio="music">音乐 开</button>
       <button class="toggle" type="button" data-audio="sfx">音效 开</button>
+      <button class="toggle" type="button" data-fs hidden>全屏</button>
     </div>
+    <p id="fs-hint" class="hint fs-hint" hidden></p>
   </section>
 
   <!-- 夜签 -->
@@ -138,6 +145,7 @@
     <div class="audio-toggles">
       <button class="toggle" type="button" data-audio="music">音乐 开</button>
       <button class="toggle" type="button" data-audio="sfx">音效 开</button>
+      <button class="toggle" type="button" data-fs hidden>全屏</button>
     </div>
   </section>
 
@@ -185,6 +193,7 @@
   </div>
 
   <script src="./audio.js"></script>
+  <script src="./sprites.js"></script>
   <script src="./game.js"></script>
 </body>
 </html>
