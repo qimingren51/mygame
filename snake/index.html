@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>贪吃蛇</title>
+  <style>
+    :root {
+      --bg: #f6f5f1;
+      --text: #1f2328;
+      --muted: #6a6f76;
+      --border: #e3e1da;
+      --board: #e9efe3;
+      --board-alt: #e2eadb;
+      --snake: #2f7d4f;
+      --snake-head: #1f5c39;
+      --food: #d94b3d;
+      --button: #ffffff;
+      --overlay: rgba(246, 245, 241, .88);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c;
+        --text: #e8e6e1;
+        --muted: #9a9ea6;
+        --border: #2e3238;
+        --board: #1d2420;
+        --board-alt: #202923;
+        --snake: #5cc48a;
+        --snake-head: #8ee0b0;
+        --food: #f0705f;
+        --button: #1f2227;
+        --overlay: rgba(22, 24, 28, .88);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    main {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    header a { color: var(--muted); text-decoration: none; }
+    header a:hover { color: var(--text); }
+    h1 { margin: 0; font-size: 1.25rem; }
+    .hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hud span { color: var(--muted); }
+    .hud strong { color: var(--text); }
+    button {
+      font: inherit;
+      color: var(--text);
+      background: var(--button);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--snake); }
+    .board-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 16px;
+      text-align: center;
+      background: var(--overlay);
+    }
+    .overlay[hidden] { display: none; }
+    .overlay h2 { margin: 0; font-size: 1.6rem; }
+    .overlay p { margin: 0 0 8px; color: var(--muted); }
+    .overlay button { padding: 10px 24px; font-size: 1.05rem; }
+    .help { margin: 12px 0 0; color: var(--muted); font-size: .9rem; text-align: center; }
+    .dpad {
+      display: none;
+      grid-template-columns: repeat(3, 64px);
+      grid-template-rows: repeat(2, 56px);
+      gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+    .dpad button { font-size: 1.4rem; padding: 0; touch-action: manipulation; }
+    .dpad [data-dir="up"] { grid-column: 2; grid-row: 1; }
+    .dpad [data-dir="left"] { grid-column: 1; grid-row: 2; }
+    .dpad [data-dir="down"] { grid-column: 2; grid-row: 2; }
+    .dpad [data-dir="right"] { grid-column: 3; grid-row: 2; }
+    @media (pointer: coarse) {
+      .dpad { display: grid; }
+      .help .keys { display: none; }
+    }
+    @media (pointer: fine) {
+      .help .touch { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a href="../">← 全部游戏</a>
+      <h1>贪吃蛇</h1>
+    </header>
+
+    <div class="hud">
+      <span>得分 <strong id="score">0</strong></span>
+      <span>最高 <strong id="best">0</strong></span>
+      <button id="pause" type="button">暂停</button>
+    </div>
+
+    <div class="board-wrap" id="board-wrap">
+      <canvas id="board"></canvas>
+      <div class="overlay" id="overlay">
+        <h2 id="overlay-title">贪吃蛇</h2>
+        <p id="overlay-text">吃到食物会变长，别撞到墙或自己</p>
+        <button id="overlay-button" type="button">开始</button>
+      </div>
+    </div>
+
+    <div class="dpad" aria-label="方向键">
+      <button type="button" data-dir="up" aria-label="上">▲</button>
+      <button type="button" data-dir="left" aria-label="左">◀</button>
+      <button type="button" data-dir="down" aria-label="下">▼</button>
+      <button type="button" data-dir="right" aria-label="右">▶</button>
+    </div>
+
+    <p class="help">
+      <span class="keys">方向键 / WASD 移动，空格暂停</span>
+      <span class="touch">在棋盘上滑动或用下方按钮控制方向</span>
+    </p>
+  </main>
+
+  <script src="./game.js"></script>
+</body>
+</html>

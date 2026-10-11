@@ -48,4 +48,6 @@ python3 -m http.server 8000
 
 ## 部署
 
-GitHub Pages 从默认分支的根目录发布（Settings → Pages → Deploy from a branch）。没有构建步骤，提交即上线。
+GitHub Pages 从 `master` 分支的根目录发布（Settings → Pages → Deploy from a branch）。没有构建步骤，推送即上线，通常一两分钟内生效。
+
+根目录的 `.nojekyll` 用于关闭 GitHub Pages 默认的 Jekyll 处理，让文件原样发布，不要删除。

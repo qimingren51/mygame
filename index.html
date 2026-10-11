@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的小游戏</title>
+  <style>
+    :root {
+      --bg: #f6f5f1;
+      --card: #ffffff;
+      --text: #1f2328;
+      --muted: #6a6f76;
+      --border: #e3e1da;
+      --accent: #2f7d4f;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c;
+        --card: #1f2227;
+        --text: #e8e6e1;
+        --muted: #9a9ea6;
+        --border: #2e3238;
+        --accent: #5cc48a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 48px 16px 64px;
+    }
+    h1 { margin: 0 0 4px; font-size: 2rem; }
+    .subtitle { margin: 0 0 32px; color: var(--muted); }
+    .games {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .game a {
+      display: block;
+      height: 100%;
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: inherit;
+      text-decoration: none;
+      transition: border-color .15s, transform .15s;
+    }
+    .game a:hover, .game a:focus-visible {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .icon { font-size: 2rem; line-height: 1; }
+    .game h2 { margin: 12px 0 4px; font-size: 1.15rem; }
+    .game p { margin: 0; color: var(--muted); font-size: .95rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>我的小游戏</h1>
+    <p class="subtitle">点开就能玩，电脑和手机都支持。</p>
+
+    <!-- 新增游戏：复制一个 <li>，链接用相对路径 "<游戏名>/" -->
+    <ul class="games">
+      <li class="game">
+        <a href="snake/">
+          <div class="icon" aria-hidden="true">🐍</div>
+          <h2>贪吃蛇</h2>
+          <p>吃到食物会变长，别撞到墙或自己。</p>
+        </a>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>
