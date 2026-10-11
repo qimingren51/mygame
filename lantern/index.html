@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0B0F1C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>提灯夜行</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@600;900&display=swap">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- 战斗 HUD -->
+  <div id="hud" class="hud" hidden>
+    <div class="xpbar"><div id="xp-fill" class="xp-fill"></div></div>
+
+    <div class="hud-left">
+      <div class="hero">
+        <div class="portrait" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 28 28">
+            <path d="M3 15 L14 7 L25 15 Z" fill="#6B5332" stroke="#8E7044" stroke-width="1.2" stroke-linejoin="round"/>
+            <circle cx="14" cy="18" r="4" fill="#262B44"/>
+            <circle cx="21" cy="20" r="2.4" fill="#FFD98A"/>
+          </svg>
+          <span id="level" class="level-badge">1</span>
+        </div>
+        <div class="hp-wrap">
+          <div class="hp-row"><span class="hero-name">阿烛</span><span id="hp-text">100 / 100</span></div>
+          <div class="hpbar"><div id="hp-fill" class="hp-fill"></div><div id="shield-fill" class="shield-fill"></div></div>
+        </div>
+      </div>
+      <div id="weapon-slots" class="slots"></div>
+      <div id="passive-slots" class="slots small"></div>
+    </div>
+
+    <div class="hud-center">
+      <div id="timer" class="timer">00:00</div>
+      <div id="phase" class="phase">生存期</div>
+      <div id="res-chips" class="res-chips"></div>
+    </div>
+
+    <div class="hud-right">
+      <div class="stat" title="击杀">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9B8F0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a8 8 0 0 0-8 8v9l3-2 2.5 2 2.5-2 2.5 2 2.5-2 3 2v-9a8 8 0 0 0-8-8Z M9 10h.01 M15 10h.01"/></svg>
+        <span id="kills">0</span>
+      </div>
+      <button id="pause-btn" class="icon-btn" type="button" aria-label="暂停">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M9 6v12 M15 6v12"/></svg>
+      </button>
+    </div>
+    <div id="combo" class="combo" hidden></div>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <div id="boss-bar" class="boss-bar" hidden>
+      <div class="boss-name">夜主 · 九尾</div>
+      <div class="boss-track"><div id="boss-fill" class="boss-fill"></div></div>
+    </div>
+
+    <button id="dash-btn" class="dash-btn" type="button" aria-label="闪避">闪</button>
+    <button id="ult-btn" class="ult-btn" type="button" aria-label="燃灯：清屏大招">
+      <span class="ult-ring" aria-hidden="true"></span>
+      <span class="ult-label">燃灯</span>
+    </button>
+  </div>
+
+  <div id="joystick" class="joystick" hidden><div id="knob" class="knob"></div></div>
+
+  <!-- 标题 -->
+  <section id="title-screen" class="screen title-screen">
+    <a class="back-link" href="../">← 全部游戏</a>
+    <h1 class="brush title-name">提灯夜行</h1>
+    <p class="tagline">一盏灯，一夜妖潮。撑到天明。</p>
+    <div class="row-actions">
+      <button id="start-btn" class="btn primary big" type="button">出发</button>
+      <button id="meta-btn" class="btn" type="button">心灯</button>
+    </div>
+    <p id="title-info" class="title-info"></p>
+    <p class="hint touch-only">左侧任意处按住拖动移动 · 攻击全自动 · 右下角闪避与燃灯</p>
+    <p class="hint mouse-only">WASD / 方向键移动 · 攻击全自动 · 空格闪避 · E 燃灯 · Esc 暂停</p>
+  </section>
+
+  <!-- 升级三选一 -->
+  <section id="levelup-screen" class="screen dim" hidden>
+    <h2 class="brush gold screen-title">心灯渐明</h2>
+    <p id="levelup-sub" class="sub"></p>
+    <div id="cards" class="cards"></div>
+    <div class="levelup-bar">
+      <div id="levelup-res" class="res-chips"></div>
+      <div class="row-actions">
+        <button id="reroll-btn" class="btn small" type="button">重抽</button>
+        <button id="skip-btn" class="btn small ghost" type="button">跳过</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 宝箱 -->
+  <section id="chest-screen" class="screen dim" hidden>
+    <h2 id="chest-title" class="brush gold screen-title">宝箱</h2>
+    <div id="chest-items" class="chest-items"></div>
+    <button id="chest-ok" class="btn primary" type="button">收下</button>
+  </section>
+
+  <!-- 进化 -->
+  <section id="evo-screen" class="screen evo-screen" hidden>
+    <div class="evo-tag">进化</div>
+    <div id="evo-name" class="brush evo-name"></div>
+    <div id="evo-recipe" class="evo-recipe"></div>
+    <div id="evo-desc" class="evo-desc"></div>
+  </section>
+
+  <!-- 暂停 -->
+  <section id="pause-screen" class="screen dim" hidden>
+    <h2 class="brush screen-title">暂停</h2>
+    <div id="pause-build" class="pause-build"></div>
+    <div class="row-actions">
+      <button id="resume-btn" class="btn primary" type="button">继续</button>
+      <button id="quit-btn" class="btn ghost" type="button">放弃本局</button>
+    </div>
+  </section>
+
+  <!-- 结算 -->
+  <section id="result-screen" class="screen dim" hidden>
+    <div class="result-grid">
+      <div class="result-col">
+        <div id="result-title" class="brush result-title"></div>
+        <div id="result-sub" class="result-sub"></div>
+        <div id="result-record" class="record-chip" hidden></div>
+        <div id="result-stats" class="stat-grid"></div>
+      </div>
+      <div class="result-col">
+        <div class="col-label">本局构筑</div>
+        <div id="result-build" class="build-grid"></div>
+        <div id="result-res" class="res-chips wrap"></div>
+      </div>
+      <div class="result-col">
+        <div class="col-label">收获</div>
+        <div id="result-oil" class="oil-big"></div>
+        <div id="result-oil-detail" class="muted small-text"></div>
+        <div id="result-next" class="next-unlock"></div>
+      </div>
+    </div>
+    <div class="row-actions result-actions">
+      <button id="home-btn" class="btn ghost" type="button">返回</button>
+      <button id="result-meta-btn" class="btn" type="button">点亮心灯</button>
+      <button id="again-btn" class="btn primary big" type="button">再来一局</button>
+    </div>
+  </section>
+
+  <!-- 心灯（局外成长） -->
+  <section id="meta-screen" class="screen dim" hidden>
+    <div class="meta-head">
+      <h2 class="brush gold screen-title">心灯</h2>
+      <div id="meta-oil" class="oil-pill"></div>
+    </div>
+    <div id="meta-list" class="meta-list"></div>
+    <button id="meta-back" class="btn" type="button">返回</button>
+  </section>
+
+  <div class="rotate-hint" aria-live="polite">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFD98A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M3 9a9 9 0 0 1 4-5 M21 15a9 9 0 0 1-4 5"/></svg>
+    <p>请将手机横过来</p>
+  </div>
+
+  <script src="./game.js"></script>
+</body>
+</html>
