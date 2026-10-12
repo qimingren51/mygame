@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "bench": "vitest bench --run"
+    "bench": "PERF=1 vitest run tests/sim/perf.test.ts --silent=false --reporter=verbose"
   },
   "dependencies": {
     "pixi-filters": "6.1.5",
