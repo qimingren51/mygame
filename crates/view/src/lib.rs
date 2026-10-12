@@ -20,9 +20,10 @@ pub const NIGHT: Color = Color::srgb(0.086, 0.106, 0.173);
 const INK: Color = Color::srgb(0.11, 0.11, 0.13);
 const LANTERN: Color = Color::srgba(1.0, 0.72, 0.36, 0.28);
 
-/// 宣纸平铺块的边长（世界单位）。宣纸图 512 像素，1 纹素 = 0.5 世界单位（docs/PORTING-NOTES.md 8.2）。
+/// 宣纸平铺块的边长（世界单位）。宣纸图 1024 像素，按图集密度 1 纹素 = 0.25 世界单位
+/// （docs/DESIGN.md 第 15 节）。M1 改为从图集元数据读取密度。
 const PAPER_TILE: f32 = 256.0;
-const PAPER_TEXELS_PER_UNIT: f32 = 2.0;
+const PAPER_TEXELS_PER_UNIT: f32 = 4.0;
 
 pub struct ViewPlugin;
 
