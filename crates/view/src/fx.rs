@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use lantern_content::{BlastKind, Element, EventKind, Stat, WeaponBehavior, ZoneKind};
 use lantern_core::Pcg32;
 use lantern_sim::boss::{BossState, Foes};
+use lantern_sim::charms::Trail;
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::encounters::Encounters;
 use lantern_sim::gold::Coins;
@@ -257,6 +258,18 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                 fx.push(OneShot::Blast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
                 fx.shake(6.0);
             }
+            // 回光、九转金丹：金色的大环，震屏
+            SimEvent::LastStand { pos } | SimEvent::Revived { pos } => {
+                let r = if matches!(ev, SimEvent::Revived { .. }) { 420.0 } else { 180.0 };
+                fx.push(
+                    OneShot::Ring { color: rgb(0xffd98a), ink: false, light: true, strong: true },
+                    to_screen(pos),
+                    r,
+                    0.9,
+                );
+                fx.flash(rgb(0xfff1c2), 0.45);
+                fx.shake(10.0);
+            }
             SimEvent::RainStrike { pos } => {
                 fx.push(OneShot::Blast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
             }
@@ -386,6 +399,22 @@ pub(crate) fn collect_fx(
                     });
                 }
             }
+        }
+    }
+
+    // ---- 风火轮的火痕
+    if let Some(trail) = &res.trail {
+        for e in &trail.list {
+            let p = to_screen(e.pos);
+            let fade = (e.life / 0.5).min(1.0);
+            let flicker = 0.75 + 0.25 * (now * 13.0 + e.pos.x * 0.1).sin();
+            glow.add(
+                f.glow,
+                p.extend(layer::EMISSIVE - 3.0),
+                Vec2::new(0.45, 0.45 * FLAT),
+                0.0,
+                rgb(0xff7a2a).with_alpha(0.6 * fade * flicker),
+            );
         }
     }
 
@@ -894,6 +923,7 @@ pub(crate) struct FxSources<'w> {
     encounters: Option<Res<'w, Encounters>>,
     reveal: Option<Res<'w, Reveal>>,
     zones: Option<Res<'w, Zones>>,
+    trail: Option<Res<'w, Trail>>,
     herbs: Option<Res<'w, Herbs>>,
     stats: Option<Res<'w, Stats>>,
     lanterns: Option<Res<'w, Lanterns>>,

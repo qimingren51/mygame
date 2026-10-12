@@ -55,11 +55,24 @@
     DashCharges: (base: 1.0, min: 1.0, max: 3.0),
     DashDistance: (base: 1.0, min: 0.3, max: 3.0),
     DashStrike: (base: 0.0, min: 0.0),
+    // 灯坠：风火轮的火痕、定海神针、照夜珠的代价、冰魄珠；霜瓷灯的受击冻结；心灯回光
+    TrailDamage: (base: 0.0, min: 0.0),
+    StillDamage: (base: 0.0, min: 0.0),
+    StillReduction: (base: 0.0, min: 0.0, max: 0.6),
+    MovingDamage: (base: 0.0, max: 0.0),
+    DarkSpeed: (base: 0.0, min: 0.0),
+    FrozenXp: (base: 0.0, min: 0.0),
+    ThornFreeze: (base: 0.0, min: 0.0, max: 1.0),
+    LastStand: (base: 0.0, min: 0.0, max: 2.0),
     // 魂火价值倍率，最多 ×2
     XpGain: (base: 1.0, min: 0.0, max: 2.0),
     // 构筑
     Rerolls: (base: 2.0, min: 0.0),
     Banishes: (base: 0.0, min: 0.0),
+    // 法器栏、灯坠栏（心灯可以开第 4 个灯坠栏）
+    WeaponSlots: (base: 6.0, min: 1.0, max: 6.0),
+    CharmSlots: (base: 3.0, min: 1.0, max: 4.0),
+    StartPassive: (base: 0.0, min: 0.0, max: 5.0),
     Choices: (base: 3.0, min: 1.0, max: 5.0),
     // 灵光一闪：三选一变成四选一
     Inspiration: (base: 0.10, min: 0.0, max: 1.0),

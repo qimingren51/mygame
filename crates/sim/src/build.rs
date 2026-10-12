@@ -38,6 +38,13 @@ pub struct Build {
     /// 已经开过几次升级（保底用）；前几次升级里出现过的新法器
     pub levelups: u32,
     pub early_new: Vec<usize>,
+    /// 挂着的灯坠（`charms.ron` 下标）
+    pub charms: Vec<usize>,
+    /// 灯的本命五行、悟·五行：这一系的选项更容易出现
+    pub lamp_element: Option<Element>,
+    pub insight: Option<Element>,
+    /// 这一局手上同时有过最多几件法器（成就用）
+    pub max_weapons: u32,
 }
 
 /// 被封印的一项。
@@ -61,6 +68,9 @@ impl Build {
     /// 开局：读出夜签对五行的影响。
     pub fn new(content: &Content, setup: &RunSetup) -> Self {
         let mut b = Build { sheng: vec![false; content.elements.sheng.len()], ..Default::default() };
+        b.lamp_element = Some(content.lamps[setup.lamp_index(content)].element);
+        b.insight = setup.insight;
+        b.charms = setup.charms.iter().filter_map(|id| content.charm_index(id)).collect();
         if let Some(pick) = &setup.omen
             && let Some(i) = content.omen_index(&pick.id)
             && let Some(el) = pick.element
@@ -205,7 +215,7 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
             out.push((Offer::WeaponUp(k), ch.weight_weapon_up));
         }
     }
-    if (arsenal.0.len() as u32) < ch.slots {
+    if (arsenal.0.len() as u32) < weapon_slots(content, build) {
         let weight = if secs < ch.late_after { ch.weight_new_weapon } else { ch.weight_new_weapon_late };
         for d in 0..content.weapons.len() {
             if !arsenal.0.iter().any(|w| w.def == d) && !banned_w(d) {
@@ -237,8 +247,28 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
         if let Some(f) = build.favor {
             *w *= if el == f { ch.favor_mult } else { ch.unfavor_mult };
         }
+        if build.lamp_element == Some(el) {
+            *w *= ch.lamp_mult;
+        }
+        if build.insight == Some(el) {
+            *w *= ch.insight_mult;
+        }
     }
     out
+}
+
+/// 法器栏的格数（灯坠断剑会减少）。
+pub fn weapon_slots(content: &Content, build: &Build) -> u32 {
+    let mut n = content.stat(Stat::WeaponSlots).base;
+    for &k in &build.charms {
+        for e in &content.charms[k].effects {
+            if let Effect::Add(Stat::WeaponSlots, v) = e {
+                n += v;
+            }
+        }
+    }
+    let d = content.stat(Stat::WeaponSlots);
+    n.clamp(d.min, d.max).round() as u32
 }
 
 /// 按权重不放回地抽 n 个。
@@ -366,6 +396,7 @@ pub fn apply_offer(
         Offer::NewWeapon(d) => {
             if !arsenal.0.iter().any(|w| w.def == d) {
                 arsenal.0.push(WeaponSlot::new(d));
+                build.max_weapons = build.max_weapons.max(arsenal.0.len() as u32);
             }
         }
         Offer::PassiveUp(k) => {

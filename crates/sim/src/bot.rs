@@ -59,6 +59,12 @@ pub fn respond(sim: &SimHarness) -> Vec<SimCommand> {
             let i = rewards.iter().position(|&r| r == want).unwrap_or(0);
             vec![SimCommand::Choose(i as u8)]
         }
+        // 灯坠：有空格就拿第一个，满了不换
+        SimPhase::Charm => {
+            let free = sim.build().charms.len() < crate::charms::charm_slots(sim.stats());
+            let picking = sim.flow().charm.as_ref().is_some_and(|c| c.picked.is_none());
+            vec![if free && picking { SimCommand::Choose(0) } else { SimCommand::Skip }]
+        }
         // 货郎：钱够就买宝箱，否则走开
         SimPhase::Shop => {
             let afford = sim.flow().shop.is_some_and(|s| sim.progress().gold >= s.chest_cost as f32);

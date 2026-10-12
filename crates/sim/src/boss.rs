@@ -10,6 +10,7 @@ use lantern_content::{AffixKind, Rule, Stat};
 use lantern_core::step::DT;
 use lantern_core::{StateHasher, Stream};
 
+use crate::charms::Survival;
 use crate::combat::{ActionQueue, HurtCtx, hurt_player};
 use crate::enemies::Enemies;
 use crate::reveal::Reveal;
@@ -332,6 +333,7 @@ pub(crate) fn update_foes(
     mut state: ResMut<BossState>,
     mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
+    mut survival: ResMut<Survival>,
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
     let c = &content.0;
@@ -345,6 +347,7 @@ pub(crate) fn update_foes(
         rng: rng.0.get(Stream::Combat),
         god: plan.god,
         outbox: &mut outbox,
+        survival: &mut survival,
     };
     let mut k = 0;
     while k < foes.0.len() {

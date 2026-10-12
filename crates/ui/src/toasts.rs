@@ -146,6 +146,12 @@ fn read_events(
             SimEvent::Sacrifice { amount } => {
                 msg("血祭", format!("失去 {} 生命，换一个宝箱", amount.round()), hex("#FF6B5A"), false)
             }
+            SimEvent::LastStand { .. } => msg("回光", "灯将灭未灭，震开了周围的妖物", hex("#FFD98A"), true),
+            SimEvent::Revived { .. } => msg("九转金丹", "金丹化开，长明火重燃", hex("#FFD98A"), true),
+            SimEvent::CharmTaken { index } => {
+                let d = &c.charms[index as usize];
+                msg(format!("灯坠 · {}", d.name), d.good.clone(), hex("#B07CF0"), false)
+            }
             SimEvent::ShieldBroken => None,
             _ => None,
         };

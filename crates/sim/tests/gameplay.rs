@@ -126,6 +126,9 @@ fn bench_mode_keeps_enemy_count_and_player_alive() {
 fn bot_full_run_defeats_the_boss() {
     let mut setup = RunSetup::new(424242, RunMode::Normal);
     setup.god = true;
+    // 出发前挂风火轮；局内可能出现全部灯坠（5:00 小头目必给一次三选一）
+    setup.charms = vec!["wind_wheel".into()];
+    setup.charm_pool = content().charms.iter().map(|c| c.id.clone()).collect();
     let mut sim = SimHarness::with_setup(content(), setup);
     let mut levels = Vec::new();
     let mut step = 0u64;
@@ -173,6 +176,7 @@ fn bot_full_run_defeats_the_boss() {
     assert!(sim.build().evolutions >= 1);
     assert!(sim.progress().kills > 1000);
     assert!(elites >= 4 && boss, "精英 {elites} 次，夜主 {boss}");
+    assert!(sim.build().charms.len() >= 2, "小头目给了灯坠：{:?}", sim.build().charms);
     let result = sim.flow().result.clone().expect("有结算");
     assert!(result.won, "无敌时击败夜主就会天明：{result:?}");
 }

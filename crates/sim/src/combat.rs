@@ -17,6 +17,7 @@ use lantern_content::{Action, AffixKind, BlastKind, Cond, Content, Element, Rank
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
+use crate::charms::{Survival, stance, try_rescue};
 use crate::enemies::{Enemies, EnemyHandle, TAG_CHILD, TAG_FRENZY, TAG_MINIBOSS};
 use crate::flow::Flow;
 use crate::gems::Gems;
@@ -69,6 +70,8 @@ pub enum Source {
     Band,
     /// 轻功：闪避穿过的妖物
     Dash,
+    /// 风火轮的火痕
+    Trail,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -221,10 +224,13 @@ pub struct ActionQueue(pub Vec<Deferred>);
 /// 一只妖物的死亡，Death 阶段处理。
 #[derive(Clone, Copy, Debug)]
 pub struct Death {
+    pub handle: EnemyHandle,
     pub pos: Vec2,
     pub kind: u16,
     /// 死时处于冰冻（水·凝 三阶的冰爆）；被冰爆冻住的不算
     pub frozen: bool,
+    /// 死时处于冰冻，冰爆冻住的也算（冰魄珠）
+    pub iced: bool,
     pub max_hp: f32,
     pub radius: f32,
     /// 词缀与标记（分裂、小头目……）
@@ -388,13 +394,15 @@ pub(crate) fn resolve_hits(
     mut log: ResMut<DamageLog>,
     mut outbox: ResMut<SimOutbox>,
     mut react: ReactRes,
+    player: Single<&Player>,
 ) {
     let content = &content.0;
     let rng = rng.0.get(Stream::Combat);
     let en = &mut *en;
     let crit_chance = stats.get(Stat::CritChance);
     let crit_mult = stats.get(Stat::CritMult);
-    let dmg_mult = stats.get(Stat::Damage);
+    // 加成区：定海神针的站定、移动加成也算在这里
+    let dmg_mult = stats.get(Stat::Damage) + stance(&stats, &content.player.charms, &player);
     let stun_crit = stats.get(Stat::StunCrit) > 0.0;
     let freeze_time = stats.get(Stat::FreezeTime);
     let zones = &content.elements.zones;
@@ -534,9 +542,11 @@ pub(crate) fn kill(en: &mut Enemies, i: usize, rank: Rank, deaths: &mut Deaths, 
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
     deaths.0.push(Death {
+        handle: en.handle(i),
         pos,
         kind,
         frozen: en.frozen[i] > 0.0 && !en.blast_frozen[i],
+        iced: en.frozen[i] > 0.0,
         max_hp: en.max_hp[i],
         radius: en.r[i],
         affix: en.affix[i],
@@ -801,11 +811,13 @@ pub(crate) fn process_deaths(
     mut flow: ResMut<Flow>,
     mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
+    mut survival: ResMut<Survival>,
 ) {
     let c = &content.0;
     let t = tick.secs();
     let minute = t / 60.0;
     let g = &c.run.gems;
+    let frozen_xp = 1.0 + stats.get(Stat::FrozenXp);
     let gd = &c.run.gold;
     let drops = &c.run.drops;
     let gold_mult = stats.get(Stat::GoldGain);
@@ -835,6 +847,9 @@ pub(crate) fn process_deaths(
         let child = d.tags & TAG_CHILD != 0;
         let miniboss = d.tags & TAG_MINIBOSS != 0;
         let elite = def.rank == Rank::Elite && !child;
+        if elite {
+            survival.elite_down(d.handle);
+        }
         let p = &mut *progress;
         p.kills += 1;
         p.combo = if p.combo_t > 0.0 { p.combo + 1 } else { 1 };
@@ -868,7 +883,11 @@ pub(crate) fn process_deaths(
             def.xp
         };
         if xp > 0.0 {
-            let value = xp * c.run.gem_value_scale.at(minute) * stats.get(Stat::XpGain);
+            let mut value = xp * c.run.gem_value_scale.at(minute) * stats.get(Stat::XpGain);
+            // 冰魄珠：冰冻中被击杀的妖物魂火翻倍
+            if d.iced {
+                value *= frozen_xp;
+            }
             if elite {
                 let n = g.elite_split;
                 for _ in 0..n {
@@ -986,21 +1005,27 @@ pub(crate) struct HurtCtx<'a> {
     pub rng: &'a mut Pcg32,
     pub god: bool,
     pub outbox: &'a mut SimOutbox,
+    pub survival: &'a mut Survival,
 }
 
-/// 主角受伤：无敌或闪避中不受伤；减伤、护甲、护盾依次生效；之后进入无敌时间。
+/// 主角受伤：无敌或闪避中不受伤；减伤（含定海神针的站定减伤）、护甲、护盾依次生效；之后进入无敌时间。
+/// 致命时先试回光、九转金丹。这一下落到了主角身上（哪怕被护盾挡下）时返回 true。
 pub(crate) fn hurt_player(
     player: &mut Player,
     health: &mut Health,
     pos: Vec2,
     amount: f32,
     ctx: &mut HurtCtx,
-) {
+) -> bool {
     if player.iframe > 0.0 || player.dash_t > 0.0 || health.hp <= 0.0 {
-        return;
+        return false;
     }
     let s = ctx.stats;
-    let mut dmg = (amount * (1.0 - s.get(Stat::Reduction)) - s.get(Stat::Armor)).max(1.0);
+    let mut reduction = s.get(Stat::Reduction);
+    if player.still_t >= ctx.content.player.charms.still_after {
+        reduction += s.get(Stat::StillReduction);
+    }
+    let mut dmg = (amount * (1.0 - reduction.min(0.9)) - s.get(Stat::Armor)).max(1.0);
     if player.shield > 0.0 {
         let absorbed = player.shield.min(dmg);
         player.shield -= absorbed;
@@ -1018,11 +1043,14 @@ pub(crate) fn hurt_player(
     }
     player.iframe = ctx.content.player.hurt_iframe;
     if dmg <= 0.0 || ctx.god {
-        return;
+        return true;
     }
+    ctx.survival.hurts += 1;
+    ctx.survival.taken += dmg.min(health.hp);
     health.hp = (health.hp - dmg).max(0.0);
     ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg });
-    if health.hp <= 0.0 {
+    if health.hp <= 0.0 && !try_rescue(ctx.content, s, ctx.survival, player, health, pos, ctx.outbox) {
         ctx.outbox.0.push(SimEvent::PlayerDied);
     }
+    true
 }

@@ -49,6 +49,7 @@ pub(crate) fn move_player(
             p.facing = dir.normalize();
         }
         p.moved = before.distance(pos.0);
+        p.still_t = if p.moved > 1e-3 { 0.0 } else { p.still_t + DT };
         // 闪避按段充能：冷却走完补一段，没满就接着冷却
         p.dash_ready = p.dash_ready.min(charges);
         if p.dash_ready < charges {

@@ -140,7 +140,8 @@ fn sheng_and_taiji_light_up() {
     let mut sim = fresh(1);
     sim.set_build(&[], &[("zhezhi", 5), ("luxin", 5)]);
     assert!(sim.build().sheng[0], "木生火");
-    assert!((sim.stats().get(Stat::BurnDamage) - 1.3).abs() < 1e-5);
+    // 红纸灯 +20%（相加），木生火 ×1.3
+    assert!((sim.stats().get(Stat::BurnDamage) - 1.56).abs() < 1e-5);
     let woke =
         sim.set_build(&[], &[("zhezhi", 5), ("luxin", 5), ("jianyi", 5), ("jingxin", 5), ("houde", 5)]);
     assert!(sim.build().taiji);
@@ -161,11 +162,11 @@ fn element_omen_gives_points_and_favor() {
 #[test]
 fn meta_and_omen_modify_stats() {
     let mut setup = RunSetup::new(1, RunMode::Normal);
-    setup.meta.insert("hp".into(), 5);
+    setup.attributes.insert("health".into(), 5);
     setup.omen = Some(OmenPick { id: "glass".into(), element: None });
     let sim = SimHarness::with_setup(content(), setup);
-    // (100 + 12 × 5) × (1 − 0.35) = 104
-    assert_eq!(sim.stats().max_hp(), 104.0);
+    // (100 + 10 × 5) × (1 − 0.35) = 97.5，取整为 98
+    assert_eq!(sim.stats().max_hp(), 98.0);
     // 加成区相加：琉璃夜 +40%
     assert!((sim.stats().get(Stat::Damage) - 1.4).abs() < 1e-5);
 }

@@ -3480,6 +3480,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "directories",
+ "lantern_content",
  "lantern_sim",
  "ron",
  "serde",

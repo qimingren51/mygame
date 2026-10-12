@@ -314,7 +314,8 @@ fn reverse_omen_disables_sheng_and_doubles_ke_reactions() {
     let mut sim = SimHarness::with_setup(content(), s);
     sim.set_build(&[], &[("zhezhi", 5), ("luxin", 5)]);
     assert!(sim.build().sheng[0], "木生火点亮了");
-    assert!((sim.stats().get(Stat::BurnDamage) - 1.0).abs() < 1e-5, "但相生被动无效");
+    // 只剩红纸灯的 +20%
+    assert!((sim.stats().get(Stat::BurnDamage) - 1.2).abs() < 1e-5, "但相生被动无效");
     assert_eq!(sim.stats().get(Stat::KeReaction), 2.0);
     let el = &content().elements;
     let ke = el.reaction_between(Element::Water, Element::Fire).unwrap();

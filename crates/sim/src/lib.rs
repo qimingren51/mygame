@@ -16,6 +16,7 @@ use lantern_content::Element;
 pub mod boss;
 pub mod bot;
 pub mod build;
+pub mod charms;
 pub mod combat;
 pub mod components;
 mod crowd;
@@ -84,6 +85,21 @@ pub struct RunSetup {
     /// 难度：第几更（从 1 起，`difficulty.ron` 的下标 + 1）
     #[serde(default = "first_tier")]
     pub tier: u8,
+    /// 灯（`lamps.ron` 的 ID）；不写时用第一盏初始灯
+    #[serde(default)]
+    pub lamp: Option<String>,
+    /// 出发前挂上的灯坠
+    #[serde(default)]
+    pub charms: Vec<String>,
+    /// 已经解锁、局内可能出现的灯坠
+    #[serde(default)]
+    pub charm_pool: Vec<String>,
+    /// 生效的局外属性等级（按 `attributes.ron` 的 ID；关掉的不写）
+    #[serde(default)]
+    pub attributes: BTreeMap<String, u32>,
+    /// 悟·五行：选中的那一系
+    #[serde(default)]
+    pub insight: Option<Element>,
 }
 
 fn first_tier() -> u8 {
@@ -92,7 +108,28 @@ fn first_tier() -> u8 {
 
 impl RunSetup {
     pub fn new(seed: u64, mode: RunMode) -> Self {
-        RunSetup { seed, mode, omen: None, meta: BTreeMap::new(), god: false, tier: 1 }
+        RunSetup {
+            seed,
+            mode,
+            omen: None,
+            meta: BTreeMap::new(),
+            god: false,
+            tier: 1,
+            lamp: None,
+            charms: Vec::new(),
+            charm_pool: Vec::new(),
+            attributes: BTreeMap::new(),
+            insight: None,
+        }
+    }
+
+    /// 这一局用的灯（`lamps.ron` 下标）。
+    pub fn lamp_index(&self, content: &lantern_content::Content) -> usize {
+        self.lamp
+            .as_deref()
+            .and_then(|id| content.lamp_index(id))
+            .or_else(|| content.lamps.iter().position(|l| l.initial))
+            .unwrap_or(0)
     }
 }
 
@@ -115,6 +152,7 @@ pub enum SimSet {
     Weapons,
     /// 飞剑、弹幕
     Projectiles,
+    /// 回光、九转金丹的震退
     Collide,
     /// 结算命中
     Damage,
@@ -206,7 +244,7 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(SimSet::Input),
-                    (player::move_player, player::upkeep, reveal::update_reveal)
+                    (player::move_player, charms::lay_trail, player::upkeep, reveal::update_reveal)
                         .chain()
                         .in_set(SimSet::Player),
                     (spawn::update_spawns, encounters::spawn_encounters).chain().in_set(SimSet::Director),
@@ -220,11 +258,13 @@ impl Plugin for SimPlugin {
                         player::dash_strike,
                         reveal::flame_band,
                         reactions::update_zones,
+                        charms::burn_trail,
                         combat::process_strikes,
                     )
                         .chain()
                         .in_set(SimSet::Weapons),
                     (weapons::volley::update_shots, boss::update_foes).chain().in_set(SimSet::Projectiles),
+                    charms::apply_rescue.in_set(SimSet::Collide),
                     combat::resolve_hits.in_set(SimSet::Damage),
                     combat::burn.in_set(SimSet::Status),
                     combat::process_deaths.in_set(SimSet::Death),

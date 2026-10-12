@@ -9,6 +9,7 @@ use lantern_content::{AffixKind, Content, PlanEvent, Rank, SpawnDef, Stat};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
+use crate::charms::Survival;
 use crate::enemies::{Enemies, TAG_MINIBOSS};
 use crate::lanterns::Lanterns;
 use crate::run::{Director, PendingEncircle, RunMode, RunPlan, SimView};
@@ -110,6 +111,7 @@ pub(crate) fn update_spawns(
     mut rng: ResMut<SimRng>,
     mut en: ResMut<Enemies>,
     mut outbox: ResMut<SimOutbox>,
+    mut survival: ResMut<Survival>,
 ) {
     let content = &content.0;
     let s = &content.run.spawn;
@@ -222,30 +224,36 @@ pub(crate) fn update_spawns(
             continue;
         }
         step.done = true;
-        let spawn_elite = |pool: &[String], rng: &mut Pcg32, en: &mut Enemies, outbox: &mut SimOutbox| {
+        let spawn_elite = |pool: &[String],
+                           rng: &mut Pcg32,
+                           en: &mut Enemies,
+                           outbox: &mut SimOutbox,
+                           survival: &mut Survival| {
             let id = &pool[rng.below(pool.len() as u32) as usize];
             let kind = content.enemy_index(id).expect("内容校验保证引用存在") as u16;
             for _ in 0..elites {
                 let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
                 if let Some(i) = spawn_enemy(content, &stats, en, rng, kind, x, y, m) {
                     give_affixes(content, en, i, affixes, rng);
+                    survival.watch(en.handle(i));
                 }
             }
             outbox.0.push(SimEvent::Elite { kind, count: elites as u8 });
         };
         match &content.run.schedule[step.index].event {
-            PlanEvent::Elite(pool) => spawn_elite(pool, rng, &mut en, &mut outbox),
+            PlanEvent::Elite(pool) => spawn_elite(pool, rng, &mut en, &mut outbox, &mut survival),
             PlanEvent::Surge { duration, rate_mult, elites: pool } => {
                 director.surge_t = *duration;
                 director.surge_mult = *rate_mult;
                 outbox.0.push(SimEvent::Surge);
-                spawn_elite(pool, rng, &mut en, &mut outbox);
+                spawn_elite(pool, rng, &mut en, &mut outbox, &mut survival);
             }
             PlanEvent::MiniBoss { enemy, .. } => {
                 let kind = content.enemy_index(enemy).expect("内容校验保证引用存在") as u16;
                 let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
                 if let Some(i) = spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m) {
                     en.tags[i] |= TAG_MINIBOSS;
+                    survival.watch(en.handle(i));
                 }
                 outbox.0.push(SimEvent::Elite { kind, count: 1 });
             }

@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use lantern_content::Content;
 use lantern_platform::{Actions, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good};
-use lantern_sim::{AppState, GameContent, OmenPick, RunMode, RunSetup};
+use lantern_sim::{AppState, GameContent, OmenPick};
 
 use bevy::ui::widget::NodeImageMode;
 use lantern_view::atlas::AtlasDb;
@@ -49,9 +49,21 @@ pub(crate) fn register(app: &mut App) {
         .add_systems(Update, (input, redraw, highlight).chain().run_if(in_state(AppState::Title)));
 }
 
-fn enter(mut mode: ResMut<TitleMode>, mut ui: ResMut<TitleUi>) {
+fn enter(
+    mut mode: ResMut<TitleMode>,
+    mut ui: ResMut<TitleUi>,
+    content: Res<GameContent>,
+    mut profile: ResMut<Profile>,
+) {
     *mode = TitleMode::Main;
     *ui = TitleUi { dirty: true, ..default() };
+    // 老存档迁移（要等内容加载好）
+    if profile.upgrade(&content.0) {
+        info!("存档已迁移到第 {} 版", profile.version);
+        if let Err(e) = profile.save() {
+            warn!("保存存档失败：{e}");
+        }
+    }
 }
 
 /// 只用于挑选新一局的种子，不参与模拟。
@@ -101,8 +113,16 @@ fn input(
             match act {
                 Some(0) => {
                     let seed = seed.0.unwrap_or_else(random_seed);
-                    *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
-                    open(&mut ui);
+                    if profile.basics {
+                        *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
+                        open(&mut ui);
+                    } else {
+                        // 第一局直接出发：一更、初始的灯，不抽夜签、不挂灯坠
+                        let setup = profile.run_setup(c, seed);
+                        info!("出发，种子 {seed}（第一夜）");
+                        commands.insert_resource(setup);
+                        next.set(AppState::Run);
+                    }
                 }
                 Some(1) => {
                     *mode = TitleMode::Meta;
@@ -136,9 +156,8 @@ fn input(
                 .or(clicked)
                 .or(actions.confirm.then_some(ui.selected));
             if let Some(i) = chosen {
-                let mut setup = RunSetup::new(seed, RunMode::Normal);
+                let mut setup = profile.run_setup(c, seed);
                 setup.omen = picks.get(i).cloned();
-                setup.meta = profile.meta.clone();
                 info!("出发，种子 {seed}，夜签 {:?}", setup.omen);
                 commands.insert_resource(setup);
                 next.set(AppState::Run);
@@ -170,7 +189,7 @@ fn input(
             }
         }
         TitleMode::Meta => {
-            let n = c.meta.lines.len();
+            let n = c.meta.nodes.len();
             if ui.selected >= n {
                 ui.selected = 0;
             }
@@ -179,8 +198,10 @@ fn input(
             {
                 ui.selected = h;
             }
-            if actions.nav.y != 0 && n > 0 {
-                ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(n as i32) as usize;
+            // 两列：上下跨一行，左右换一列
+            let step = actions.nav.y * META_COLUMNS as i32 + actions.nav.x;
+            if step != 0 && n > 0 {
+                ui.selected = (ui.selected as i32 + step).rem_euclid(n as i32) as usize;
             }
             let chosen = actions
                 .pick
@@ -190,9 +211,8 @@ fn input(
                 .or(actions.confirm.then_some(ui.selected));
             if let Some(i) = chosen {
                 ui.selected = i;
-                let line = &c.meta.lines[i];
-                let cost = c.meta.cost(profile.meta_level(&line.id));
-                if profile.buy_meta(&line.id, cost, c.meta.max_level)
+                let id = c.meta.nodes[i].id.clone();
+                if profile.buy_meta(c, &id)
                     && let Err(e) = profile.save()
                 {
                     warn!("保存存档失败：{e}");
@@ -205,6 +225,9 @@ fn input(
         }
     }
 }
+
+/// 心灯面板的列数。
+const META_COLUMNS: usize = 2;
 
 /// 标题菜单：(文字, 快捷键)
 const MENU: [(&str, &str); 5] =
@@ -443,76 +466,82 @@ fn meta_panel(
         p.spawn(dim_layer());
         p.spawn((
             Node {
-                width: px(680),
+                width: px(1120),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                padding: UiRect::axes(px(56), px(44)),
-                row_gap: px(10),
+                padding: UiRect::axes(px(56), px(36)),
+                row_gap: px(8),
                 ..default()
             },
             skin.image("panel"),
         ))
         .with_children(|panel| {
-            panel.spawn(text(&fonts.title, 64.0, INK, "心灯"));
+            panel.spawn(text(&fonts.title, 56.0, INK, "心灯"));
             panel.spawn(text(&fonts.body, 18.0, on_paper(hex("#FFD98A")), &format!("灯油 {}", profile.oil)));
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
-            for (i, line) in m.lines.iter().enumerate() {
-                let lv = profile.meta_level(&line.id);
-                let maxed = lv >= m.max_level;
-                let cost = m.cost(lv);
-                let can = !maxed && profile.oil >= cost;
-                let price = if maxed {
-                    "已满".to_string()
-                } else if can {
-                    format!("{cost} 灯油　可点亮")
-                } else {
-                    format!("{cost} 灯油　还差 {}", cost - profile.oil)
-                };
-                let mut row = panel.spawn(Node {
-                    width: percent(100),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(16), px(8)),
-                    ..default()
-                });
-                row.with_children(|r| {
-                    r.spawn(focus(skin, "focus_ring", i, 2.0));
-                    let icon = if lv > 0 {
-                        format!("ui/icon_meta_{}", line.id)
-                    } else {
-                        format!("ui/icon_meta_{}_off", line.id)
+            let mut grid = panel.spawn(Node {
+                width: percent(100),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: px(4),
+                ..default()
+            });
+            grid.with_children(|g| {
+                for (i, node) in m.nodes.iter().enumerate() {
+                    let lv = profile.meta_level(&node.id);
+                    let cost = profile.meta_cost(c, &node.id);
+                    let can = cost.is_some_and(|x| profile.oil >= x);
+                    let price = match cost {
+                        None => "已满".to_string(),
+                        Some(x) if can => format!("{x} 灯油"),
+                        Some(x) => format!("{x} 灯油　差 {}", x - profile.oil),
                     };
-                    spawn_icon(r, db, fonts, Some(&icon), &line.icon, INK, 56.0);
-                    r.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
-                        row_gap: px(2),
+                    let mut row = g.spawn(Node {
+                        width: percent(100.0 / META_COLUMNS as f32),
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                        padding: UiRect::axes(px(12), px(6)),
                         ..default()
-                    })
-                    .with_children(|t| {
-                        t.spawn(Node { column_gap: px(10), align_items: AlignItems::Center, ..default() })
-                            .with_children(|h| {
-                                h.spawn(text(&fonts.title, 30.0, INK, &line.name));
-                                for k in 0..m.max_level {
-                                    h.spawn((
-                                        Node { width: px(18), height: px(18), ..default() },
-                                        skin.image(if k < lv { "pip_on" } else { "pip" }),
-                                    ));
-                                }
-                            });
-                        t.spawn(text(&fonts.body, 15.0, INK_DIM, &line.desc));
                     });
-                    r.spawn(text(
-                        &fonts.body,
-                        15.0,
-                        if can { on_paper(hex("#FFD98A")) } else { INK_DIM },
-                        &price,
-                    ));
-                });
-                clickable(&mut row, i);
-            }
+                    row.with_children(|r| {
+                        r.spawn(focus(skin, "focus_ring", i, 2.0));
+                        let icon = if lv > 0 {
+                            format!("ui/icon_meta_{}", node.id)
+                        } else {
+                            format!("ui/icon_meta_{}_off", node.id)
+                        };
+                        spawn_icon(r, db, fonts, Some(&icon), &node.icon, INK, 44.0);
+                        r.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            row_gap: px(2),
+                            ..default()
+                        })
+                        .with_children(|t| {
+                            t.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() })
+                                .with_children(|h| {
+                                    h.spawn(text(&fonts.title, 26.0, INK, &node.name));
+                                    for k in 0..node.max_level {
+                                        h.spawn((
+                                            Node { width: px(14), height: px(14), ..default() },
+                                            skin.image(if k < lv { "pip_on" } else { "pip" }),
+                                        ));
+                                    }
+                                    h.spawn(text(
+                                        &fonts.body,
+                                        14.0,
+                                        if can { on_paper(hex("#FFD98A")) } else { INK_DIM },
+                                        &price,
+                                    ));
+                                });
+                            t.spawn(text(&fonts.body, 13.0, INK_DIM, &node.desc));
+                        });
+                    });
+                    clickable(&mut row, i);
+                }
+            });
         });
-        p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　Enter　点亮　　Esc　返回"));
+        p.spawn(text(&fonts.body, 18.0, PAPER, "方向键 选择　Enter　点亮　　Esc　返回"));
     });
 }
 

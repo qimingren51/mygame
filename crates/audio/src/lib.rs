@@ -312,6 +312,14 @@ fn play_sim_events(outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
                 let s = a.sfx.warn.clone();
                 a.play(&s);
             }
+            SimEvent::LastStand { .. } | SimEvent::Revived { .. } => {
+                let s = a.sfx.big_bell.clone();
+                a.play(&s);
+            }
+            SimEvent::CharmTaken { .. } => {
+                let s = a.sfx.resonance.clone();
+                a.play(&s);
+            }
             SimEvent::BossPhase { .. } | SimEvent::BossEnraged => {
                 let s = a.sfx.big_bell.clone();
                 a.play(&s);

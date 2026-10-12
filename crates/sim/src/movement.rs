@@ -1,13 +1,14 @@
 //! 妖物移动（移植自网页版 sim/step.ts 的 updateEnemies）。互相推开见 crowd 模块。
 
 use bevy_ecs::prelude::*;
-use bevy_math::ops;
+use bevy_math::{Vec2, ops};
 
-use lantern_content::{Movement, Rank};
+use lantern_content::{Movement, Rank, Stat};
 use lantern_core::Stream;
 use lantern_core::step::DT;
 
-use crate::combat::{ActionQueue, HurtCtx, hurt_player};
+use crate::charms::Survival;
+use crate::combat::{ActionQueue, Hard, HurtCtx, apply_hard, hurt_player};
 use crate::enemies::Enemies;
 use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan, SimView};
@@ -40,10 +41,15 @@ pub(crate) fn update_enemies(
     mut en: ResMut<Enemies>,
     mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
+    mut survival: ResMut<Survival>,
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
     let content = &content.0;
     let (pos, mut player, mut health) = player.into_inner();
+    // 照夜珠：照见圈外的妖物更快；霜瓷灯：受击时冻住攻击者
+    let dark_speed = stats.get(Stat::DarkSpeed);
+    let thorn = stats.get(Stat::ThornFreeze);
+    let thorn_time = content.player.charms.thorn_freeze * stats.get(Stat::FreezeTime);
     let (px, py) = (pos.0.x, pos.0.y);
     let pr = content.player.radius;
     let t = tick.secs();
@@ -69,6 +75,7 @@ pub(crate) fn update_enemies(
         rng: combat_rng,
         god: plan.god,
         outbox: &mut outbox,
+        survival: &mut survival,
     };
 
     for i in 0..en.hi {
@@ -127,6 +134,9 @@ pub(crate) fn update_enemies(
             {
                 sp *= 1.0 - zone_slow;
             }
+            if dark_speed > 0.0 && !reveal.covers(Vec2::new(x, y)) {
+                sp *= 1.0 + dark_speed;
+            }
             if en.confuse[i] > 0.0 {
                 // 晕头：朝随机方向乱走
                 en.confuse[i] -= DT;
@@ -163,11 +173,16 @@ pub(crate) fn update_enemies(
         en.x[i] = x;
         en.y[i] = y;
         if en.affix[i] & cloak_bit != 0 {
-            en.cloaked[i] = !reveal.covers(bevy_math::Vec2::new(x, y));
+            en.cloaked[i] = !reveal.covers(Vec2::new(x, y));
         }
 
-        if d < en.r[i] + pr && en.damage[i] > 0.0 {
-            hurt_player(&mut player, &mut health, pos.0, en.damage[i], &mut ctx);
+        if d < en.r[i] + pr
+            && en.damage[i] > 0.0
+            && hurt_player(&mut player, &mut health, pos.0, en.damage[i], &mut ctx)
+            && thorn > 0.0
+            && ctx.rng.chance(thorn)
+        {
+            apply_hard(en, i, def.rank, Hard::Freeze { blast: false }, thorn_time);
         }
     }
 }

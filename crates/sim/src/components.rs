@@ -44,6 +44,8 @@ pub struct Player {
     pub facing: Vec2,
     /// 本步移动的距离，画面层用来推进走路动画
     pub moved: f32,
+    /// 站着不动了多久（定海神针）
+    pub still_t: f32,
     /// 剩余无敌时间
     pub iframe: f32,
     /// 剩余闪避时间
@@ -63,6 +65,7 @@ impl Default for Player {
         Player {
             facing: Vec2::X,
             moved: 0.0,
+            still_t: 0.0,
             iframe: 0.0,
             dash_t: 0.0,
             dash_ready: 1,

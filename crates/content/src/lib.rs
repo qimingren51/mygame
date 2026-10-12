@@ -32,6 +32,10 @@ pub struct Content {
     pub affixes: Vec<AffixDef>,
     /// 难度：一更、二更……
     pub difficulty: Vec<DifficultyDef>,
+    pub attributes: AttributesDef,
+    pub lamps: Vec<LampDef>,
+    pub charms: Vec<CharmDef>,
+    pub achievements: Vec<AchievementDef>,
     /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
     pub hash: u64,
 }
@@ -93,6 +97,10 @@ impl Content {
             meta: read(data_dir, "meta.ron", &mut hash)?,
             affixes: read(data_dir, "affixes.ron", &mut hash)?,
             difficulty: read(data_dir, "difficulty.ron", &mut hash)?,
+            attributes: read(data_dir, "attributes.ron", &mut hash)?,
+            lamps: read(data_dir, "lamps.ron", &mut hash)?,
+            charms: read(data_dir, "charms.ron", &mut hash)?,
+            achievements: read(data_dir, "achievements.ron", &mut hash)?,
             hash: 0,
         };
         content.hash = hash;
@@ -117,6 +125,14 @@ impl Content {
 
     pub fn omen_index(&self, id: &str) -> Option<usize> {
         self.omens.iter().position(|o| o.id == id)
+    }
+
+    pub fn lamp_index(&self, id: &str) -> Option<usize> {
+        self.lamps.iter().position(|l| l.id == id)
+    }
+
+    pub fn charm_index(&self, id: &str) -> Option<usize> {
+        self.charms.iter().position(|c| c.id == id)
     }
 
     pub fn stat(&self, s: Stat) -> StatDef {
@@ -145,7 +161,11 @@ mod tests {
         assert!(c.weapon_index(&c.player.start_weapon).is_some());
         assert_eq!(c.stats.len(), Stat::COUNT);
         assert_eq!(c.stat(Stat::CritMult).base, 2.0);
-        assert_eq!(c.meta.cost(0), 120);
+        let luck = c.meta.node("luck").unwrap();
+        assert_eq!((c.meta.cost(luck, 0), c.meta.cost(luck, 2), c.meta.cost(luck, 4)), (300, 770, 1970));
+        let dmg = &c.attributes.list[0];
+        assert_eq!((c.attributes.price(dmg, 0, 0), c.attributes.price(dmg, 9, 0)), (60, 600));
+        assert_eq!(c.attributes.price(dmg, 1, 10), 145);
         assert_eq!(c.passives.len(), 17);
     }
 

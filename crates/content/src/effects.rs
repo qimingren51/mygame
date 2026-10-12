@@ -90,12 +90,31 @@ pub enum Stat {
     DashDistance,
     /// 闪避穿过的妖物受到“单次伤害最高的法器的基础伤害 × 它”（0 表示没有）
     DashStrike,
+    /// 闪避路线留下火痕（灯坠风火轮）：火痕每秒伤害 = 单次伤害最高的法器的基础伤害 × 它
+    TrailDamage,
+    /// 站定 1 秒后的伤害加成、受伤减免；移动时的伤害加成（灯坠定海神针）
+    StillDamage,
+    StillReduction,
+    MovingDamage,
+    /// 照见圈外的妖物移速加成（灯坠照夜珠的代价）
+    DarkSpeed,
+    /// 冰冻中被击杀的妖物魂火多给几倍（灯坠冰魄珠）
+    FrozenXp,
+    /// 受击时冻住攻击者的概率（霜瓷灯）
+    ThornFreeze,
+    /// 回光（心灯）：1 级留 1 点生命并震退周围，2 级再回复 30% 生命
+    LastStand,
     /// 魂火价值倍率
     XpGain,
     // ---- 构筑 ----
     Rerolls,
     /// 封印次数
     Banishes,
+    /// 法器栏、灯坠栏的格数
+    WeaponSlots,
+    CharmSlots,
+    /// 开局自带一门随机心法的等级（心灯余烬）
+    StartPassive,
     /// 升级时的选项数
     Choices,
     /// “灵光一闪”（多一个选项）的概率
@@ -123,7 +142,7 @@ pub enum Stat {
 }
 
 impl Stat {
-    pub const ALL: [Stat; 61] = [
+    pub const ALL: [Stat; 72] = [
         Stat::Damage,
         Stat::Area,
         Stat::Cooldown,
@@ -168,9 +187,20 @@ impl Stat {
         Stat::DashCharges,
         Stat::DashDistance,
         Stat::DashStrike,
+        Stat::TrailDamage,
+        Stat::StillDamage,
+        Stat::StillReduction,
+        Stat::MovingDamage,
+        Stat::DarkSpeed,
+        Stat::FrozenXp,
+        Stat::ThornFreeze,
+        Stat::LastStand,
         Stat::XpGain,
         Stat::Rerolls,
         Stat::Banishes,
+        Stat::WeaponSlots,
+        Stat::CharmSlots,
+        Stat::StartPassive,
         Stat::Choices,
         Stat::Inspiration,
         Stat::ChestMin,
@@ -233,6 +263,8 @@ pub enum Effect {
     Favor,
     /// 改变规则的开关（夜签、更、灯坠用）
     Rule(Rule),
+    /// 按五行到没到一阶加减某个属性（灯坠五帝钱）：每有一系到一阶加 on，没到加 off，五系全到再加 all
+    ByTiers { stat: Stat, on: f32, off: f32, all: f32 },
 }
 
 /// 规则开关。
@@ -244,6 +276,8 @@ pub enum Rule {
     NoMoon,
     /// 夜主多一招（三更起）
     BossExtra,
+    /// 倒下时复活一次（灯坠九转金丹，用掉就碎）
+    Revive,
 }
 
 impl Rule {

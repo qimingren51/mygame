@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+lantern_content.workspace = true
 lantern_sim.workspace = true
 bevy.workspace = true
 directories.workspace = true

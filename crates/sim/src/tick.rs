@@ -10,6 +10,7 @@ use lantern_core::{StateHasher, Stream, Streams};
 
 use crate::boss::{BossState, Foes};
 use crate::build::Build;
+use crate::charms::{Survival, Trail};
 use crate::combat::{ActionQueue, DamageLog, Deaths, HitQueue, Strikes, SwordBudget};
 use crate::crowd::Crowd;
 use crate::encounters::Encounters;
@@ -68,9 +69,20 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     } else {
         Lanterns::place(&c.run.lanterns, rng.get(Stream::Start))
     };
-    let start_weapon = c.weapon_index(&p.start_weapon).expect("内容校验保证引用存在");
+    // 起手法器跟着灯走；跑分模式用 player.ron 里的
+    let lamp = &c.lamps[setup.lamp_index(c)];
+    let start = if plan.is_bench() { &p.start_weapon } else { &lamp.start_weapon };
+    let start_weapon = c.weapon_index(start).expect("内容校验保证引用存在");
     let arsenal = Arsenal(vec![WeaponSlot::new(start_weapon)]);
     let mut build = Build::new(c, &setup);
+    build.max_weapons = 1;
+    // 余烬：开局自带一门随机心法，等级等于节点等级
+    let ember = collect(c, &setup, &build, None, 1).0.get(Stat::StartPassive).round().max(0.0) as u32;
+    if ember > 0 && !c.passives.is_empty() {
+        let d = rng.get(Stream::Start).below(c.passives.len() as u32) as usize;
+        let level = ember.min(c.passives[d].max_level);
+        build.passives.push(crate::build::PassiveSlot { def: d, level });
+    }
     build.compute_resonance(c, &arsenal);
     let (stats, effects) = collect(c, &setup, &build, None, 1);
     let max_hp = stats.max_hp();
@@ -132,6 +144,8 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Herbs::default());
     commands.insert_resource(Discoveries::default());
     commands.insert_resource(DashHits::default());
+    commands.insert_resource(Trail::default());
+    commands.insert_resource(Survival::default());
     commands.insert_resource(SwordBudget(c.elements.bonus_sword_rate));
     commands.insert_resource(encounters);
     commands.insert_resource(HashLog::default());
@@ -200,6 +214,8 @@ pub(crate) struct HashParams<'w, 's> {
     coins: Res<'w, Coins>,
     lanterns: Res<'w, Lanterns>,
     boss: Res<'w, BossState>,
+    trail: Res<'w, Trail>,
+    survival: Res<'w, Survival>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -221,7 +237,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
             h.write_f32(hp.max);
         }
         if let Some(pl) = player {
-            for v in [pl.facing.x, pl.facing.y, pl.iframe, pl.dash_t, pl.dash_cd, pl.shield] {
+            for v in [pl.facing.x, pl.facing.y, pl.iframe, pl.dash_t, pl.dash_cd, pl.shield, pl.still_t] {
                 h.write_f32(v);
             }
             h.write_u32(pl.dash_ready);
@@ -240,6 +256,8 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.coins.hash_into(&mut h);
     p.lanterns.hash_into(&mut h);
     p.boss.hash_into(&mut h);
+    p.trail.hash_into(&mut h);
+    p.survival.hash_into(&mut h);
     h.write_f32(p.progress.gold);
     h.write_f32(p.progress.xp);
     h.write_u32(p.progress.level);

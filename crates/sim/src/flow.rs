@@ -15,6 +15,7 @@ use lantern_core::Stream;
 
 use crate::boss::Foes;
 use crate::build::{Awaken, Build, Offer, apply_offer, offers, pick_weighted, roll_choices};
+use crate::charms::{Survival, charm_slots, roll_charms};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes, heal};
 use crate::encounters::Encounters;
 use crate::run::{Progress, RunMode, RunPlan};
@@ -60,6 +61,8 @@ pub enum SimPhase {
     Lantern,
     /// 货郎的摊子
     Shop,
+    /// 灯坠三选一（满格时再选替换哪一枚）
+    Charm,
     Over,
 }
 
@@ -105,6 +108,15 @@ pub struct Shop {
     pub charm_cost: u32,
 }
 
+/// 灯坠三选一。
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharmChoice {
+    /// `charms.ron` 下标
+    pub offers: Vec<usize>,
+    /// 灯坠栏满了：选中的是第几个选项，接下来选替换哪一枚（`Skip` 返回）
+    pub picked: Option<usize>,
+}
+
 /// 升级时给出的选项。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Choice {
@@ -145,6 +157,25 @@ pub struct RunResult {
     /// 点亮的石灯笼、灯阵是否完整
     pub lanterns: u32,
     pub lamps_complete: bool,
+    /// 成就要看的统计
+    pub feats: Feats,
+}
+
+/// 一局里做到的事（成就、图鉴用）。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Feats {
+    /// 见过的反应（按 `elements.ron` 里 reactions 的下标置位）
+    pub reactions: u32,
+    pub taiji: bool,
+    /// 共鸣到过的最高阶
+    pub max_tier: u8,
+    /// 手上同时有过最多几件法器
+    pub max_weapons: u32,
+    /// 不受伤击败的精英
+    pub flawless_elites: u32,
+    /// 掉过几次血、一共掉了多少
+    pub hurts: u32,
+    pub taken: f32,
 }
 
 /// 一局之内的流程状态。
@@ -164,6 +195,9 @@ pub struct Flow {
     pub lamp: Option<Vec<LampReward>>,
     /// 正在逛的货郎
     pub shop: Option<Shop>,
+    /// 排队的灯坠三选一与当前的一次
+    pub charm_queue: u32,
+    pub charm: Option<CharmChoice>,
     /// 击败夜主后进入结算的时刻
     pub won_at: Option<f32>,
     /// 局内额外得到的灯油（跳过升级、补给、金蟾）
@@ -191,6 +225,8 @@ pub(crate) struct FlowParams<'w, 's> {
     outbox: ResMut<'w, SimOutbox>,
     lanterns: Res<'w, crate::lanterns::Lanterns>,
     coins: ResMut<'w, crate::gold::Coins>,
+    survival: Res<'w, Survival>,
+    discoveries: Res<'w, crate::reactions::Discoveries>,
     player: Query<'w, 's, &'static mut Health, With<Player>>,
 }
 
@@ -277,6 +313,17 @@ impl FlowParams<'_, '_> {
         if source == ChestSource::MiniBoss {
             n = n.max(miniboss_chest_min(c));
         }
+        // 灯坠三选一：小头目按时间表必给，精英宝箱有一定概率附带
+        if !self.setup.charm_pool.is_empty() {
+            let charm = match source {
+                ChestSource::MiniBoss => miniboss_charm(c),
+                ChestSource::Elite => self.rng.0.get(Stream::Chest).chance(c.run.choices.elite_charm),
+                _ => false,
+            };
+            if charm {
+                self.flow.charm_queue += 1;
+            }
+        }
         // 每个宝箱附带金币
         let (lo, hi) = c.run.gold.chest;
         let gold = self.rng.0.get(Stream::Chest).range_f32(lo as f32, hi as f32 + 0.999).floor();
@@ -317,6 +364,7 @@ impl FlowParams<'_, '_> {
         self.flow.evolving = None;
         self.flow.lamp = None;
         self.flow.shop = None;
+        self.flow.charm = None;
         if let Some(k) = self.flow.pending_evos.pop_front() {
             self.flow.evolving = Some(k);
             *self.phase = SimPhase::Evolve;
@@ -334,9 +382,41 @@ impl FlowParams<'_, '_> {
             self.open_chest();
         } else if self.flow.lamp_queue > 0 {
             self.open_lamp();
+        } else if self.flow.charm_queue > 0 {
+            self.open_charm();
         } else {
             *self.phase = SimPhase::Play;
         }
+    }
+
+    /// 灯坠三选一；没有可给的灯坠时直接跳过。
+    fn open_charm(&mut self) {
+        self.flow.charm_queue -= 1;
+        let c = &self.content.0;
+        let offers = roll_charms(
+            c,
+            &self.setup,
+            &self.build,
+            &self.survival,
+            self.arsenal.0.len(),
+            self.rng.0.get(Stream::Chest),
+        );
+        if offers.is_empty() {
+            self.next_pending();
+            return;
+        }
+        self.flow.charm = Some(CharmChoice { offers, picked: None });
+        *self.phase = SimPhase::Charm;
+    }
+
+    /// 挂上一枚灯坠；replace 是要换下的那一枚在灯坠栏里的位置。
+    fn wear_charm(&mut self, k: usize, replace: Option<usize>) {
+        match replace {
+            Some(slot) if slot < self.build.charms.len() => self.build.charms[slot] = k,
+            _ => self.build.charms.push(k),
+        }
+        self.outbox.0.push(SimEvent::CharmTaken { index: k as u16 });
+        self.refresh();
     }
 
     /// 点灯奖励：回复生命 / 一次升级 / 金币（无法回复生命时不给回复）。
@@ -404,6 +484,15 @@ impl FlowParams<'_, '_> {
             gold,
             lanterns: lit,
             lamps_complete: self.lanterns.complete(),
+            feats: Feats {
+                reactions: self.discoveries.seen,
+                taiji: self.build.taiji,
+                max_tier: self.build.tiers.iter().copied().max().unwrap_or(0),
+                max_weapons: self.build.max_weapons,
+                flawless_elites: self.survival.flawless,
+                hurts: self.survival.hurts,
+                taken: self.survival.taken,
+            },
         });
         self.flow.choice = None;
         *self.phase = SimPhase::Over;
@@ -568,7 +657,47 @@ pub(crate) fn handle_commands(
                 fp.outbox.0.push(SimEvent::Bought);
                 fp.after_choice();
             }
+            (SimPhase::Shop, SimCommand::Choose(1)) => {
+                let Some(shop) = fp.flow.shop else { continue };
+                if fp.progress.gold < shop.charm_cost as f32 || fp.setup.charm_pool.is_empty() {
+                    continue;
+                }
+                fp.progress.gold -= shop.charm_cost as f32;
+                fp.flow.charm_queue += 1;
+                fp.outbox.0.push(SimEvent::Bought);
+                fp.after_choice();
+            }
             (SimPhase::Shop, SimCommand::Skip) => fp.after_choice(),
+            (SimPhase::Charm, SimCommand::Choose(i)) => {
+                let Some(choice) = fp.flow.charm.clone() else { continue };
+                let i = i as usize;
+                match choice.picked {
+                    // 满格：选替换哪一枚
+                    Some(p) => {
+                        if i >= fp.build.charms.len() {
+                            continue;
+                        }
+                        fp.wear_charm(choice.offers[p], Some(i));
+                        fp.after_choice();
+                    }
+                    None => {
+                        let Some(&k) = choice.offers.get(i) else { continue };
+                        if fp.build.charms.len() < charm_slots(&fp.stats) {
+                            fp.wear_charm(k, None);
+                            fp.after_choice();
+                        } else if let Some(ch) = &mut fp.flow.charm {
+                            ch.picked = Some(i);
+                        }
+                    }
+                }
+            }
+            (SimPhase::Charm, SimCommand::Skip) => {
+                // 替换时返回三选一；三选一时放弃
+                match &mut fp.flow.charm {
+                    Some(ch) if ch.picked.is_some() => ch.picked = None,
+                    _ => fp.after_choice(),
+                }
+            }
             _ => {}
         }
     }
@@ -610,6 +739,11 @@ fn miniboss_chest_min(c: &lantern_content::Content) -> u32 {
             _ => None,
         })
         .unwrap_or(1)
+}
+
+/// 小头目是否必给一次灯坠三选一（时间表里写的）。
+fn miniboss_charm(c: &lantern_content::Content) -> bool {
+    c.run.schedule.iter().any(|s| matches!(s.event, lantern_content::PlanEvent::MiniBoss { charm: true, .. }))
 }
 
 /// 宝箱里优先给的一项：能进化的直接进化；否则升级等级最高、还没满级的法器。

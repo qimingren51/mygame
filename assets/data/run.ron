@@ -120,6 +120,9 @@
         owned_element_mult: 1.5,
         favor_mult: 1.3,
         unfavor_mult: 0.6,
+        // 灯的本命五行 ×1.2，悟·五行 ×1.15
+        lamp_mult: 1.2,
+        insight_mult: 1.15,
         // 保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上但缺进化心法时，
         // 每次升级 25% 把那门心法放进选项（docs/GAMEPLAY.md 第 5.8 节）
         pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25),
@@ -128,6 +131,9 @@
         skip_oil: 10,
         // 宝箱：随机数加运气超过 0.93 五连，超过 0.68 三连，否则一个
         chest_odds: [(0.93, 5), (0.68, 3)],
+        // 局内灯坠三选一；精英宝箱 30% 附带一次（小头目必给，写在时间表里）
+        charm_offers: 3,
+        elite_charm: 0.3,
     ),
 
     combo: (

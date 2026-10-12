@@ -27,6 +27,37 @@ pub struct PlayerDef {
     pub dash: DashDef,
     pub ult: UltDef,
     pub reveal: RevealDef,
+    pub charms: CharmTuning,
+    pub rescue: RescueDef,
+}
+
+/// 灯坠的局内机制参数（docs/GAMEPLAY.md 第 5.7 节）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CharmTuning {
+    /// 定海神针：站着不动多久算“站定”
+    pub still_after: f32,
+    /// 风火轮的火痕：闪避每走这么远留一段；半径、持续时间。
+    /// 每秒伤害 = TrailDamage × 单次伤害最高的那件法器的基础伤害
+    pub trail_gap: f32,
+    pub trail_radius: f32,
+    pub trail_life: f32,
+    /// 霜瓷灯：冻住攻击者几秒（再乘冰冻时长）
+    pub thorn_freeze: f32,
+}
+
+/// 倒下前的救命：回光（心灯）、九转金丹（灯坠）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RescueDef {
+    /// 回光 2 级时回复生命上限的比例；九转金丹回复的比例（都不受回复倍率影响）
+    pub last_stand_heal: f32,
+    pub revive_heal: f32,
+    /// 回光震退周围这么大一圈；九转金丹震退全屏
+    pub radius: f32,
+    pub knockback: f32,
+    /// 之后的无敌时间
+    pub iframe: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -192,6 +223,9 @@ pub struct ChoicesDef {
     /// 夜签偏重：同系、其他系的权重倍率
     pub favor_mult: f32,
     pub unfavor_mult: f32,
+    /// 灯的本命五行、悟·五行的选项权重倍率
+    pub lamp_mult: f32,
+    pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
@@ -201,6 +235,9 @@ pub struct ChoicesDef {
     pub skip_oil: u32,
     /// 宝箱：随机数（加上运气）超过阈值时开出的个数，从高到低
     pub chest_odds: Vec<(f32, u32)>,
+    /// 局内灯坠三选一给几个选项；精英宝箱附带一次的概率
+    pub charm_offers: u32,
+    pub elite_charm: f32,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；
@@ -905,33 +942,166 @@ pub struct BuffDef {
     pub effects: Vec<Effect>,
 }
 
-/// 心灯（`meta.ron`）：局外成长。
+/// 心灯（`meta.ron`，docs/GAMEPLAY.md 第 11.3 节）：用灯油点亮的功能节点。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MetaDef {
-    pub max_level: u32,
-    /// 点亮第 n 级（从 1 起）的花费 = round(base × n^exp / round_to) × round_to
-    pub cost_base: f32,
+    /// 第 n 级（从 1 起）的花费 = round(base_cost × exp^(n−1) / round_to) × round_to
     pub cost_exp: f32,
     pub cost_round: f32,
-    pub lines: Vec<MetaLineDef>,
+    pub nodes: Vec<MetaNodeDef>,
 }
 
 impl MetaDef {
-    /// 从 level 级升到 level + 1 级的花费。
-    pub fn cost(&self, level: u32) -> u32 {
-        let n = (level + 1) as f32;
-        let raw = self.cost_base * n.powf(self.cost_exp) / self.cost_round;
+    pub fn node(&self, id: &str) -> Option<&MetaNodeDef> {
+        self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// 某个节点从 level 级升到 level + 1 级的花费。
+    pub fn cost(&self, node: &MetaNodeDef, level: u32) -> u32 {
+        let raw = node.base_cost * self.cost_exp.powi(level as i32) / self.cost_round;
         (raw.round() * self.cost_round) as u32
     }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct MetaLineDef {
+pub struct MetaNodeDef {
     pub id: String,
     pub name: String,
     pub icon: String,
     pub desc: String,
+    pub max_level: u32,
+    pub base_cost: f32,
+    #[serde(default)]
     pub per_level: Vec<Effect>,
+    /// 逐级写的效果：第 k 项是升到 k+1 级时新加的
+    #[serde(default)]
+    pub levels: Vec<Vec<Effect>>,
+    /// 悟·五行：出发前选一个生效，那一系的选项更容易出现
+    #[serde(default)]
+    pub insight: Option<Element>,
+}
+
+/// 局外属性（`attributes.ron`，docs/GAMEPLAY.md 第 11.2 节，docs/BALANCE.md 第 10.3 节）：用金币买。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AttributesDef {
+    /// 每买过一级，所有属性的价格再涨这么多
+    pub inflation: f32,
+    /// 价格取整到它的倍数
+    pub round: u32,
+    pub list: Vec<AttributeDef>,
+}
+
+impl AttributesDef {
+    /// 第 level + 1 级的价格（已经买过 bought 级）。
+    pub fn price(&self, a: &AttributeDef, level: u32, bought: u32) -> u32 {
+        let raw = a.base as f32 * (level + 1) as f32 * (1.0 + self.inflation * bought as f32);
+        let r = self.round.max(1) as f32;
+        ((raw / r).round() * r) as u32
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AttributeDef {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub max_level: u32,
+    pub base: u32,
+    pub per_level: Vec<Effect>,
+    /// 默认关闭（招妖）
+    #[serde(default)]
+    pub off_by_default: bool,
+}
+
+/// 灯（`lamps.ron`，docs/GAMEPLAY.md 第 11.4 节）：相当于选角色。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LampDef {
+    pub id: String,
+    pub name: String,
+    /// 对应的流派
+    pub school: String,
+    /// 本命五行：这一系的升级选项权重 ×1.2
+    pub element: Element,
+    pub start_weapon: String,
+    /// 光色（#RRGGBB）
+    pub color: String,
+    pub good: String,
+    pub bad: String,
+    pub effects: Vec<Effect>,
+    /// 一开始就能用
+    #[serde(default)]
+    pub initial: bool,
+}
+
+/// 灯坠（`charms.ron`，docs/GAMEPLAY.md 第 5.7 节）：挂在灯上、改写规则，每一枚都有代价。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CharmDef {
+    pub id: String,
+    pub name: String,
+    pub good: String,
+    pub bad: String,
+    pub effects: Vec<Effect>,
+    #[serde(default)]
+    pub initial: bool,
+    /// 法器多于这么多件时不出现（断剑）
+    #[serde(default)]
+    pub max_weapons: Option<u32>,
+}
+
+/// 成就（`achievements.ron`，docs/GAMEPLAY.md 第 13.1 节）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AchievementDef {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub when: AchievementWhen,
+    pub rewards: Vec<Reward>,
+}
+
+/// 成就的条件。“通关”指击败夜主、天明。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum AchievementWhen {
+    /// 完成了几局（倒下也算）
+    Runs(u32),
+    /// 通关第几更
+    Clear(u8),
+    /// 一夜点亮全部石灯笼
+    AllLanterns,
+    /// 第一次倒下
+    Died,
+    /// 第一次触发太极
+    Taiji,
+    /// 通关，且这一局手上的法器从没超过几件
+    ClearWithWeapons(u32),
+    /// 第一次触发五行反应
+    Reaction,
+    /// 见过全部反应（跨局累计）
+    AllReactions,
+    /// 第一次有一系到第几阶
+    ResonanceTier(u8),
+    /// 第一次进化法器
+    Evolution,
+    /// 不受伤击败一只精英
+    FlawlessElite,
+    /// 通关，且所有属性都不生效
+    ClearNoAttributes,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum Reward {
+    /// 开放心灯、属性、夜签、出发前挂灯坠
+    Basics,
+    Lamp(String),
+    Charm(String),
+    /// 开放第几更
+    Tier(u8),
+    Gold(u32),
+    Oil(u32),
 }

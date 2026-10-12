@@ -1,0 +1,21 @@
+// 灯坠（docs/GAMEPLAY.md 第 5.7 节，名字见 docs/LORE.md 第 9.4 节）：挂在灯上改写规则，每一枚都有代价。
+// 出发前挂一枚；局内 5:00 小头目必给一次三选一，精英宝箱 30% 附带一次，货郎 80 金币一次。
+// 风火轮、定海神针、长命锁、冰魄珠一开始就有，其余靠成就解锁（achievements.ron）。P0 做这 8 枚。
+[
+    (id: "wind_wheel", name: "风火轮", good: "闪避距离 +40%，闪避路线留下 2 秒火痕", bad: "闪避冷却 +0.4 秒",
+     effects: [Mul(DashDistance, 0.4), Add(TrailDamage, 0.5), Add(DashCooldown, 0.4)], initial: true),
+    (id: "pillar", name: "定海神针", good: "站定 1 秒后伤害 +25%、受伤 -25%", bad: "移动时伤害 -10%",
+     effects: [Add(StillDamage, 0.25), Add(StillReduction, 0.25), Add(MovingDamage, -0.10)], initial: true),
+    (id: "night_pearl", name: "照夜珠", good: "照见圈 +30%，照见易伤 +15%", bad: "照见圈外的妖物移速 +25%",
+     effects: [Mul(Reveal, 0.3), Add(RevealVuln, 0.15), Add(DarkSpeed, 0.25)]),
+    (id: "elixir", name: "九转金丹", good: "倒下时复活一次：回复 50% 生命并震退全屏", bad: "复活前一直占一格；复活后碎掉",
+     effects: [Rule(Revive)]),
+    (id: "five_coins", name: "五帝钱", good: "每有一系到一阶，伤害 +5%；五系全开再 +10%", bad: "每有一系没到一阶，伤害 -8%",
+     effects: [ByTiers(stat: Damage, on: 0.05, off: -0.08, all: 0.10)]),
+    (id: "longevity", name: "长命锁", good: "生命上限 +60", bad: "伤害 -10%",
+     effects: [Add(MaxHp, 60.0), Add(Damage, -0.10)], initial: true),
+    (id: "ice_soul", name: "冰魄珠", good: "冰冻中被击杀的妖物，魂火 ×2", bad: "冰冻时长 -20%",
+     effects: [Add(FrozenXp, 1.0), Mul(FreezeTime, -0.2)], initial: true),
+    (id: "broken_sword", name: "断剑", good: "每件法器伤害 +35%", bad: "法器栏只剩 4 格",
+     effects: [Add(Damage, 0.35), Add(WeaponSlots, -2.0)], max_weapons: Some(4)),
+]

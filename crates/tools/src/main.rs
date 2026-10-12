@@ -184,6 +184,7 @@ fn source_name(c: &Content, s: Source) -> String {
         Source::Reaction(r) => format!("反应·{}", c.elements.reactions[r as usize].name),
         Source::Band => "灯焰带".into(),
         Source::Dash => "轻功".into(),
+        Source::Trail => "火痕".into(),
     }
 }
 

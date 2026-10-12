@@ -96,6 +96,11 @@ impl Checker<'_> {
                     }
                 }
                 Effect::Rule(_) => {}
+                Effect::ByTiers { on, off, all, .. } => {
+                    if !(on.is_finite() && off.is_finite() && all.is_finite()) {
+                        return self.fail(file, format!("\"{owner}\" 的 ByTiers 不是有限数"));
+                    }
+                }
                 Effect::Points(_) | Effect::Favor => {
                     if !element_context {
                         return self.fail(
@@ -298,6 +303,27 @@ impl Content {
             ],
         )?;
         c.positive("player.ron", &[("reveal.band_width", p.reveal.band_width)])?;
+        let (ct, rs) = (&p.charms, &p.rescue);
+        c.positive(
+            "player.ron",
+            &[
+                ("charms.trail_gap", ct.trail_gap),
+                ("charms.trail_radius", ct.trail_radius),
+                ("charms.trail_life", ct.trail_life),
+                ("rescue.radius", rs.radius),
+            ],
+        )?;
+        c.non_negative(
+            "player.ron",
+            &[
+                ("charms.still_after", ct.still_after),
+                ("charms.thorn_freeze", ct.thorn_freeze),
+                ("rescue.knockback", rs.knockback),
+                ("rescue.iframe", rs.iframe),
+            ],
+        )?;
+        c.fraction("player.ron", "rescue.last_stand_heal", rs.last_stand_heal)?;
+        c.fraction("player.ron", "rescue.revive_heal", rs.revive_heal)?;
         if self.weapon_index(&p.start_weapon).is_none() {
             return c.fail("player.ron", format!("start_weapon 引用了不存在的法器 \"{}\"", p.start_weapon));
         }
@@ -442,6 +468,10 @@ impl Content {
         )?;
         c.fraction("run.ron", "choices.pity.key_chance", ch.pity.key_chance)?;
         c.fraction("run.ron", "choices.heal", ch.heal)?;
+        c.fraction("run.ron", "choices.elite_charm", ch.elite_charm)?;
+        if ch.charm_offers == 0 {
+            return c.fail("run.ron", "choices.charm_offers 至少为 1".into());
+        }
         if ch.chest_odds.windows(2).any(|w| w[0].0 < w[1].0) {
             return c.fail("run.ron", "choices.chest_odds 要按阈值从高到低排列".into());
         }
@@ -729,13 +759,78 @@ impl Content {
 
         // ---- meta.ron ----
         let m = &self.meta;
-        if m.max_level == 0 || m.lines.is_empty() {
-            return c.fail("meta.ron", "max_level 至少为 1，lines 不能为空".into());
+        c.positive("meta.ron", &[("cost_exp", m.cost_exp), ("cost_round", m.cost_round)])?;
+        c.unique("meta.ron", "心灯", m.nodes.iter().map(|n| n.id.as_str()))?;
+        for n in &m.nodes {
+            if n.max_level == 0 {
+                return c.fail("meta.ron", format!("心灯 \"{}\" 的 max_level 至少为 1", n.id));
+            }
+            if !n.levels.is_empty() && n.levels.len() != n.max_level as usize {
+                return c.fail("meta.ron", format!("心灯 \"{}\" 的 levels 要有 max_level 项", n.id));
+            }
+            if n.insight.is_some() && n.max_level != 1 {
+                return c.fail("meta.ron", format!("悟 \"{}\" 只能有 1 级", n.id));
+            }
+            c.positive("meta.ron", &[("base_cost", n.base_cost)])?;
+            c.effects("meta.ron", &n.id, &n.per_level, false)?;
+            for lv in &n.levels {
+                c.effects("meta.ron", &n.id, lv, false)?;
+            }
         }
-        c.positive("meta.ron", &[("cost_base", m.cost_base), ("cost_round", m.cost_round)])?;
-        c.unique("meta.ron", "心灯", m.lines.iter().map(|l| l.id.as_str()))?;
-        for l in &m.lines {
-            c.effects("meta.ron", &l.id, &l.per_level, false)?;
+
+        // ---- attributes.ron ----
+        let at = &self.attributes;
+        c.non_negative("attributes.ron", &[("inflation", at.inflation)])?;
+        c.unique("attributes.ron", "属性", at.list.iter().map(|a| a.id.as_str()))?;
+        for a in &at.list {
+            if a.max_level == 0 || a.base == 0 {
+                return c.fail("attributes.ron", format!("属性 \"{}\" 的 max_level、base 至少为 1", a.id));
+            }
+            c.effects("attributes.ron", &a.id, &a.per_level, false)?;
+        }
+
+        // ---- lamps.ron ----
+        c.unique("lamps.ron", "灯", self.lamps.iter().map(|l| l.id.as_str()))?;
+        if !self.lamps.iter().any(|l| l.initial) {
+            return c.fail("lamps.ron", "至少要有一盏 initial 的灯".into());
+        }
+        for l in &self.lamps {
+            c.color("lamps.ron", &l.id, &l.color)?;
+            if self.weapon_index(&l.start_weapon).is_none() {
+                return c
+                    .fail("lamps.ron", format!("灯 \"{}\" 的起手法器 \"{}\" 不存在", l.id, l.start_weapon));
+            }
+            c.effects("lamps.ron", &l.id, &l.effects, false)?;
+        }
+
+        // ---- charms.ron ----
+        c.unique("charms.ron", "灯坠", self.charms.iter().map(|x| x.id.as_str()))?;
+        for x in &self.charms {
+            c.effects("charms.ron", &x.id, &x.effects, false)?;
+        }
+
+        // ---- achievements.ron ----
+        c.unique("achievements.ron", "成就", self.achievements.iter().map(|a| a.id.as_str()))?;
+        for a in &self.achievements {
+            for r in &a.rewards {
+                match r {
+                    crate::Reward::Lamp(id) if self.lamp_index(id).is_none() => {
+                        return c
+                            .fail("achievements.ron", format!("成就 \"{}\" 奖励的灯 \"{id}\" 不存在", a.id));
+                    }
+                    crate::Reward::Charm(id) if self.charm_index(id).is_none() => {
+                        return c.fail(
+                            "achievements.ron",
+                            format!("成就 \"{}\" 奖励的灯坠 \"{id}\" 不存在", a.id),
+                        );
+                    }
+                    crate::Reward::Tier(t) if *t == 0 || *t as usize > self.difficulty.len() => {
+                        return c
+                            .fail("achievements.ron", format!("成就 \"{}\" 开放的第 {t} 更不存在", a.id));
+                    }
+                    _ => {}
+                }
+            }
         }
         Ok(())
     }

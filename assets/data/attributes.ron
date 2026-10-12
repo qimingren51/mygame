@@ -1,0 +1,17 @@
+// 局外属性（docs/GAMEPLAY.md 第 11.2 节，价格见 docs/BALANCE.md 第 10.3 节）：在灯驿的货郎那里用金币买。
+// 每级价格 = base × 级 × (1 + 2% × 已经买过的总级数)，取整到 5。随时可以全部退还；出发前可以单独关掉。
+// P0 做这 8 项。
+(
+    inflation: 0.02,
+    round: 5,
+    list: [
+        (id: "damage", name: "伤害", desc: "每级伤害 +5%", max_level: 10, base: 60, per_level: [Add(Damage, 0.05)]),
+        (id: "health", name: "生命", desc: "每级生命上限 +10", max_level: 10, base: 40, per_level: [Add(MaxHp, 10.0)]),
+        (id: "armor", name: "护甲", desc: "每级护甲 +1", max_level: 5, base: 150, per_level: [Add(Armor, 1.0)]),
+        (id: "speed", name: "移速", desc: "每级移速 +3%", max_level: 5, base: 80, per_level: [Mul(Speed, 0.03)]),
+        (id: "magnet", name: "拾取范围", desc: "每级拾取范围 +20%", max_level: 5, base: 40, per_level: [Mul(Magnet, 0.2)]),
+        (id: "crit", name: "暴击率", desc: "每级暴击率 +2%", max_level: 5, base: 120, per_level: [Add(CritChance, 0.02)]),
+        (id: "cooldown", name: "冷却", desc: "每级冷却 -3%", max_level: 5, base: 150, per_level: [Add(Cooldown, -0.03)]),
+        (id: "xp", name: "经验", desc: "每级魂火价值 +4%", max_level: 5, base: 80, per_level: [Add(XpGain, 0.04)]),
+    ],
+)

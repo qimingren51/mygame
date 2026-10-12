@@ -98,6 +98,9 @@ enum Source {
     Taiji,
     Buff,
     Difficulty,
+    Attribute,
+    Lamp,
+    Charm,
 }
 
 struct Acc {
@@ -133,6 +136,8 @@ impl Acc {
                 }
                 Effect::Shield { amount } => self.effects.shield = Some(*amount),
                 Effect::Rule(r) => self.rules |= r.bit(),
+                // 按共鸣阶数算，汇总时另外处理
+                Effect::ByTiers { .. } => {}
                 // 共鸣点数和选项偏向在构筑里处理
                 Effect::Points(_) | Effect::Favor => {}
             }
@@ -154,11 +159,25 @@ pub fn collect(
     let grown = level.saturating_sub(1) as f32;
     acc.mul[Stat::Reveal as usize] += content.player.reveal.per_level * grown;
     acc.mul[Stat::Light as usize] += content.player.reveal.light_per_level * grown;
-    for (i, line) in content.meta.lines.iter().enumerate() {
-        let lv = setup.meta.get(&line.id).copied().unwrap_or(0).min(content.meta.max_level);
+    for (i, node) in content.meta.nodes.iter().enumerate() {
+        let lv = setup.meta.get(&node.id).copied().unwrap_or(0).min(node.max_level);
         if lv > 0 {
-            acc.apply(&line.per_level, lv as f32, Source::Meta, i);
+            acc.apply(&node.per_level, lv as f32, Source::Meta, i);
+            for (k, step) in node.levels.iter().take(lv as usize).enumerate() {
+                acc.apply(step, 1.0, Source::Meta, i * 8 + k);
+            }
         }
+    }
+    for (i, a) in content.attributes.list.iter().enumerate() {
+        let lv = setup.attributes.get(&a.id).copied().unwrap_or(0).min(a.max_level);
+        if lv > 0 {
+            acc.apply(&a.per_level, lv as f32, Source::Attribute, i);
+        }
+    }
+    let lamp = setup.lamp_index(content);
+    acc.apply(&content.lamps[lamp].effects, 1.0, Source::Lamp, lamp);
+    for &k in &build.charms {
+        acc.apply(&content.charms[k].effects, 1.0, Source::Charm, k);
     }
     if let Some(i) = setup.omen.as_ref().and_then(|o| content.omen_index(&o.id)) {
         acc.apply(&content.omens[i].effects, 1.0, Source::Omen, i);
@@ -194,6 +213,19 @@ pub fn collect(
     }
     if let Some(b) = buff {
         acc.apply(&content.events.buffs[b].effects, 1.0, Source::Buff, b);
+    }
+    // 五帝钱这类按共鸣阶数算的效果
+    let on = build.tiers.iter().filter(|&&t| t >= 1).count() as f32;
+    for &k in &build.charms {
+        for e in &content.charms[k].effects {
+            if let Effect::ByTiers { stat, on: per_on, off, all } = *e {
+                let mut v = per_on * on + off * (5.0 - on);
+                if on >= 5.0 {
+                    v += all;
+                }
+                acc.add[stat as usize] += v;
+            }
+        }
     }
     let mut v = [0.0; Stat::COUNT];
     for (i, d) in content.stats.iter().enumerate() {

@@ -27,6 +27,8 @@ enum Shown {
     Lamp(Vec<LampReward>),
     /// 货郎：宝箱价、灯坠价
     Shop(u32, u32),
+    /// 灯坠三选一：选项、满格时选中的那一个、挂着的灯坠
+    Charm(Vec<usize>, Option<usize>, Vec<usize>),
 }
 
 #[derive(Resource, Default)]
@@ -65,7 +67,7 @@ fn reset(mut ui: ResMut<ChoiceUi>) {
     *ui = ChoiceUi::default();
 }
 
-fn current(phase: SimPhase, flow: &Flow) -> Shown {
+fn current(phase: SimPhase, flow: &Flow, build: &Build) -> Shown {
     match phase {
         SimPhase::LevelUp => {
             flow.choice.as_ref().map_or(Shown::None, |c| Shown::LevelUp(c.offers.clone(), c.inspired))
@@ -74,6 +76,10 @@ fn current(phase: SimPhase, flow: &Flow) -> Shown {
         SimPhase::Evolve => flow.evolving.map_or(Shown::None, Shown::Evolve),
         SimPhase::Lantern => flow.lamp.clone().map_or(Shown::None, Shown::Lamp),
         SimPhase::Shop => flow.shop.map_or(Shown::None, |s| Shown::Shop(s.chest_cost, s.charm_cost)),
+        SimPhase::Charm => flow
+            .charm
+            .as_ref()
+            .map_or(Shown::None, |ch| Shown::Charm(ch.offers.clone(), ch.picked, build.charms.clone())),
         _ => Shown::None,
     }
 }
@@ -91,6 +97,7 @@ fn sync(
     arsenal: Res<Arsenal>,
     build: Res<Build>,
     progress: Res<lantern_sim::Progress>,
+    setup: Res<lantern_sim::RunSetup>,
     mut ui: ResMut<ChoiceUi>,
     roots: Query<Entity, With<ChoiceRoot>>,
 ) {
@@ -98,7 +105,7 @@ fn sync(
     if flow.is_changed() {
         ui.waiting = false;
     }
-    let now = current(*phase, &flow);
+    let now = current(*phase, &flow, &build);
     if now == ui.shown {
         return;
     }
@@ -139,7 +146,12 @@ fn sync(
         Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, k),
         Shown::Lamp(rewards) => spawn_lamp(&mut commands, c, &fonts, &db, &skin, &rewards),
         Shown::Shop(chest, charm) => {
-            spawn_shop(&mut commands, &fonts, &db, &skin, chest, charm, progress.gold.floor() as u32)
+            let gold = progress.gold.floor() as u32;
+            let charms = !setup.charm_pool.is_empty();
+            spawn_shop(&mut commands, &fonts, &db, &skin, chest, charm, gold, charms)
+        }
+        Shown::Charm(offers, picked, worn) => {
+            spawn_charm(&mut commands, c, &fonts, &db, &skin, &offers, picked, &worn)
         }
     }
 }
@@ -148,6 +160,7 @@ fn input(
     actions: Res<Actions>,
     phase: Res<SimPhase>,
     flow: Res<Flow>,
+    build: Res<Build>,
     mut ui: ResMut<ChoiceUi>,
     mut sim: ResMut<SimCommands>,
 ) {
@@ -216,8 +229,35 @@ fn input(
                 send(&mut ui, SimCommand::Choose(i as u8));
             }
         }
+        SimPhase::Charm => {
+            let Some(ch) = &flow.charm else { return };
+            // 满格时在挂着的灯坠里选替换哪一枚
+            let n = if ch.picked.is_some() { build.charms.len() } else { ch.offers.len() };
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
+                ui.selected = h.min(n.saturating_sub(1));
+            }
+            if actions.nav.x != 0 && n > 0 {
+                ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(n as i32) as usize;
+            }
+            if ui.age < 0.25 {
+                return;
+            }
+            let chosen = actions
+                .pick
+                .map(usize::from)
+                .filter(|&i| i < n)
+                .or(clicked)
+                .or(actions.confirm.then_some(ui.selected));
+            if let Some(i) = chosen {
+                send(&mut ui, SimCommand::Choose(i as u8));
+            } else if actions.back || actions.skip {
+                send(&mut ui, SimCommand::Skip);
+            }
+        }
         SimPhase::Shop => {
-            // 0 宝箱、1 灯坠（还没有）、2 离开
+            // 0 宝箱、1 灯坠、2 离开
             if let Some(h) = ui.hovered.take()
                 && actions.pointer_moved
             {
@@ -237,8 +277,8 @@ fn input(
                 .or(actions.confirm.then_some(ui.selected));
             if actions.back || actions.skip || chosen == Some(2) {
                 send(&mut ui, SimCommand::Skip);
-            } else if chosen == Some(0) {
-                send(&mut ui, SimCommand::Choose(0));
+            } else if let Some(i @ (0 | 1)) = chosen {
+                send(&mut ui, SimCommand::Choose(i as u8));
             }
         }
         SimPhase::Evolve if ui.age > 2.1 || (ui.age > 0.5 && (actions.confirm || clicked.is_some())) => {
@@ -557,7 +597,8 @@ fn spawn_lamp(
     });
 }
 
-/// 货郎的摊子。
+/// 货郎的摊子。charms：有没有解锁的灯坠可卖。
+#[allow(clippy::too_many_arguments)]
 fn spawn_shop(
     commands: &mut Commands,
     fonts: &Fonts,
@@ -566,6 +607,7 @@ fn spawn_shop(
     chest: u32,
     charm: u32,
     gold: u32,
+    charms: bool,
 ) {
     commands.spawn(overlay(skin)).with_children(|root| {
         root.spawn(text(&fonts.title, 64.0, hex("#E8C27A"), "货郎"));
@@ -594,12 +636,57 @@ fn spawn_shop(
                 "坠",
                 hex("#B07CF0"),
                 "灯坠",
-                &format!("{charm} 金币　三选一（还没开放）"),
-                false,
+                &format!("{charm} 金币　三选一"),
+                charms && gold >= charm,
             );
             plain_card(row, fonts, db, skin, 2, None, "走", PAPER, "离开", "不买了", true);
         });
         root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择　　Esc / X　离开"));
+    });
+}
+
+/// 灯坠三选一；满格时选中一枚后，改为在挂着的灯坠里选替换哪一枚。
+#[allow(clippy::too_many_arguments)]
+fn spawn_charm(
+    commands: &mut Commands,
+    c: &Content,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    offers: &[usize],
+    picked: Option<usize>,
+    worn: &[usize],
+) {
+    let color = hex("#B07CF0");
+    let card = |row: &mut ChildSpawnerCommands, i: usize, k: usize| {
+        let d = &c.charms[k];
+        let glyph: String = d.name.chars().next().map(String::from).unwrap_or_default();
+        let icon = format!("ui/icon_charm_{}", d.id);
+        let desc = format!("{}\n代价：{}", d.good, d.bad);
+        plain_card(row, fonts, db, skin, i, Some(&icon), &glyph, color, &d.name, &desc, true);
+    };
+    commands.spawn(overlay(skin)).with_children(|root| match picked {
+        None => {
+            root.spawn(text(&fonts.title, 64.0, color, "灯坠"));
+            root.spawn(text(&fonts.body, 18.0, DIM, "挂在灯上，改写规则；每一枚都有代价"));
+            root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+                for (i, &k) in offers.iter().enumerate() {
+                    card(row, i, k);
+                }
+            });
+            root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择　　Esc / X　放弃"));
+        }
+        Some(p) => {
+            let name = offers.get(p).map_or("", |&k| c.charms[k].name.as_str());
+            root.spawn(text(&fonts.title, 56.0, color, "灯坠栏满了"));
+            root.spawn(text(&fonts.body, 18.0, DIM, &format!("换下哪一枚，挂上「{name}」？换下的直接消失")));
+            root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+                for (i, &k) in worn.iter().enumerate() {
+                    card(row, i, k);
+                }
+            });
+            root.spawn(text(&fonts.body, 16.0, PAPER, "数字键 / ← → + Enter　替换　　Esc / X　返回"));
+        }
     });
 }
 

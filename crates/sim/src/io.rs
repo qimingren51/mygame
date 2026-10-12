@@ -100,6 +100,18 @@ pub enum SimEvent {
     ShieldUp,
     ShieldBroken,
     PlayerDied,
+    /// 回光：致命一击留下 1 点生命，震退周围
+    LastStand {
+        pos: Vec2,
+    },
+    /// 九转金丹：复活，震退全屏，金丹碎掉
+    Revived {
+        pos: Vec2,
+    },
+    /// 挂上了一枚灯坠；index 是 `charms.ron` 下标
+    CharmTaken {
+        index: u16,
+    },
     LevelUp {
         level: u32,
     },

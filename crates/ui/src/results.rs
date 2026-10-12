@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 
-use lantern_platform::profile::{NewRecord, RunRecord};
+use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
 use lantern_platform::{Actions, Profile};
 use lantern_sim::omens::omen_good;
 use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
@@ -41,14 +41,15 @@ fn spawn(
     let Some(r) = flow.result.clone() else { return };
     let counts =
         playback.is_none() && !matches!(setup.mode, lantern_sim::RunMode::Bench { .. }) && !setup.god;
-    let record = if counts {
-        let rec = profile.record(RunRecord { won: r.won, seconds: r.seconds, kills: r.kills, oil: r.oil });
+    let recorded = if counts {
+        let rec = RunRecord { result: &r, tier: setup.tier, attributes: !setup.attributes.is_empty() };
+        let got = profile.record(c, rec);
         if let Err(e) = profile.save() {
             warn!("保存存档失败：{e}");
         }
-        rec
+        got
     } else {
-        None
+        Recorded::default()
     };
     let boss_name = c.enemies.iter().find(|e| e.boss.is_some()).map_or("夜主", |e| e.name.as_str());
     let sub = if r.won {
@@ -88,7 +89,7 @@ fn spawn(
             ))
             .with_children(|p| {
                 results_body(
-                    p, c, &fonts, &db, &skin, &r, &sub, omen, record, counts, &arsenal, &build, &profile,
+                    p, c, &fonts, &db, &skin, &r, &sub, omen, &recorded, counts, &arsenal, &build, &profile,
                 )
             });
             root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));
@@ -105,7 +106,7 @@ fn results_body(
     r: &lantern_sim::RunResult,
     sub: &str,
     omen: Option<(&lantern_sim::OmenPick, &lantern_content::OmenDef)>,
-    record: Option<NewRecord>,
+    recorded: &Recorded,
     counts: bool,
     arsenal: &Arsenal,
     build: &Build,
@@ -128,7 +129,7 @@ fn results_body(
                     &format!("夜签「{}」　{}", def.name, omen_good(c, pick)),
                 ));
             }
-            if let Some(rec) = record {
+            if let Some(rec) = recorded.record {
                 let s = match rec {
                     NewRecord::FirstDawn => "首次天明",
                     NewRecord::Kills => "新纪录 · 单局击杀",
@@ -245,13 +246,22 @@ fn results_body(
                         if r.lamps_complete { "　灯阵完整" } else { "" }
                     ),
                 ));
+                if !recorded.achievements.is_empty() {
+                    let names: Vec<_> =
+                        recorded.achievements.iter().map(|&k| c.achievements[k].name.as_str()).collect();
+                    p.spawn(text(
+                        &fonts.body,
+                        18.0,
+                        on_paper(hex("#FFD98A")),
+                        &format!("达成：{}", names.join("、")),
+                    ));
+                }
                 // 离下一盏心灯还差多少
                 let next = c
                     .meta
-                    .lines
+                    .nodes
                     .iter()
-                    .filter(|l| profile.meta_level(&l.id) < c.meta.max_level)
-                    .map(|l| (l, c.meta.cost(profile.meta_level(&l.id))))
+                    .filter_map(|l| profile.meta_cost(c, &l.id).map(|cost| (l, cost)))
                     .min_by_key(|&(_, cost)| cost);
                 if let Some((line, cost)) = next {
                     let lv = profile.meta_level(&line.id) + 1;

@@ -1,0 +1,21 @@
+// P0 的 15 个成就（docs/GAMEPLAY.md 第 13.1 节）。名字以后由 docs/LORE.md 定。
+// 达成时弹提示、立即发奖；解锁的内容下一局起能用。成就发的灯油和金币不乘更和夜签的倍率。
+[
+    (id: "first_night", name: "初夜", desc: "完成第 1 局（倒下也算）", when: Runs(1), rewards: [Basics]),
+    (id: "second_night", name: "再夜", desc: "完成第 2 局", when: Runs(2), rewards: [Lamp("mirror")]),
+    (id: "clear_1", name: "青丘天明", desc: "通关青丘一更", when: Clear(1), rewards: [Lamp("frost"), Tier(2)]),
+    (id: "clear_2", name: "二更天明", desc: "通关青丘二更", when: Clear(2), rewards: [Tier(3)]),
+    (id: "clear_3", name: "三更天明", desc: "通关青丘三更", when: Clear(3), rewards: [Gold(500)]),
+    (id: "all_lanterns", name: "灯阵", desc: "一夜点亮全部 5 盏石灯笼", when: AllLanterns, rewards: [Charm("night_pearl")]),
+    (id: "first_fall", name: "灯灭", desc: "第一次倒下", when: Died, rewards: [Charm("elixir")]),
+    (id: "first_taiji", name: "太极", desc: "第一次触发太极", when: Taiji, rewards: [Charm("five_coins")]),
+    (id: "four_weapons", name: "少而精", desc: "通关，且这一局手上的法器从没超过 4 件", when: ClearWithWeapons(4),
+     rewards: [Charm("broken_sword")]),
+    (id: "first_reaction", name: "生克", desc: "第一次触发五行反应", when: Reaction, rewards: [Oil(100)]),
+    (id: "all_reactions", name: "十变", desc: "见过全部 10 种反应（跨局累计）", when: AllReactions, rewards: [Gold(300)]),
+    (id: "tier_three", name: "三阶", desc: "第一次有一系共鸣到三阶", when: ResonanceTier(3), rewards: [Oil(200)]),
+    (id: "first_evolution", name: "进化", desc: "第一次进化法器", when: Evolution, rewards: [Oil(100)]),
+    (id: "flawless_elite", name: "无伤", desc: "不受伤击败一只精英（护盾挡下的不算受伤）", when: FlawlessElite,
+     rewards: [Gold(200)]),
+    (id: "no_attributes", name: "赤手", desc: "通关，且所有属性都不生效", when: ClearNoAttributes, rewards: [Gold(500)]),
+]
