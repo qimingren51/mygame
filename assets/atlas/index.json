@@ -2,6 +2,7 @@
  "atlases": [
   "actors",
   "ground",
+  "ui",
   "vfx"
  ],
  "paper": true,
@@ -14,6 +15,9 @@
   ],
   "ground": [
    "ground.json"
+  ],
+  "ui": [
+   "ui.json"
   ]
  }
 }

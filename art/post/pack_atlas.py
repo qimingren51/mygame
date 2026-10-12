@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-MAX_SIZE = 4096  # 单页上限；超出时自动分页（lantern-next 的网页版当年用 2048）
+MAX_SIZE = 4096  # 单页上限；超出时自动分页（网页版 lantern-next 当年用 2048）
 DEFAULT_PX_PER_UNIT = 2.0  # 素材 meta.json 没写 px_per_unit 时的默认密度
 PAD = 2  # 帧与帧之间的间距
 MARGIN = 1  # 裁边时保留的透明边，线性过滤时不会采到邻居

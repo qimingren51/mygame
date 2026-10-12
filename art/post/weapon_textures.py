@@ -8,14 +8,17 @@
   - PNG 为直通（非预乘）alpha，颜色已向透明区扩展，缩放时不出黑边。
   - “可染色”贴图 RGB 恒为 255，只有 alpha 有形状，游戏里 tint 后叠加混合（blend=add）。
   - 有方向的精灵（剑、剑尾光、纸鹤）旋转角为 0 时指向 +X（屏幕右）。
-  - 1 个贴图像素 = 0.5 世界单位（style.PX_PER_UNIT = 2）。
+  - 1 倍密度下 1 个贴图像素 = 0.5 世界单位（style.PX_PER_UNIT = 2·DENSITY）。
+  - 出图密度由环境变量 LANTERN_ART_DENSITY（1 或 2）决定：尺寸、线宽、噪声尺度都按密度缩放，
+    2 倍是同一张画画得更细（随机序列与 1 倍相同，见 vfx_textures.noise1），不是放大 1 倍图。1 倍结果与改造前逐字节相同。
 
 输出：
-  art/out/assets/weapons/   sword sword_evo sword_trail crane_0..3 crane_evo_0..3 ring ring_ink seal seal_evo
-                            seal_mark crack warn taiji blast shield chest soulbell lotus + meta.json
-  art/out/review/           weapons_sheet.png（3×，纸色底 / 夜色底）  weapons_ingame.png（游戏比例的模拟场景）
+  art/out/<A>/weapons/      sword sword_evo sword_trail crane_0..3 crane_evo_0..3 ring ring_ink seal seal_evo
+                            seal_mark crack warn taiji blast shield chest soulbell lotus foxfire_0..2 + meta.json
+                            （<A> = style.ASSETS_DIR_NAME：assets / assets@2x）
+  art/out/review/（2 倍：review@2x/）  weapons_sheet.png（纸色底 / 夜色底）  weapons_ingame.png（游戏比例的模拟场景）
 
-用法（在 lantern-next/ 目录下）：
+用法（在仓库根目录下）：
   art/.venv/bin/python art/post/weapon_textures.py
   art/.venv/bin/python art/post/test_weapon_textures.py
 """
@@ -37,7 +40,8 @@ import vfx_textures as V  # noqa: E402  只复用工具函数，不会触发它�
 S = V.S
 ART = V.ART
 OUT = V.OUT
-WEAPON_DIR = OUT / "assets" / "weapons"
+D = V.D
+WEAPON_DIR = V.ASSETS / "weapons"
 REVIEW_DIR = V.REVIEW_DIR
 
 col = V.col
@@ -252,10 +256,10 @@ class Painter:
 
     def __init__(self, w: int, h: int, seed: int, ss: int = 8):
         self.w, self.h, self.ss = w, h, ss
-        self.X, self.Y = V.grid(h, w, ss)
-        self.lay = V.Layer(h * ss, w * ss)
+        self.X, self.Y = V.grid1(h, w, ss)
+        self.lay = V.Layer(*self.X.shape)
         self.rng = np.random.default_rng(seed)
-        self.aa = 0.6 / ss
+        self.aa = 0.6 / (ss * D)  # 抗锯齿宽度按“最终像素”算，坐标是 1 倍像素
 
     # ---- 形状
     def sdf(self, poly, pad: float = 3.0):
@@ -270,8 +274,8 @@ class Painter:
         c = self.cover(d)
         rgb = np.broadcast_to(np.asarray(rgb, dtype=np.float64), self.X.shape + (3,)).copy()
         if mottle:
-            m = noise(self.rng, self.X.shape, mottle_sigma * self.ss)
-            m2 = noise(self.rng, self.X.shape, 0.5 * self.ss)
+            m = V.noise1(self.rng, self.X.shape, mottle_sigma * self.ss)
+            m2 = V.noise1(self.rng, self.X.shape, 0.5 * self.ss)
             k = np.clip(mottle * (0.5 + 0.35 * m + 0.15 * m2), 0, 1)
             rgb = mixc(rgb, JIAO if mottle_rgb is None else mottle_rgb, k)
         if pool:
@@ -309,7 +313,7 @@ class Painter:
         pts = np.asarray(pts, dtype=np.float64)
         halfw = np.broadcast_to(np.asarray(halfw, dtype=np.float64), (len(pts),)).copy()
         if dry > 0:
-            cov, _ = V.brush_stroke(self.X, self.Y, pts, halfw, self.rng, dry=dry, dry_start=dry_start, edge_jitter=jitter, ss=self.ss)
+            cov, _ = V.brush_stroke(self.X, self.Y, pts, halfw, self.rng, dry=dry, dry_start=dry_start, edge_jitter=jitter, ss=self.ss * D)
             return cov
         f = V.stroke_fields(self.X, self.Y, pts, halfw)
         hw = f["hw"]
@@ -334,10 +338,13 @@ class Painter:
         self.lay.over(rgb, a)
 
     # ---- 输出
-    def image(self) -> Image.Image:
+    def image(self, keep_bottom: bool = False) -> Image.Image:
+        """keep_bottom=True：底边一行不清零（锚点在底边的草、芦苇、竹子，根要落在底边上）。"""
         lay = self.lay.down(self.ss)
         rgb, a = lay.straight()
-        a[0, :] = a[-1, :] = a[:, 0] = a[:, -1] = 0
+        a[0, :] = a[:, 0] = a[:, -1] = 0
+        if not keep_bottom:
+            a[-1, :] = 0
         return V.to_rgba8(rgb, a)
 
 
@@ -459,7 +466,7 @@ def make_sword(evo: bool) -> Image.Image:
 def make_trail() -> Image.Image:
     """剑尾光：右端（锚点）粗而亮，向左收成一线，带顺笔方向的几丝飞白。白色，染色后叠加。"""
     W, H, ss = 48, 10, 8
-    X, Y = V.grid(H, W, ss)
+    X, Y = V.grid1(H, W, ss)
     rng = np.random.default_rng(2200)
     x_head = 45.2
     u = np.clip(X / x_head, 0, 1)  # 0=左端尾巴，1=右端
@@ -567,7 +574,7 @@ def make_crane(frame: int, evo: bool) -> Image.Image:
 
 
 def polar(size: int, ss: int):
-    X, Y = V.grid(size, size, ss)
+    X, Y = V.grid1(size, size, ss)
     c = size / 2.0
     dx, dy = X - c, Y - c
     r = np.hypot(dx, dy)
@@ -642,7 +649,7 @@ def make_ring_ink() -> Image.Image:
     a = cover * (0.97 - 0.18 * smoothstep(0.3, 1.0, t) * (1 - b))
     # 起笔处的洇墨：外面一圈很淡的晕
     start_pt = np.array([c + (Rm - 1.6) * math.cos(th0), c + (Rm - 1.6) * math.sin(th0)])
-    bleed = 0.16 * np.exp(-np.hypot(X - start_pt[0], Y - start_pt[1]) / 6.0) * smoothstep(0.2, 0.8, rank01(noise(rng, X.shape, 1.2 * ss)))
+    bleed = 0.16 * np.exp(-np.hypot(X - start_pt[0], Y - start_pt[1]) / 6.0) * smoothstep(0.2, 0.8, rank01(V.noise1(rng, X.shape, 1.2 * ss)))
     lay = V.Layer(*X.shape)
     lay.over(ZHONG, bleed * (1 - cover))
     lay.over(rgb, a)
@@ -690,8 +697,8 @@ def make_taiji() -> Image.Image:
     rng = np.random.default_rng(2700)
     c, R = size / 2.0, 52.0
     # 坐标轻微扭曲：手绘的 S 线
-    wu = 0.010 * noise(rng, X.shape, 6 * ss) + 0.003 * noise(rng, X.shape, 1.5 * ss)
-    wv = 0.010 * noise(rng, X.shape, 6 * ss) + 0.003 * noise(rng, X.shape, 1.5 * ss)
+    wu = 0.010 * V.noise1(rng, X.shape, 6 * ss) + 0.003 * V.noise1(rng, X.shape, 1.5 * ss)
+    wv = 0.010 * V.noise1(rng, X.shape, 6 * ss) + 0.003 * V.noise1(rng, X.shape, 1.5 * ss)
     u = (X - c) / R + wu
     v = (Y - c) / R + wv
     rho = np.hypot(u, v)
@@ -713,7 +720,7 @@ def make_taiji() -> Image.Image:
     ink = smoothstep(dry - 0.06, dry + 0.06, b)
     blk_a = black * (0.62 + 0.38 * ink)
     blk_rgb = mixc(JIAO, NONG, 0.25 + 0.5 * (1 - ink))
-    paper_rgb = mixc(PAPER, PAPER_SH, 0.3 * smoothstep(-1, 2, noise(rng, X.shape, 3 * ss)))
+    paper_rgb = mixc(PAPER, PAPER_SH, 0.3 * smoothstep(-1, 2, V.noise1(rng, X.shape, 3 * ss)))
     # 外圈一笔：比太极略大，起笔在左上，收笔飞白
     t_rim = np.mod(tt - 0.62, 1.0)
     Rr = R * (1.035 + 0.008 * np.sin(2 * math.pi * t_rim))
@@ -740,7 +747,7 @@ def make_blast() -> Image.Image:
     rn = r / 30.0
     edge = 0.62 * (1.0 + 0.16 * sample1(pnoise1(rng, 512, 9.0), tt) + 0.06 * sample1(pnoise1(rng, 512, 3.0), tt))
     puff = smoothstep(edge + 0.08, edge - 0.18, rn)
-    billow = 0.5 + 0.5 * noise(rng, X.shape, 2.4 * ss)
+    billow = 0.5 + 0.5 * V.noise1(rng, X.shape, 2.4 * ss)
     puff = puff * (0.45 + 0.25 * billow) * (1.0 - 0.35 * smoothstep(0.25, 0.0, rn - edge + 0.25) * (billow < 0.4))
     core = np.exp(-((rn / 0.32) ** 2))
     streaks = np.zeros_like(r)
@@ -942,7 +949,7 @@ SHAN_GLYPH = (
 def make_seal_mark() -> Image.Image:
     """朱砂印迹：方印、白文（字口不着印泥，透出地面），印泥不匀、四边有崩口。正常混合。"""
     size, ss = 64, 4
-    X, Y = V.grid(size, size, ss)
+    X, Y = V.grid1(size, size, ss)
     rng = np.random.default_rng(3200)
     c = size / 2.0
     ang = math.radians(-4.0)
@@ -950,26 +957,26 @@ def make_seal_mark() -> Image.Image:
     v = -(X - c) * math.sin(ang) + (Y - c) * math.cos(ang)
     half = 25.0
     sq = (np.abs(u) ** 10 + np.abs(v) ** 10) ** 0.1 - half  # 带一点圆角的方
-    sq = sq + 0.5 * noise(rng, X.shape, 2.5 * ss) + 0.22 * noise(rng, X.shape, 0.7 * ss)
+    sq = sq + 0.5 * V.noise1(rng, X.shape, 2.5 * ss) + 0.22 * V.noise1(rng, X.shape, 0.7 * ss)
     # 崩口：边上几处缺一小块
     for _ in range(5):
         side = rng.integers(4)
         pos = rng.uniform(-0.8, 0.8) * half
         px, py = [(pos, -half), (half, pos), (pos, half), (-half, pos)][side]
         rr = rng.uniform(1.2, 2.6)
-        sq = np.maximum(sq, rr - np.hypot(u - px, v - py) + 0.3 * noise(rng, X.shape, 0.8 * ss))
+        sq = np.maximum(sq, rr - np.hypot(u - px, v - py) + 0.3 * V.noise1(rng, X.shape, 0.8 * ss))
     cover = smoothstep(0.45, -0.45, sq)
     # 白文：字口不着色。字也带一点刀味（边上轻微起伏）
     gd = np.full(X.shape, 1e3)
     for stroke in SHAN_GLYPH:
         pts = V.arc_resample(np.array([(half * 1.02 * x, half * 1.02 * y) for x, y in stroke]), 120)
         gd = np.minimum(gd, polyline_dist(u, v, pts))
-    gw = 2.9 + 0.3 * noise(rng, X.shape, 1.5 * ss)
+    gw = 2.9 + 0.3 * V.noise1(rng, X.shape, 1.5 * ss)
     glyph = smoothstep(gw - 0.45, gw + 0.45, gd)  # 1 = 着色
     # 印泥不匀：大块浓淡 + 成簇的麻点 + 一角压得轻
-    blot = 0.5 + 0.5 * noise(rng, X.shape, 4.0 * ss)
-    speck = rank01(noise(rng, X.shape, 0.6 * ss) + 0.8 * (blot - 0.5))
-    light_corner = smoothstep(0.0, 1.0, ((u + v) / (2 * half) + 0.2 * noise(rng, X.shape, 3 * ss)) * 1.6 - 0.5)
+    blot = 0.5 + 0.5 * V.noise1(rng, X.shape, 4.0 * ss)
+    speck = rank01(V.noise1(rng, X.shape, 0.6 * ss) + 0.8 * (blot - 0.5))
+    light_corner = smoothstep(0.0, 1.0, ((u + v) / (2 * half) + 0.2 * V.noise1(rng, X.shape, 3 * ss)) * 1.6 - 0.5)
     dens = 0.95 - 0.12 * blot - 0.5 * smoothstep(0.9, 0.975, speck) - 0.3 * light_corner * smoothstep(0.6, 0.9, speck)
     a = np.clip(cover * glyph * dens, 0, 1)
     # 颜色：印泥积在边上偏深，薄处偏淡
@@ -988,7 +995,7 @@ def make_crack() -> Image.Image:
     """地裂：中心砸出的焦墨坑，向外放射七道折线裂缝（之字形、根部粗、尖上带飞白），少量分叉和环向短裂，
     坑外一圈干笔擦出的震痕，底下一片很淡的晕染压暗地面。按 30° 俯角压扁。正常混合（游戏里淡出）。"""
     W, H, ss = 128, 96, 4
-    X, Y = V.grid(H, W, ss)
+    X, Y = V.grid1(H, W, ss)
     rng = np.random.default_rng(3300)
     cx, cy, sy = 64.0, 48.5, 0.68
     U, Vv = X - cx, (Y - cy) / sy  # 圆形空间
@@ -1032,7 +1039,7 @@ def make_crack() -> Image.Image:
         dense = V.arc_resample(img_pts, n)
         tt = np.linspace(0, 1, n)
         hw = 0.5 * (w0 * (1 - tt) ** 0.85 + 0.25)
-        cov, f = V.brush_stroke(X, Y, dense, hw, rng, dry=0.5, dry_start=0.55, edge_jitter=0.2, ss=ss)
+        cov, f = V.brush_stroke(X, Y, dense, hw, rng, dry=0.5, dry_start=0.55, edge_jitter=0.2, ss=ss * D)
         dist = np.hypot(f["perp"], f["over"])
         core = np.maximum(core, cov)
         lip = np.maximum(lip, smoothstep(f["hw"] + 0.9, f["hw"] + 0.3, dist))
@@ -1057,7 +1064,7 @@ def make_crack() -> Image.Image:
         debris = np.maximum(debris, smoothstep(pr + 0.3, pr - 0.3, np.hypot(U - px, Vv - py)))
     # 压暗的晕
     wash_r = 42.0 * (1 + V.angular_noise(rng, th, harmonics=(2, 3, 4, 5), amp=0.12))
-    wash = 0.14 * smoothstep(wash_r, wash_r * 0.4, rho) * (0.75 + 0.25 * noise(rng, X.shape, 4 * ss))
+    wash = 0.14 * smoothstep(wash_r, wash_r * 0.4, rho) * (0.75 + 0.25 * V.noise1(rng, X.shape, 4 * ss))
     lay = V.Layer(*X.shape)
     lay.over(ZHONG, wash)
     lay.over(DAN, scuff)
@@ -1220,6 +1227,40 @@ def make_lotus() -> Image.Image:
     return P.image()
 
 
+# ============================================================== 狐火
+
+
+def make_foxfire(frame: int) -> Image.Image:
+    """狐火（夜主的弹幕）：亮的圆核 + 向左（飞行反方向）拖出的三缕火舌，火舌逐帧摆动，尾巴更淡。
+    白色可染色、叠加混合；旋转角 0 时朝 +X 飞。3 帧循环。"""
+    W, H, ss = 24, 24, 8
+    X, Y = V.grid1(H, W, ss)
+    ph = 2 * math.pi * frame / 3
+    cx, cy = 14.4, 12.0
+    r = np.hypot(X - cx, Y - cy)
+    core_r = 3.6 + 0.3 * math.sin(ph)
+    core = smoothstep(core_r + 0.9, core_r - 0.8, r)
+    hot = np.exp(-((r / 2.0) ** 2))
+    tongues = np.zeros_like(r)
+    # (纵向偏移, 长度, 根部半宽, 摆幅, 相位)
+    for dy0, L, w0, amp, k in ((0.0, 12.0, 3.0, 1.2, 0.0), (-2.4, 8.6, 1.7, 1.0, 2.2), (2.3, 8.2, 1.6, 1.0, 4.1)):
+        wob = amp * math.sin(ph + k)
+        p0 = (cx - 0.5, cy + dy0 * 0.5)
+        p1 = (cx - L * 0.35, cy + dy0 + wob * 0.6)
+        p2 = (cx - L * 0.7, cy + dy0 * 1.2 - wob)
+        p3 = (cx - L, cy + dy0 * 1.35 + wob * 0.9)
+        pts = V.bezier([p0, p1, p2, p3], 80)
+        tt = np.linspace(0, 1, len(pts))
+        f = V.stroke_fields(X, Y, pts, w0 * (1 - tt) ** 0.9 + 0.08)
+        m = np.clip(1 - np.hypot(f["perp"], f["over"]) / f["hw"], 0, 1)
+        tongues = np.maximum(tongues, smoothstep(0.0, 0.35, m) * (0.85 - 0.5 * f["t"]))
+    shape = np.maximum(core, tongues)
+    halo = 0.4 * fft_blur(shape, V.sig(1.6 * ss)) * (1 - core)
+    a = np.clip(np.maximum(shape, halo) + 0.25 * hot, 0, 1)
+    a *= V.bump_window(np.hypot((X - 12.0) / 11.6, (Y - 12.0) / 11.6)) ** 0.25
+    return white_image(a, ss)
+
+
 # ============================================================== 汇总
 
 WHITE_ADD = {"color": "white", "blend": "add", "tint": True}
@@ -1236,25 +1277,32 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
         out[f"crane_{i}"] = (make_crane(i, False), (0.5, 0.5), {**full, "kind": "weapon", "points": "+x", "anim": "crane", "frame": i, "frames": 4, "fps": 10, "note": "纸鹤扑翼循环"})
     for i in range(4):
         out[f"crane_evo_{i}"] = (make_crane(i, True), (0.5, 0.5), {**full, "kind": "weapon", "points": "+x", "anim": "crane_evo", "frame": i, "frames": 4, "fps": 12, "note": "千鹤引：翼缘金箔"})
-    out["ring"] = (make_ring(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": 57, "note": "涟漪环：环外沿半径约 57px（贴图半宽 64），按需要的半径缩放；霜铃染 #6FB8FF，大招染金，地震染赭"})
-    out["ring_ink"] = (make_ring_ink(), (0.5, 0.5), {"color": "full", "blend": "normal", "tint": False, "kind": "fx", "radius_px": 50, "note": "一笔圆相墨圈，地面墨痕"})
+    out["ring"] = (make_ring(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": V.dpx(57), "note": "涟漪环：环外沿半径约 57px（贴图半宽 64），按需要的半径缩放；霜铃染 #6FB8FF，大招染金，地震染赭"})
+    out["ring_ink"] = (make_ring_ink(), (0.5, 0.5), {"color": "full", "blend": "normal", "tint": False, "kind": "fx", "radius_px": V.dpx(50), "note": "一笔圆相墨圈，地面墨痕"})
     out["seal"] = (make_seal(), (0.5, 0.85), {**full, "kind": "weapon", "note": "山印：锚点是石印底面中心（落地点）"})
     out["seal_evo"] = (make_seal_evo(), (0.5, 0.85), {**full, "kind": "weapon", "note": "镇岳：锚点是石印底面中心（落地点）"})
     out["seal_mark"] = (make_seal_mark(), (0.5, 0.5), {**full, "kind": "fx", "note": "朱砂印迹，白文字口透明（露出地面）；可随机旋转"})
     out["crack"] = (make_crack(), (0.5, 0.5), {**full, "kind": "fx", "note": "镇岳地裂，已按俯角压扁；淡出使用"})
-    out["warn"] = (make_warn(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": 27, "note": "落印预警靶环，建议染 #C9925A，可慢慢旋转"})
-    out["taiji"] = (make_taiji(), (0.5, 0.5), {**full, "kind": "fx", "radius_px": 54, "note": "水墨太极，焦墨与宣纸色，可旋转"})
+    out["warn"] = (make_warn(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": V.dpx(27), "note": "落印预警靶环，建议染 #C9925A，可慢慢旋转"})
+    out["taiji"] = (make_taiji(), (0.5, 0.5), {**full, "kind": "fx", "radius_px": V.dpx(54), "note": "水墨太极，焦墨与宣纸色，可旋转"})
     out["blast"] = (make_blast(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "note": "爆炸烟团，火染 #FF8A3D，冰染 #6FB8FF"})
-    out["shield"] = (make_shield(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": 28, "note": "护体罩：八角 + 八卦爻，建议染 #C9925A"})
+    out["shield"] = (make_shield(), (0.5, 0.5), {**WHITE_ADD, "kind": "fx", "radius_px": V.dpx(28), "note": "护体罩：八角 + 八卦爻，建议染 #C9925A"})
     out["chest"] = (make_chest(), (0.5, 0.85), {**full, "kind": "pickup", "note": "宝箱：锚点是箱底中心"})
     out["soulbell"] = (make_soulbell(), (0.5, 0.85), {**full, "kind": "pickup", "note": "引魂铃：锚点在铃口"})
     out["lotus"] = (make_lotus(), (0.5, 0.8), {**full, "kind": "pickup", "note": "莲：锚点在荷叶中心"})
+    # ---- 第二批（桌面版）新增：只往后追加，前面的条目与 1 倍文件逐字节不变
+    for i in range(3):
+        out[f"foxfire_{i}"] = (make_foxfire(i), (0.6, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "anim": "foxfire", "frame": i, "frames": 3, "fps": 12,
+                                                            "note": "夜主的狐火弹：锚点在火球中心，火舌向后拖；建议染 #FF6B5A（style.EYE.fox）"})
     return out
 
 
 # ============================================================== 检查图
 
 TINTS = {
+    "foxfire_0": S.EYE["fox"],
+    "foxfire_1": S.EYE["fox"],
+    "foxfire_2": S.EYE["fox"],
     "ring": "#6FB8FF",
     "sword_trail": "#CFE3F5",
     "warn": "#C9925A",
@@ -1366,17 +1414,24 @@ def ingame_mock(items, path: Path) -> None:
     上左：夜里灯照下的宣纸（世界层 × 光照图，发光物最后叠加，与游戏同法）；
     上右：同一场景不打光，发光物改成染色后正常叠放，只为看清形状；
     下：涟漪环染冰蓝后按 30/60/120/240/480 像素直径缩放（双线性），以及 800 像素时的局部。"""
-    Wm, Hm = 900, 600
+    Wm, Hm = V.dpx(900), V.dpx(600)
+
+    def put(canvas, img, x, y, **kw):
+        # 布局坐标按 1 倍像素写，乘密度后落到当前密度的画布上（贴图本身已是当前密度的尺寸）
+        place(canvas, img, x * D, y * D, **kw)
     paper_img = load_optional(V.GROUND_DIR / "paper.png")
     if paper_img is not None:
         pt = np.asarray(paper_img.convert("RGB"), dtype=np.float64) / 255.0
         base = np.tile(pt, (2, 2, 1))[:Hm, :Wm].copy()
     else:
         base = np.broadcast_to(PAPER, (Hm, Wm, 3)).copy()
-    hero = load_optional(V.OUT / "assets" / "hero" / "idle_SE_00.png")
+    hero, hero_k = load_optional(V.ASSETS / "hero" / "idle_SE_00.png"), 1.0
+    hero_emit = load_optional(V.ASSETS / "hero" / "idle_SE_00_emit.png")
+    if hero is None:  # 当前密度的主角还没出图：借 1 倍的放大，只作比例参考
+        hero, hero_k = load_optional(V.OUT / "assets" / "hero" / "idle_SE_00.png"), D
+        hero_emit = load_optional(V.OUT / "assets" / "hero" / "idle_SE_00_emit.png")
     if hero is None:
-        hero = hero_stand_in()
-    hero_emit = load_optional(V.OUT / "assets" / "hero" / "idle_SE_00_emit.png")
+        hero, hero_k = hero_stand_in(), D
     shadow = load_optional(V.VFX_DIR / "shadow.png")
     light = load_optional(V.VFX_DIR / "light.png")
     wash = load_optional(V.GROUND_DIR / "wash_0.png")
@@ -1390,44 +1445,44 @@ def ingame_mock(items, path: Path) -> None:
 
     def draw_world(world):
         if wash is not None:
-            place(world, wash, 600, 480, scale=1.4, anchor=(0.5, 0.5))
+            put(world, wash, 600, 480, scale=1.4, anchor=(0.5, 0.5))
         # 地面：镇岳留下的地裂和印迹、一个圆相墨痕
-        place(world, T["crack"], 250, 450, scale=1.2, anchor=A["crack"], alpha=0.9)
-        place(world, T["seal_mark"], 250, 450, angle=math.radians(8), scale=(0.9, 0.9 * 0.7), anchor=A["seal_mark"], alpha=0.85)
-        place(world, T["ring_ink"], 360, 530, scale=(0.75, 0.75 * 0.6), anchor=A["ring_ink"], alpha=0.75)
+        put(world, T["crack"], 250, 450, scale=1.2, anchor=A["crack"], alpha=0.9)
+        put(world, T["seal_mark"], 250, 450, angle=math.radians(8), scale=(0.9, 0.9 * 0.7), anchor=A["seal_mark"], alpha=0.85)
+        put(world, T["ring_ink"], 360, 530, scale=(0.75, 0.75 * 0.6), anchor=A["ring_ink"], alpha=0.75)
         # 拾取物
         for name, px, py in (("chest", 560, 525), ("soulbell", 615, 545), ("lotus", 505, 550)):
             if shadow is not None:
-                place(world, shadow, px, py, scale=(T[name].width / 64 * 0.95, 0.5), anchor=(0.5, 0.5), alpha=0.8)
-            place(world, T[name], px, py, anchor=A[name])
+                put(world, shadow, px, py, scale=(T[name].width / 64 * 0.95, 0.5), anchor=(0.5, 0.5), alpha=0.8)
+            put(world, T[name], px, py, anchor=A[name])
         # 已经落地的镇岳
         if shadow is not None:
-            place(world, shadow, 215, 300, scale=(0.75, 0.9), anchor=(0.5, 0.5))
-        place(world, T["seal_evo"], 215, 300, anchor=A["seal_evo"])
+            put(world, shadow, 215, 300, scale=(0.75, 0.9), anchor=(0.5, 0.5))
+        put(world, T["seal_evo"], 215, 300, anchor=A["seal_evo"])
         # 主角
         if shadow is not None:
-            place(world, shadow, hx, hy, scale=1.0, anchor=(0.5, 0.5))
-        place(world, hero, hx, hy, anchor=(0.5, 0.875))
+            put(world, shadow, hx, hy, scale=1.0, anchor=(0.5, 0.5))
+        put(world, hero, hx, hy, anchor=(0.5, 0.875), scale=hero_k)
         # 正在落下的山印：地上的影子，石印还在半空
         if shadow is not None:
-            place(world, shadow, wx, wy, scale=(0.7, 0.85), anchor=(0.5, 0.5), alpha=0.6)
-        place(world, T["seal"], wx, wy - 60, anchor=A["seal"])
+            put(world, shadow, wx, wy, scale=(0.7, 0.85), anchor=(0.5, 0.5), alpha=0.6)
+        put(world, T["seal"], wx, wy - 60, anchor=A["seal"])
         # 纸鹤三只
         for name, px, py, ang in (("crane_0", 300, 180, -0.15), ("crane_2", 640, 160, 0.1), ("crane_evo_1", 720, 270, 0.35)):
-            place(world, T[name], px, py, angle=ang, anchor=A[name])
+            put(world, T[name], px, py, angle=ang, anchor=A[name])
 
     def draw_swords(canvas, lightmap=None):
         # 飞剑画在尾光之上（游戏里尾光在剑后面）；夜里按所在位置的光照染色
         for sx_, sy_, ang, name in swords:
-            tint = None if lightmap is None else lightmap[int(sy_), int(sx_)]
-            place(canvas, T[name], sx_, sy_, angle=ang, anchor=A[name], tint=tint)
+            tint = None if lightmap is None else lightmap[int(sy_ * D), int(sx_ * D)]
+            put(canvas, T[name], sx_, sy_, angle=ang, anchor=A[name], tint=tint)
 
     def draw_fx(canvas, mode, k_alpha=1.0):
         def fx(name, x, y, alpha=1.0, **kw):
-            place(canvas, T[name], x, y, anchor=A[name], mode=mode, tint=col(TINTS[name]), alpha=alpha * k_alpha, **kw)
+            put(canvas, T[name], x, y, anchor=A[name], mode=mode, tint=col(TINTS[name]), alpha=alpha * k_alpha, **kw)
 
         fx("warn", wx, wy, 0.95, scale=(1.4, 1.4 * 0.62))
-        fx("ring", hx, hy - 30, 0.5, scale=(140 / ring_r, 140 / ring_r * 0.62))
+        fx("ring", hx, hy - 30, 0.5, scale=(140 * D / ring_r, 140 * D / ring_r * 0.62))
         fx("blast", 780, 500, 1.0, scale=1.3)
         for sx_, sy_, ang, _ in swords:
             fx("sword_trail", sx_, sy_, 0.8, angle=ang, scale=(1.6, 1.0))
@@ -1437,7 +1492,7 @@ def ingame_mock(items, path: Path) -> None:
     draw_world(world)
     lm = np.broadcast_to(col(S.NIGHT_AMBIENT), world.shape).copy()
     if light is not None:
-        place(lm, light, hx - 10, hy - 60, scale=900 / 128, anchor=(0.5, 0.5), mode="add", tint=col(S.LANTERN_LIGHT))
+        put(lm, light, hx - 10, hy - 60, scale=900 * D / light.width, anchor=(0.5, 0.5), mode="add", tint=col(S.LANTERN_LIGHT))
     else:
         lm[:] = 1.0
     lm = np.clip(lm, 0, 1)
@@ -1445,7 +1500,7 @@ def ingame_mock(items, path: Path) -> None:
     draw_fx(lit, "add")
     draw_swords(lit, lm)
     if hero_emit is not None:
-        place(lit, hero_emit, hx, hy, anchor=(0.5, 0.875), mode="add")
+        put(lit, hero_emit, hx, hy, anchor=(0.5, 0.875), mode="add", scale=hero_k)
     lit = np.clip(lit, 0, 1)
     # 白天：不打光，发光物染色后正常叠放
     day = base.copy()
@@ -1455,28 +1510,30 @@ def ingame_mock(items, path: Path) -> None:
     day = np.clip(day, 0, 1)
 
     # 涟漪环缩放条
-    strip_h = 520
+    # 涟漪环缩放条：直径按 1 倍屏幕像素写（世界单位 ×2），乘密度后是当前密度下的屏幕像素
+    strip_h = V.dpx(520)
     strip = np.broadcast_to(col(S.NIGHT_AMBIENT), (strip_h, Wm * 2 + 12, 3)).copy()
     x = 20
     for dia in (30, 60, 120, 240, 480):
-        s = dia / (2 * ring_r)
-        place(strip, T["ring"], x + dia / 2, 30 + 240, scale=s, anchor=(0.5, 0.5), mode="add", tint=col(TINTS["ring"]))
+        put(strip, T["ring"], x + dia / 2, 30 + 240, scale=dia * D / (2 * ring_r), anchor=(0.5, 0.5), mode="add", tint=col(TINTS["ring"]))
         x += dia + 30
-    big = np.broadcast_to(col(S.NIGHT_AMBIENT), (900, 900, 3)).copy()
-    place(big, T["ring"], 450, 450, scale=800 / (2 * ring_r), anchor=(0.5, 0.5), mode="add", tint=col(TINTS["ring"]))
-    crop = big[50:500, 50:500]
-    strip[40:40 + 450, x + 10:x + 10 + 450] = crop
-    gap = 12
-    out = np.ones((Hm + 34 + strip_h + 30, Wm * 2 + gap, 3)) * 0.1
-    out[34:34 + Hm, :Wm] = lit
-    out[34:34 + Hm, Wm + gap:] = day
-    out[34 + Hm + 30:, :] = np.clip(strip, 0, 1)
+    big = np.broadcast_to(col(S.NIGHT_AMBIENT), (V.dpx(900), V.dpx(900), 3)).copy()
+    put(big, T["ring"], 450, 450, scale=800 * D / (2 * ring_r), anchor=(0.5, 0.5), mode="add", tint=col(TINTS["ring"]))
+    c0, c1, x0 = V.dpx(50), V.dpx(500), V.dpx(x + 10)
+    crop = big[c0:c1, c0:c1]
+    strip[V.dpx(40) : V.dpx(40) + crop.shape[0], x0 : x0 + crop.shape[1]] = crop[:, : max(0, strip.shape[1] - x0)]
+    gap, top = 12, V.dpx(34)
+    out = np.ones((Hm + top + strip_h + top, Wm * 2 + gap, 3)) * 0.1
+    out[top : top + Hm, :Wm] = lit
+    out[top : top + Hm, Wm + gap :] = day
+    out[top + Hm + top :, :] = np.clip(strip, 0, 1)
     im = Image.fromarray(np.round(out * 255).astype(np.uint8), "RGB")
     dr = ImageDraw.Draw(im)
-    f = V.font(15)
-    dr.text((8, 9), "night: world x lightmap + additive FX (1 texel = 1 px = 0.5 world unit; hero frame 160 px)", fill="#DDDDDD", font=f)
+    f = V.font(V.dpx(15))
+    ppu = V.PPU
+    dr.text((8, 9), f"night: world x lightmap + additive FX (density {D:g}x: 1 texel = 1 px = {1 / S.PX_PER_UNIT:g} world unit)", fill="#DDDDDD", font=f)
     dr.text((Wm + gap + 8, 9), "same scene unlit; FX drawn tinted with normal blend (shape check only)", fill="#DDDDDD", font=f)
-    dr.text((8, 34 + Hm + 8), "ring.png tinted #6FB8FF, additive, bilinear: diameter 30 / 60 / 120 / 240 / 480 px, and a 450 px crop of the 800 px ring", fill="#DDDDDD", font=f)
+    dr.text((8, top + Hm + 8), f"ring.png tinted #6FB8FF, additive, bilinear: diameter 15 / 30 / 60 / 120 / 240 world units ({ppu} px/unit), and a crop at 400 units", fill="#DDDDDD", font=f)
     V.save_png(im, path)
 
 
@@ -1500,12 +1557,12 @@ def main() -> dict:
         "name": "weapons",
         "generator": "art/post/weapon_textures.py",
         "format": "PNG RGBA，直通（非预乘）alpha；tint=true 的贴图 RGB 恒为白色，游戏里染色后叠加",
-        "px_per_unit": S.PX_PER_UNIT,
+        "px_per_unit": V.PPU,
         "direction": "有方向的精灵（points=+x）旋转角 0 时指向屏幕右",
         "files": files,
     }
     (WEAPON_DIR / "meta.json").write_text(V.dump_json(meta), encoding="utf-8")
-    review_sheet(items, REVIEW_DIR / "weapons_sheet.png")
+    review_sheet(items, REVIEW_DIR / "weapons_sheet.png", scale=max(1, int(round(3 / D))))
     ingame_mock(items, REVIEW_DIR / "weapons_ingame.png")
     total = sum(sizes.values())
     print(f"写出 {len(sizes)} 张贴图，共 {total / 1024:.1f} KB；生成 {t1 - t0:.1f} s，合计 {time.perf_counter() - t0:.1f} s")

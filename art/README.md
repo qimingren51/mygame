@@ -119,6 +119,37 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 约定：tint=true 的贴图 RGB 恒为 255，只有 alpha 有形状，游戏里染色后叠加；剑、剑尾光、纸鹤旋转角为 0 时指向 +X；
 剑尾光锚点在右端，放在剑的位置、画在剑后面；石印、宝箱、铃、莲的锚点是落地点。
 
+## 界面图标、地面装饰与一键生成（post/ui_icons.py、post/ground_decor.py、post/make_2d.py）
+
+```bash
+art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图（约 6 分钟）
+art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 LANTERN_ART_DENSITY 时会 1 倍、2 倍各跑一遍
+```
+
+| 输出 | 内容 |
+|---|---|
+| `out/assets*/ui/` | 25 个图标（1 倍 64²、2 倍 128²，锚点居中）：法器 5、进化 5、心法 10、五行 5。`meta.json` 里每个图标有 `kind`、`id`、`el`、`name`，`el_colors` 是五行配色 |
+| `out/assets*/weapons/` | 新增 `foxfire_0..2`（夜主弹幕，白色可染色，叠加，朝 +X，建议染 #FF6B5A） |
+| `out/assets*/ground/` | 新增 `spring`（灵泉）、`rift` + `rift_glow`（裂隙与叠加辉光，建议染 #D2386A）、`reed_0..2`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`、`bamboo_0..1` |
+| `out/review*/` | `additions_sheet.png`（图标原大和 32 像素、纸色底和夜色底）、`ground_mock.png`（白天和夜晚的地面合成） |
+
+2D 贴图也按 `LANTERN_ART_DENSITY` 出图：噪声在 1 倍网格上生成再放大，所以 2 倍和 1 倍是同一张画，只是边缘更清楚。
+1 倍的 PNG 逐字节固定，基准在 `post/golden_1x.json`（依赖锁定的 Pillow 12.3.0）。
+
+## 打包桌面版图集
+
+```bash
+A=art/out/assets@2x
+art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out assets/atlas
+art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/ancient_lamp $A/blood_altar
+art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons
+art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
+art/.venv/bin/python art/post/pack_atlas.py --name ui --out assets/atlas $A/ui
+```
+
+格式约定见 `docs/DESIGN.md` 第 15 节。
+
 ## 正式管线
 
 ```bash

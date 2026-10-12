@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """weapon_textures.py 的自检：纯 assert，不依赖 pytest。
 
-每次运行都会先重新生成一遍（约 20 秒），同时记录脚本写了哪些文件，
-再单独渲染一遍与磁盘上的结果逐像素比对（确定性），全程约 35 秒。
+每次运行都会先重新生成一遍，同时记录脚本写了哪些文件，再单独渲染一遍与磁盘上的结果逐像素比对（确定性）。
+不设 LANTERN_ART_DENSITY 时自动在 1 倍、2 倍各跑一遍（子进程，约 1 分钟 + 3 分钟）；设了就只测那一种密度。
+1 倍还要核对与密度改造前的基准逐字节相同（post/golden_1x.json）；2 倍要与 1 倍是“同一张画”。
 
-用法（在 lantern-next/ 目录下）：
+用法（在仓库根目录下）：
   art/.venv/bin/python art/post/test_weapon_textures.py
+  LANTERN_ART_DENSITY=1 art/.venv/bin/python art/post/test_weapon_textures.py   # 只测 1 倍
 """
 
 from __future__ import annotations
@@ -20,34 +22,47 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import testkit  # noqa: E402
+
+if __name__ == "__main__":
+    _rc = testkit.run_all_densities(__file__)
+    if _rc is not None:
+        sys.exit(_rc)
+
 import weapon_textures as W  # noqa: E402
 
 V = W.V
 S = W.S
+D = V.D
+
+
+def sz(w: int, h: int) -> tuple[int, int]:
+    return (int(round(w * D)), int(round(h * D)))
 
 # 文件名 → (尺寸, 锚点)。与任务约定一致，独立写一份，不从生成脚本里取。
 EXPECTED = {
-    "sword.png": ((44, 12), (0.6, 0.5)),
-    "sword_evo.png": ((52, 14), (0.6, 0.5)),
-    "sword_trail.png": ((48, 10), (1.0, 0.5)),
-    **{f"crane_{i}.png": ((30, 26), (0.5, 0.5)) for i in range(4)},
-    **{f"crane_evo_{i}.png": ((30, 26), (0.5, 0.5)) for i in range(4)},
-    "ring.png": ((128, 128), (0.5, 0.5)),
-    "ring_ink.png": ((128, 128), (0.5, 0.5)),
-    "seal.png": ((40, 44), (0.5, 0.85)),
-    "seal_evo.png": ((56, 60), (0.5, 0.85)),
-    "seal_mark.png": ((64, 64), (0.5, 0.5)),
-    "crack.png": ((128, 96), (0.5, 0.5)),
-    "warn.png": ((64, 64), (0.5, 0.5)),
-    "taiji.png": ((128, 128), (0.5, 0.5)),
-    "blast.png": ((64, 64), (0.5, 0.5)),
-    "shield.png": ((64, 64), (0.5, 0.5)),
-    "chest.png": ((40, 36), (0.5, 0.85)),
-    "soulbell.png": ((20, 26), (0.5, 0.85)),
-    "lotus.png": ((22, 20), (0.5, 0.8)),
+    "sword.png": (sz(44, 12), (0.6, 0.5)),
+    "sword_evo.png": (sz(52, 14), (0.6, 0.5)),
+    "sword_trail.png": (sz(48, 10), (1.0, 0.5)),
+    **{f"crane_{i}.png": (sz(30, 26), (0.5, 0.5)) for i in range(4)},
+    **{f"crane_evo_{i}.png": (sz(30, 26), (0.5, 0.5)) for i in range(4)},
+    "ring.png": (sz(128, 128), (0.5, 0.5)),
+    "ring_ink.png": (sz(128, 128), (0.5, 0.5)),
+    "seal.png": (sz(40, 44), (0.5, 0.85)),
+    "seal_evo.png": (sz(56, 60), (0.5, 0.85)),
+    "seal_mark.png": (sz(64, 64), (0.5, 0.5)),
+    "crack.png": (sz(128, 96), (0.5, 0.5)),
+    "warn.png": (sz(64, 64), (0.5, 0.5)),
+    "taiji.png": (sz(128, 128), (0.5, 0.5)),
+    "blast.png": (sz(64, 64), (0.5, 0.5)),
+    "shield.png": (sz(64, 64), (0.5, 0.5)),
+    "chest.png": (sz(40, 36), (0.5, 0.85)),
+    "soulbell.png": (sz(20, 26), (0.5, 0.85)),
+    "lotus.png": (sz(22, 20), (0.5, 0.8)),
+    **{f"foxfire_{i}.png": (sz(24, 24), (0.6, 0.5)) for i in range(3)},
 }
 # 白色、可染色、叠加混合的贴图
-WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png"}
+WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3))}
 REVIEW = ["weapons_sheet.png", "weapons_ingame.png"]
 
 WRITTEN: list[Path] = []
@@ -193,6 +208,18 @@ def test_point_right():
     xs = np.arange(al.shape[1])
     cx = (al.sum(0) * xs).sum() / al.sum()
     assert cx > 0.6 * al.shape[1], "剑尾光的粗亮端应在右边（锚点 1.0）"
+    for i in range(3):
+        al = rgba(f"foxfire_{i}.png")[..., 3].astype(np.float64)
+        w = al.shape[1]
+        xs = np.arange(w)
+        hot_cx = ((al**4).sum(0) * xs).sum() / (al**4).sum()
+        assert hot_cx > 0.5 * w, f"foxfire_{i} 最亮的火球应在右半边（朝 +X 飞），重心 {hot_cx:.1f}"
+        ax = EXPECTED[f"foxfire_{i}.png"][1][0] * w
+        cols = np.nonzero((al > 20).any(0))[0]
+        assert ax - cols.min() > 1.5 * (cols.max() - ax), f"foxfire_{i} 火舌应向左（飞行反方向）拖得比火球长"
+        assert al[:, : w // 3].sum() > 0.05 * al.sum(), f"foxfire_{i} 左边应拖着火舌"
+    ff = [rgba(f"foxfire_{i}.png")[..., 3].astype(np.float64) for i in range(3)]
+    assert min(np.abs(ff[i] - ff[(i + 1) % 3]).mean() for i in range(3)) > 0.5, "狐火各帧应有闪动"
     for i in range(4):
         for prefix in ("crane", "crane_evo"):
             a = rgba(f"{prefix}_{i}.png")
@@ -210,7 +237,7 @@ def test_ground_anchor():
         ay = EXPECTED[name][1][1] * h
         rows = np.nonzero((al > 128).any(1))[0]
         assert rows.max() >= ay - 1.0, f"{name} 底部在锚点上方太远（底 {rows.max()}，锚点 {ay:.1f}）"
-        assert rows.max() <= ay + 4.0, f"{name} 锚点以下内容太多（底 {rows.max()}，锚点 {ay:.1f}）"
+        assert rows.max() <= ay + 4.0 * D, f"{name} 锚点以下内容太多（底 {rows.max()}，锚点 {ay:.1f}）"
 
 
 def test_crane_flap():
@@ -224,7 +251,7 @@ def test_crane_flap():
     # 第 0 帧翅膀向上、第 2 帧翅膀向下：可见像素的竖直重心
     ys = np.arange(frames[0].shape[0])[:, None]
     cy = [(f * ys).sum() / f.sum() for f in frames]
-    assert cy[0] < cy[2] - 1.0, f"翅膀上扬帧的重心应比下扑帧高：{cy}"
+    assert cy[0] < cy[2] - 1.0 * D, f"翅膀上扬帧的重心应比下扑帧高：{cy}"
 
 
 def test_ring_profile():
@@ -235,18 +262,23 @@ def test_ring_profile():
     prof = np.array([a[(r >= k) & (r < k + 1)].mean() for k in range(n // 2)])
     peak = int(prof.argmax())
     want = meta_files()["ring.png"]["radius_px"]
-    assert abs(peak - want) <= 4, f"环的最亮半径 {peak} 与 meta radius_px {want} 不符"
-    assert prof[:12].max() == 0, "环中心应完全透明"
-    assert prof[peak - 14] < prof[peak] * 0.5, "环内侧应淡出"
-    assert prof[peak - 14] > 0, "环内侧应有柔和的余波"
+    k12, k14 = int(12 * D), int(14 * D)
+    assert abs(peak - want) <= 4 * D, f"环的最亮半径 {peak} 与 meta radius_px {want} 不符（2 倍容差 {4 * D}）"
+    assert prof[:k12].max() == 0, "环中心应完全透明"
+    assert prof[peak - k14] < prof[peak] * 0.5, "环内侧应淡出"
+    assert prof[peak - k14] > 0, "环内侧应有柔和的余波"
 
 
 def test_seal_mark_glyph_is_hollow():
     """白文：字口透明。印面中心竖笔处 alpha 应很低，旁边的朱砂地 alpha 高。"""
     a = rgba("seal_mark.png")[..., 3]
     c = a.shape[0] // 2
-    assert a[c - 4 : c + 4, c - 1 : c + 2].mean() < 40, "印文中竖处应透出地面"
-    assert a[c - 12 : c - 6, c - 9 : c - 5].mean() > 150, "字旁的朱砂地应不透明"
+
+    def k(v):
+        return int(round(v * D))
+
+    assert a[c - k(4) : c + k(4), c - k(1) : c + k(2)].mean() < 40, "印文中竖处应透出地面"
+    assert a[c - k(12) : c - k(6), c - k(9) : c - k(5)].mean() > 150, "字旁的朱砂地应不透明"
 
 
 # ---------------------------------------------------------------- 确定性、体积、写盘范围
@@ -261,7 +293,7 @@ def test_deterministic():
 
 def test_total_size():
     total = sum(p.stat().st_size for p in W.WEAPON_DIR.glob("*.png"))
-    assert total < 300 * 1024, f"贴图总体积 {total / 1024:.1f} KB 超过 300 KB"
+    assert total < 300 * 1024 * D * D, f"贴图总体积 {total / 1024:.1f} KB 超过 {300 * D * D:.0f} KB"
 
 
 def test_writes_only_own_outputs():
@@ -273,6 +305,29 @@ def test_writes_only_own_outputs():
         if p.is_relative_to(W.REVIEW_DIR.resolve()):
             assert p.name.startswith("weapons_"), f"检查图名字应以 weapons_ 开头：{p.name}"
     assert snapshot_other_outputs() == SNAPSHOT, "vfx/ 或 ground/ 的产物被改动了"
+
+
+def test_meta_px_per_unit():
+    meta = json.loads((W.WEAPON_DIR / "meta.json").read_text(encoding="utf-8"))
+    assert meta["px_per_unit"] == S.PX_PER_UNIT, f"px_per_unit {meta['px_per_unit']} != {S.PX_PER_UNIT}"
+    for name, e in meta["files"].items():
+        if "radius_px" in e:
+            assert isinstance(e["radius_px"], int), f"{name} radius_px 应为整数像素"
+
+
+def test_density_1x_unchanged():
+    """1 倍：已有贴图与密度改造前逐字节相同；meta 已有条目不变（新条目只追加）。"""
+    if D != 1:
+        return
+    testkit.check_golden(V.ASSETS, ("weapons",))
+
+
+def test_density_2x_same_art():
+    """2 倍：缩回 1 倍后与 1 倍贴图基本一致。需要 1 倍产物在盘上（两种密度一起测时先测 1 倍）。"""
+    if D != 2:
+        return
+    res = testkit.density_consistency(W.WEAPON_DIR, V.OUT / "assets" / "weapons", list(EXPECTED))
+    assert len(res) == len(EXPECTED), "1 倍产物不全，先跑一遍 1 倍"
 
 
 def test_review_images():

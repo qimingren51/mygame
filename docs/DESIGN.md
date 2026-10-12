@@ -343,9 +343,9 @@ assets/data/
   | --- | --- |
   | `actors` | 主角、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern、古灯 ancient_lamp、血祭坛 blood_altar），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `boss` | 夜主九尾（640² 帧，单独一张，改模型时不影响 actors；下一批） |
-  | `vfx` | 光源渐变、火焰、魂火、光环、墨点，以及法器与拾取物（`weapons/…`） |
-  | `ground` | 地面装饰。第一批只有水墨草和晕染，下一批加石子、水洼、落叶、竹、灵泉、裂隙 |
-  | `ui` | 法器、进化、心法、五行图标（下一批） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2` |
+  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光） |
+  | `ui` | 界面图标 `ui/icon_<法器或心法 id>`、`ui/icon_<法器 id>_evo`（进化）、`ui/icon_el_<metal\|wood\|water\|fire\|earth>`。屏幕空间用，2 倍下 128²，`pxPerUnit` 对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
   | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
 
@@ -368,7 +368,8 @@ assets/data/
 - **自发光层**：`_emit` 帧和对应的普通帧尺寸、锚点完全相同，叠加画在暗层之上，所以暗处也能看到灯笼窗、妖眼。没有自发光部件的素材没有 `_emit` 帧。
 - **主角动画**：`idle`（6 帧）、`walk`（8 帧，按移动距离推进，`stride_units` 是一个循环走过的世界距离）、`dash`（4 帧 @16 fps）、`hurt`（2 帧 @10 fps）、`death`（6 帧 @8 fps，不循环），各 8 个方向。
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
-- **已知差异**：`vfx/flame_*`（灯火火焰）目前标的是 `blend: add`，但网页版实际用普通混合画（火焰尖端的墨色要保留）。下一批改成 `normal`。
+- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
+- **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
 
 ## 16. 性能预算
 

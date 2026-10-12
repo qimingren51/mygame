@@ -1,0 +1,825 @@
+{
+ "note": "1 倍密度产物的基准（密度改造前的文件）。PNG 逐字节比 md5；meta.json 只比已有条目（新增条目允许追加）。md5 依赖 Pillow/zlib 版本（requirements.txt 固定了 pillow 12.3.0）。",
+ "png_md5": {
+  "vfx/eyes.png": "72c8b15d58972d5f108340f036d1004e",
+  "vfx/flame_0.png": "e6b1ff57a8c549194ace931e0c6fe5f1",
+  "vfx/flame_1.png": "dd188e608adefc65d1d1d665b7e41918",
+  "vfx/flame_2.png": "33fca12b6e934d5d589267fc6a4956f7",
+  "vfx/flame_3.png": "5b9a5338682640bc02cca9563827725c",
+  "vfx/gem_0.png": "b93fbccbe1776dc58e66b9fa92318d78",
+  "vfx/gem_1.png": "5d989f11cfdea8f932f8a1e35f1a6686",
+  "vfx/gem_2.png": "5d62c77a70245e798fb683fc48292409",
+  "vfx/glow.png": "32e49ca23cf81c20a5c4b6380954ec36",
+  "vfx/ink_0.png": "6cbbc154b45b82cd033136e616a35416",
+  "vfx/ink_1.png": "69bf0cd3c34ee86c2b68eff8b18c13aa",
+  "vfx/ink_2.png": "ac1e76777bfdb6079ecbd1e00c3bc0d9",
+  "vfx/lantern.png": "07000ca7cbd415500d1374a1facf889f",
+  "vfx/light.png": "2dd4dfe88fb654a91ce136fdb6b5f1ac",
+  "vfx/shadow.png": "67015a2c086844279f0acf5525a4b8aa",
+  "vfx/spark.png": "0da38d92df1e55366243c022c7023283",
+  "ground/grass_0.png": "48eacd0bfffa0343264b6a0397e70281",
+  "ground/grass_1.png": "8abff3c7ea4ec654a3143cdde1f7aca8",
+  "ground/grass_2.png": "28fe69e35a499336af6e9cb34d870427",
+  "ground/grass_3.png": "8cd739e0c9d5ab50b599cc826c704f13",
+  "ground/paper.png": "ee4ec659406ebea492decf2db22834c2",
+  "ground/wash_0.png": "6edb7f6a7c27edc6e35716f0b0d8346e",
+  "ground/wash_1.png": "e16a8ee45c964e069dab1af350db6268",
+  "ground/wash_2.png": "d287b205e41371d8677314a92d4d04c7",
+  "weapons/blast.png": "e0ddc8140d4d9b87245530dcd70d051e",
+  "weapons/chest.png": "ce447658e6d253e6f540154570c4b751",
+  "weapons/crack.png": "5565b7f81329bb5ffb044285df253142",
+  "weapons/crane_0.png": "c861a02cf527ccadde83d9ec5d261929",
+  "weapons/crane_1.png": "de2940d388706156d6013b938989f895",
+  "weapons/crane_2.png": "4f2b8b32fc80329dc970a7a743b69de4",
+  "weapons/crane_3.png": "12572e4b646f588aed099e10fe0b25fd",
+  "weapons/crane_evo_0.png": "188bf935f495fe7cf1c9056f6bfa25cb",
+  "weapons/crane_evo_1.png": "df2e603f191a19938862928f469df2df",
+  "weapons/crane_evo_2.png": "397570276561dbfbcd3ab5b30439906f",
+  "weapons/crane_evo_3.png": "6d4d7d1c197f447904b7d46713969d3f",
+  "weapons/lotus.png": "31760a896f3d751ffcab3ed8581fd848",
+  "weapons/ring.png": "1446b60e5cd387606e92728443d426cb",
+  "weapons/ring_ink.png": "266d16f814e73741c915cfd51899c477",
+  "weapons/seal.png": "0153d419b5e91755d7ec2910be91d83e",
+  "weapons/seal_evo.png": "26a75e0a40321945d65cf25c1a05df41",
+  "weapons/seal_mark.png": "5e76cf2bde8ea5e9e7083def37d1da1d",
+  "weapons/shield.png": "5218e3396c128c019c58a10ff49d8680",
+  "weapons/soulbell.png": "a4cc623b0dcb96d5a94c16c9490af4dd",
+  "weapons/sword.png": "c669c5cae219f8c195945d121fcc5604",
+  "weapons/sword_evo.png": "7ab6429cae6e484dff0c288727ca733f",
+  "weapons/sword_trail.png": "dc02dd4fbcd8f9f865009d50e044bf4e",
+  "weapons/taiji.png": "c9c0407ca3c85c81a6d8ecea3726b30b",
+  "weapons/warn.png": "8d76fa0a90f87628621727f64854a874"
+ },
+ "meta": {
+  "vfx": {
+   "name": "vfx",
+   "generator": "art/post/vfx_textures.py",
+   "format": "PNG RGBA，直通（非预乘）alpha",
+   "px_per_unit": 2,
+   "files": {
+    "light.png": {
+     "size": [
+      128,
+      128
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "光照图里的灯光池，半径处 alpha 恰为 0，已做蓝噪声抖动"
+    },
+    "glow.png": {
+     "size": [
+      64,
+      64
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "自发光物体的烘焙泛光"
+    },
+    "eyes.png": {
+     "size": [
+      24,
+      10
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "妖眼，按 style.EYE 染色"
+    },
+    "shadow.png": {
+     "size": [
+      64,
+      24
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "jiao",
+     "blend": "normal",
+     "note": "接触阴影，最大 alpha 约 0.45"
+    },
+    "spark.png": {
+     "size": [
+      12,
+      12
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true
+    },
+    "gem_0.png": {
+     "size": [
+      20,
+      20
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "魂火，默认染 SOUL_LIGHT"
+    },
+    "gem_1.png": {
+     "size": [
+      26,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "魂火，默认染 SOUL_LIGHT"
+    },
+    "gem_2.png": {
+     "size": [
+      32,
+      32
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "note": "魂火，默认染 SOUL_LIGHT"
+    },
+    "flame_0.png": {
+     "size": [
+      32,
+      48
+     ],
+     "anchor": [
+      0.5,
+      0.6
+     ],
+     "color": "full",
+     "blend": "add",
+     "tint": false,
+     "anim": "flame",
+     "frame": 0,
+     "frames": 4
+    },
+    "flame_1.png": {
+     "size": [
+      32,
+      48
+     ],
+     "anchor": [
+      0.5,
+      0.6
+     ],
+     "color": "full",
+     "blend": "add",
+     "tint": false,
+     "anim": "flame",
+     "frame": 1,
+     "frames": 4
+    },
+    "flame_2.png": {
+     "size": [
+      32,
+      48
+     ],
+     "anchor": [
+      0.5,
+      0.6
+     ],
+     "color": "full",
+     "blend": "add",
+     "tint": false,
+     "anim": "flame",
+     "frame": 2,
+     "frames": 4
+    },
+    "flame_3.png": {
+     "size": [
+      32,
+      48
+     ],
+     "anchor": [
+      0.5,
+      0.6
+     ],
+     "color": "full",
+     "blend": "add",
+     "tint": false,
+     "anim": "flame",
+     "frame": 3,
+     "frames": 4
+    },
+    "ink_0.png": {
+     "size": [
+      20,
+      20
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "jiao",
+     "blend": "normal"
+    },
+    "ink_1.png": {
+     "size": [
+      20,
+      20
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "jiao",
+     "blend": "normal"
+    },
+    "ink_2.png": {
+     "size": [
+      20,
+      20
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "jiao",
+     "blend": "normal"
+    },
+    "lantern.png": {
+     "size": [
+      20,
+      24
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "add",
+     "tint": false,
+     "note": "灯笼芯，暖光 LANTERN_LIGHT"
+    }
+   }
+  },
+  "ground": {
+   "name": "ground",
+   "generator": "art/post/vfx_textures.py",
+   "format": "PNG RGBA，直通（非预乘）alpha；paper.png 为不透明 RGB 平铺图",
+   "px_per_unit": 2,
+   "files": {
+    "paper.png": {
+     "size": [
+      512,
+      512
+     ],
+     "anchor": [
+      0.0,
+      0.0
+     ],
+     "tile": true,
+     "texel_world_units": 0.5,
+     "mode": "RGB"
+    },
+    "wash_0.png": {
+     "size": [
+      240,
+      160
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "zhong",
+     "blend": "normal",
+     "max_alpha": 0.35
+    },
+    "wash_1.png": {
+     "size": [
+      240,
+      160
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "zhong",
+     "blend": "normal",
+     "max_alpha": 0.35
+    },
+    "wash_2.png": {
+     "size": [
+      240,
+      160
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "zhong",
+     "blend": "normal",
+     "max_alpha": 0.35
+    },
+    "grass_0.png": {
+     "size": [
+      48,
+      40
+     ],
+     "anchor": [
+      0.5,
+      1.0
+     ],
+     "blend": "normal"
+    },
+    "grass_1.png": {
+     "size": [
+      48,
+      40
+     ],
+     "anchor": [
+      0.5,
+      1.0
+     ],
+     "blend": "normal"
+    },
+    "grass_2.png": {
+     "size": [
+      48,
+      40
+     ],
+     "anchor": [
+      0.5,
+      1.0
+     ],
+     "blend": "normal"
+    },
+    "grass_3.png": {
+     "size": [
+      48,
+      40
+     ],
+     "anchor": [
+      0.5,
+      1.0
+     ],
+     "blend": "normal"
+    }
+   }
+  },
+  "weapons": {
+   "name": "weapons",
+   "generator": "art/post/weapon_textures.py",
+   "format": "PNG RGBA，直通（非预乘）alpha；tint=true 的贴图 RGB 恒为白色，游戏里染色后叠加",
+   "px_per_unit": 2,
+   "direction": "有方向的精灵（points=+x）旋转角 0 时指向屏幕右",
+   "files": {
+    "sword.png": {
+     "size": [
+      44,
+      12
+     ],
+     "anchor": [
+      0.6,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "note": "符剑：剑尖朝 +X，剑身约 22 世界单位"
+    },
+    "sword_evo.png": {
+     "size": [
+      52,
+      14
+     ],
+     "anchor": [
+      0.6,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "note": "万剑归宗：金边剑身，自带一圈淡金光"
+    },
+    "sword_trail.png": {
+     "size": [
+      48,
+      10
+     ],
+     "anchor": [
+      1.0,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "kind": "fx",
+     "points": "+x",
+     "note": "剑尾光：锚点在右端（剑的位置），向左拖尾，画在剑后面；建议染 #CFE3F5"
+    },
+    "crane_0.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane",
+     "frame": 0,
+     "frames": 4,
+     "fps": 10,
+     "note": "纸鹤扑翼循环"
+    },
+    "crane_1.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane",
+     "frame": 1,
+     "frames": 4,
+     "fps": 10,
+     "note": "纸鹤扑翼循环"
+    },
+    "crane_2.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane",
+     "frame": 2,
+     "frames": 4,
+     "fps": 10,
+     "note": "纸鹤扑翼循环"
+    },
+    "crane_3.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane",
+     "frame": 3,
+     "frames": 4,
+     "fps": 10,
+     "note": "纸鹤扑翼循环"
+    },
+    "crane_evo_0.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane_evo",
+     "frame": 0,
+     "frames": 4,
+     "fps": 12,
+     "note": "千鹤引：翼缘金箔"
+    },
+    "crane_evo_1.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane_evo",
+     "frame": 1,
+     "frames": 4,
+     "fps": 12,
+     "note": "千鹤引：翼缘金箔"
+    },
+    "crane_evo_2.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane_evo",
+     "frame": 2,
+     "frames": 4,
+     "fps": 12,
+     "note": "千鹤引：翼缘金箔"
+    },
+    "crane_evo_3.png": {
+     "size": [
+      30,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "points": "+x",
+     "anim": "crane_evo",
+     "frame": 3,
+     "frames": 4,
+     "fps": 12,
+     "note": "千鹤引：翼缘金箔"
+    },
+    "ring.png": {
+     "size": [
+      128,
+      128
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "kind": "fx",
+     "radius_px": 57,
+     "note": "涟漪环：环外沿半径约 57px（贴图半宽 64），按需要的半径缩放；霜铃染 #6FB8FF，大招染金，地震染赭"
+    },
+    "ring_ink.png": {
+     "size": [
+      128,
+      128
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "fx",
+     "radius_px": 50,
+     "note": "一笔圆相墨圈，地面墨痕"
+    },
+    "seal.png": {
+     "size": [
+      40,
+      44
+     ],
+     "anchor": [
+      0.5,
+      0.85
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "note": "山印：锚点是石印底面中心（落地点）"
+    },
+    "seal_evo.png": {
+     "size": [
+      56,
+      60
+     ],
+     "anchor": [
+      0.5,
+      0.85
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "weapon",
+     "note": "镇岳：锚点是石印底面中心（落地点）"
+    },
+    "seal_mark.png": {
+     "size": [
+      64,
+      64
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "fx",
+     "note": "朱砂印迹，白文字口透明（露出地面）；可随机旋转"
+    },
+    "crack.png": {
+     "size": [
+      128,
+      96
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "fx",
+     "note": "镇岳地裂，已按俯角压扁；淡出使用"
+    },
+    "warn.png": {
+     "size": [
+      64,
+      64
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "kind": "fx",
+     "radius_px": 27,
+     "note": "落印预警靶环，建议染 #C9925A，可慢慢旋转"
+    },
+    "taiji.png": {
+     "size": [
+      128,
+      128
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "fx",
+     "radius_px": 54,
+     "note": "水墨太极，焦墨与宣纸色，可旋转"
+    },
+    "blast.png": {
+     "size": [
+      64,
+      64
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "kind": "fx",
+     "note": "爆炸烟团，火染 #FF8A3D，冰染 #6FB8FF"
+    },
+    "shield.png": {
+     "size": [
+      64,
+      64
+     ],
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "color": "white",
+     "blend": "add",
+     "tint": true,
+     "kind": "fx",
+     "radius_px": 28,
+     "note": "护体罩：八角 + 八卦爻，建议染 #C9925A"
+    },
+    "chest.png": {
+     "size": [
+      40,
+      36
+     ],
+     "anchor": [
+      0.5,
+      0.85
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "pickup",
+     "note": "宝箱：锚点是箱底中心"
+    },
+    "soulbell.png": {
+     "size": [
+      20,
+      26
+     ],
+     "anchor": [
+      0.5,
+      0.85
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "pickup",
+     "note": "引魂铃：锚点在铃口"
+    },
+    "lotus.png": {
+     "size": [
+      22,
+      20
+     ],
+     "anchor": [
+      0.5,
+      0.8
+     ],
+     "color": "full",
+     "blend": "normal",
+     "tint": false,
+     "kind": "pickup",
+     "note": "莲：锚点在荷叶中心"
+    }
+   }
+  }
+ },
+ "deliberate_meta_changes": {
+  "note": "有意的 meta 改动（PNG 不变）：灯火在游戏里改为正常混合，火舌尖的焦墨保持黑色。",
+  "vfx": {
+   "flame_0.png": {
+    "blend": "normal"
+   },
+   "flame_1.png": {
+    "blend": "normal"
+   },
+   "flame_2.png": {
+    "blend": "normal"
+   },
+   "flame_3.png": {
+    "blend": "normal"
+   }
+  }
+ }
+}
