@@ -24,6 +24,16 @@ pub struct Actions {
     pub pause: bool,
     pub quit_to_title: bool,
     pub toggle_fullscreen: bool,
+    /// 标题界面：开始跑分
+    pub bench: bool,
+    /// 显示 / 隐藏性能面板
+    pub toggle_perf: bool,
+}
+
+/// 跑分时自动绕圈走，代替玩家输入。存在这个资源时，键盘和手柄的移动不交给模拟。
+#[derive(Resource, Default, Debug)]
+pub struct AutoPilot {
+    pub t: f32,
 }
 
 pub struct PlatformPlugin {
@@ -63,6 +73,8 @@ fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mu
         quit_to_title: keys.just_pressed(KeyCode::KeyQ),
         toggle_fullscreen: keys.just_pressed(KeyCode::F11)
             || (keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::Enter)),
+        bench: keys.just_pressed(KeyCode::KeyB),
+        toggle_perf: keys.just_pressed(KeyCode::F3),
     };
     for pad in &gamepads {
         // 手柄摇杆 y 轴向上，这里翻转成向下。
@@ -85,14 +97,22 @@ fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mu
 
 /// 游戏进行中，把操作交给模拟。帧率高于 60 时，某些帧不跑模拟步，命令会留到下一步处理。
 fn feed_sim(
+    time: Res<Time>,
     actions: Res<Actions>,
     state: Option<Res<State<RunState>>>,
+    autopilot: Option<ResMut<AutoPilot>>,
     mut input: ResMut<InputFrame>,
     mut commands: ResMut<SimCommands>,
 ) {
     let playing = state.is_some_and(|s| *s.get() == RunState::Playing);
     if !playing {
         *input = InputFrame::default();
+        return;
+    }
+    if let Some(mut auto) = autopilot {
+        // 半径约 236 的大圈，速度和玩家走路一样
+        auto.t += time.delta_secs();
+        *input = InputFrame::quantize(Vec2::new((auto.t * 0.5).cos(), (auto.t * 0.5).sin()));
         return;
     }
     *input = InputFrame::quantize(actions.move_dir);

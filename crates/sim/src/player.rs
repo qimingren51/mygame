@@ -4,11 +4,12 @@ use bevy_ecs::prelude::*;
 
 use lantern_core::step::DT;
 
-use crate::run::Stats;
+use crate::run::{RunMode, RunPlan, Stats};
 use crate::{GameContent, InputFrame, Player, Pos, SimCommand, SimCommands, SimEvent, SimOutbox};
 
 pub(crate) fn apply_commands(
     content: Res<GameContent>,
+    mut plan: ResMut<RunPlan>,
     mut commands: ResMut<SimCommands>,
     mut outbox: ResMut<SimOutbox>,
     mut q: Query<(&Pos, &mut Player)>,
@@ -26,6 +27,11 @@ pub(crate) fn apply_commands(
                     p.iframe = p.iframe.max(dash.iframe);
                     p.dash_cd = dash.cooldown;
                     outbox.0.push(SimEvent::Dash { pos: pos.0 });
+                }
+            }
+            SimCommand::BenchTarget(n) => {
+                if let RunMode::Bench { enemies } = &mut plan.mode {
+                    *enemies = n;
                 }
             }
         }

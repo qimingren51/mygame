@@ -9,19 +9,25 @@ use lantern_core::step::TICK_HZ;
 use lantern_platform::Actions;
 use lantern_sim::{AppState, Progress, RunMode, RunSetup, RunState, Tick};
 
+mod bench;
+mod hud;
+mod perf;
+
+pub use perf::SimTiming;
+
 /// 命令行指定的种子（`--seed`）。没有指定时每局随机。
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct SeedOverride(pub Option<u64>);
 
 #[derive(Resource)]
-struct Fonts {
+pub(crate) struct Fonts {
     title: Handle<Font>,
     body: Handle<Font>,
 }
 
-const PAPER: Color = Color::srgb(0.914, 0.875, 0.78);
-const DIM: Color = Color::srgba(0.914, 0.875, 0.78, 0.6);
-const CINNABAR: Color = Color::srgb(0.80, 0.25, 0.18);
+pub(crate) const PAPER: Color = Color::srgb(0.914, 0.875, 0.78);
+pub(crate) const DIM: Color = Color::srgba(0.914, 0.875, 0.78, 0.6);
+pub(crate) const CINNABAR: Color = Color::srgb(0.80, 0.25, 0.18);
 
 pub struct UiPlugin;
 
@@ -30,7 +36,8 @@ impl Plugin for UiPlugin {
         app.init_resource::<SeedOverride>()
             .add_systems(Startup, load_fonts)
             .add_systems(OnEnter(AppState::Title), spawn_title)
-            .add_systems(OnEnter(AppState::Run), spawn_hud)
+            .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
+            .add_systems(OnExit(AppState::Run), bench::cleanup)
             .add_systems(OnEnter(RunState::Paused), spawn_pause)
             .add_systems(OnEnter(RunState::Over), spawn_over)
             .add_systems(
@@ -40,9 +47,14 @@ impl Plugin for UiPlugin {
                     playing_input.run_if(in_state(RunState::Playing)),
                     paused_input.run_if(in_state(RunState::Paused)),
                     over_input.run_if(in_state(RunState::Over)),
-                    update_clock.run_if(in_state(AppState::Run)),
+                    hud::update_hud.run_if(in_state(AppState::Run)),
+                    (bench::drive, bench::finish_input)
+                        .chain()
+                        .run_if(in_state(RunState::Playing))
+                        .run_if(resource_exists::<bench::BenchRun>),
                 ),
             );
+        perf::register(app);
     }
 }
 
@@ -55,7 +67,7 @@ fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut next: ResMut
     next.set(AppState::Title);
 }
 
-fn text(font: &Handle<Font>, size: f32, color: Color, s: &str) -> impl Bundle {
+pub(crate) fn text(font: &Handle<Font>, size: f32, color: Color, s: &str) -> impl Bundle {
     (Text::new(s), TextFont::from(font.clone()).with_font_size(size), TextColor(color))
 }
 
@@ -76,7 +88,7 @@ fn spawn_title(mut commands: Commands, fonts: Res<Fonts>) {
             text(&fonts.body, 22.0, CINNABAR, concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"))),
             (Node { height: px(48), ..default() }),
             text(&fonts.body, 24.0, PAPER, "Enter / 手柄 A　出发"),
-            text(&fonts.body, 18.0, DIM, "F11　全屏　　Esc　退出"),
+            text(&fonts.body, 18.0, DIM, "B　跑分　　F11　全屏　　Esc　退出"),
         ],
     ));
 }
@@ -93,6 +105,8 @@ fn title_input(
         info!("出发，种子 {seed}");
         commands.insert_resource(RunSetup { seed, mode: RunMode::Normal });
         next.set(AppState::Run);
+    } else if actions.bench {
+        bench::start(&mut commands, &mut next);
     } else if actions.back {
         exit.write(AppExit::Success);
     }
@@ -105,44 +119,6 @@ fn random_seed() -> u64 {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     nanos % 1_000_000_000
-}
-
-#[derive(Component)]
-struct Clock;
-
-fn spawn_hud(mut commands: Commands, fonts: Res<Fonts>, setup: Res<RunSetup>) {
-    commands.spawn((
-        DespawnOnExit(AppState::Run),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(20),
-            top: px(14),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-        children![
-            (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
-            text(&fonts.body, 16.0, DIM, &format!("种子 {}", setup.seed)),
-        ],
-    ));
-    commands.spawn((
-        DespawnOnExit(AppState::Run),
-        Node { position_type: PositionType::Absolute, left: px(20), bottom: px(14), ..default() },
-        children![text(
-            &fonts.body,
-            16.0,
-            DIM,
-            "WASD / 方向键 / 左摇杆　移动　　空格 / 手柄 A　闪避　　Esc　暂停"
-        )],
-    ));
-}
-
-fn update_clock(tick: Option<Res<Tick>>, mut q: Query<&mut Text, With<Clock>>) {
-    let Some(tick) = tick else { return };
-    let secs = tick.0 / u64::from(TICK_HZ);
-    for mut t in &mut q {
-        t.0 = format!("{:02}:{:02}", secs / 60, secs % 60);
-    }
 }
 
 fn playing_input(actions: Res<Actions>, mut next: ResMut<NextState<RunState>>) {

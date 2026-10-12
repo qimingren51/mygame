@@ -32,6 +32,8 @@ impl InputFrame {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimCommand {
     Dash,
+    /// 跑分模式下改变场上保持的妖物数量（分段跑分用）；普通模式下忽略
+    BenchTarget(u32),
 }
 
 /// 等待下一步处理的命令。
