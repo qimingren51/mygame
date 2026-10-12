@@ -1,13 +1,13 @@
-# 推送到 master 且 web/ 有改动时，构建网页小游戏站点并发布到 GitHub Pages。
+# 推送到 master 后，构建网页小游戏站点（web/）并发布到 GitHub Pages。
+# 每次推送都运行、不按路径过滤：如果仓库的 Pages 来源还是“从分支部署”，GitHub 会对仓库根目录
+# 另跑一次 Jekyll 部署（根目录现在不是网站），需要这里的部署覆盖它。Pages 来源改成
+# “GitHub Actions”之后，可以加回 paths: ['web/**'] 过滤。
 # 需要在仓库 Settings → Pages → Source 选择 “GitHub Actions”。
 name: Pages
 
 on:
   push:
     branches: [master]
-    paths:
-      - 'web/**'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:

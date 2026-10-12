@@ -114,7 +114,7 @@ node web/scripts/build-site.mjs   # 组装到 web/_site/（加 --ci 会同时跑
 node web/scripts/serve-site.mjs   # 访问 http://localhost:8000/mygame/
 ```
 
-- **自动部署**：推送到 `master` 并且 `web/` 有改动时，`.github/workflows/pages.yml` 会组装整站并发布到 GitHub Pages。仓库设置里 Pages 的来源必须是“GitHub Actions”。
+- **自动部署**：每次推送到 `master`，`.github/workflows/pages.yml` 都会组装网页站点并发布到 GitHub Pages。仓库设置里 Pages 的来源必须是“GitHub Actions”；如果还是“从分支部署”，GitHub 会对仓库根目录另跑一次 Jekyll 部署，和这里的部署互相覆盖。
 - **`build-site.mjs` 的组装规则**：
   - `web/` 根目录的网页文件原样复制，Markdown 不发布。
   - 有 `vite.config.ts` 的文件夹先构建，再把 `dist/` 放进去。
