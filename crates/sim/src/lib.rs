@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use lantern_content::Element;
 
 pub mod boss;
+pub mod bot;
 pub mod build;
 pub mod combat;
 pub mod components;

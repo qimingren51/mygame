@@ -12,9 +12,12 @@ mod bench;
 mod choice;
 mod describe;
 mod hud;
+mod pause;
 mod perf;
 mod replay_ui;
 mod results;
+mod settings_ui;
+mod skin;
 mod title;
 mod toasts;
 
@@ -33,21 +36,42 @@ pub(crate) struct Fonts {
 pub(crate) const PAPER: Color = Color::srgb(0.914, 0.875, 0.78);
 pub(crate) const DIM: Color = Color::srgba(0.914, 0.875, 0.78, 0.6);
 pub(crate) const CINNABAR: Color = Color::srgb(0.80, 0.25, 0.18);
+/// 纸面上的墨色：正文、次要文字
+pub(crate) const INK: Color = Color::srgb(0.090, 0.078, 0.059);
+pub(crate) const INK_DIM: Color = Color::srgb(0.31, 0.286, 0.259);
+
+/// 夜里看着顺眼的淡彩，写在纸上太浅：压暗一些。
+pub(crate) fn on_paper(c: Color) -> Color {
+    let l = c.to_linear();
+    Color::linear_rgb(l.red * 0.32, l.green * 0.32, l.blue * 0.32)
+}
+
+/// 全屏压暗的墨云（叠在半透明夜色上）。
+pub(crate) fn overlay_vignette(skin: &skin::Skin) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        skin.image("overlay_vignette"),
+    )
+}
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SeedOverride>()
-            .add_systems(Startup, load_fonts)
+            .add_systems(Startup, (load_fonts, skin::load_skin))
             .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
             .add_systems(OnExit(AppState::Run), bench::cleanup)
-            .add_systems(OnEnter(RunState::Paused), spawn_pause)
             .add_systems(
                 Update,
                 (
                     playing_input.run_if(in_state(RunState::Playing)),
-                    paused_input.run_if(in_state(RunState::Paused)),
+                    settings_ui::refresh_values,
                     (hud::update_hud, hud::update_slots, hud::update_chips).run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
@@ -61,6 +85,7 @@ impl Plugin for UiPlugin {
         choice::register(app);
         toasts::register(app);
         results::register(app);
+        pause::register(app);
     }
 }
 
@@ -83,37 +108,5 @@ pub(crate) fn text(font: &Handle<Font>, size: f32, color: Color, s: &str) -> imp
 fn playing_input(actions: Res<Actions>, mut next: ResMut<NextState<RunState>>) {
     if actions.pause {
         next.set(RunState::Paused);
-    }
-}
-
-fn spawn_pause(mut commands: Commands, fonts: Res<Fonts>) {
-    commands.spawn((
-        DespawnOnExit(RunState::Paused),
-        Node {
-            width: percent(100),
-            height: percent(100),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: px(16),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.05, 0.06, 0.1, 0.7)),
-        children![
-            text(&fonts.title, 72.0, PAPER, "暂停"),
-            text(&fonts.body, 22.0, PAPER, "Enter / Esc　继续　　Q / 手柄 Select　回到标题"),
-        ],
-    ));
-}
-
-fn paused_input(
-    actions: Res<Actions>,
-    mut next_run: ResMut<NextState<RunState>>,
-    mut next_app: ResMut<NextState<AppState>>,
-) {
-    if actions.quit_to_title {
-        next_app.set(AppState::Title);
-    } else if actions.confirm || actions.pause || actions.back {
-        next_run.set(RunState::Playing);
     }
 }

@@ -4,12 +4,18 @@ use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
 use lantern_content::Content;
-use lantern_platform::{Actions, Profile};
+use lantern_platform::{Actions, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good};
 use lantern_sim::{AppState, GameContent, OmenPick, RunMode, RunSetup};
 
+use bevy::ui::widget::NodeImageMode;
+use lantern_view::atlas::AtlasDb;
+
+use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
-use crate::{CINNABAR, DIM, Fonts, PAPER, SeedOverride, bench, text};
+use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
+use crate::skin::Skin;
+use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, SeedOverride, bench, on_paper, text};
 
 /// 标题界面上打开的面板。
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
@@ -20,6 +26,8 @@ pub(crate) enum TitleMode {
     Omen { seed: u64, picks: Vec<OmenPick> },
     /// 心灯
     Meta,
+    /// 设置
+    Settings,
 }
 
 #[derive(Resource, Default)]
@@ -34,13 +42,10 @@ pub(crate) struct TitleUi {
 #[derive(Component)]
 pub(crate) struct TitlePanel;
 
-#[derive(Component)]
-pub(crate) struct Choice(usize);
-
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<TitleMode>()
         .init_resource::<TitleUi>()
-        .add_systems(OnEnter(AppState::Title), enter)
+        .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
         .add_systems(Update, (input, redraw, highlight).chain().run_if(in_state(AppState::Title)));
 }
 
@@ -63,6 +68,8 @@ fn input(
     content: Res<GameContent>,
     seed: Res<SeedOverride>,
     mut profile: ResMut<Profile>,
+    mut settings: ResMut<Settings>,
+    mut window: PrimaryWindowQuery,
     mut mode: ResMut<TitleMode>,
     mut ui: ResMut<TitleUi>,
     mut commands: Commands,
@@ -77,22 +84,46 @@ fn input(
     };
     match mode.clone() {
         TitleMode::Main => {
-            if actions.confirm || clicked.is_some() {
-                let seed = seed.0.unwrap_or_else(random_seed);
-                *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
-                open(&mut ui);
-            } else if actions.meta {
-                *mode = TitleMode::Meta;
-                open(&mut ui);
-            } else if actions.bench {
-                bench::start(&mut commands, &mut next);
-            } else if actions.back {
-                exit.write(AppExit::Success);
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
+                ui.selected = h;
+            }
+            if actions.nav.y != 0 {
+                ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(MENU.len() as i32) as usize;
+            }
+            // 菜单：0 出发、1 心灯、2 设置、3 跑分、4 退出；快捷键直接对应
+            let act = clicked
+                .or(actions.confirm.then_some(ui.selected))
+                .or(actions.meta.then_some(1))
+                .or(actions.bench.then_some(3))
+                .or(actions.back.then_some(4));
+            match act {
+                Some(0) => {
+                    let seed = seed.0.unwrap_or_else(random_seed);
+                    *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
+                    open(&mut ui);
+                }
+                Some(1) => {
+                    *mode = TitleMode::Meta;
+                    open(&mut ui);
+                }
+                Some(2) => {
+                    *mode = TitleMode::Settings;
+                    open(&mut ui);
+                }
+                Some(3) => bench::start(&mut commands, &mut next),
+                Some(4) => {
+                    exit.write(AppExit::Success);
+                }
+                _ => {}
             }
         }
         TitleMode::Omen { seed, picks } => {
             let n = picks.len();
-            if let Some(h) = ui.hovered.take() {
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
                 ui.selected = h;
             }
             if actions.nav.x != 0 && n > 0 {
@@ -116,9 +147,36 @@ fn input(
                 open(&mut ui);
             }
         }
+        TitleMode::Settings => {
+            let n = ITEMS.len();
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
+                ui.selected = h;
+            }
+            if actions.nav.y != 0 {
+                ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(n as i32) as usize;
+            }
+            if let Some(i) = clicked {
+                ui.selected = i;
+            }
+            if actions.back {
+                *mode = TitleMode::Main;
+                open(&mut ui);
+            } else if ui.selected < n {
+                let mut a = *actions;
+                a.confirm |= clicked.is_some();
+                settings_ui::adjust(ITEMS[ui.selected], &a, &mut settings, &mut window);
+            }
+        }
         TitleMode::Meta => {
             let n = c.meta.lines.len();
-            if let Some(h) = ui.hovered.take() {
+            if ui.selected >= n {
+                ui.selected = 0;
+            }
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
                 ui.selected = h;
             }
             if actions.nav.y != 0 && n > 0 {
@@ -148,6 +206,10 @@ fn input(
     }
 }
 
+/// 标题菜单：(文字, 快捷键)
+const MENU: [(&str, &str); 5] =
+    [("出发", "Enter"), ("心灯", "M"), ("设置", ""), ("跑分", "B"), ("退出", "Esc")];
+
 fn panel() -> impl Bundle {
     (
         TitlePanel,
@@ -165,11 +227,29 @@ fn panel() -> impl Bundle {
     )
 }
 
+/// 标题画：一直铺在标题界面的最底下，夜签和心灯面板盖在上面。
+fn spawn_background(mut commands: Commands, skin: Res<Skin>) {
+    commands.spawn((
+        DespawnOnExit(AppState::Title),
+        GlobalZIndex(-1),
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        ImageNode::new(skin.title.clone()).with_mode(NodeImageMode::Stretch),
+    ));
+}
+
 fn redraw(
     mut commands: Commands,
     content: Res<GameContent>,
     fonts: Res<Fonts>,
+    skin: Res<Skin>,
+    db: Res<AtlasDb>,
     profile: Res<Profile>,
+    settings: Res<Settings>,
     mode: Res<TitleMode>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
@@ -183,19 +263,20 @@ fn redraw(
     }
     let c = &content.0;
     match &*mode {
-        TitleMode::Main => main_panel(&mut commands, &fonts, &profile),
-        TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, *seed, picks),
-        TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &profile),
+        TitleMode::Main => main_panel(&mut commands, &fonts, &skin, &profile),
+        TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
+        TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
+        TitleMode::Settings => settings_panel(&mut commands, &fonts, &skin, &settings),
     }
 }
 
-fn highlight(ui: Res<TitleUi>, mut q: Query<(&Choice, &mut BorderColor, &mut BackgroundColor)>) {
-    for (choice, mut border, mut bg) in &mut q {
-        let on = choice.0 == ui.selected;
-        let mut b = border.top;
-        b.set_alpha(if on { 1.0 } else { 0.35 });
-        *border = BorderColor::all(b);
-        bg.0 = if on { Color::srgba(0.12, 0.13, 0.19, 0.95) } else { Color::srgba(0.07, 0.08, 0.12, 0.85) };
+/// 选中项的焦点标记。
+#[derive(Component)]
+pub(crate) struct FocusMark(usize);
+
+fn highlight(ui: Res<TitleUi>, mut q: Query<(&FocusMark, &mut Visibility)>) {
+    for (m, mut v) in &mut q {
+        v.set_if_neq(if m.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
 
@@ -204,7 +285,24 @@ fn clickable(e: &mut EntityCommands, i: usize) {
     e.observe(move |_: On<PointerOver>, mut ui: ResMut<TitleUi>| ui.hovered = Some(i));
 }
 
-fn main_panel(commands: &mut Commands, fonts: &Fonts, profile: &Profile) {
+/// 盖住父节点的焦点框（默认隐藏）。
+fn focus(skin: &Skin, name: &str, i: usize, pad: f32) -> impl Bundle {
+    (
+        FocusMark(i),
+        Visibility::Hidden,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(-pad),
+            right: px(-pad),
+            top: px(-pad),
+            bottom: px(-pad),
+            ..default()
+        },
+        skin.image(name),
+    )
+}
+
+fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Profile) {
     let best = &profile.best;
     let record = if profile.runs == 0 {
         "第一次夜行".to_string()
@@ -218,53 +316,112 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, profile: &Profile) {
             if best.won { "　·　已迎来天明" } else { "" }
         )
     };
-    let mut root = commands.spawn(panel());
-    root.with_children(|p| {
-        p.spawn(text(&fonts.title, 128.0, PAPER, "提灯夜行"));
-        p.spawn(text(&fonts.body, 22.0, CINNABAR, concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"))));
-        p.spawn(text(&fonts.body, 18.0, DIM, &format!("灯油 {}　·　{record}", profile.oil)));
-        p.spawn(Node { height: px(36), ..default() });
-        p.spawn(text(&fonts.body, 24.0, PAPER, "Enter / 手柄 A　出发"));
-        p.spawn(text(&fonts.body, 18.0, DIM, "M / 手柄 X　心灯　　B　跑分　　F11　全屏　　Esc　退出"));
-    });
+    commands
+        .spawn((
+            TitlePanel,
+            DespawnOnExit(AppState::Title),
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(7),
+                top: percent(12),
+                bottom: percent(8),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Start,
+                row_gap: px(10),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Node { width: px(520), height: px(172), ..default() },
+                ImageNode::new(skin.logo.clone()),
+            ));
+            p.spawn(Node { height: px(36), ..default() });
+            for (i, (label, key)) in MENU.iter().enumerate() {
+                let mut item = p.spawn(Node {
+                    width: px(300),
+                    height: px(64),
+                    align_items: AlignItems::Center,
+                    padding: UiRect::left(px(36)),
+                    column_gap: px(18),
+                    ..default()
+                });
+                item.with_children(|it| {
+                    it.spawn(focus(skin, "menu_hl", i, 0.0));
+                    it.spawn(text(&fonts.title, 40.0, PAPER, label));
+                    it.spawn(text(&fonts.body, 15.0, DIM, key));
+                });
+                clickable(&mut item, i);
+            }
+            p.spawn(Node { flex_grow: 1.0, ..default() });
+            p.spawn(text(&fonts.body, 18.0, hex("#FFD98A"), &format!("灯油 {}", profile.oil)));
+            p.spawn(text(&fonts.body, 15.0, DIM, &record));
+            p.spawn(text(
+                &fonts.body,
+                14.0,
+                CINNABAR,
+                concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"), "　　F11　全屏"),
+            ));
+        });
 }
 
-fn omen_panel(commands: &mut Commands, c: &Content, fonts: &Fonts, seed: u64, picks: &[OmenPick]) {
+fn dim_layer() -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.6)),
+    )
+}
+
+fn omen_panel(
+    commands: &mut Commands,
+    c: &Content,
+    fonts: &Fonts,
+    skin: &Skin,
+    db: &AtlasDb,
+    seed: u64,
+    picks: &[OmenPick],
+) {
     commands.spawn(panel()).with_children(|p| {
+        p.spawn(dim_layer());
         p.spawn(text(&fonts.title, 72.0, PAPER, "抽取夜签"));
         p.spawn(text(&fonts.body, 18.0, DIM, &format!("本局规则三选一　·　种子 {seed}")));
-        p.spawn(Node { column_gap: px(20), ..default() }).with_children(|row| {
+        p.spawn(Node { column_gap: px(24), ..default() }).with_children(|row| {
             for (i, pick) in picks.iter().enumerate() {
                 let Some(def) = c.omen_index(&pick.id).map(|k| &c.omens[k]) else { continue };
-                let color = pick.element.map_or(hex("#FFD98A"), |e| element_color(c, e));
+                let accent = pick.element.map_or(CINNABAR, |e| on_paper(element_color(c, e)));
                 let mut card = row.spawn((
-                    Choice(i),
                     Node {
-                        width: px(240),
-                        min_height: px(250),
+                        width: px(250),
+                        min_height: px(320),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
-                        padding: UiRect::all(px(18)),
+                        padding: UiRect::axes(px(24), px(22)),
                         row_gap: px(12),
-                        border: UiRect::all(px(2)),
-                        border_radius: BorderRadius::all(px(10)),
                         ..default()
                     },
-                    BorderColor::all(color),
-                    BackgroundColor(Color::srgba(0.07, 0.08, 0.12, 0.85)),
+                    skin.image("card_omen"),
                 ));
                 card.with_children(|card| {
-                    card.spawn(text(&fonts.body, 14.0, DIM, "夜签"));
-                    card.spawn(text(&fonts.title, 52.0, color, &def.name));
+                    card.spawn(focus(skin, "card_focus", i, 6.0));
+                    card.spawn(text(&fonts.body, 14.0, INK_DIM, "夜签"));
+                    let icon = format!("ui/icon_omen_{}", def.id);
+                    spawn_icon(card, db, fonts, Some(&icon), &def.name, accent, 84.0);
+                    card.spawn(text(&fonts.title, 48.0, accent, &def.name));
                     card.spawn(Node { flex_grow: 1.0, ..default() });
-                    card.spawn(text(
-                        &fonts.body,
-                        17.0,
-                        hex("#8FE3B0"),
-                        &format!("＋ {}", omen_good(c, pick)),
+                    card.spawn((
+                        text(&fonts.body, 16.0, hex("#2F6B45"), &format!("＋ {}", omen_good(c, pick))),
+                        Node { max_width: px(200), ..default() },
                     ));
-                    card.spawn(text(&fonts.body, 17.0, hex("#FF8A7A"), &format!("－ {}", def.bad)));
-                    card.spawn(text(&fonts.body, 14.0, DIM, &format!("{}", i + 1)));
+                    card.spawn((
+                        text(&fonts.body, 16.0, hex("#9A3324"), &format!("－ {}", def.bad)),
+                        Node { max_width: px(200), ..default() },
+                    ));
+                    card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
                 });
                 clickable(&mut card, i);
             }
@@ -273,66 +430,122 @@ fn omen_panel(commands: &mut Commands, c: &Content, fonts: &Fonts, seed: u64, pi
     });
 }
 
-fn meta_panel(commands: &mut Commands, c: &Content, fonts: &Fonts, profile: &Profile) {
+fn meta_panel(
+    commands: &mut Commands,
+    c: &Content,
+    fonts: &Fonts,
+    skin: &Skin,
+    db: &AtlasDb,
+    profile: &Profile,
+) {
     let m = &c.meta;
     commands.spawn(panel()).with_children(|p| {
-        p.spawn(text(&fonts.title, 72.0, PAPER, "心灯"));
-        p.spawn(text(&fonts.body, 20.0, hex("#FFD98A"), &format!("灯油 {}", profile.oil)));
-        p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(10), ..default() }).with_children(
-            |list| {
-                for (i, line) in m.lines.iter().enumerate() {
-                    let lv = profile.meta_level(&line.id);
-                    let maxed = lv >= m.max_level;
-                    let cost = m.cost(lv);
-                    let can = !maxed && profile.oil >= cost;
-                    let pips: String = (0..m.max_level).map(|k| if k < lv { '●' } else { '○' }).collect();
-                    let price = if maxed {
-                        "已满".to_string()
-                    } else if can {
-                        format!("{cost} 灯油　可点亮")
-                    } else {
-                        format!("{cost} 灯油　还差 {}", cost - profile.oil)
-                    };
-                    let mut row = list.spawn((
-                        Choice(i),
-                        Node {
-                            width: px(560),
-                            align_items: AlignItems::Center,
-                            column_gap: px(16),
-                            padding: UiRect::axes(px(16), px(10)),
-                            border: UiRect::all(px(2)),
-                            border_radius: BorderRadius::all(px(8)),
-                            ..default()
-                        },
-                        BorderColor::all(if can { hex("#FFD98A") } else { DIM }),
-                        BackgroundColor(Color::srgba(0.07, 0.08, 0.12, 0.85)),
-                    ));
-                    row.with_children(|r| {
-                        r.spawn(text(
-                            &fonts.title,
-                            44.0,
-                            if lv > 0 { hex("#FFD98A") } else { DIM },
-                            &line.icon,
-                        ));
-                        r.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() })
-                            .with_children(|t| {
-                                t.spawn(Node {
-                                    column_gap: px(12),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                })
-                                .with_children(|h| {
-                                    h.spawn(text(&fonts.title, 28.0, PAPER, &line.name));
-                                    h.spawn(text(&fonts.body, 18.0, hex("#FFD98A"), &pips));
-                                });
-                                t.spawn(text(&fonts.body, 15.0, DIM, &line.desc));
-                            });
-                        r.spawn(text(&fonts.body, 15.0, if can { hex("#FFD98A") } else { DIM }, &price));
-                    });
-                    clickable(&mut row, i);
-                }
+        p.spawn(dim_layer());
+        p.spawn((
+            Node {
+                width: px(680),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(px(56), px(44)),
+                row_gap: px(10),
+                ..default()
             },
-        );
+            skin.image("panel"),
+        ))
+        .with_children(|panel| {
+            panel.spawn(text(&fonts.title, 64.0, INK, "心灯"));
+            panel.spawn(text(&fonts.body, 18.0, on_paper(hex("#FFD98A")), &format!("灯油 {}", profile.oil)));
+            panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+            for (i, line) in m.lines.iter().enumerate() {
+                let lv = profile.meta_level(&line.id);
+                let maxed = lv >= m.max_level;
+                let cost = m.cost(lv);
+                let can = !maxed && profile.oil >= cost;
+                let price = if maxed {
+                    "已满".to_string()
+                } else if can {
+                    format!("{cost} 灯油　可点亮")
+                } else {
+                    format!("{cost} 灯油　还差 {}", cost - profile.oil)
+                };
+                let mut row = panel.spawn(Node {
+                    width: percent(100),
+                    align_items: AlignItems::Center,
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(16), px(8)),
+                    ..default()
+                });
+                row.with_children(|r| {
+                    r.spawn(focus(skin, "focus_ring", i, 2.0));
+                    let icon = if lv > 0 {
+                        format!("ui/icon_meta_{}", line.id)
+                    } else {
+                        format!("ui/icon_meta_{}_off", line.id)
+                    };
+                    spawn_icon(r, db, fonts, Some(&icon), &line.icon, INK, 56.0);
+                    r.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        row_gap: px(2),
+                        ..default()
+                    })
+                    .with_children(|t| {
+                        t.spawn(Node { column_gap: px(10), align_items: AlignItems::Center, ..default() })
+                            .with_children(|h| {
+                                h.spawn(text(&fonts.title, 30.0, INK, &line.name));
+                                for k in 0..m.max_level {
+                                    h.spawn((
+                                        Node { width: px(18), height: px(18), ..default() },
+                                        skin.image(if k < lv { "pip_on" } else { "pip" }),
+                                    ));
+                                }
+                            });
+                        t.spawn(text(&fonts.body, 15.0, INK_DIM, &line.desc));
+                    });
+                    r.spawn(text(
+                        &fonts.body,
+                        15.0,
+                        if can { on_paper(hex("#FFD98A")) } else { INK_DIM },
+                        &price,
+                    ));
+                });
+                clickable(&mut row, i);
+            }
+        });
         p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　Enter　点亮　　Esc　返回"));
+    });
+}
+
+fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings: &Settings) {
+    commands.spawn(panel()).with_children(|p| {
+        p.spawn(dim_layer());
+        p.spawn((
+            Node {
+                width: px(460),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(px(48), px(40)),
+                row_gap: px(4),
+                ..default()
+            },
+            skin.image("panel"),
+        ))
+        .with_children(|panel| {
+            panel.spawn(text(&fonts.title, 64.0, INK, "设置"));
+            panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+            for (i, &item) in ITEMS.iter().enumerate() {
+                let mut row = panel.spawn(Node {
+                    width: percent(100),
+                    padding: UiRect::axes(px(18), px(8)),
+                    ..default()
+                });
+                row.with_children(|r| {
+                    r.spawn(focus(skin, "focus_ring", i, 0.0));
+                    settings_ui::spawn_row(r, fonts, settings, item);
+                });
+                clickable(&mut row, i);
+            }
+        });
+        p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　← → 调整　Enter 切换　　Esc 返回"));
     });
 }

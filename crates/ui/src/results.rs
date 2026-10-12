@@ -11,7 +11,8 @@ use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
-use crate::{CINNABAR, DIM, Fonts, PAPER, text};
+use crate::skin::Skin;
+use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 pub(crate) fn register(app: &mut App) {
     app.add_systems(OnEnter(RunState::Over), spawn)
@@ -28,6 +29,7 @@ fn spawn(
     content: Res<GameContent>,
     fonts: Res<Fonts>,
     db: Res<AtlasDb>,
+    skin: Res<Skin>,
     flow: Res<Flow>,
     setup: Res<RunSetup>,
     arsenal: Res<Arsenal>,
@@ -71,19 +73,58 @@ fn spawn(
             },
             BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.8)),
         ))
-        .with_children(|p| {
+        .with_children(|root| {
+            root.spawn(overlay_vignette(&skin));
+            root.spawn((
+                Node {
+                    width: px(760),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(px(56), px(40)),
+                    row_gap: px(12),
+                    ..default()
+                },
+                skin.image("panel"),
+            ))
+            .with_children(|p| {
+                results_body(
+                    p, c, &fonts, &db, &skin, &r, &sub, omen, record, counts, &arsenal, &build, &profile,
+                )
+            });
+            root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn results_body(
+    p: &mut ChildSpawnerCommands,
+    c: &lantern_content::Content,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    r: &lantern_sim::RunResult,
+    sub: &str,
+    omen: Option<(&lantern_sim::OmenPick, &lantern_content::OmenDef)>,
+    record: Option<NewRecord>,
+    counts: bool,
+    arsenal: &Arsenal,
+    build: &Build,
+    profile: &Profile,
+) {
+    {
+        {
             p.spawn(text(
                 &fonts.title,
                 96.0,
-                if r.won { hex("#FFF1C2") } else { CINNABAR },
+                if r.won { on_paper(hex("#FFD98A")) } else { CINNABAR },
                 if r.won { "天明" } else { "灯灭" },
             ));
-            p.spawn(text(&fonts.body, 20.0, PAPER, &sub));
+            p.spawn(text(&fonts.body, 20.0, INK, sub));
             if let Some((pick, def)) = omen {
                 p.spawn(text(
                     &fonts.body,
                     16.0,
-                    DIM,
+                    INK_DIM,
                     &format!("夜签「{}」　{}", def.name, omen_good(c, pick)),
                 ));
             }
@@ -93,8 +134,18 @@ fn spawn(
                     NewRecord::Kills => "新纪录 · 单局击杀",
                     NewRecord::Survival => "新纪录 · 存活时间",
                 };
-                p.spawn(text(&fonts.body, 20.0, hex("#FFD98A"), s));
+                p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() })
+                    .with_children(|row| {
+                        if let Some(seal) = db.find("ui/seal_record") {
+                            row.spawn((
+                                Node { width: px(40), height: px(40), ..default() },
+                                db.ui_image(seal),
+                            ));
+                        }
+                        row.spawn(text(&fonts.body, 20.0, CINNABAR, s));
+                    });
             }
+            p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
             p.spawn(Node { column_gap: px(16), ..default() }).with_children(|row| {
                 for (k, v) in [
                     ("击杀", r.kills.to_string()),
@@ -104,14 +155,13 @@ fn spawn(
                 ] {
                     row.spawn((
                         Node {
-                            width: px(120),
+                            width: px(128),
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
-                            padding: UiRect::all(px(8)),
-                            border_radius: BorderRadius::all(px(8)),
+                            padding: UiRect::all(px(10)),
                             ..default()
                         },
-                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.05)),
+                        skin.image("panel_dark"),
                     ))
                     .with_children(|b| {
                         b.spawn(text(&fonts.body, 14.0, DIM, k));
@@ -131,12 +181,12 @@ fn spawn(
                         };
                         spawn_icon(
                             row,
-                            &db,
-                            &fonts,
+                            db,
+                            fonts,
                             Some(&name),
                             &def.icon,
                             element_color(c, def.element),
-                            48.0,
+                            52.0,
                         );
                     }
                     row.spawn(Node { width: px(16), ..default() });
@@ -145,8 +195,8 @@ fn spawn(
                         let name = format!("ui/icon_{}", def.id);
                         spawn_icon(
                             row,
-                            &db,
-                            &fonts,
+                            db,
+                            fonts,
                             Some(&name),
                             &def.name,
                             element_color(c, def.element),
@@ -164,8 +214,23 @@ fn spawn(
                 if bonus > 0 {
                     detail.push_str(&format!(" · 额外 {bonus}"));
                 }
-                p.spawn(text(&fonts.title, 40.0, hex("#FFD98A"), &format!("+{} 灯油", r.oil)));
-                p.spawn(text(&fonts.body, 15.0, DIM, &detail));
+                p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+                p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() })
+                    .with_children(|row| {
+                        if let Some(oil) = db.find("ui/icon_oil") {
+                            row.spawn((
+                                Node { width: px(44), height: px(44), ..default() },
+                                db.ui_image(oil),
+                            ));
+                        }
+                        row.spawn(text(
+                            &fonts.title,
+                            40.0,
+                            on_paper(hex("#FFD98A")),
+                            &format!("+{} 灯油", r.oil),
+                        ));
+                    });
+                p.spawn(text(&fonts.body, 15.0, INK_DIM, &detail));
                 // 离下一盏心灯还差多少
                 let next = c
                     .meta
@@ -186,12 +251,11 @@ fn spawn(
                             cost - profile.oil
                         )
                     };
-                    p.spawn(text(&fonts.body, 16.0, PAPER, &s));
+                    p.spawn(text(&fonts.body, 16.0, INK, &s));
                 }
             }
-            p.spawn(Node { height: px(12), ..default() });
-            p.spawn(text(&fonts.body, 20.0, DIM, "Enter / 手柄 A　回到标题"));
-        });
+        }
+    }
 }
 
 fn input(

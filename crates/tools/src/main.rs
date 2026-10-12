@@ -3,6 +3,7 @@
 //!   cargo run --release -p lantern-tools -- bench [--enemies 5000] [--seconds 20] [--seed 1]
 //!   cargo run -p lantern-tools -- check-content
 //!   cargo run --release -p lantern-tools -- replay <回放文件>
+//!   cargo run --release -p lantern-tools -- balance [--runs 20] [--seed 1] [--god]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -11,7 +12,8 @@ use std::time::Instant;
 use bevy_math::{Vec2, ops};
 use lantern_content::Content;
 use lantern_core::step::TICK_HZ;
-use lantern_sim::{InputFrame, Replay, RunMode, SimCommand, SimHarness};
+use lantern_sim::combat::Source;
+use lantern_sim::{InputFrame, Replay, RunMode, RunSetup, SimCommand, SimEvent, SimHarness, bot};
 
 const USAGE: &str = "用法：
   lantern-tools bench [--enemies <数量>] [--seconds <秒>] [--seed <种子>]
@@ -19,7 +21,10 @@ const USAGE: &str = "用法：
   lantern-tools check-content
       校验 assets/data
   lantern-tools replay <回放文件>
-      不开窗口重放，逐秒核对状态哈希，报告第一次出现分歧的步数";
+      不开窗口重放，逐秒核对状态哈希，报告第一次出现分歧的步数
+  lantern-tools balance [--runs <局数>] [--seed <起始种子>] [--god]
+      机器人自动选卡、绕圈走位打整局，统计等级曲线、击杀、进化时间、伤害来源占比、存活时间
+      （--god：主角无敌，看成长曲线和夜主战）";
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")
@@ -101,11 +106,154 @@ fn replay(args: &[String]) -> Result<(), String> {
     }
 }
 
+struct RunStats {
+    won: bool,
+    secs: f32,
+    kills: u32,
+    /// 每 30 秒的等级
+    levels: Vec<u32>,
+    /// 每次进化的时刻（秒）
+    evolutions: Vec<f32>,
+    damage: Vec<(Source, f64)>,
+    build: String,
+}
+
+fn play_one(content: &Content, seed: u64, god: bool) -> RunStats {
+    let mut setup = RunSetup::new(seed, RunMode::Normal);
+    setup.god = god;
+    let mut sim = SimHarness::with_setup(content.clone(), setup);
+    let mut levels = Vec::new();
+    let mut evolutions = Vec::new();
+    // 最多 15 分钟游戏时间（夜主没打死时也停）
+    while !sim.is_over() && sim.tick() < 15 * 60 * u64::from(TICK_HZ) {
+        let tick = sim.tick();
+        let (input, cmds) = bot::input(tick);
+        bot::step(&mut sim, input, &cmds);
+        if sim.tick() != tick && sim.tick().is_multiple_of(30 * u64::from(TICK_HZ)) {
+            levels.push(sim.progress().level);
+        }
+        for ev in sim.take_events() {
+            if let SimEvent::Evolve { .. } = ev {
+                evolutions.push(sim.tick() as f32 / TICK_HZ as f32);
+            }
+        }
+    }
+    let c = content;
+    let mut build: Vec<String> = sim
+        .arsenal()
+        .0
+        .iter()
+        .map(|w| {
+            let def = &c.weapons[w.def];
+            match (&def.evolution, w.evolved) {
+                (Some(e), true) => e.name.clone(),
+                _ => format!("{}{}", def.name, w.level),
+            }
+        })
+        .collect();
+    build.extend(sim.build().passives.iter().map(|p| format!("{}{}", c.passives[p.def].name, p.level)));
+    let result = sim.flow().result.clone();
+    RunStats {
+        won: result.as_ref().is_some_and(|r| r.won),
+        secs: sim.tick() as f32 / TICK_HZ as f32,
+        kills: sim.progress().kills,
+        levels,
+        evolutions,
+        damage: sim.damage_log().0.clone(),
+        build: build.join(" "),
+    }
+}
+
+fn median(mut v: Vec<f32>) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort_by(f32::total_cmp);
+    v[v.len() / 2]
+}
+
+fn source_name(c: &Content, s: Source) -> String {
+    match s {
+        Source::Weapon(i) => c.weapons[i as usize].name.clone(),
+        Source::BonusSword => "追加飞剑".into(),
+        Source::Burn => "灼烧".into(),
+        Source::Blast => "连锁爆炸".into(),
+        Source::Quake => "震地".into(),
+        Source::Screen => "太极".into(),
+        Source::Ult => "燃灯".into(),
+    }
+}
+
+/// 机器人打若干局，汇总成长曲线和伤害来源（docs/BALANCE.md 第 11 节）。
+fn balance(args: &[String]) -> Result<(), String> {
+    let runs = flag(args, "--runs", 20)?;
+    let seed0 = flag(args, "--seed", 1)?;
+    let god = args.iter().any(|a| a == "--god");
+    let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    let all: Vec<RunStats> = (0..runs).map(|k| play_one(&content, seed0 + k, god)).collect();
+    println!(
+        "{runs} 局（种子 {seed0}–{}，{}），用时 {:.1} 秒",
+        seed0 + runs - 1,
+        if god { "无敌" } else { "会受伤" },
+        start.elapsed().as_secs_f64()
+    );
+    let wins = all.iter().filter(|r| r.won).count();
+    println!(
+        "天明 {wins} / {runs}；存活时间中位 {:.0} 秒；击杀中位 {:.0}",
+        median(all.iter().map(|r| r.secs).collect()),
+        median(all.iter().map(|r| r.kills as f32).collect())
+    );
+    // 等级曲线：每 30 秒的中位等级（只统计还活着的局）
+    let longest = all.iter().map(|r| r.levels.len()).max().unwrap_or(0);
+    let curve: Vec<String> = (0..longest)
+        .map(|i| {
+            let v: Vec<f32> = all.iter().filter_map(|r| r.levels.get(i).map(|&l| l as f32)).collect();
+            format!("{:.0}", median(v))
+        })
+        .collect();
+    println!("每 30 秒等级中位：{}", curve.join(","));
+    let first_evo: Vec<f32> = all.iter().filter_map(|r| r.evolutions.first().copied()).collect();
+    println!(
+        "第一次进化：{} 局出现，中位 {:.0} 秒；平均每局进化 {:.1} 件",
+        first_evo.len(),
+        median(first_evo.clone()),
+        all.iter().map(|r| r.evolutions.len()).sum::<usize>() as f32 / runs as f32
+    );
+    let mut total: Vec<(Source, f64)> = Vec::new();
+    for r in &all {
+        for &(s, d) in &r.damage {
+            match total.iter_mut().find(|(t, _)| *t == s) {
+                Some((_, v)) => *v += d,
+                None => total.push((s, d)),
+            }
+        }
+    }
+    let sum: f64 = total.iter().map(|(_, d)| d).sum::<f64>().max(1.0);
+    total.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let shares: Vec<String> =
+        total.iter().map(|&(s, d)| format!("{} {:.1}%", source_name(&content, s), d / sum * 100.0)).collect();
+    println!("伤害来源：{}", shares.join("，"));
+    println!("各局构筑：");
+    for (k, r) in all.iter().enumerate() {
+        println!(
+            "  种子 {:>4}　{}　{:>4.0} 秒　击杀 {:>5}　{}",
+            seed0 + k as u64,
+            if r.won { "天明" } else { "灯灭" },
+            r.secs,
+            r.kills,
+            r.build
+        );
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("bench") => bench(&args[1..]),
         Some("replay") => replay(&args[1..]),
+        Some("balance") => balance(&args[1..]),
         Some("check-content") => {
             Content::load(&data_dir()).map(|_| println!("内容数据校验通过")).map_err(|e| e.to_string())
         }

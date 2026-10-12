@@ -12,8 +12,9 @@ use lantern_sim::flow::{ChestSource, Flow};
 use lantern_sim::{Arsenal, Build, GameContent, Offer, RunState, SimCommand, SimCommands, SimPhase};
 use lantern_view::atlas::AtlasDb;
 
-use crate::describe::{OfferInfo, element_color, hex, offer_info, offer_note};
-use crate::{DIM, Fonts, PAPER, text};
+use crate::describe::{OfferInfo, Rarity, element_color, hex, offer_info, offer_note};
+use crate::skin::Skin;
+use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 /// 界面上现在画的是哪一个选择。变了就重画。
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -42,7 +43,7 @@ pub(crate) struct ChoiceUi {
 pub(crate) struct ChoiceRoot;
 
 #[derive(Component)]
-pub(crate) struct Card(usize);
+pub(crate) struct Card;
 
 #[derive(Component)]
 pub(crate) struct RerollLabel;
@@ -79,6 +80,7 @@ fn sync(
     content: Res<GameContent>,
     fonts: Res<Fonts>,
     db: Res<AtlasDb>,
+    skin: Res<Skin>,
     phase: Res<SimPhase>,
     flow: Res<Flow>,
     arsenal: Res<Arsenal>,
@@ -113,6 +115,7 @@ fn sync(
                 c,
                 &fonts,
                 &db,
+                &skin,
                 &arsenal,
                 &build,
                 &offers,
@@ -123,10 +126,10 @@ fn sync(
         }
         Shown::Chest(..) => {
             if let Some(chest) = &flow.chest {
-                spawn_chest(&mut commands, c, &fonts, &db, &arsenal, &build, chest)
+                spawn_chest(&mut commands, c, &fonts, &db, &skin, &arsenal, &build, chest)
             }
         }
-        Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &arsenal, k),
+        Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, k),
     }
 }
 
@@ -151,7 +154,9 @@ fn input(
             if n == 0 {
                 return;
             }
-            if let Some(h) = ui.hovered {
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
                 ui.selected = h.min(n - 1);
             }
             if actions.nav.x != 0 {
@@ -181,19 +186,15 @@ fn input(
     }
 }
 
-/// 选中的卡片描边更亮、底色更深。
+/// 选中的卡片叠一层泥金焦点框。
 fn highlight(
     ui: Res<ChoiceUi>,
     flow: Res<Flow>,
-    mut cards: Query<(&Card, &mut BorderColor, &mut BackgroundColor)>,
+    mut focus: Query<(&CardFocus, &mut Visibility)>,
     mut reroll: Query<&mut Text, With<RerollLabel>>,
 ) {
-    for (card, mut border, mut bg) in &mut cards {
-        let on = card.0 == ui.selected;
-        let mut b = border.top;
-        b.set_alpha(if on { 1.0 } else { 0.45 });
-        *border = BorderColor::all(b);
-        bg.0 = if on { Color::srgba(0.12, 0.13, 0.19, 0.97) } else { Color::srgba(0.07, 0.08, 0.12, 0.93) };
+    for (f, mut v) in &mut focus {
+        v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
     }
     if flow.is_changed() {
         for mut t in &mut reroll {
@@ -202,7 +203,10 @@ fn highlight(
     }
 }
 
-fn overlay() -> impl Bundle {
+#[derive(Component)]
+pub(crate) struct CardFocus(usize);
+
+fn overlay(skin: &Skin) -> impl Bundle {
     (
         ChoiceRoot,
         DespawnOnExit(lantern_sim::AppState::Run),
@@ -217,7 +221,8 @@ fn overlay() -> impl Bundle {
             row_gap: px(18),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.72)),
+        BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.65)),
+        children![overlay_vignette(skin)],
     )
 }
 
@@ -252,11 +257,21 @@ pub(crate) fn spawn_icon(
     }
 }
 
+fn card_skin(r: Rarity) -> &'static str {
+    match r {
+        Rarity::Tian => "card_tian",
+        Rarity::Xuan => "card_xuan",
+        Rarity::Ling => "card_ling",
+        Rarity::Fan => "card_fan",
+    }
+}
+
 fn card(
     commands: &mut ChildSpawnerCommands,
     c: &Content,
     fonts: &Fonts,
     db: &AtlasDb,
+    skin: &Skin,
     arsenal: &Arsenal,
     build: &Build,
     i: usize,
@@ -266,55 +281,66 @@ fn card(
     let note = offer_note(c, arsenal, build, offer);
     let el = info.element.map(|e| format!("{} 属性", c.element(e).name)).unwrap_or_default();
     let mut card = commands.spawn((
-        Card(i),
+        Card,
         Node {
-            width: px(236),
-            min_height: px(330),
+            width: px(240),
+            min_height: px(340),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            padding: UiRect::all(px(16)),
+            padding: UiRect::axes(px(22), px(20)),
             row_gap: px(8),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(10)),
             ..default()
         },
-        BorderColor::all(info.color),
-        BackgroundColor(Color::srgba(0.07, 0.08, 0.12, 0.93)),
+        skin.image(card_skin(info.rarity)),
     ));
     card.with_children(|card| {
+        // 焦点框：和卡片一样大，叠在上面
+        card.spawn((
+            CardFocus(i),
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(-6),
+                right: px(-6),
+                top: px(-6),
+                bottom: px(-6),
+                ..default()
+            },
+            skin.image("card_focus"),
+        ));
         card.spawn(Node { width: percent(100), justify_content: JustifyContent::SpaceBetween, ..default() })
             .with_children(|row| {
-                row.spawn(text(&fonts.body, 14.0, info.rarity.color(), info.rarity.name()));
-                row.spawn(text(&fonts.body, 14.0, DIM, &info.kind));
+                row.spawn(text(&fonts.body, 14.0, on_paper(info.rarity.color()), info.rarity.name()));
+                row.spawn(text(&fonts.body, 14.0, INK_DIM, &info.kind));
             });
-        spawn_icon(card, db, fonts, info.icon.as_deref(), &info.glyph, info.color, 84.0);
-        card.spawn(text(&fonts.title, 34.0, info.color, &info.name));
-        card.spawn((text(&fonts.body, 16.0, PAPER, &info.desc), Node { max_width: px(200), ..default() }));
-        card.spawn(text(&fonts.body, 13.0, DIM, &el));
+        spawn_icon(card, db, fonts, info.icon.as_deref(), &info.glyph, on_paper(info.color), 88.0);
+        card.spawn(text(&fonts.title, 36.0, on_paper(info.color), &info.name));
+        card.spawn((text(&fonts.body, 16.0, INK, &info.desc), Node { max_width: px(196), ..default() }));
+        card.spawn(text(&fonts.body, 13.0, INK_DIM, &el));
         card.spawn(Node { flex_grow: 1.0, ..default() });
         if let Some(n) = note {
+            let box_skin = if n.color.is_some() { "note_box_hi" } else { "note_box" };
             card.spawn((
                 Node {
                     width: percent(100),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(px(8)),
+                    padding: UiRect::axes(px(10), px(8)),
                     row_gap: px(2),
-                    border_radius: BorderRadius::all(px(6)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.05)),
+                skin.image(box_skin),
             ))
             .with_children(|b| {
-                b.spawn(text(&fonts.body, 14.0, n.color.unwrap_or(DIM), &n.title));
+                b.spawn(text(&fonts.body, 14.0, n.color.map_or(INK_DIM, on_paper), &n.title));
                 if !n.body.is_empty() {
                     b.spawn((
-                        text(&fonts.body, 13.0, DIM, &n.body),
-                        Node { max_width: px(196), ..default() },
+                        text(&fonts.body, 13.0, INK_DIM, &n.body),
+                        Node { max_width: px(176), ..default() },
                     ));
                 }
             });
         }
-        card.spawn(text(&fonts.body, 14.0, DIM, &format!("{}", i + 1)));
+        card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
     });
     card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
@@ -325,6 +351,7 @@ fn spawn_level_up(
     c: &Content,
     fonts: &Fonts,
     db: &AtlasDb,
+    skin: &Skin,
     arsenal: &Arsenal,
     build: &Build,
     offers: &[Offer],
@@ -332,7 +359,7 @@ fn spawn_level_up(
     level: u32,
     rerolls: u32,
 ) {
-    commands.spawn(overlay()).with_children(|root| {
+    commands.spawn(overlay(skin)).with_children(|root| {
         root.spawn(Node {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
@@ -347,9 +374,9 @@ fn spawn_level_up(
             };
             head.spawn(text(&fonts.body, 18.0, if inspired { hex("#FFD98A") } else { DIM }, &sub));
         });
-        root.spawn(Node { column_gap: px(18), ..default() }).with_children(|row| {
+        root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
             for (i, &o) in offers.iter().enumerate() {
-                card(row, c, fonts, db, arsenal, build, i, o);
+                card(row, c, fonts, db, skin, arsenal, build, i, o);
             }
         });
         root.spawn(Node { column_gap: px(36), ..default() }).with_children(|foot| {
@@ -373,6 +400,7 @@ fn spawn_chest(
     c: &Content,
     fonts: &Fonts,
     db: &AtlasDb,
+    skin: &Skin,
     arsenal: &Arsenal,
     build: &Build,
     chest: &lantern_sim::flow::ChestReveal,
@@ -385,46 +413,62 @@ fn spawn_chest(
         (_, n) => format!("宝箱 · {n} 连"),
     };
     commands
-        .spawn(overlay())
+        .spawn(overlay(skin))
         .with_children(|root| {
             root.spawn(text(&fonts.title, 64.0, hex("#FFD98A"), &title));
-            root.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(10), ..default() })
-                .with_children(|list| {
-                    for item in &chest.items {
-                        // 物品已经生效，按生效前的样子描述（升级显示“Lv a → a+1”）
-                        let info = offer_info(c, arsenal, build, item.offer);
-                        let kind = match item.offer {
-                            Offer::WeaponUp(_) | Offer::PassiveUp(_) => {
-                                format!("Lv{} → {}", item.level - 1, item.level)
-                            }
-                            Offer::Evolve(_) => "进化".into(),
-                            Offer::NewWeapon(_) | Offer::NewPassive(_) => "新".into(),
-                            _ => "补给".into(),
-                        };
+            // 卷轴：展开的纸上一行一件
+            root.spawn((
+                Node {
+                    width: px(480),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6),
+                    padding: UiRect::axes(px(40), px(36)),
+                    ..default()
+                },
+                skin.image("panel"),
+            ))
+            .with_children(|list| {
+                for (k, item) in chest.items.iter().enumerate() {
+                    // 物品已经生效，按生效前的样子描述（升级显示“Lv a → a+1”）
+                    let info = offer_info(c, arsenal, build, item.offer);
+                    let kind = match item.offer {
+                        Offer::WeaponUp(_) | Offer::PassiveUp(_) => {
+                            format!("Lv{} → {}", item.level - 1, item.level)
+                        }
+                        Offer::Evolve(_) => "进化".into(),
+                        Offer::NewWeapon(_) | Offer::NewPassive(_) => "新".into(),
+                        _ => "补给".into(),
+                    };
+                    if k > 0 {
                         list.spawn((
-                            Card(usize::MAX),
-                            Node {
-                                width: px(420),
-                                align_items: AlignItems::Center,
-                                column_gap: px(14),
-                                padding: UiRect::axes(px(14), px(8)),
-                                border: UiRect::all(px(2)),
-                                border_radius: BorderRadius::all(px(8)),
-                                ..default()
-                            },
-                            BorderColor::all(info.color.with_alpha(0.5)),
-                            BackgroundColor(Color::srgba(0.07, 0.08, 0.12, 0.93)),
-                        ))
+                            Node { height: px(10), width: percent(100), ..default() },
+                            skin.image("divider"),
+                        ));
+                    }
+                    list.spawn(Node { align_items: AlignItems::Center, column_gap: px(14), ..default() })
                         .with_children(|row| {
-                            spawn_icon(row, db, fonts, info.icon.as_deref(), &info.glyph, info.color, 52.0);
+                            spawn_icon(
+                                row,
+                                db,
+                                fonts,
+                                info.icon.as_deref(),
+                                &info.glyph,
+                                on_paper(info.color),
+                                56.0,
+                            );
                             row.spawn(Node { flex_direction: FlexDirection::Column, ..default() })
                                 .with_children(|t| {
-                                    t.spawn(text(&fonts.title, 28.0, info.color, &info.name));
-                                    t.spawn(text(&fonts.body, 14.0, DIM, &kind));
+                                    t.spawn(text(&fonts.title, 28.0, on_paper(info.color), &info.name));
+                                    t.spawn(text(
+                                        &fonts.body,
+                                        14.0,
+                                        INK_DIM,
+                                        &format!("{}　{kind}", info.rarity.name()),
+                                    ));
                                 });
                         });
-                    }
-                });
+                }
+            });
             root.spawn(text(&fonts.body, 18.0, PAPER, "Enter / 手柄 A　继续"));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
@@ -435,6 +479,7 @@ fn spawn_evolve(
     c: &Content,
     fonts: &Fonts,
     db: &AtlasDb,
+    skin: &Skin,
     arsenal: &Arsenal,
     k: usize,
 ) {
@@ -443,10 +488,12 @@ fn spawn_evolve(
     let color = element_color(c, def.element);
     let icon_name = format!("ui/icon_{}_evo", def.id);
     commands
-        .spawn(overlay())
+        .spawn(overlay(skin))
         .with_children(|root| {
-            root.spawn(text(&fonts.body, 22.0, hex("#FFD98A"), "进化"));
-            spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, 160.0);
+            if let Some(seal) = db.find("ui/seal_evo") {
+                root.spawn((Node { width: px(72), height: px(72), ..default() }, db.ui_image(seal)));
+            }
+            spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, 168.0);
             root.spawn(text(&fonts.title, 88.0, color, &evo.name));
             root.spawn(text(&fonts.body, 20.0, PAPER, &format!("{} → {}", def.name, evo.name)));
             root.spawn(text(&fonts.body, 18.0, DIM, &evo.desc));

@@ -282,9 +282,10 @@ pub(crate) fn resolve_hits(
         if boss && hit.boss_cap > 0.0 {
             dmg = dmg.min(hit.boss_cap);
         }
+        // 统计只计实际打掉的血（溢出的不算）
+        log.add(hit.source, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
         en.flash[i] = 0.08;
-        log.add(hit.source, dmg);
         let pos = Vec2::new(en.x[i], en.y[i]);
         let kind = if hit.flags & HIT_DOT != 0 {
             HitKind::Dot
@@ -509,10 +510,10 @@ pub(crate) fn burn(
         }
         en.burn_t[i] -= DT;
         let dmg = en.burn_dps[i] * en.burn_stacks[i] * DT;
+        log.add(Source::Burn, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
         en.burn_acc[i] += dmg;
         en.burn_show[i] -= DT;
-        log.add(Source::Burn, dmg);
         if en.burn_show[i] <= 0.0 && en.burn_acc[i] >= 1.0 {
             outbox.0.push(SimEvent::Hit {
                 pos: Vec2::new(en.x[i], en.y[i] - en.r[i]),

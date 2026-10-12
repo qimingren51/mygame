@@ -6,6 +6,7 @@ use lantern_content::Rank;
 use lantern_sim::{AppState, GameContent, SimEvent, SimOutbox};
 
 use crate::describe::{element_color, hex};
+use crate::skin::Skin;
 use crate::{DIM, Fonts, PAPER, text};
 
 const MAX: usize = 4;
@@ -56,6 +57,7 @@ fn read_events(
     mut commands: Commands,
     content: Res<GameContent>,
     fonts: Res<Fonts>,
+    skin: Res<Skin>,
     outbox: Res<SimOutbox>,
     stack: Single<Entity, With<ToastStack>>,
     toasts: Query<(Entity, &Toast)>,
@@ -140,11 +142,10 @@ fn read_events(
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::axes(px(22), px(6)),
-                    border_radius: BorderRadius::all(px(8)),
+                    padding: UiRect::axes(px(48), px(if m.big { 12.0 } else { 8.0 })),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.6)),
+                skin.image(if m.big { "toast_big" } else { "toast" }),
             ))
             .with_children(|t| {
                 t.spawn(text(&fonts.title, if m.big { 40.0 } else { 28.0 }, m.color, &m.title));
@@ -161,7 +162,7 @@ fn read_events(
 fn fade(
     mut commands: Commands,
     time: Res<Time>,
-    mut toasts: Query<(Entity, &mut Toast, &mut BackgroundColor, &Children)>,
+    mut toasts: Query<(Entity, &mut Toast, &mut ImageNode, &Children)>,
     mut texts: Query<&mut TextColor>,
 ) {
     for (e, mut t, mut bg, children) in &mut toasts {
@@ -171,7 +172,7 @@ fn fade(
             continue;
         }
         let a = ((t.life - t.t) / 0.5).min(1.0);
-        bg.0.set_alpha(0.6 * a);
+        bg.color.set_alpha(a);
         for c in children {
             if let Ok(mut tc) = texts.get_mut(*c) {
                 tc.0.set_alpha(a);

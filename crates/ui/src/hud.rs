@@ -13,7 +13,8 @@ use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
-use crate::{CINNABAR, DIM, Fonts, PAPER, text};
+use crate::skin::Skin;
+use crate::{DIM, Fonts, PAPER, text};
 
 #[derive(Component)]
 pub(crate) struct Clock;
@@ -64,8 +65,6 @@ pub(crate) struct ComboLabel;
 pub(crate) struct BuffLabel;
 
 const BAR_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
-const XP_COLOR: Color = Color::srgb(0.62, 0.86, 0.95);
-const SHIELD_COLOR: Color = Color::srgba(0.79, 0.57, 0.35, 0.9);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
 
 fn abs(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f32>) -> Node {
@@ -79,14 +78,16 @@ fn abs(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f
     }
 }
 
-fn bar(width: f32, height: f32, fill: impl Bundle, color: Color) -> impl Bundle {
+/// 进度条：底槽（毛笔横拖）里放一条填充，填充的宽度按百分比设。
+fn bar(skin: &Skin, width: f32, height: f32, fill: impl Bundle, fill_skin: &str) -> impl Bundle {
+    let inset = (height * 4.0 / 36.0).max(1.0);
     (
-        Node { width: px(width), height: px(height), ..default() },
-        BackgroundColor(BAR_BG),
+        Node { width: px(width), height: px(height), padding: UiRect::all(px(inset)), ..default() },
+        skin.image("bar_track"),
         children![(
             fill,
             Node { width: percent(0), height: percent(100), ..default() },
-            BackgroundColor(color)
+            skin.image(fill_skin)
         )],
     )
 }
@@ -95,6 +96,7 @@ pub(crate) fn spawn_hud(
     mut commands: Commands,
     content: Res<GameContent>,
     fonts: Res<Fonts>,
+    skin: Res<Skin>,
     setup: Res<RunSetup>,
 ) {
     let c = &content.0;
@@ -107,14 +109,14 @@ pub(crate) fn spawn_hud(
             left: px(0),
             right: px(0),
             top: px(0),
-            height: px(6),
+            height: px(7),
             ..default()
         },
         BackgroundColor(BAR_BG),
         children![(
             XpFill,
             Node { width: percent(0), height: percent(100), ..default() },
-            BackgroundColor(XP_COLOR)
+            skin.image("bar_fill_xp")
         )],
     ));
     // 左上：用时、击杀、种子、夜签
@@ -158,6 +160,10 @@ pub(crate) fn spawn_hud(
             p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
                 for e in Element::ALL {
                     row.spawn((
+                        Node { padding: UiRect::axes(px(10), px(3)), ..default() },
+                        skin.image("chip_dark"),
+                    ))
+                    .with_child((
                         ElementChip(e),
                         text(
                             &fonts.body,
@@ -182,7 +188,7 @@ pub(crate) fn spawn_hud(
         },
         children![
             (BossName, text(&fonts.title, 26.0, hex("#FF6B5A"), "")),
-            bar(520.0, 10.0, BossFill, hex("#FF6B5A")),
+            bar(&skin, 560.0, 18.0, BossFill, "bar_fill_boss"),
         ],
     ));
     // 右侧：连斩
@@ -203,29 +209,29 @@ pub(crate) fn spawn_hud(
         children![
             (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
             (
-                Node { width: px(260), height: px(9), ..default() },
-                BackgroundColor(BAR_BG),
+                Node { width: px(280), height: px(18), padding: UiRect::all(px(2)), ..default() },
+                skin.image("bar_track"),
                 children![
                     (
                         HpFill,
                         Node { width: percent(100), height: percent(100), ..default() },
-                        BackgroundColor(CINNABAR)
+                        skin.image("bar_fill_hp")
                     ),
                     (
                         ShieldFill,
                         Node {
                             position_type: PositionType::Absolute,
-                            left: px(0),
-                            top: px(0),
+                            left: px(2),
+                            top: px(1),
                             width: percent(0),
-                            height: px(3),
+                            height: px(6),
                             ..default()
                         },
-                        BackgroundColor(SHIELD_COLOR)
+                        skin.image("bar_fill_shield")
                     ),
                 ],
             ),
-            bar(180.0, 5.0, UltFill, GOLD),
+            bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
             (UltLabel, text(&fonts.body, 13.0, DIM, "燃灯")),
         ],
     ));
@@ -391,6 +397,7 @@ pub(crate) fn update_slots(
     content: Res<GameContent>,
     fonts: Res<Fonts>,
     db: Res<AtlasDb>,
+    skin: Res<Skin>,
     arsenal: Option<Res<Arsenal>>,
     build: Option<Res<Build>>,
     slots: Single<Entity, With<Slots>>,
@@ -422,7 +429,17 @@ pub(crate) fn update_slots(
                     ..default()
                 })
                 .with_children(|cell| {
-                    spawn_icon(cell, &db, &fonts, Some(&name), &def.icon, color, 38.0);
+                    cell.spawn((
+                        Node {
+                            width: px(48),
+                            height: px(48),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        skin.image(if w.evolved { "slot_l_evo" } else { "slot_l" }),
+                    ))
+                    .with_children(|slot| spawn_icon(slot, &db, &fonts, Some(&name), &def.icon, color, 38.0));
                     let lv = if w.evolved { "★".to_string() } else { format!("{}", w.level) };
                     cell.spawn(text(&fonts.body, 12.0, if w.evolved { GOLD } else { PAPER }, &lv));
                 });
@@ -440,7 +457,17 @@ pub(crate) fn update_slots(
                     ..default()
                 })
                 .with_children(|cell| {
-                    spawn_icon(cell, &db, &fonts, Some(&name), &glyph, color, 28.0);
+                    cell.spawn((
+                        Node {
+                            width: px(34),
+                            height: px(34),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        skin.image("slot_s"),
+                    ))
+                    .with_children(|slot| spawn_icon(slot, &db, &fonts, Some(&name), &glyph, color, 26.0));
                     cell.spawn(text(&fonts.body, 11.0, PAPER, &format!("{}", s.level)));
                 });
             }

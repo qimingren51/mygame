@@ -5,7 +5,7 @@
 
 use bevy::input::InputSystems;
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
+use bevy::window::{CursorMoved, MonitorSelection, PrimaryWindow, WindowMode};
 
 use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands, SimPhase};
 
@@ -42,6 +42,8 @@ pub struct Actions {
     pub pick: Option<u8>,
     /// 标题界面：心灯
     pub meta: bool,
+    /// 这一帧鼠标动过。菜单弹出时光标恰好停在某一项上，不算悬停，免得抢走键盘的选择
+    pub pointer_moved: bool,
 }
 
 /// 跑分时自动绕圈走，代替玩家输入。存在这个资源时，键盘和手柄的移动不交给模拟。
@@ -64,7 +66,12 @@ impl Plugin for PlatformPlugin {
     }
 }
 
-fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mut actions: ResMut<Actions>) {
+fn gather_actions(
+    keys: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut cursor: MessageReader<CursorMoved>,
+    mut actions: ResMut<Actions>,
+) {
     let held = |a: KeyCode, b: KeyCode| keys.pressed(a) || keys.pressed(b);
     let mut dir = Vec2::ZERO;
     if held(KeyCode::KeyA, KeyCode::ArrowLeft) {
@@ -96,6 +103,7 @@ fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mu
         nav: IVec2::ZERO,
         pick: None,
         meta: keys.just_pressed(KeyCode::KeyM),
+        pointer_moved: cursor.read().count() > 0,
     };
     let pressed = |a: KeyCode, b: KeyCode| keys.just_pressed(a) || keys.just_pressed(b);
     if pressed(KeyCode::ArrowLeft, KeyCode::KeyA) {

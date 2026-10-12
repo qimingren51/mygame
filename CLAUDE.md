@@ -35,6 +35,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run --release -p lantern-tools -- bench  # 模拟跑分（不开窗口，默认 5000 只妖物）
 cargo run --release -p lantern-tools -- replay <文件>  # 校验回放：逐秒核对状态哈希
+cargo run --release -p lantern-tools -- balance --runs 20  # 机器人批量跑局看平衡（加 --god 无敌跑完整局）
 cargo run -- --replay <文件>                   # 在游戏里观看回放
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希
 python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）
@@ -59,7 +60,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
   - `Cargo.lock` 要提交。
 - **提交前**：`cargo fmt --all --check`、`clippy -D warnings`、`cargo test --workspace` 都要通过。
 - **代码风格**：注释和面向玩家的文字用中文，简洁直白。
-- **界面文字**：M0 暂时写在 `crates/ui` 的代码里，M2 统一移到 `assets/i18n/`。改了文字要重新运行 `fonts.py`。
+- **界面文字**：固定文字写在 `crates/ui` 的代码里，名字和说明写在 `assets/data/`；加第二种语言时再统一移到 `assets/i18n/`。改了文字要重新运行 `fonts.py`。
 - **美术**：
   - Blender 管线在 `art/`，在仓库根目录运行，产物输出到 `assets/atlas/`。
   - 只提交脚本和打包好的图集，中间文件（`art/out/`、`art/.venv/`）不提交。
