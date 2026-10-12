@@ -10,7 +10,17 @@
 画法复用 weapon_textures.Painter（淡彩填色、手抖轮廓、干笔）。五行颜色取自 src/data/elements.ts，
 兑上相近的国画颜料，在纸色上也看得清（EL_INK）。
 
-输出：art/out/<ASSETS_DIR_NAME>/ui/  icon_*.png + meta.json
+第二批（追加在前 25 个之后，前 25 个逐字节不变）：
+  补给 icon_lotus 莲子、icon_oil 灯油；心灯 icon_meta_<dmg|hp|agi|luck>（点亮）与 _off（未点亮，同一幅画褪成淡墨）；
+  奇遇 icon_enc_<toad|spring|shrine|altar|rift>；古灯增益 icon_buff_<fury|swift|soul|iron>；
+  夜签 icon_omen_<bloodmoon|fog|glass|foxes|gale|chestrain|element|greed|quiet|wonders>（朱砂双圈框）；
+  界面 icon_kills、icon_pause、icon_dash、icon_ult、icon_level（等级徽章底，中间留空）；
+  朱砂印章 seal_*（ui_seals.py 画，尺寸各异，见 meta 的 size）。
+各类的色弧见下面“第二批”一节；meta 里每项都有 kind、id、name。
+
+出图按图标并行（多进程，LANTERN_JOBS 控制进程数，默认 min(4, CPU 数)；每个图标自带种子，结果与串行一致）。
+
+输出：art/out/<ASSETS_DIR_NAME>/ui/  icon_*.png、seal_*.png + meta.json
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/ui_icons.py                          # 1 倍
   LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/ui_icons.py    # 2 倍
@@ -19,8 +29,11 @@
 from __future__ import annotations
 
 import math
+import multiprocessing
+import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -137,32 +150,50 @@ def shade_lr(P: W.Painter, x0, x1, light, dark, gamma=1.0):
 # ============================================================== 框：纸底、墨圈、五行弧、金圈
 
 
-def frame_back(P: W.Painter, el: str, *, evo=False, element=False):
+def disc_back(P: W.Painter, base):
+    """宣纸色圆底（base 是底色，纸纹、中心提亮都在它上面做）。"""
     r = np.hypot(P.X - C, P.Y - C)
     th = np.mod(np.arctan2(P.Y - C, P.X - C) / (2 * math.pi), 1.0)
     rr = 27.4 * (1 + 0.006 * W.sample1(W.pnoise1(P.rng, 256, 10.0), th))
     disc = smoothstep(rr + 2 * P.aa, rr - 2 * P.aa, r)
     n = V.noise1(P.rng, P.X.shape, 3.0 * P.ss)
-    base = PAPER
-    if element:
-        base = mixc(PAPER, EL_WASH[el], 0.55)
-    elif evo:
-        base = mixc(PAPER, W_TENG, 0.16)
     rgb = mixc(base, mixc(base, PAPER_SH, 0.8), np.clip(0.3 + 0.25 * n, 0, 1))
     # 中心略亮，边上一圈淡淡的积色，像一张小小的册页
     rgb = mixc(rgb, mixc(rgb, WHITE, 0.35), np.exp(-((r / 16.0) ** 2)) * 0.5)
     P.lay.over(rgb, disc)
 
 
+def frame_back(P: W.Painter, el: str, *, evo=False, element=False):
+    base = PAPER
+    if element:
+        base = mixc(PAPER, EL_WASH[el], 0.55)
+    elif evo:
+        base = mixc(PAPER, W_TENG, 0.16)
+    disc_back(P, base)
+
+
 def frame_front(P: W.Painter, el: str, *, evo=False, element=False):
+    ring_front(P, EL_INK[el], arc_hw=1.05 if element else 0.8, evo=evo)
+
+
+def ring_front(P: W.Painter, arc_rgb, *, arc_hw=0.8, evo=False, ink=(JIAO, NONG), dry=(0.06, 0.5), ring_alpha=1.0, gold_rim=None):
+    """色弧 + 墨圈（圆相）+ 进化金圈。arc_rgb=None 不画色弧；ink、dry、ring_alpha 调墨圈的墨色与干湿；
+    gold_rim=(半径, 半宽) 时在墨圈内侧加一道粗金圈（等级徽章底）。"""
     r = np.hypot(P.X - C, P.Y - C)
     th = np.mod(np.arctan2(P.Y - C, P.X - C), 2 * math.pi)
-    # 五行色弧：墨圈内侧，从右下经下、左到左上，两头收细
+    # 色弧：墨圈内侧，从右下经下、左到左上，两头收细
     a0, span = math.radians(25.0), math.radians(235.0)
-    ta = np.mod(th - a0, 2 * math.pi) / span
-    hwa = (1.05 if element else 0.8) * np.sin(np.pi * np.clip(ta, 0, 1)) ** 0.6 * (ta <= 1)
-    arc = smoothstep(hwa + P.aa, hwa - P.aa, np.abs(r - 24.3)) * (hwa > 0.05)
-    P.lay.over(EL_INK[el], 0.95 * arc)
+    if arc_rgb is not None:
+        ta = np.mod(th - a0, 2 * math.pi) / span
+        hwa = arc_hw * np.sin(np.pi * np.clip(ta, 0, 1)) ** 0.6 * (ta <= 1)
+        arc = smoothstep(hwa + P.aa, hwa - P.aa, np.abs(r - 24.3)) * (hwa > 0.05)
+        P.lay.over(arc_rgb, 0.95 * arc)
+    if gold_rim is not None:
+        gr, ghw = gold_rim
+        rim = smoothstep(ghw + P.aa, ghw - P.aa, np.abs(r - gr))
+        P.lay.over(mixc(mixc(TENG, GOLD_HI, 0.35), GOLD_DK, smoothstep(gr - ghw, gr + ghw, r) * 0.7), rim)
+        for rr_, rgb_ in ((gr - ghw, GOLD_DK), (gr + ghw, GOLD_DK)):
+            P.lay.over(rgb_, 0.8 * smoothstep(0.3 + P.aa, 0.3 - P.aa, np.abs(r - rr_)))
     # 墨圈：一笔圆相，起笔在右上，顺时针，收笔飞白，留一个小缺口
     th0, span2 = math.radians(-38.0), math.radians(336.0)
     rel = np.mod(th - th0 + math.radians(8.0), 2 * math.pi) - math.radians(8.0)
@@ -176,9 +207,11 @@ def frame_front(P: W.Painter, el: str, *, evo=False, element=False):
     cov = smoothstep(hw + P.aa, hw - P.aa, dist)
     tex = W.ptex(P.rng, ns=16, nt=512, along=8.0, across=0.6)
     b = W.sample_ptex(tex, np.clip((r - R) / np.maximum(hw, 0.3), -1, 1), tc * 0.999)
-    dry = 0.5 * smoothstep(0.8, 1.0, tc) + 0.06
+    dry = dry[1] * smoothstep(0.8, 1.0, tc) + dry[0]
     cov = cov * smoothstep(dry - 0.07, dry + 0.07, b)
-    P.lay.over(mixc(JIAO, NONG, 0.35 * (1 - b) * tc), cov)
+    if ring_alpha != 1.0:
+        cov = cov * ring_alpha
+    P.lay.over(mixc(ink[0], ink[1], 0.35 * (1 - b) * tc), cov)
     if evo:
         # 金圈：墨圈外一道细金线，四角各一粒金点
         gc = smoothstep(0.55 + P.aa, 0.55 - P.aa, np.abs(r - 30.05))
@@ -833,6 +866,784 @@ def em_el_earth(P, evo):
         shape(P, W.ellipse_pts(x, y, rx, rx * 0.7, 24), mixc(DAN, PAPER, 0.3), ol=0.8, pool=0.3)
 
 
+# ============================================================== 第二批：补给、心灯、奇遇、增益、夜签、界面
+#
+# 同一套框，按类别换色弧：补给与界面用淡墨兑赭的中性弧；心灯点亮时是暖灯色弧、圈里一团灯晕，
+# 没点亮时整幅褪成淡墨、墨圈更干更淡；奇遇和增益的色弧取网页版的颜色兑国画颜料（ACC_INK，同 EL_INK 的兑法）；
+# 夜签不用墨圈，换朱砂双圈（像一枚圆形朱文印），和法器、心法一眼分开。
+
+ACC_HEX = {  # 网页版 web/lantern/game.js 的 EVENTS / BUFFS 颜色
+    "toad": "#FFD98A", "spring": "#5FD4C4", "shrine": "#FF8A3D", "altar": "#FF6B5A", "rift": "#B07CF0",
+    "fury": "#FF8A3D", "swift": "#6FD6A0", "soul": "#5FD4C4", "iron": "#E9D9A6",
+}
+ACC_INK = {
+    "toad": col(S.mix(S.mix(ACC_HEX["toad"], S.ACCENT["tenghuang"], 0.5), S.ACCENT["zheshi"], 0.3)),
+    "spring": col(S.mix(S.mix(ACC_HEX["spring"], S.ACCENT["shilv"], 0.4), S.ACCENT["huaqing"], 0.25)),
+    "shrine": EL_INK["fire"],
+    "altar": col(S.mix(ACC_HEX["altar"], S.ACCENT["zhusha"], 0.55)),
+    "rift": col(S.mix(S.mix(ACC_HEX["rift"], S.ACCENT["huaqing"], 0.3), S.INK["zhong"], 0.15)),
+    "fury": EL_INK["fire"],
+    "swift": EL_INK["wood"],
+    "soul": col(S.mix(S.mix(ACC_HEX["soul"], S.ACCENT["shilv"], 0.4), S.ACCENT["huaqing"], 0.25)),
+    "iron": EL_INK["metal"],
+}
+NEUTRAL_ARC = mixc(DAN, ZHESHI, 0.3)  # 补给、界面：淡墨兑一点赭，不像任何一行
+LAMP_ARC = mixc(TENG, ZHUSHA, 0.3)  # 心灯点亮：暖灯色
+LAMP_GLOW = mixc(col(S.LANTERN_LIGHT), PAPER, 0.25)
+OFF_INK = (mixc(NONG, DAN, 0.35), DAN)  # 心灯未点亮：墨圈淡、干
+SOUL = col(S.SOUL_LIGHT)
+RIFT_HOT = col("#D2386A")  # 与 ground/rift_glow 的染色一致
+PURPLE_STOPS = [
+    (0.00, S.mix("#B07CF0", S.INK["jiao"], 0.55)),
+    (0.15, S.mix("#B07CF0", S.INK["zhong"], 0.25)),
+    (0.50, S.mix("#B07CF0", "#D2386A", 0.35)),
+    (0.80, S.mix("#D2386A", "#FFFFFF", 0.55)),
+    (1.00, S.mix("#F4D8F0", "#FFFFFF", 0.4)),
+]
+FOX_STOPS = [
+    (0.00, S.mix(S.EYE["fox"], S.INK["jiao"], 0.5)),
+    (0.15, S.mix(S.EYE["fox"], S.ACCENT["zhusha"], 0.5)),
+    (0.50, S.EYE["fox"]),
+    (0.80, S.mix(S.EYE["fox"], "#FFFFFF", 0.55)),
+    (1.00, S.mix(S.EYE["fox"], "#FFFFFF", 0.85)),
+]
+
+
+def lum3(rgb):
+    return np.asarray(rgb)[..., :3] @ np.array([0.299, 0.587, 0.114])
+
+
+def sparkle(P: W.Painter, x, y, L, rgb=TENG, hw=0.5, alpha=1.0):
+    """四角星芒：横竖两笔，中间粗两头尖。"""
+    n = 16
+    prof = hw * np.sin(np.pi * np.linspace(0, 1, n)) ** 0.8 + 0.04
+    for dx, dy in ((1.0, 0.0), (0.0, 1.0)):
+        stroke(P, W.seg_pts((x - dx * L, y - dy * L), (x + dx * L, y + dy * L), n=n), prof, rgb, alpha)
+
+
+def flame(P: W.Painter, cx, by, h, w, *, lean=0.0, ol=0.8, core=True, stops=None, ol_rgb=None, pool_rgb=None):
+    """一朵火苗：底在 (cx, by)，高 h、半宽 w；lean 让火尖往右偏（负数往左）。"""
+    pn = [(0.0, 0.0), (-0.7, -0.1), (-1.0, -0.35), (-0.8, -0.6), (-0.35, -0.82), (0.0, -1.0), (0.3, -0.78), (0.8, -0.58), (1.0, -0.33), (0.72, -0.1)]
+    pts = [(cx + x * w + lean * (-y) ** 1.6, by + y * h) for x, y in pn]
+    heat = np.exp(-(((P.X - cx - 0.3 * lean) / (0.85 * w)) ** 2 + ((P.Y - (by - 0.3 * h)) / (0.5 * h)) ** 2))
+    rgb = V.ramp(np.clip(heat * 1.05, 0, 1), V.FLAME_STOPS if stops is None else stops)
+    _, m = shape(P, W.catmull_closed(pts, 8), rgb, ol=ol, ol_rgb=mixc(ZHUSHA, JIAO, 0.55) if ol_rgb is None else ol_rgb,
+                 pool=0.3, pool_rgb=ZHUSHA if pool_rgb is None else pool_rgb, mottle=0.0, wob=0.03)
+    if core:
+        cp = [(cx + 0.42 * x * w + 0.55 * lean * (-y) ** 1.6, by - 0.1 * h + 0.45 * y * h) for x, y in pn]
+        shape(P, W.catmull_closed(cp, 8), mixc(TENG, WHITE, 0.65), ol=0, pool=0.25, pool_rgb=TENG, mottle=0.0, wob=0.02)
+    return m
+
+
+def coin(P: W.Painter, cx, cy, r, *, ry=None, ol=0.85):
+    """铜钱：藤黄圆片、内圈一道细线、方孔。"""
+    ry = r if ry is None else ry
+    rgb = mixc(mixc(TENG, GOLD_HI, 0.35), mixc(TENG, GOLD_DK, 0.55), smoothstep(cy - ry, cy + ry, P.Y))
+    _, m = shape(P, W.ellipse_pts(cx, cy, r, ry, 48), rgb, ol=ol, ol_rgb=mixc(GOLD_DK, JIAO, 0.5), pool=0.4, pool_rgb=GOLD_DK, mottle=0.0, wob=0.02)
+    rim = W.ellipse_pts(cx, cy, 0.72 * r, 0.72 * ry, 48)
+    stroke(P, V.arc_resample(np.vstack([rim, rim[:1]]), 60), 0.22 * r / 5.0 + 0.12, GOLD_DK, 0.7, clip=m)
+    hx, hy = 0.27 * r, 0.27 * ry
+    hole = [(cx - hx, cy - hy), (cx + hx, cy - hy), (cx + hx, cy + hy), (cx - hx, cy + hy)]
+    shape(P, hole, mixc(NONG, GOLD_DK, 0.3), ol=0.35, ol_rgb=mixc(GOLD_DK, JIAO, 0.5), pool=0.0, mottle=0.0, wob=0.0)
+    return m
+
+
+def leaf(P: W.Painter, cx, cy, ang, L, wd, rgb):
+    """一片叶子：杏仁形，中间一道叶脉。"""
+    a = math.radians(ang)
+    u = np.array([math.cos(a), math.sin(a)])
+    base, tip = np.array([cx, cy]) - u * L / 2, np.array([cx, cy]) + u * L / 2
+    _, m = shape(P, W.almond(base, tip, wd, 30, bulge=0.45), rgb, ol=0.8, ol_rgb=mixc(rgb, JIAO, 0.6), pool=0.3, pool_rgb=mixc(rgb, JIAO, 0.3), mottle=0.0)
+    stroke(P, W.seg_pts(base, tip, n=16), 0.25, mixc(rgb, JIAO, 0.5), 0.8, clip=m)
+
+
+def paint_ingot(P: W.Painter, cx, cy, s):
+    """元宝（与 em_el_metal 同形，按中心 (32, 35) 平移缩放）。"""
+    def q(pts):
+        return [(cx + s * (x - 32.0), cy + s * (y - 35.0)) for x, y in pts]
+
+    body = W.catmull_closed(q([(13.5, 27.5), (19.5, 33.5), (26.0, 35.3), (38.0, 35.3), (44.5, 33.5), (50.5, 27.5), (48.0, 38.5), (40.0, 45.0), (32.0, 46.5), (24.0, 45.0), (16.0, 38.5)]), 8)
+    rgb = mixc(mixc(TENG, GOLD_HI, 0.35), mixc(TENG, GOLD_DK, 0.6), smoothstep(cy - 5 * s, cy + 11 * s, P.Y))
+    shape(P, body, rgb, ol=OL * min(1.0, s + 0.25), ol_rgb=mixc(GOLD_DK, JIAO, 0.5), pool=0.45, pool_rgb=GOLD_DK, mottle=0.04)
+    stroke(P, V.bezier(q([(14.5, 28.2), (32.0, 23.0), (49.5, 28.2)]), 40), 0.55 * s + 0.1, GOLD_DK, 0.9)
+    (dx, dy), = q([(32.0, 31.0)])
+    dome = W.ellipse_pts(dx, dy, 8.6 * s, 7.0 * s, 48)
+    shape(P, dome, mixc(GOLD_HI, mixc(TENG, GOLD_DK, 0.4), smoothstep(0.1, 1.0, np.hypot((P.X - dx + 3 * s) / (8.6 * s), (P.Y - dy + 3 * s) / (7.0 * s)))),
+          ol=1.1 * min(1.0, s + 0.25), ol_rgb=mixc(GOLD_DK, JIAO, 0.5), pool=0.35, pool_rgb=GOLD_DK, mottle=0.0)
+    stroke(P, V.bezier(q([(27.0, 30.5), (28.0, 27.2), (31.0, 25.6)]), 20), 0.75 * s * W.brush_profile(20, 0.4, 0.3), WHITE, 0.85)
+
+
+def chest_icon(P: W.Painter, x0, y0, w, h, dx, dy, *, ol=1.2):
+    """宝箱（同 weapon_textures.make_chest 的画法，简化）：朱漆三面、箱盖缝、藤黄压条与包角、圆锁片。"""
+    front, top, side, sil = W.box_faces(x0, y0, w, h, dx, dy)
+    lac = ZHUSHA
+    masks = []
+    for poly, rgb in zip((top, front, side), (mixc(lac, PAPER, 0.28), lac, mixc(lac, ZHONG, 0.45))):
+        d, _ = P.sdf(W.wobble(poly, P.rng, 0.06, spacing=0.3))
+        masks.append(P.cover(d))
+        P.fill(d, rgb, mottle=0.08, mottle_rgb=ZHUSHA_DK, pool=0.3, pool_rgb=ZHUSHA_DK, pool_w=0.7)
+    stroke(P, V.bezier([(x0 + 0.2 * w, y0 - 0.25 * dy), (x0 + 0.5 * w, y0 - 0.7 * dy), (x0 + 0.8 * w, y0 - 0.85 * dy)], 30), 0.12 * dy * W.brush_profile(30, 0.5, 0.2), mixc(lac, WHITE, 0.55), 0.7, clip=masks[0])
+    ys = y0 + 0.34 * h
+    bw = max(0.55, 0.06 * h)
+
+    def gold(poly, o=0.5):
+        d, t = P.sdf(W.wobble(poly, P.rng, 0.04, spacing=0.25))
+        P.fill(d, TENG, pool=0.45, pool_rgb=GOLD_DK, pool_w=0.4)
+        P.outline(d, t, o, GOLD_DK)
+
+    gold([(x0, ys - bw), (x0 + w, ys - bw), (x0 + w, ys + bw), (x0, ys + bw)])
+    gold([(x0 + w, ys - bw), (x0 + w + dx, ys - dy - bw), (x0 + w + dx, ys - dy + bw), (x0 + w, ys + bw)])
+    cw = 0.12 * w
+    for xa, xb in ((x0, x0 + cw), (x0 + w - cw, x0 + w)):
+        gold([(xa, y0), (xb, y0), (xb, y0 + h), (xa, y0 + h)])
+    lx, ly, lr = x0 + w / 2, ys + 0.12 * h, 0.17 * h
+    d, t = P.sdf(W.ellipse_pts(lx, ly, lr, lr, 40))
+    P.fill(d, mixc(TENG, GOLD_HI, smoothstep(lr, -lr, P.Y - ly)), pool=0.5, pool_rgb=GOLD_DK, pool_w=0.5)
+    P.outline(d, t, 0.55, GOLD_DK)
+    P.dot(lx, ly + 0.15 * lr, 0.3 * lr, JIAO, ry=0.45 * lr)
+    d, t = P.sdf(W.wobble(sil, P.rng, 0.06, spacing=0.3))
+    P.outline(d, t, ol, INK_LINE, jitter=0.25)
+    stroke(P, W.seg_pts((x0, y0), (x0 + w, y0), (x0 + w + dx, y0 - dy), n=50), 0.35, JIAO)
+    stroke(P, W.seg_pts((x0 + w, y0), (x0 + w, y0 + h), n=30), 0.35, JIAO)
+
+
+def heart_pts(cx, cy, s, n=160):
+    t = np.linspace(0, 2 * math.pi, n, endpoint=False)
+    x = 16 * np.sin(t) ** 3
+    y = -(13 * np.cos(t) - 5 * np.cos(2 * t) - 2 * np.cos(3 * t) - np.cos(4 * t))
+    return np.stack([cx + s * x, cy + s * (y - 2.5)], -1)
+
+
+# ---------------------------------------------------------------- 补给
+
+def em_lotus(P):
+    """莲子：三片粉白莲瓣托着一只石绿莲蓬，蓬面七粒莲子，下接一段莲茎。"""
+    stroke(P, V.bezier([(32.5, 40.0), (33.0, 46.0), (37.0, 51.0)], 30), np.linspace(1.7, 1.2, 30), mixc(SHILV, JIAO, 0.45))
+    white, pink, tip_c = mixc(PAPER, WHITE, 0.7), mixc(W_ZHUSHA, PAPER, 0.05), mixc(W_ZHUSHA, ZHUSHA, 0.45)
+    for base, tip, wd, asym in (((32.0, 30.0), (32.0, 10.0), 12.5, 0.0), ((28.5, 38.0), (13.0, 25.5), 12.0, 0.12), ((35.5, 38.0), (51.0, 25.5), 12.0, -0.12)):
+        b, t = np.asarray(base), np.asarray(tip)
+        along = ((P.X - b[0]) * (t[0] - b[0]) + (P.Y - b[1]) * (t[1] - b[1])) / ((t[0] - b[0]) ** 2 + (t[1] - b[1]) ** 2)
+        rgb = mixc(mixc(white, pink, smoothstep(0.2, 0.8, along)), tip_c, smoothstep(0.75, 1.0, along))
+        _, m = shape(P, W.almond(base, tip, wd, 48, bulge=0.5, asym=asym), rgb, ol=OL, ol_rgb=mixc(ZHUSHA_DK, JIAO, 0.45), pool=0.2, pool_rgb=tip_c, mottle=0.0)
+        stroke(P, W.seg_pts(b + (t - b) * 0.35, b + (t - b) * 0.85, n=20), 0.32, mixc(W_ZHUSHA, ZHUSHA, 0.35), 0.6, clip=m)
+    body = W.catmull_closed([(19.8, 26.0), (21.8, 32.5), (26.5, 38.5), (32.0, 40.8), (37.5, 38.5), (42.2, 32.5), (44.2, 26.0), (39.0, 21.0), (32.0, 20.0), (25.0, 21.0)], 8)
+    shape(P, body, shade_lr(P, 20, 44, mixc(W_SHILV, EL_INK["wood"], 0.4), mixc(SHILV, JIAO, 0.35)), ol=OL, ol_rgb=mixc(SHILV, JIAO, 0.7), pool=0.3, pool_rgb=mixc(SHILV, JIAO, 0.4), mottle=0.06)
+    _, m = shape(P, W.ellipse_pts(32.0, 25.0, 12.2, 4.8, 64), mixc(mixc(W_SHILV, TENG, 0.15), PAPER, 0.25), ol=1.0, ol_rgb=mixc(SHILV, JIAO, 0.6), pool=0.35, pool_rgb=SHILV, mottle=0.04)
+    seeds = [(32.0, 25.0)] + [(32.0 + 7.4 * math.cos(a), 25.0 + 2.8 * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 7)[:-1] + 0.3]
+    for x, y in seeds:
+        P.dot(x, y + 0.2, 1.8, mixc(SHILV, JIAO, 0.55), ry=1.3, clip=m)
+        P.dot(x - 0.25, y - 0.1, 1.15, mixc(mixc(W_SHILV, TENG, 0.3), WHITE, 0.35), ry=0.85, clip=m)
+
+
+def em_oil(P):
+    """灯油：一大滴琥珀色的灯油，滴尖上燃着一朵小火苗。挨着数字显示，所以只有两大块：油滴、火苗。"""
+    glow(P, 32.0, 37.0, 17.0, mixc(TENG, PAPER, 0.4), 0.5)
+    cx, cy, R, tip = 32.0, 40.0, 11.2, 19.5  # 底下一个圆，滴尖到圆的两条切线
+    half = math.asin(R / (cy - tip))
+    arc = np.linspace(-0.5 * math.pi + (0.5 * math.pi - half), 1.5 * math.pi - (0.5 * math.pi - half), 60)
+    drop = np.vstack([[(cx, tip)], np.stack([cx + R * np.cos(arc), cy + R * np.sin(arc)], -1)])
+    rr = np.hypot((P.X - 28.5) / 12.0, (P.Y - 35.0) / 13.0)
+    rgb = mixc(mixc(TENG, WHITE, 0.5), mixc(TENG, ZHESHI, 0.5), smoothstep(0.1, 0.75, rr))
+    rgb = mixc(rgb, mixc(ZHESHI, JIAO, 0.3), smoothstep(0.75, 1.4, rr))
+    _, m = shape(P, drop, rgb, ol=OL * 1.25, ol_rgb=mixc(ZHESHI, JIAO, 0.65), pool=0.4, pool_rgb=mixc(ZHESHI, JIAO, 0.25), mottle=0.0, wob=0.03)
+    stroke(P, V.bezier([(25.5, 45.0), (23.8, 39.5), (26.0, 33.0)], 30), 1.15 * W.brush_profile(30, 0.4, 0.3), WHITE, 0.9, clip=m)
+    P.dot(27.8, 30.0, 0.9, WHITE, clip=m)
+    flame(P, 32.2, 20.5, 11.0, 3.6, lean=0.8)
+
+
+# ---------------------------------------------------------------- 心灯
+
+def em_meta_dmg(P):
+    """锋芒：一枚矛头斜指右上，刃面一亮一暗、一线刃光，锋尖一点金芒；銎下一簇朱缨。"""
+    fr = Fr(29.0, 35.0, -45.0, 1.0)
+    stroke(P, fr(W.seg_pts((-18.5, 0.0), (-8.0, 0.0), n=20)), 1.5, mixc(ZHESHI, NONG, 0.45))
+    root = fr.pt(-8.5, 0.0)
+    for k, (ang, L) in enumerate(((148, 9.5), (163, 11.5), (180, 12.0), (197, 11.5), (212, 9.5), (172, 9.5), (189, 9.5))):
+        a = math.radians(ang)
+        tip = fr.pt(-8.5 + L * math.cos(a), L * math.sin(a))
+        mid = fr.pt(-8.5 + 0.55 * L * math.cos(a), 0.45 * L * math.sin(a))
+        stroke(P, V.bezier([root, mid, tip], 24), 1.2 * W.brush_profile(24, 1.0, 0.2, 0.0), ZHUSHA if k % 2 == 0 else mixc(ZHUSHA, ZHUSHA_DK, 0.5), dry=0.25, dry_start=0.55)
+    P.dot(*root, 1.7, ZHUSHA_DK)
+    shape(P, fr([(-9.0, -2.1), (-2.5, -1.7), (-2.5, 1.7), (-9.0, 2.1)]), mixc(mixc(ZHESHI, NONG, 0.3), SHILV, 0.15), ol=0.9, pool=0.3)
+    stroke(P, fr(W.seg_pts((-6.8, -2.3), (-6.8, 2.3), n=10)), 0.45, mixc(TENG, GOLD_DK, 0.3))
+    blade = fr(W.seg_pts((-3.0, -1.8), (0.5, -5.2), (4.0, -6.4), (13.0, -3.3), (22.0, 0.0), (13.0, 3.3), (4.0, 6.4), (0.5, 5.2), (-3.0, 1.8), n=120))
+    _, Vv = fr.uv(P)
+    d, t = P.sdf(W.wobble(blade, P.rng, 0.03, spacing=0.3))
+    steel_hi = mixc(mixc(PAPER, WHITE, 0.6), QING, 0.15)
+    steel_lo = mixc(mixc(QING, HUAQING, 0.4), ZHONG, 0.45)
+    P.fill(d, mixc(steel_hi, steel_lo, smoothstep(-0.2, 0.2, Vv)), pool=0.25, pool_rgb=mixc(HUAQING, JIAO, 0.4), pool_w=0.6)
+    m = P.cover(d)
+    stroke(P, fr(W.seg_pts((-2.5, 0.0), (20.5, 0.0), n=30)), 0.45, mixc(HUAQING, JIAO, 0.5), 0.9, clip=m)
+    stroke(P, fr(W.seg_pts((1.5, -4.4), (5.0, -5.2), (16.0, -2.0), n=30)), 0.5, WHITE, 0.95, clip=m)
+    P.outline(d, t, OL * 1.15, INK_LINE, jitter=0.15)
+    tx, ty = fr.pt(21.0, 0.0)
+    glow(P, tx, ty, 6.5, mixc(TENG, WHITE, 0.5), 0.8)
+    sparkle(P, tx, ty, 5.2, mixc(TENG, WHITE, 0.2), 0.75)
+    P.dot(tx, ty, 0.9, WHITE)
+
+
+def em_meta_hp(P):
+    """体魄：一枚心形翡翠佩，玉色上亮下深、浮雕一道内心线，顶上系朱砂绳结。"""
+    loop = V.bezier([(30.2, 29.0), (25.5, 16.0), (38.5, 16.0), (33.8, 29.0)], 50)
+    stroke(P, loop, 0.8, ZHUSHA)
+    shape(P, W.catmull_closed([(32.0, 14.0), (34.6, 16.6), (32.0, 19.2), (29.4, 16.6)], 6), ZHUSHA, ol=0.6, ol_rgb=ZHUSHA_DK, pool=0.3, pool_rgb=ZHUSHA_DK)
+    for sx in (-1.0, 1.0):
+        stroke(P, V.bezier([(32.0 + 0.8 * sx, 13.8), (32.0 + 2.2 * sx, 11.8), (32.0 + 4.0 * sx, 11.0)], 16), 0.55 * W.brush_profile(16, 1.0, 0.3, 0.0), ZHUSHA)
+    jade_l = mixc(mixc(SHILV, WHITE, 0.5), W_SHILV, 0.2)
+    jade_m = mixc(SHILV, EL_INK["wood"], 0.4)
+    jade_d = mixc(mixc(SHILV, HUAQING, 0.35), JIAO, 0.3)
+    rr = np.hypot((P.X - 26.5) / 13.0, (P.Y - 28.0) / 13.0)
+    rgb = mixc(mixc(jade_l, jade_m, smoothstep(0.0, 0.7, rr)), jade_d, smoothstep(0.7, 1.5, rr))
+    _, m = shape(P, heart_pts(32.0, 35.0, 0.82), rgb, ol=OL * 1.1, ol_rgb=mixc(SHILV, JIAO, 0.7), pool=0.35, pool_rgb=jade_d, mottle=0.08, mottle_rgb=mixc(SHILV, WHITE, 0.4))
+    inner = heart_pts(32.0, 35.8, 0.5)
+    stroke(P, V.arc_resample(np.vstack([inner, inner[:1]]), 160), 0.5, mixc(SHILV, JIAO, 0.45), 0.75, clip=m)
+    stroke(P, V.bezier([(21.0, 33.5), (20.5, 27.5), (25.0, 24.5)], 30), 1.1 * W.brush_profile(30, 0.4, 0.3), WHITE, 0.85, clip=m)
+    P.dot(38.0, 27.5, 0.9, WHITE, 0.8, clip=m)
+    P.dot(32.0, 29.6, 1.0, mixc(SHILV, JIAO, 0.6))
+
+
+def em_meta_agi(P):
+    """灵巧：一只燕子斜掠向右上，镰刀似的双翅、剪刀尾，喉间一点朱红，身后两道疾风。"""
+    fr = Fr(31.5, 32.0, -28.0, 0.88)
+    body_c = mixc(NONG, HUAQING, 0.3)
+    for v0, L, al in ((-3.5, 10.0, 0.7), (4.0, 8.0, 0.6)):
+        stroke(P, fr(W.seg_pts((-11.0, v0), (-11.0 - L, v0 + 0.4), n=20)), np.linspace(0.9, 0.15, 20), mixc(HUAQING, DAN, 0.4), al, dry=0.4, dry_start=0.3)
+    for sgn in (-1.0, 1.0):
+        tail = fr(V.bezier([(-7.0, 0.9 * sgn), (-13.0, 2.0 * sgn), (-18.0, 4.2 * sgn), (-23.0, 6.8 * sgn)], 30))
+        stroke(P, tail, np.interp(np.linspace(0, 1, 30), [0, 0.5, 1], [1.7, 0.95, 0.15]), body_c)
+    for sgn in (-1.0, 1.0):
+        lead = V.bezier([(3.0, 1.8 * sgn), (5.8, 9.0 * sgn), (1.5, 17.0 * sgn), (-7.5, 22.5 * sgn)], 40)
+        trail = V.bezier([(-7.5, 22.5 * sgn), (-3.5, 15.0 * sgn), (-2.8, 8.0 * sgn), (-5.0, 2.2 * sgn)], 40)
+        _, Vv = fr.uv(P)
+        rgb = mixc(mixc(body_c, HUAQING, 0.3), mixc(body_c, JIAO, 0.4), smoothstep(4.0, 20.0, np.abs(Vv)))
+        _, m = shape(P, fr(np.vstack([lead, trail[1:-1]])), rgb, ol=OL, ol_rgb=JIAO, pool=0.3, pool_rgb=JIAO, mottle=0.05)
+        for f in (0.35, 0.6):
+            stroke(P, fr(V.bezier([(1.0, (3.0 + 3.0 * f) * sgn), (-1.0, (10.0 + 5.0 * f) * sgn), (-5.0 - 2.0 * f, (17.0 + 3.0 * f) * sgn)], 20)), 0.3, mixc(HUAQING, QING, 0.4), 0.55, clip=m)
+    _, m = shape(P, fr(W.almond((-9.5, 0.0), (6.5, 0.0), 8.2, 40, bulge=0.6)), body_c, ol=OL, ol_rgb=JIAO, pool=0.3, pool_rgb=JIAO)
+    P.dot(*fr.pt(1.5, 2.0), 2.2, mixc(PAPER, WHITE, 0.6), ry=1.2, clip=m)
+    shape(P, fr(W.ellipse_pts(7.4, 0.0, 3.9, 3.5, 40)), mixc(NONG, JIAO, 0.4), ol=0.9, ol_rgb=JIAO, pool=0.2)
+    shape(P, fr([(10.6, -1.0), (13.4, 0.1), (10.6, 1.0)]), JIAO, ol=0.4, wob=0.0)
+    P.dot(*fr.pt(9.6, 1.6), 1.25, ZHUSHA)
+    P.dot(*fr.pt(8.6, -1.3), 0.6, WHITE)
+
+
+def em_meta_luck(P):
+    """气运：一尾锦鲤斜身跃起（鲤跃），身子微弓：朱红兑藤黄的背、白腹，背鳍、胸鳍、大尾鳍白里透红，口边吐两个泡。
+    鱼先按直的设计（u 沿身长，头在 +u；v 向腹部为正），再整条弯到一段圆弧上。"""
+    t = np.array([math.cos(math.radians(-48.0)), math.sin(math.radians(-48.0))])
+    n = np.array([-t[1], t[0]])  # 指向腹侧（右下）
+    c0, R = np.array([29.0, 30.5]), 24.0
+    ctr = c0 + n * R
+
+    def bend(pts):
+        p = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
+        a = p[:, 0] / R
+        rr = R - p[:, 1]
+        return ctr[None, :] + rr[:, None] * (-np.cos(a)[:, None] * n[None, :] + np.sin(a)[:, None] * t[None, :])
+
+    q = np.stack([P.X - ctr[0], P.Y - ctr[1]], -1)
+    Vv = R - np.hypot(q[..., 0], q[..., 1])
+    fin_c = mixc(PAPER, WHITE, 0.6)
+    fin_ol = mixc(ZHUSHA_DK, JIAO, 0.45)
+    # 尾鳍：两叶张开，中间一个分叉
+    tail = W.catmull_closed([(-10.5, -1.6), (-16.0, -5.0), (-21.5, -8.6), (-19.0, -2.2), (-16.6, 0.0), (-19.0, 2.4), (-21.0, 9.0), (-15.5, 5.2), (-10.5, 1.6)], 8)
+    _, m = shape(P, bend(tail), mixc(fin_c, W_ZHUSHA, 0.45), ol=1.0, ol_rgb=fin_ol, pool=0.35, pool_rgb=mixc(W_ZHUSHA, ZHUSHA, 0.4), mottle=0.0)
+    for vv in (-5.5, -2.5, 2.5, 5.5):
+        stroke(P, bend(W.seg_pts((-11.5, 0.2 * vv), (-18.5, vv), n=12)), 0.25, ZHUSHA, 0.55, clip=m)
+    # 背鳍、腹鳍
+    dorsal = [(-6.0, -4.6), (-2.0, -9.6), (5.0, -9.0), (6.5, -6.0)]
+    shape(P, bend(W.catmull_closed(dorsal, 8)), mixc(fin_c, W_ZHUSHA, 0.35), ol=0.85, ol_rgb=fin_ol, pool=0.3, pool_rgb=W_ZHUSHA, mottle=0.0)
+    for (u0, u1, v1) in ((6.0, 1.5, 9.5), (-3.0, -7.0, 7.5)):
+        shape(P, bend(W.almond((u0, 4.0), (u1, v1), 3.2, 20, bulge=0.35)), mixc(fin_c, W_ZHUSHA, 0.3), ol=0.75, ol_rgb=fin_ol, pool=0.25, pool_rgb=W_ZHUSHA)
+    # 身
+    us = np.linspace(-12.0, 15.0, 60)
+    hw = np.interp(us, [-12.0, -9.0, -3.0, 5.0, 11.0, 13.5, 15.0], [1.7, 2.9, 5.5, 6.6, 5.2, 3.6, 0.6])
+    body = bend([(u, -h) for u, h in zip(us, hw)] + [(u, h) for u, h in zip(us[::-1], hw[::-1])][1:-1])
+    koi = mixc(ZHUSHA, TENG, 0.3)
+    rgb = mixc(mixc(koi, ZHUSHA_DK, 0.2), mixc(PAPER, WHITE, 0.6), smoothstep(0.5, 4.5, Vv))
+    _, m = shape(P, body, rgb, ol=OL, ol_rgb=mixc(ZHUSHA_DK, JIAO, 0.55), pool=0.25, pool_rgb=ZHUSHA_DK, mottle=0.06, mottle_rgb=ZHUSHA_DK)
+    for (u, v) in ((-6.0, -2.2), (-1.5, -3.0), (3.0, -3.2), (-3.5, 0.6), (1.0, 0.2)):
+        a = np.linspace(-1.1, 1.1, 10)
+        stroke(P, bend(np.stack([u - 1.1 * np.cos(a), v + 1.4 * np.sin(a)], -1)), 0.26, mixc(TENG, GOLD_HI, 0.45), 0.75, clip=m)
+    stroke(P, bend(V.bezier([(9.0, -4.6), (7.6, 0.0), (9.0, 4.4)], 20)), 0.4, mixc(ZHUSHA_DK, JIAO, 0.3), 0.8, clip=m)
+    ex, ey = bend([(11.6, -1.6)])[0]
+    P.dot(ex, ey, 1.45, JIAO)
+    P.dot(ex - 0.45, ey - 0.45, 0.5, WHITE)
+    for vv in (-0.8, 1.6):
+        stroke(P, bend(V.bezier([(14.6, vv), (16.4, vv + 0.6 * np.sign(vv)), (17.6, vv + 2.4 * np.sign(vv))], 12)), 0.24, mixc(ZHUSHA_DK, JIAO, 0.3), 0.85)
+    for (u, v, r) in ((18.5, -4.5, 1.5), (21.0, -8.5, 1.05)):
+        bx, by = bend([(u, v)])[0]
+        bub = W.ellipse_pts(bx, by, r, r, 24)
+        stroke(P, V.arc_resample(np.vstack([bub, bub[:1]]), 30), 0.32, mixc(HUAQING, DAN, 0.3), 0.85)
+
+
+# ---------------------------------------------------------------- 奇遇
+
+def em_enc_toad(P):
+    """金蟾：三足金蟾蹲坐，鼓眼、阔口衔一枚铜钱，背上疙瘩点点；身后伸出第三条腿。"""
+    gold_l, gold_d = mixc(TENG, GOLD_HI, 0.35), mixc(TENG, GOLD_DK, 0.6)
+    ol_c = mixc(GOLD_DK, JIAO, 0.55)
+    shape(P, W.catmull_closed([(40.0, 41.0), (47.5, 39.5), (51.0, 45.0), (47.0, 47.6), (41.5, 46.5)], 6), gold_d, ol=1.0, ol_rgb=ol_c, pool=0.3, pool_rgb=GOLD_DK)
+    for x in (47.0, 49.5):
+        stroke(P, W.seg_pts((x, 46.5), (x + 1.2, 48.3), n=8), 0.4, ol_c)
+    body = W.catmull_closed([(16.5, 40.0), (18.5, 31.0), (24.0, 25.5), (32.0, 24.0), (40.0, 25.5), (45.5, 31.0), (47.5, 40.0), (42.0, 46.5), (32.0, 48.0), (22.0, 46.5)], 8)
+    rgb = mixc(gold_l, gold_d, smoothstep(24.0, 50.0, P.Y + 0.4 * (P.X - 32.0)))
+    _, m = shape(P, body, rgb, ol=OL * 1.15, ol_rgb=ol_c, pool=0.4, pool_rgb=GOLD_DK, mottle=0.1, mottle_rgb=GOLD_DK)
+    for (x, y, r) in ((23.5, 33.5, 1.2), (40.5, 33.5, 1.2), (28.0, 30.5, 1.0), (36.0, 30.5, 1.0), (20.5, 39.0, 1.0), (43.5, 39.0, 1.0), (32.0, 29.0, 0.9)):
+        P.dot(x, y, r, GOLD_DK, 0.85, clip=m)
+        P.dot(x - 0.3 * r, y - 0.3 * r, 0.4 * r, GOLD_HI, clip=m)
+    for ex in (24.0, 40.0):
+        _, m2 = shape(P, W.ellipse_pts(ex, 25.0, 4.6, 4.2, 40), gold_l, ol=1.05, ol_rgb=ol_c, pool=0.3, pool_rgb=GOLD_DK)
+        P.dot(ex, 25.5, 2.8, mixc(TENG, WHITE, 0.45), clip=m2)
+        P.dot(ex + 0.3, 25.7, 1.8, JIAO, ry=1.1)
+        P.dot(ex - 0.6, 24.9, 0.6, WHITE)
+    stroke(P, V.bezier([(20.5, 36.5), (32.0, 41.5), (43.5, 36.5)], 40), 0.7, ol_c)
+    for sx in (-1.0, 1.0):
+        x0 = 32.0 + sx * 12.5
+        foot = W.catmull_closed([(x0 - 2.6, 41.0), (x0 + 2.6, 41.0), (x0 + 4.0, 46.8), (x0 + 1.4, 48.6), (x0 - 1.4, 48.6), (x0 - 4.0, 46.8)], 6)
+        shape(P, foot, gold_d, ol=1.0, ol_rgb=ol_c, pool=0.3, pool_rgb=GOLD_DK)
+        for dx_ in (-1.4, 1.4):
+            stroke(P, W.seg_pts((x0 + dx_, 46.0), (x0 + 1.6 * dx_, 48.4), n=8), 0.35, ol_c)
+    coin(P, 32.0, 41.5, 5.6)
+
+
+def em_enc_spring(P):
+    """灵泉：一圈山石围着一汪青碧的泉水，泉眼涌起一股水柱，水花四落，涟漪荡开，上方几点灵光。"""
+    wat = ACC_INK["spring"]
+    wat_l, wat_d = mixc(wat, WHITE, 0.55), mixc(wat, mixc(HUAQING, JIAO, 0.45), 0.55)
+    stone = mixc(DAN, W_ZHESHI, 0.25)
+    shape(P, W.ellipse_pts(32.0, 40.5, 20.0, 9.4, 80), shade_lr(P, 12, 52, mixc(stone, PAPER, 0.25), mixc(stone, JIAO, 0.35)), ol=OL, pool=0.3, pool_rgb=JIAO, mottle=0.12)
+    for a in np.linspace(0, 2 * math.pi, 10, endpoint=False) + 0.2:
+        x, y = 32.0 + 18.2 * math.cos(a), 40.5 + 8.2 * math.sin(a)
+        stroke(P, V.bezier([(x - 2.2, y + 0.6), (x, y - 1.6), (x + 2.2, y + 0.6)], 12), 0.45, NONG, 0.75)
+    pool = W.ellipse_pts(32.0, 40.0, 15.6, 6.2, 80)
+    _, m = shape(P, pool, mixc(wat_l, wat, smoothstep(34.5, 45.0, P.Y)), ol=1.0, ol_rgb=wat_d, pool=0.4, pool_rgb=wat_d, mottle=0.0)
+    for rx, ry in ((6.0, 2.3), (11.0, 4.3)):
+        rp = W.ellipse_pts(32.0, 40.6, rx, ry, 60)
+        stroke(P, V.arc_resample(np.vstack([rp, rp[:1]]), 80), 0.45, WHITE, 0.85, clip=m)
+    jet = V.bezier([(32.0, 40.0), (31.4, 31.0), (32.4, 21.5)], 30)
+    stroke(P, jet, np.linspace(3.2, 2.0, 30), wat_d)
+    stroke(P, jet, np.linspace(2.4, 1.3, 30), wat_l)
+    stroke(P, jet[:24], 0.5, WHITE, 0.9)
+    for sx in (-1.0, 1.0):
+        arc = V.bezier([(32.2, 21.5), (32.2 + 6.0 * sx, 14.5), (32.2 + 10.5 * sx, 25.0)], 30)
+        stroke(P, arc, 1.25 * W.brush_profile(30, 1.0, 0.3, 0.0), wat_d)
+        stroke(P, arc, 0.6 * W.brush_profile(30, 1.0, 0.3, 0.0), wat_l)
+        for (dx_, dy_, r) in ((11.5, 29.0, 0.9), (8.0, 31.5, 0.7)):
+            P.dot(32.2 + dx_ * sx, dy_, r, wat_d)
+    for (x, y, L) in ((19.0, 18.0, 2.6), (45.5, 15.5, 2.2), (41.0, 10.8, 1.6)):
+        sparkle(P, x, y, L, mixc(wat, WHITE, 0.2), 0.55)
+
+
+def em_enc_shrine(P):
+    """古灯：石柱上一盏青铜古灯，灯盏里火苗正旺，四周一团暖光。"""
+    glow(P, 33.0, 22.0, 15.0, mixc(col(S.FLAME_LIGHT), PAPER, 0.25), 0.75)
+    stone = mixc(DAN, W_ZHESHI, 0.3)
+    paint_box(P, 21.0, 47.5, 20.0, 4.0, 3.5, 2.5, mixc(stone, ZHONG, 0.25), ol=1.1)
+    masks = paint_box(P, 27.0, 36.0, 9.0, 11.5, 2.5, 2.0, stone, ol=1.15)
+    for (x0, y0) in ((28.5, 39.0), (29.5, 43.0)):
+        stroke(P, W.seg_pts((x0, y0), (x0 + 2.5, y0 + 1.5), n=10), 0.45, ZHONG, 0.7, clip=masks[1], dry=0.4, dry_start=0.2)
+    paint_box(P, 23.0, 33.0, 17.0, 3.0, 3.5, 2.5, mixc(stone, PAPER, 0.15), ol=1.1)
+    bx, by = 33.2, 31.4
+    bronze = mixc(mixc(ZHESHI, NONG, 0.35), SHILV, 0.2)
+    shape(P, [(bx - 1.3, by - 3.0), (bx + 1.3, by - 3.0), (bx + 2.2, by + 0.4), (bx - 2.2, by + 0.4)], mixc(bronze, JIAO, 0.2), ol=0.8, wob=0.02)
+    bowl = W.catmull_closed([(bx - 7.2, by - 6.8), (bx + 7.2, by - 6.8), (bx + 5.0, by - 3.6), (bx, by - 2.6), (bx - 5.0, by - 3.6)], 8)
+    shape(P, bowl, shade_lr(P, bx - 7, bx + 7, mixc(bronze, GOLD_HI, 0.3), mixc(bronze, JIAO, 0.35)), ol=1.0, pool=0.3)
+    shape(P, W.ellipse_pts(bx, by - 6.8, 7.0, 1.5, 40), mixc(NONG, ZHESHI, 0.2), ol=0.7, pool=0.0, wob=0.02)
+    stroke(P, W.seg_pts((bx - 6.5, by - 5.3), (bx + 6.5, by - 5.3), n=20), 0.35, mixc(TENG, GOLD_DK, 0.3), 0.8)
+    flame(P, bx, by - 7.0, 12.5, 4.2, lean=0.6)
+
+
+def em_enc_altar(P):
+    """血祭坛：两层石台，台面一汪血红的池，血顺着台沿淌下；下层台角两支短烛。"""
+    red = ACC_INK["altar"]
+    glow(P, 32.5, 27.0, 15.0, mixc(red, PAPER, 0.35), 0.6)
+    stone_d = mixc(ZHONG, DAN, 0.2)
+    paint_box(P, 13.5, 42.0, 32.0, 7.0, 5.0, 3.5, mixc(stone_d, PAPER, 0.12), ol=1.2)
+    masks = paint_box(P, 18.0, 33.5, 23.0, 8.5, 6.0, 9.0, stone_d, ol=1.25)
+    stroke(P, V.bezier([(21.5, 38.0), (29.5, 36.0), (37.5, 38.0)], 30), 0.5, mixc(ZHUSHA, ZHONG, 0.3), 0.7, clip=masks[1])
+    blood = mixc(ZHUSHA, mixc(red, ZHUSHA_DK, 0.4), 0.5)
+    pool = W.catmull_closed([(21.5, 31.0), (25.0, 27.0), (33.0, 25.6), (41.5, 26.0), (43.5, 28.6), (40.0, 31.6), (31.0, 32.4)], 8)
+    rr = np.hypot((P.X - 30.0) / 9.0, (P.Y - 27.5) / 3.5)
+    _, m = shape(P, pool, mixc(mixc(red, WHITE, 0.2), blood, smoothstep(0.2, 1.2, rr)), ol=0.9, ol_rgb=ZHUSHA_DK, pool=0.45, pool_rgb=ZHUSHA_DK, mottle=0.0)
+    stroke(P, V.bezier([(25.5, 28.6), (30.5, 27.0), (36.5, 27.4)], 20), 0.55 * W.brush_profile(20, 0.4, 0.3), WHITE, 0.85, clip=m)
+    rp = W.ellipse_pts(35.5, 29.3, 3.0, 0.9, 30)
+    stroke(P, V.arc_resample(np.vstack([rp, rp[:1]]), 40), 0.25, mixc(red, WHITE, 0.45), 0.8, clip=m)
+    for (x, L) in ((22.5, 5.0), (27.5, 7.5), (35.0, 4.0)):
+        stroke(P, W.seg_pts((x, 32.6), (x + 0.2, 33.4 + L), n=16), np.linspace(1.1, 0.75, 16), blood)
+        P.dot(x + 0.2, 33.5 + L, 1.0, blood)
+    for (x, y) in ((17.5, 41.5), (45.5, 39.5)):
+        shape(P, [(x - 1.3, y - 5.0), (x + 1.3, y - 5.0), (x + 1.3, y), (x - 1.3, y)], mixc(PAPER, WHITE, 0.4), ol=0.7, pool=0.2, pool_rgb=QING, wob=0.02)
+        flame(P, x, y - 5.0, 4.6, 1.5, ol=0.5, core=False)
+
+
+def em_enc_rift(P):
+    """妖潮裂隙：一片地面被撕开一道锯齿形的裂口，口里透出紫红的妖光，碎石和妖火往上飞。"""
+    pur = ACC_INK["rift"]
+    ground = W.catmull_closed([(11.5, 41.0), (16.0, 35.5), (26.0, 33.0), (38.0, 32.5), (48.0, 34.5), (52.5, 39.5), (48.0, 45.5), (36.0, 48.0), (24.0, 47.5), (15.0, 45.5)], 8)
+    rg = np.exp(-(((P.X - 32.0) / 15.0) ** 2 + ((P.Y - 30.0) / 12.0) ** 2))
+    P.lay.over(mixc(pur, PAPER, 0.3), 0.65 * rg)
+    d, m = shape(P, ground, shade_lr(P, 12.0, 52.0, mixc(mixc(W_ZHESHI, DAN, 0.6), PAPER, 0.1), mixc(ZHESHI, ZHONG, 0.55)), ol=0, pool=0.35, pool_rgb=ZHONG, mottle=0.14)
+    for ctrl in (((21.0, 41.0), (19.0, 44.5), (16.5, 45.0)), ((31.0, 41.0), (32.5, 44.5), (30.5, 47.0)), ((41.0, 39.0), (44.0, 42.5), (47.5, 43.0)), ((26.5, 37.6), (25.0, 35.0), (21.5, 34.6)), ((36.5, 36.6), (38.5, 34.0), (42.0, 33.6))):
+        stroke(P, V.bezier(list(ctrl), 16), np.linspace(0.7, 0.15, 16), JIAO, 0.9, clip=m)
+    d2, t = P.sdf(W.wobble(ground, P.rng, 0.06, spacing=0.3))
+    P.outline(d2, t, 1.2, JIAO, jitter=0.3, dry=0.3)
+    cl = np.array([(12.5, 41.5), (17.5, 38.2), (21.0, 41.8), (26.5, 37.4), (31.0, 41.4), (36.5, 36.4), (41.0, 39.6), (46.5, 35.8), (51.5, 38.0)])
+    cl = V.arc_resample(cl, 160)
+    s = np.linspace(0, 1, 160)
+    hw = 0.35 + 4.3 * np.sin(np.pi * s) ** 0.8
+    d, t = P.sdf(W.ribbon(cl, hw))
+    P.fill(d, mixc(RIFT_HOT, WHITE, 0.8), pool=1.0, pool_rgb=mixc(pur, RIFT_HOT, 0.35), pool_w=1.5)
+    P.outline(d, t, OL, mixc(pur, JIAO, 0.65), jitter=0.2)
+    stroke(P, cl[20:140], 0.2 + 0.7 * np.sin(np.pi * np.linspace(0, 1, 120)), WHITE, 0.95)
+    flame(P, 25.0, 38.5, 12.0, 3.0, lean=-0.8, stops=PURPLE_STOPS, ol_rgb=mixc(pur, JIAO, 0.55), pool_rgb=pur, core=False)
+    flame(P, 37.0, 36.5, 17.0, 3.8, lean=0.9, stops=PURPLE_STOPS, ol_rgb=mixc(pur, JIAO, 0.55), pool_rgb=pur, core=False)
+    for (x, y, r, a) in ((17.5, 28.5, 2.3, 20), (46.5, 25.5, 2.0, -30), (29.0, 17.0, 1.6, 50)):
+        pts = W.ellipse_pts(x, y, r, r * 0.75, 5, a0=math.radians(a))
+        shape(P, pts, mixc(ZHONG, NONG, 0.5), ol=0.7, ol_rgb=JIAO, pool=0.0, wob=0.0)
+
+
+# ---------------------------------------------------------------- 古灯增益
+
+def em_buff_fury(P):
+    """灯焰：一团怒焰，五条火舌尖利、向右上翻卷，焦墨兑朱砂的外焰、橙焰、白热的芯，四周迸出火星。"""
+    outer = [(32.0, 50.5), (22.5, 47.0), (17.5, 39.0), (18.5, 30.0), (14.0, 22.5), (21.5, 25.0), (23.5, 18.0), (21.5, 10.5), (29.0, 16.0),
+             (34.0, 8.0), (36.0, 16.5), (39.5, 19.5), (46.0, 12.5), (45.0, 22.0), (50.0, 26.5), (47.0, 33.5), (46.5, 42.0), (41.0, 48.0)]
+    cxy = np.array([32.5, 44.0])
+
+    def scaled(k):
+        return [tuple(cxy + (np.array(p) - cxy) * k) for p in outer]
+
+    shape(P, W.catmull_closed(outer, 6), mixc(ZHUSHA, ZHUSHA_DK, 0.25), ol=OL * 1.1, ol_rgb=mixc(ZHUSHA_DK, JIAO, 0.6), pool=0.4, pool_rgb=mixc(ZHUSHA_DK, JIAO, 0.3), mottle=0.06, mottle_rgb=ZHUSHA_DK, wob=0.05)
+    shape(P, W.catmull_closed(scaled(0.7), 6), mixc(ZHUSHA, col(S.FLAME_LIGHT), 0.65), ol=0, pool=0.3, pool_rgb=ZHUSHA, mottle=0.0, wob=0.04)
+    shape(P, W.catmull_closed(scaled(0.4), 6), mixc(TENG, WHITE, 0.55), ol=0, pool=0.3, pool_rgb=TENG, mottle=0.0, wob=0.03)
+    for (x, y, r) in ((50.0, 16.5, 0.9), (13.5, 31.0, 0.75), (40.0, 9.5, 0.7), (52.0, 34.0, 0.6), (17.0, 15.0, 0.6)):
+        P.dot(x, y, r, mixc(ZHUSHA, TENG, 0.4))
+
+
+def em_buff_swift(P):
+    """御风：一笔从里向外卷出的旋风，甩出长长的风尾，上下两道细风相随，一片绿叶被卷着走。"""
+    ink = mixc(EL_INK["wood"], JIAO, 0.55)
+    cx, cy = 35.5, 28.0
+    th = np.linspace(0.0, 1.75 * math.pi, 140)
+    r = 1.2 + 9.6 * th / th[-1]
+    a = th - 1.25 * math.pi
+    spiral = np.stack([cx + r * np.cos(a), cy + r * np.sin(a)], -1)
+    end = spiral[-1]
+    tail = V.bezier([end, end + [-7.0, 0.4], end + [-15.0, -1.5], end + [-23.0, 2.5]], 70)
+    path = np.vstack([spiral, tail[1:]])
+    tt = np.linspace(0, 1, len(path))
+    hw = np.interp(tt, [0.0, 0.12, 0.5, 0.72, 1.0], [0.6, 1.6, 3.1, 2.6, 0.3])
+    stroke(P, path, hw, ink, 1.0, dry=0.25, dry_start=0.85, jitter=0.06)
+    for (x0, y0, L, al) in ((15.0, 30.0, 12.0, 0.95), (18.0, 46.5, 15.0, 1.0)):
+        stroke(P, V.bezier([(x0, y0), (x0 + L / 2, y0 - 0.8), (x0 + L, y0 - 0.4)], 30), 1.4 * W.brush_profile(30, 0.3, 1.0, 0.0)[::-1], mixc(EL_INK["wood"], JIAO, 0.2), al, dry=0.35, dry_start=0.0)
+    leaf(P, 47.0, 19.5, -35.0, 8.5, 4.4, mixc(EL_INK["wood"], SHILV, 0.4))
+
+
+def em_buff_soul(P):
+    """聚魂：三缕魂火从三面旋着聚向当中一团白亮的魂光。"""
+    tq = ACC_INK["soul"]
+    tq_d = mixc(tq, mixc(HUAQING, JIAO, 0.4), 0.55)
+    cx, cy = 32.0, 32.5
+    glow(P, cx, cy, 14.0, mixc(SOUL, PAPER, 0.3), 0.85)
+    for (x, y, r) in ((14.5, 25.0, 0.8), (48.5, 21.0, 0.7), (46.0, 46.0, 0.9), (19.0, 44.5, 0.6), (31.0, 12.0, 0.6)):
+        P.dot(x, y, r + 0.45, tq_d)
+        P.dot(x, y, r, mixc(SOUL, WHITE, 0.4))
+    for (a_deg, sc, sweep) in ((-100.0, 1.15, 1.25), (30.0, 0.9, 1.5), (140.0, 0.75, 1.1)):
+        a0 = math.radians(a_deg)
+        js = np.linspace(0, 1, 40)
+        ang = a0 + sweep * js
+        rad = 7.5 + (9.0 + 4.0 * sc) * js
+        path = np.stack([cx + rad * np.cos(ang), cy + rad * np.sin(ang)], -1)
+        hw = sc * np.interp(js, [0.0, 0.12, 0.35, 1.0], [2.2, 3.4, 2.4, 0.2])
+        stroke(P, path, hw + 0.75, tq_d, jitter=0.03)
+        stroke(P, path, hw, mixc(tq, WHITE, 0.25), jitter=0.03)
+        stroke(P, path[:12], hw[:12] * 0.5, mixc(SOUL, WHITE, 0.5), 0.9)
+        P.dot(path[3, 0], path[3, 1], 1.3 * sc, WHITE, 0.95)
+    shape(P, W.ellipse_pts(cx, cy, 4.6, 4.6, 40), mixc(SOUL, WHITE, 0.5), ol=0.9, ol_rgb=tq_d, pool=0.35, pool_rgb=tq, mottle=0.0)
+    P.dot(cx - 0.8, cy - 0.8, 1.6, WHITE)
+
+
+def em_buff_iron(P):
+    """金身（金钟罩）：一口半透明的金钟罩住一个打坐的人影，钟外一圈金光。"""
+    for k in range(16):
+        a = 2 * math.pi * k / 16 + 0.1
+        r0, r1 = 19.0, 21.8 if k % 2 == 0 else 20.6
+        p0 = (32.0 + r0 * math.cos(a), 31.5 + r0 * math.sin(a))
+        p1 = (32.0 + r1 * math.cos(a), 31.5 + r1 * math.sin(a))
+        stroke(P, W.seg_pts(p0, p1, n=8), np.linspace(0.6, 0.15, 8), mixc(TENG, GOLD_DK, 0.15), 0.9)
+    P.dot(32.0, 30.0, 3.2, NONG)
+    shape(P, W.catmull_closed([(32.0, 33.2), (37.5, 35.5), (40.0, 43.5), (36.0, 45.8), (28.0, 45.8), (24.0, 43.5), (26.5, 35.5)], 6), NONG, ol=0, pool=0.2, pool_rgb=JIAO, mottle=0.0)
+    poly, _ = bell_poly(32.0, 15.5, 47.5, 7.6, 16.8, 2.2)
+    rgb = shade_lr(P, 15, 49, mixc(TENG, GOLD_HI, 0.55), mixc(TENG, GOLD_DK, 0.45))
+    d, t = P.sdf(W.wobble(poly, P.rng, 0.05, spacing=0.3))
+    P.fill(d, rgb, 0.55, pool=0.75, pool_rgb=mixc(TENG, GOLD_DK, 0.25), pool_w=1.6)
+    m = P.cover(d)
+    for y in (21.5, 42.0):
+        stroke(P, W.seg_pts((14.0, y), (50.0, y), n=40), 0.55, GOLD_DK, 0.85, clip=m)
+    stroke(P, V.bezier([(26.0, 18.5), (21.5, 30.0), (18.5, 44.0)], 30), 0.9 * W.brush_profile(30, 0.5, 0.3), mixc(GOLD_HI, WHITE, 0.5), 0.85, clip=m)
+    P.outline(d, t, OL * 1.15, mixc(GOLD_DK, JIAO, 0.45), jitter=0.18)
+    shape(P, W.ellipse_pts(32.0, 13.6, 2.6, 2.0, 30), TENG, ol=0.8, ol_rgb=mixc(GOLD_DK, JIAO, 0.45), pool=0.4, pool_rgb=GOLD_DK)
+
+
+# ---------------------------------------------------------------- 夜签
+
+def em_omen_bloodmoon(P):
+    """血月：一轮血红的满月，两缕干笔墨云横过月面，月下一道浓墨山脊压住月的下沿。"""
+    glow(P, 32.5, 25.0, 19.0, mixc(ZHUSHA, PAPER, 0.45), 0.7)
+    rr = np.hypot((P.X - 29.0) / 12.5, (P.Y - 21.0) / 12.5)
+    rgb = mixc(mixc(mixc(ZHUSHA, W_ZHUSHA, 0.55), ZHUSHA, smoothstep(0.0, 0.8, rr)), ZHUSHA_DK, smoothstep(0.8, 1.6, rr))
+    d, m = shape(P, W.ellipse_pts(32.5, 25.5, 12.5, 12.5, 96), rgb, ol=1.0, ol_rgb=ZHUSHA_DK, pool=0.35, pool_rgb=ZHUSHA_DK, mottle=0.12, mottle_rgb=ZHUSHA_DK, wob=0.03)
+    for (x, y, r, al) in ((28.0, 21.5, 3.0, 0.35), (36.5, 28.0, 3.6, 0.3), (37.0, 19.0, 2.1, 0.3)):
+        P.dot(x, y, r, ZHUSHA_DK, al, clip=m)
+    for ctrl, hwm in ((((13.5, 26.5), (24.0, 23.0), (36.0, 27.5), (49.0, 22.5)), 1.25), (((17.0, 32.5), (28.0, 29.5), (40.0, 33.5), (50.5, 30.0)), 1.0)):
+        stroke(P, V.bezier(list(ctrl), 60), hwm * W.brush_profile(60, 0.4, 0.2, 0.3), mixc(NONG, ZHONG, 0.3), 0.95, dry=0.5, dry_start=0.15)
+    inside = smoothstep(23.6, 23.0, np.hypot(P.X - C, P.Y - C))
+    ridge = [(9.0, 54.0), (9.0, 44.0), (15.0, 40.0), (19.5, 41.5), (25.0, 36.5), (29.0, 39.0), (33.5, 37.5), (38.5, 34.0), (43.5, 39.0), (48.0, 37.5), (55.0, 42.0), (55.0, 54.0)]
+    d, t = P.sdf(W.wobble(W.catmull_closed(ridge, 6), P.rng, 0.06, spacing=0.3))
+    P.fill(d, mixc(mixc(NONG, JIAO, 0.4), mixc(ZHONG, DAN, 0.4), smoothstep(36.0, 52.0, P.Y)), pool=0.35, pool_rgb=JIAO, pool_w=0.8, mottle=0.1, mottle_rgb=JIAO, clip=inside)
+    P.outline(d, t, 1.0, JIAO, jitter=0.25, dry=0.15, clip=inside)
+    for ctrl in (((25.0, 37.5), (23.5, 41.0), (24.5, 45.0)), ((38.5, 35.0), (37.5, 39.0), (39.0, 43.5))):
+        stroke(P, V.bezier(list(ctrl), 20), 0.5 * W.brush_profile(20, 1.0, 0.2), mixc(DAN, QING, 0.3), 0.6, clip=inside, dry=0.4, dry_start=0.3)
+
+
+def em_omen_fog(P):
+    """浓雾：一盏红灯笼隐在三道白雾后面，只露出几分。"""
+    paint_lantern(P, 32.0, 30.0, 0.85)
+    mist = mixc(PAPER, WHITE, 0.55)
+    for (y, x0, x1, h) in ((22.0, 12.5, 45.0, 4.8), (33.0, 19.5, 51.5, 5.8), (43.5, 12.0, 46.5, 5.0)):
+        yc = y + 0.9 * np.sin(P.X * 0.33 + y)
+        hh = 0.5 * h * (1.0 + 0.15 * np.sin(P.X * 0.6 + 2.0 * y))
+        a = smoothstep(hh + 1.1, hh - 0.9, np.abs(P.Y - yc)) * smoothstep(x0 - 1.0, x0 + 5.0, P.X) * smoothstep(x1 + 1.0, x1 - 5.0, P.X)
+        P.lay.over(mixc(mist, QING, smoothstep(-0.5 * h, 0.5 * h, P.Y - yc) * 0.35), 0.95 * a)
+        xs = np.linspace(x0 + 3.0, x1 - 6.0, 50)
+        top = np.stack([xs, y + 0.9 * np.sin(xs * 0.33 + y) - 0.5 * h * (1.0 + 0.15 * np.sin(xs * 0.6 + 2.0 * y)) + 0.3], -1)
+        stroke(P, top, 0.5 * W.brush_profile(50, 0.3, 0.2), DAN, 0.8, dry=0.45, dry_start=0.2)
+
+
+def em_omen_glass(P):
+    """琉璃灯：一盏透明的琉璃灯，金顶金座，罩里的火苗看得分明；罩上一道细裂纹（代价：生命上限降低）。"""
+    glow(P, 32.0, 33.0, 15.0, mixc(TENG, PAPER, 0.35), 0.55)
+    flame(P, 32.0, 40.5, 13.5, 3.9, lean=0.3)
+    stroke(P, W.seg_pts((32.0, 40.0), (32.0, 43.5), n=8), 0.45, JIAO)
+    body = W.catmull_closed([(24.0, 20.0), (40.0, 20.0), (43.5, 27.0), (43.0, 38.0), (40.0, 44.5), (24.0, 44.5), (21.0, 38.0), (20.5, 27.0)], 8)
+    d, t = P.sdf(W.wobble(body, P.rng, 0.04, spacing=0.3))
+    P.fill(d, mixc(W_HUAQING, WHITE, 0.55), 0.35, pool=0.8, pool_rgb=mixc(W_HUAQING, HUAQING, 0.35), pool_w=1.8)
+    m = P.cover(d)
+    for x0, bend in ((26.5, -1.2), (37.5, 1.2)):
+        stroke(P, V.bezier([(x0, 20.5), (x0 + bend, 32.0), (x0, 44.0)], 30), 0.35, mixc(TENG, GOLD_DK, 0.3), 0.6, clip=m)
+    stroke(P, V.bezier([(23.6, 24.5), (22.2, 32.0), (23.6, 40.5)], 30), 1.0 * W.brush_profile(30, 0.4, 0.3), WHITE, 0.95, clip=m)
+    P.dot(40.0, 25.0, 0.8, WHITE, clip=m)
+    crack = [(40.5, 21.0), (38.6, 25.0), (40.0, 27.2), (37.4, 31.0), (38.2, 33.5)]
+    stroke(P, V.arc_resample(np.array(crack), 40), np.linspace(0.45, 0.12, 40), JIAO, 0.9, clip=m)
+    P.outline(d, t, OL, mixc(HUAQING, JIAO, 0.55), jitter=0.18)
+    gold = mixc(TENG, GOLD_DK, 0.15)
+    shape(P, [(25.0, 15.8), (39.0, 15.8), (42.6, 21.0), (21.4, 21.0)], gold, ol=1.0, ol_rgb=mixc(GOLD_DK, JIAO, 0.45), pool=0.45, pool_rgb=GOLD_DK, wob=0.03)
+    shape(P, [(21.4, 44.0), (42.6, 44.0), (40.0, 48.8), (24.0, 48.8)], gold, ol=1.0, ol_rgb=mixc(GOLD_DK, JIAO, 0.45), pool=0.45, pool_rgb=GOLD_DK, wob=0.03)
+    loop = W.ellipse_pts(32.0, 12.4, 2.6, 2.4, 40)
+    stroke(P, V.arc_resample(np.vstack([loop, loop[:1]]), 60), 0.6, mixc(GOLD_DK, JIAO, 0.3))
+    P.dot(32.0, 15.2, 1.5, TENG)
+
+
+def em_omen_foxes(P):
+    """狐火夜：一张白狐面具，朱砂描眉、细长的眼缝，两边各飘一团狐火。"""
+    for x, ln in ((13.8, -1.0), (50.2, 1.0)):
+        glow(P, x, 39.0, 7.0, mixc(col(S.EYE["fox"]), PAPER, 0.4), 0.55)
+        flame(P, x, 44.5, 11.5, 3.3, lean=ln, stops=FOX_STOPS, ol_rgb=mixc(ZHUSHA_DK, JIAO, 0.4), core=False)
+    mask = W.catmull_closed([(32.0, 47.0), (25.5, 42.0), (20.0, 34.0), (19.0, 26.0), (20.5, 14.0), (26.0, 20.0), (32.0, 19.0), (38.0, 20.0), (43.5, 14.0), (45.0, 26.0), (44.0, 34.0), (38.5, 42.0)], 8)
+    rgb = mixc(mixc(PAPER, WHITE, 0.8), mixc(PAPER, QING, 0.3), smoothstep(26.0, 48.0, P.Y) * 0.6)
+    _, m = shape(P, mask, rgb, ol=OL * 1.1, pool=0.25, pool_rgb=QING, mottle=0.0)
+    for sx in (-1.0, 1.0):
+        ear = [(32.0 + sx * 11.0, 16.8), (32.0 + sx * 7.0, 21.2), (32.0 + sx * 11.5, 23.5)]
+        shape(P, ear, ZHUSHA, ol=0.5, ol_rgb=ZHUSHA_DK, pool=0.3, pool_rgb=ZHUSHA_DK, wob=0.02)
+        eye = W.almond((32.0 + sx * 3.2, 31.6), (32.0 + sx * 10.8, 28.2), 2.6, 24, bulge=0.45)
+        shape(P, eye, JIAO, ol=0, pool=0.0, mottle=0.0, wob=0.0)
+        brow = V.bezier([(32.0 + sx * 4.0, 28.8), (32.0 + sx * 7.0, 25.5), (32.0 + sx * 11.5, 24.8)], 24)
+        stroke(P, brow, 1.1 * W.brush_profile(24, 1.0, 0.1, 0.0), ZHUSHA, clip=m)
+        for k in range(3):
+            y = 36.5 + 1.6 * k
+            stroke(P, W.seg_pts((32.0 + sx * 7.5, y), (32.0 + sx * 11.0, y - 0.8 + 0.6 * k), n=10), 0.4, ZHUSHA, 0.85, clip=m)
+    shape(P, W.catmull_closed([(32.0, 21.0), (33.6, 24.0), (32.0, 26.5), (30.4, 24.0)], 6), ZHUSHA, ol=0, pool=0.2, pool_rgb=ZHUSHA_DK, wob=0.0)
+    P.dot(32.0, 44.6, 1.4, JIAO, ry=1.0)
+
+
+def em_omen_gale(P):
+    """疾风：三道长长的风笔横扫过去，末梢上卷，几片叶子被风卷着飞。"""
+    for ctrl, hwm, rgb, cxy in ((((11.5, 31.0), (22.0, 21.0), (35.0, 32.0), (47.0, 21.5)), 1.7, NONG, (47.5, 25.0)),
+                                (((12.0, 40.5), (25.0, 30.5), (39.0, 42.0), (51.0, 31.0)), 2.2, JIAO, (51.0, 34.6)),
+                                (((18.0, 48.0), (28.0, 41.5), (37.0, 49.0), (46.5, 43.0)), 1.3, ZHONG, None)):
+        pts = V.bezier(list(ctrl), 60)
+        stroke(P, pts, hwm * W.brush_profile(60, 0.4, 0.5, 0.2), rgb, 1.0, dry=0.5, dry_start=0.15)
+        if cxy is not None:
+            th = np.linspace(0.0, 1.5 * math.pi, 40)
+            r = 3.6 - 2.5 * th / th[-1]
+            curl = np.stack([cxy[0] + r * np.cos(-th - 0.5 * math.pi), cxy[1] + r * np.sin(-th - 0.5 * math.pi)], -1)
+            stroke(P, curl, np.linspace(hwm * 0.5, 0.35, 40), rgb)
+    leaf(P, 40.0, 17.5, -30.0, 8.0, 4.0, mixc(W_SHILV, SHILV, 0.4))
+    leaf(P, 23.0, 18.0, 25.0, 6.5, 3.4, mixc(W_ZHESHI, ZHESHI, 0.4))
+    leaf(P, 33.0, 50.0, -10.0, 6.5, 3.4, mixc(W_SHILV, SHILV, 0.6))
+
+
+def em_omen_chestrain(P):
+    """天降宝箱：一只朱漆宝箱从天而降，上面拖着几道直直的落痕；左上还掉着一只小的。"""
+    for (x, y0, y1, al) in ((29.0, 13.0, 27.0, 0.8), (34.5, 10.5, 26.0, 0.9), (40.0, 13.5, 25.5, 0.75), (18.0, 9.5, 18.5, 0.6), (22.5, 11.0, 17.5, 0.5)):
+        stroke(P, W.seg_pts((x, y0), (x, y1), n=24), np.linspace(0.1, 0.85, 24), mixc(DAN, ZHONG, 0.4), al, dry=0.35, dry_start=0.0)
+    chest_icon(P, 15.0, 22.5, 9.5, 6.5, 3.0, 2.2, ol=0.9)
+    chest_icon(P, 23.5, 33.5, 18.0, 12.0, 5.5, 4.5, ol=1.25)
+    for (x, y, L) in ((49.0, 25.0, 2.4), (18.5, 40.0, 2.0)):
+        sparkle(P, x, y, L, TENG, 0.55)
+
+
+def em_omen_element(P):
+    """五行偏重：五行一圈，相生的环线连着五点；火的那一点又大又重，坠在环底。"""
+    cx, cy, R = 32.0, 29.5, 13.0
+    ring = W.ellipse_pts(cx, cy, R, R, 120)
+    stroke(P, V.arc_resample(np.vstack([ring, ring[:1]]), 160), 0.75, ZHONG, 0.9, dry=0.3, dry_start=0.0)
+    order = ["fire", "earth", "metal", "water", "wood"]  # 顺时针相生：火生土、土生金、金生水、水生木、木生火
+    for k, el in enumerate(order):
+        a = math.radians(90 + 72 * k)
+        x, y = cx + R * math.cos(a), cy + R * math.sin(a)
+        rad = 7.4 if k == 0 else 3.9
+        if k == 0:
+            P.dot(x + 0.8, y + 1.2, rad, JIAO, 0.22)
+        rr = np.hypot((P.X - x + 0.35 * rad) / rad, (P.Y - y + 0.35 * rad) / rad)
+        rgb = mixc(mixc(EL_INK[el], WHITE, 0.3), mixc(EL_INK[el], JIAO, 0.3), smoothstep(0.2, 1.4, rr))
+        shape(P, W.ellipse_pts(x, y, rad, rad, 48), rgb, ol=1.2 if k == 0 else 0.9, ol_rgb=mixc(EL_INK[el], JIAO, 0.6), pool=0.35, pool_rgb=mixc(EL_INK[el], JIAO, 0.3), mottle=0.0, wob=0.03)
+        P.dot(x - 0.35 * rad, y - 0.35 * rad, 0.22 * rad, WHITE, 0.85)
+
+
+def em_omen_greed(P):
+    """贪婪：一锭元宝压在一堆铜钱上，钱从右边往下滚落。"""
+    for (x, y) in ((21.0, 45.5), (29.0, 47.0), (37.5, 46.5), (44.0, 44.0), (25.0, 41.5), (33.5, 42.0), (40.5, 40.0)):
+        shape(P, W.ellipse_pts(x, y + 0.9, 4.6, 1.9, 36), mixc(TENG, GOLD_DK, 0.6), ol=0.8, ol_rgb=mixc(GOLD_DK, JIAO, 0.5), pool=0.2, mottle=0.0, wob=0.02)
+        coin(P, x, y, 4.6, ry=1.9, ol=0.8)
+    paint_ingot(P, 30.0, 33.0, 0.66)
+    coin(P, 46.5, 31.5, 3.9)
+    coin(P, 44.5, 21.5, 1.9, ry=3.6, ol=0.75)
+    for ctrl in (((41.0, 17.0), (44.0, 15.5), (47.5, 17.5)), ((49.5, 26.0), (51.5, 28.5), (51.0, 31.5))):
+        stroke(P, V.bezier(list(ctrl), 16), 0.45 * W.brush_profile(16, 0.3, 0.3), DAN, 0.85)
+
+
+def em_omen_quiet(P):
+    """静夜：一弯新月挂在右上，下面一道平静的水线，水里一道淡淡的月影；远处一抹淡山，大片留白。"""
+    hill = W.catmull_closed([(12.5, 39.0), (16.5, 35.0), (21.0, 33.0), (25.0, 35.5), (29.5, 37.0), (31.0, 39.0)], 6)
+    shape(P, hill, mixc(QING, PAPER, 0.3), ol=0, pool=0.3, pool_rgb=DAN, mottle=0.08, mottle_rgb=DAN)
+    x1, y1, r1 = 36.5, 23.0, 10.0
+    x2, y2, r2 = 40.6, 19.6, 8.6
+    d1 = np.hypot(P.X - x1, P.Y - y1) - r1
+    d2 = np.hypot(P.X - x2, P.Y - y2) - r2
+    d = np.maximum(d1, -d2)
+    t = np.mod(np.arctan2(P.Y - y1, P.X - x1) / (2 * math.pi), 1.0)
+    rr = np.hypot((P.X - 31.0) / 9.0, (P.Y - 28.0) / 9.0)
+    P.fill(d, mixc(mixc(TENG, WHITE, 0.35), TENG, smoothstep(0.2, 1.0, rr)), pool=0.4, pool_rgb=mixc(TENG, GOLD_DK, 0.4), pool_w=0.7)
+    P.outline(d, t, 1.0, mixc(GOLD_DK, JIAO, 0.45), jitter=0.15)
+    xs = np.linspace(12.0, 52.0, 80)
+    stroke(P, np.stack([xs, 39.0 + 0.35 * np.sin(xs * 0.4)], -1), 1.0 * W.brush_profile(80, 0.5, 0.3, 0.2), NONG, 1.0, dry=0.35, dry_start=0.75)
+    stroke(P, W.seg_pts((21.0, 45.0), (43.0, 45.2), n=40), 0.5 * W.brush_profile(40, 0.4, 0.3), DAN, 0.8)
+    for (y, half, al) in ((41.6, 4.2, 0.95), (43.4, 3.0, 0.8), (47.0, 1.8, 0.6)):
+        stroke(P, W.seg_pts((32.0 - half, y), (32.0 + half, y), n=16), 0.6 * W.brush_profile(16, 0.4, 0.4), mixc(TENG, GOLD_DK, 0.15), al)
+    for (x, y, r) in ((19.0, 21.0, 0.75), (25.0, 15.5, 0.6), (48.5, 33.0, 0.5)):
+        P.dot(x, y, r, ZHONG)
+
+
+def em_omen_wonders(P):
+    """奇遇夜：一只斜放的葫芦，腰系朱砂绳，葫芦口冒出一缕卷曲的仙气，气里几颗金星。"""
+    fr = Fr(26.5, 39.0, -52.0, 1.0)
+    us = np.linspace(-9.6, 19.2, 90)
+    big = np.sqrt(np.clip(9.6**2 - us**2, 0, None))
+    small = np.sqrt(np.clip(6.0**2 - (us - 13.2) ** 2, 0, None))
+    k = 2.2
+    hw = k * np.log(np.exp(big / k) + np.exp(small / k) - 1.0 + 1e-9)
+    hw = np.maximum(hw, 0.05)
+    poly = fr([(u, -h) for u, h in zip(us, hw)] + [(u, h) for u, h in zip(us[::-1], hw[::-1])][1:-1])
+    _, Vv = fr.uv(P)
+    rgb = mixc(mixc(W_ZHESHI, TENG, 0.35), mixc(ZHESHI, ZHONG, 0.35), smoothstep(-6.0, 9.0, Vv))
+    mouth = np.array(fr.pt(19.5, 0.0))
+    smoke = V.bezier([mouth, mouth + [6.0, -4.0], mouth + [2.0, -12.0], mouth + [-6.0, -10.5]], 50)
+    stroke(P, smoke, np.interp(np.linspace(0, 1, 50), [0, 0.3, 1], [1.2, 1.8, 0.3]), mixc(QING, HUAQING, 0.25), 0.9, dry=0.35, dry_start=0.6)
+    th = np.linspace(0.0, 1.5 * math.pi, 30)
+    rc = 2.4 - 1.6 * th / th[-1]
+    end = smoke[-1]
+    curl = np.stack([end[0] + 2.0 + rc * np.cos(th + math.pi), end[1] + rc * np.sin(th + math.pi)], -1)
+    stroke(P, curl, 0.6, mixc(QING, HUAQING, 0.25), 0.85)
+    _, m = shape(P, poly, rgb, ol=OL, pool=0.3, pool_rgb=mixc(ZHESHI, JIAO, 0.3), mottle=0.08, mottle_rgb=ZHESHI)
+    stroke(P, fr(V.bezier([(-5.0, -6.0), (-1.0, -8.0), (3.0, -6.8)], 20)), 0.9 * W.brush_profile(20, 0.4, 0.3), mixc(PAPER, WHITE, 0.6), 0.85, clip=m)
+    stroke(P, fr(W.seg_pts((7.8, -4.5), (7.8, 4.5), n=12)), 0.95, ZHUSHA)
+    knot = np.array(fr.pt(7.8, 4.3))
+    for dv in ((-1.0, 5.5), (1.6, 5.0)):
+        stroke(P, V.bezier([knot, knot + [0.5 * dv[0], 2.0], knot + list(dv)], 12), 0.55 * W.brush_profile(12, 1.0, 0.3, 0.0), ZHUSHA)
+    P.dot(knot[0], knot[1], 1.0, ZHUSHA_DK)
+    stroke(P, fr(W.seg_pts((18.6, 0.0), (21.0, 0.0), n=8)), 1.4, mixc(ZHESHI, JIAO, 0.4))
+    for (x, y, L) in ((47.5, 22.0, 2.8), (36.0, 11.5, 2.2), (43.5, 13.5, 1.6), (21.0, 17.5, 1.8)):
+        sparkle(P, x, y, L, TENG, 0.6)
+
+
+# ---------------------------------------------------------------- 界面
+
+def em_hud_kills(P):
+    """击杀：一只墨团小鬼被一刀斜斩成两半——两半错开，刀痕一线朱砂。不见血。"""
+    ghost = [(32.0, 13.5), (40.5, 17.0), (44.5, 26.0), (44.0, 37.0), (45.5, 46.0), (41.0, 43.5), (37.5, 48.0), (33.0, 44.5), (28.5, 48.5), (25.0, 43.5), (20.0, 46.0), (21.0, 37.0), (20.0, 26.0), (24.0, 17.0)]
+    poly = W.catmull_closed(ghost, 8)
+    c0 = np.array([32.0, 31.0])
+    e = np.array([1.0, -0.95])
+    e /= np.linalg.norm(e)
+    nv = np.array([-e[1], e[0]])
+    g = 1.3
+    for sgn in (1.0, -1.0):
+        off = nv * g * sgn
+        side = ((P.X - c0[0] - off[0]) * nv[0] + (P.Y - c0[1] - off[1]) * nv[1]) * sgn
+        clip = smoothstep(-P.aa, P.aa, side)
+        rgb = shade_lr(P, 18.0, 46.0, mixc(ZHONG, NONG, 0.4), mixc(NONG, JIAO, 0.5))
+        d, t = P.sdf(W.wobble(poly + off, P.rng, 0.05, spacing=0.3))
+        P.fill(d, rgb, pool=0.3, pool_rgb=JIAO, pool_w=0.8, clip=clip)
+        P.outline(d, t, OL, JIAO, jitter=0.2, clip=clip)
+        for ex in (27.0, 37.0):
+            eye = W.almond((ex - 3.0 + off[0], 26.0 + off[1] + (0.8 if ex < 32 else -0.4)), (ex + 3.0 + off[0], 26.0 + off[1] + (-0.6 if ex < 32 else 0.8)), 3.6, 20, bulge=0.5)
+            shape(P, eye, mixc(PAPER, WHITE, 0.5), ol=0, pool=0.0, mottle=0.0, wob=0.0)
+    cut = W.seg_pts(c0 - e * 24.0, c0 + e * 24.0, n=60)
+    stroke(P, cut, 0.15 + 0.85 * np.sin(np.pi * np.linspace(0, 1, 60)) ** 1.5, ZHUSHA, 1.0)
+
+
+def em_hud_pause(P):
+    """暂停：两笔竖直的浓墨，起笔重按、收笔带飞白。"""
+    for x in (25.5, 38.5):
+        pts = W.seg_pts((x, 18.5), (x + 0.3, 45.5), n=60)
+        stroke(P, pts, 3.5 * W.brush_profile(60, 1.0, 0.75, 0.1), JIAO, 1.0, dry=0.18, dry_start=0.88, jitter=0.06)
+
+
+def em_hud_dash(P):
+    """闪：一只快靴向前一蹬，身后三道疾痕、几点扬尘。"""
+    for (y, x0, x1, hwm, rgb) in ((26.0, 13.0, 29.0, 1.3, ZHONG), (33.0, 10.5, 28.0, 1.8, NONG), (40.0, 14.0, 27.0, 1.2, ZHONG)):
+        stroke(P, W.seg_pts((x0, y), (x1, y - 0.6), n=40), hwm * np.linspace(0.1, 1.0, 40) ** 0.7, rgb, 0.95, dry=0.4, dry_start=0.0)
+    fr = Fr(28.5, 42.5, -12.0, 1.0)
+    boot = [(0.0, 0.0), (-0.2, -9.0), (-1.0, -17.5), (7.0, -18.5), (8.0, -9.5), (13.5, -7.0), (18.0, -5.0), (20.5, -2.0), (19.0, 0.2)]
+    sil = fr(W.catmull_closed(boot, 5))
+    _, Vv = fr.uv(P)
+    _, m = shape(P, sil, mixc(mixc(NONG, ZHONG, 0.5), JIAO, smoothstep(-18.0, 0.0, Vv) * 0.6), ol=OL, ol_rgb=JIAO, pool=0.25, pool_rgb=JIAO, mottle=0.05)
+    stroke(P, fr(V.bezier([(0.5, -0.4), (10.0, 0.6), (19.0, -0.4)], 30)), 1.0, mixc(PAPER, WHITE, 0.5), 1.0, clip=m)
+    stroke(P, fr(W.seg_pts((-0.8, -15.5), (7.3, -16.4), n=20)), 0.9, ZHUSHA, 1.0, clip=m)
+    for (x, y, r, al) in ((26.0, 44.5, 1.7, 0.6), (21.5, 46.0, 1.3, 0.5), (17.5, 44.0, 0.9, 0.4)):
+        P.dot(x, y, r, DAN, al)
+
+
+def em_hud_ult(P):
+    """燃灯（大招）：一盏灯笼在烈焰里燃起，背后一圈放射的金光环。"""
+    glow(P, 32.0, 31.0, 20.0, mixc(TENG, PAPER, 0.3), 0.7)
+    ring = W.ellipse_pts(32.0, 31.5, 18.6, 18.6, 120)
+    stroke(P, V.arc_resample(np.vstack([ring, ring[:1]]), 200), 0.75, mixc(TENG, GOLD_DK, 0.2), 0.95)
+    for k in range(16):
+        a = 2 * math.pi * k / 16
+        r0, r1 = 15.0, 22.0 if k % 2 == 0 else 20.0
+        stroke(P, W.seg_pts((32.0 + r0 * math.cos(a), 31.5 + r0 * math.sin(a)), (32.0 + r1 * math.cos(a), 31.5 + r1 * math.sin(a)), n=10),
+               np.linspace(0.75, 0.15, 10), mixc(TENG, ZHUSHA, 0.15), 0.9)
+    flame(P, 32.0, 47.0, 34.0, 12.5, ol=1.0)
+    paint_lantern(P, 32.0, 33.5, 0.82)
+
+
+def em_hud_level(P):
+    """等级徽章底：只有框（纸底、墨圈、金圈），中间留空，数字由游戏画。"""
+
+
 # ============================================================== 汇总
 
 EMBLEMS = {
@@ -865,11 +1676,156 @@ def make_icon(index: int, key: str, el: str, evo: bool, element: bool) -> Image.
     return P.image()
 
 
+# ---------------------------------------------------------------- 第二批的框
+
+F_PLAIN = {"arc": NEUTRAL_ARC}
+F_LIT = {"arc": LAMP_ARC, "glow": True}
+F_OFF = {"arc": QING, "off": True}
+F_OMEN = {"omen": True}
+F_LEVEL = {"arc": None, "gold_rim": (22.6, 2.3)}
+
+
+def F_ACC(key):
+    return {"arc": ACC_INK[key]}
+
+
+def paint_faded(P: W.Painter, fn) -> None:
+    """心灯未点亮：物件先画在单独一层，再按明度换成淡墨（深处重墨兑淡墨、亮处近纸色），叠回纸底。
+    物件的随机数与点亮版完全一样，所以是同一幅画。"""
+    back = P.lay
+    P.lay = V.Layer(*P.X.shape)
+    fn(P)
+    em = P.lay
+    P.lay = back
+    rgb = em.p / np.maximum(em.a, 1e-6)[..., None]
+    L = np.clip(lum3(rgb), 0.0, 1.0)
+    tone = mixc(mixc(ZHONG, DAN, 0.3), mixc(PAPER, WHITE, 0.2), L**0.95)
+    back.over(tone, em.a * 0.92)
+
+
+def omen_front(P: W.Painter) -> None:
+    """夜签的框：朱砂双圈（外粗内细），像一枚圆形朱文印——印泥有轻有重、有砂眼，外圈有两处残缺。"""
+    r = np.hypot(P.X - C, P.Y - C)
+    th = np.mod(np.arctan2(P.Y - C, P.X - C) / (2 * math.pi), 1.0)
+    R1 = 27.2 + 0.15 * W.sample1(W.pnoise1(P.rng, 256, 6.0), th)
+    hw1 = 1.6 * np.clip(1.0 + 0.12 * W.sample1(W.pnoise1(P.rng, 256, 4.0), th), 0.7, 1.3)
+    R2, hw2 = 24.3, 0.62 * np.clip(1.0 + 0.15 * W.sample1(W.pnoise1(P.rng, 256, 5.0), th), 0.6, 1.4)
+    cov = np.maximum(smoothstep(hw1 + P.aa, hw1 - P.aa, np.abs(r - R1)), smoothstep(hw2 + P.aa, hw2 - P.aa, np.abs(r - R2)))
+    for g0, gw in ((0.135, 0.012), (0.61, 0.008)):  # 残边：外圈两处缺口
+        gap = smoothstep(gw, gw * 0.4, np.abs(np.mod(th - g0 + 0.5, 1.0) - 0.5)) * (r > R2 + 1.5)
+        cov = cov * (1.0 - gap)
+    press = V.noise1(P.rng, P.X.shape, 2.5 * P.ss)
+    speck = V.rank01(V.noise1(P.rng, P.X.shape, 0.22 * P.ss))
+    holes = smoothstep(0.93 + 0.03 * press, 0.965 + 0.03 * press, speck)
+    rgb = mixc(mixc(ZHUSHA, W_ZHUSHA, 0.15), mixc(ZHUSHA, ZHUSHA_DK, 0.45), np.clip(0.5 + 0.35 * press, 0, 1))
+    P.lay.over(rgb, cov * (1.0 - 0.85 * holes) * 0.97)
+
+
+META_NODES = [("dmg", "锋芒", em_meta_dmg), ("hp", "体魄", em_meta_hp), ("agi", "灵巧", em_meta_agi), ("luck", "气运", em_meta_luck)]
+ENCOUNTERS = [("toad", "金蟾", em_enc_toad), ("spring", "灵泉", em_enc_spring), ("shrine", "古灯", em_enc_shrine), ("altar", "血祭坛", em_enc_altar), ("rift", "妖潮裂隙", em_enc_rift)]
+BUFFS = [("fury", "灯焰", em_buff_fury), ("swift", "御风", em_buff_swift), ("soul", "聚魂", em_buff_soul), ("iron", "金身", em_buff_iron)]
+OMENS = [  # 与 web/lantern/game.js 的 OMENS 同序
+    ("bloodmoon", "血月", em_omen_bloodmoon), ("fog", "浓雾", em_omen_fog), ("glass", "琉璃灯", em_omen_glass), ("foxes", "狐火夜", em_omen_foxes),
+    ("gale", "疾风", em_omen_gale), ("chestrain", "天降宝箱", em_omen_chestrain), ("element", "五行偏重", em_omen_element), ("greed", "贪婪", em_omen_greed),
+    ("quiet", "静夜", em_omen_quiet), ("wonders", "奇遇夜", em_omen_wonders),
+]
+HUD = [("kills", "击杀", em_hud_kills, F_PLAIN), ("pause", "暂停", em_hud_pause, F_PLAIN), ("dash", "闪", em_hud_dash, F_PLAIN),
+       ("ult", "燃灯", em_hud_ult, {"arc": LAMP_ARC}), ("level", "等级", em_hud_level, F_LEVEL)]
+
+
+def new_specs():
+    """第二批图标：[(文件名, 物件函数, 框, 种子, meta 附加字段)]，追加在前 25 个之后，顺序固定。
+    心灯的亮、暗两版用同一个种子（同一幅画）。"""
+    out = []
+    k = 0
+
+    def add(fname, fn, fs, extra, same_seed=False):
+        nonlocal k
+        if not same_seed:
+            k += 1
+        out.append((fname, fn, fs, 7000 + 37 * k, extra))
+
+    add("icon_lotus", em_lotus, F_PLAIN, {"kind": "supply", "id": "lotus", "name": "莲子"})
+    add("icon_oil", em_oil, F_PLAIN, {"kind": "currency", "id": "oil", "name": "灯油"})
+    for mid, name, fn in META_NODES:
+        add(f"icon_meta_{mid}", fn, F_LIT, {"kind": "meta", "id": mid, "name": name, "lit": True})
+        add(f"icon_meta_{mid}_off", fn, F_OFF, {"kind": "meta", "id": mid, "name": name, "lit": False}, same_seed=True)
+    for eid, name, fn in ENCOUNTERS:
+        add(f"icon_enc_{eid}", fn, F_ACC(eid), {"kind": "encounter", "id": eid, "name": name, "accent": ACC_HEX[eid]})
+    for bid, name, fn in BUFFS:
+        add(f"icon_buff_{bid}", fn, F_ACC(bid), {"kind": "buff", "id": bid, "name": name, "accent": ACC_HEX[bid]})
+    for oid, name, fn in OMENS:
+        add(f"icon_omen_{oid}", fn, F_OMEN, {"kind": "omen", "id": oid, "name": name})
+    for hid, name, fn, fs in HUD:
+        add(f"icon_{hid}", fn, fs, {"kind": "hud", "id": hid, "name": name})
+    return out
+
+
+def make_icon2(index: int) -> Image.Image:
+    _, fn, fs, seed, _ = new_specs()[index]
+    P = W.Painter(SIZE, SIZE, seed, ss=SS)
+    disc_back(P, mixc(PAPER, W_ZHUSHA, 0.05) if fs.get("omen") else PAPER)
+    if fs.get("glow"):
+        glow(P, C, C + 1.0, 22.0, LAMP_GLOW, 0.65)
+    if fs.get("off"):
+        paint_faded(P, fn)
+    else:
+        fn(P)
+    if fs.get("omen"):
+        omen_front(P)
+    elif fs.get("off"):
+        ring_front(P, fs["arc"], arc_hw=0.6, ink=OFF_INK, dry=(0.22, 0.55), ring_alpha=0.9)
+    else:
+        ring_front(P, fs.get("arc"), gold_rim=fs.get("gold_rim"))
+    return P.image()
+
+
+def note_for(extra: dict) -> str:
+    if extra.get("kind") == "meta":
+        return f"心灯{'（点亮）' if extra['lit'] else '（未点亮）'}：{extra['name']}"
+    if extra.get("kind") == "seal":
+        return f"朱砂印章（{extra['style']}）：{extra['name']}"
+    return f"界面图标：{extra['name']}"
+
+
+# ---------------------------------------------------------------- 并行出图
+
+def _render(task):
+    kind, i = task
+    if kind == "old":
+        _, key, el, evo, element, _ = icon_specs()[i]
+        return make_icon(i, key, el, evo, element)
+    if kind == "new":
+        return make_icon2(i)
+    import ui_seals  # noqa: PLC0415
+
+    return ui_seals.make_seal(i)
+
+
+def render_all(tasks) -> list[Image.Image]:
+    """每个图标各自取种子，彼此独立，可以多进程并行；结果与逐个串行画完全一致。LANTERN_JOBS=1 关闭并行。"""
+    jobs = int(os.environ.get("LANTERN_JOBS", str(min(4, os.cpu_count() or 1))))
+    if jobs <= 1 or len(tasks) < 4:
+        return [_render(t) for t in tasks]
+    with ProcessPoolExecutor(jobs, mp_context=multiprocessing.get_context("fork")) as ex:
+        return list(ex.map(_render, tasks, chunksize=1))
+
+
 def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
+    import ui_seals  # noqa: PLC0415
+
     base = {"color": "full", "blend": "normal", "tint": False}
+    old, new, seals = icon_specs(), new_specs(), ui_seals.seal_specs()
+    tasks = [("old", i) for i in range(len(old))] + [("new", i) for i in range(len(new))] + [("seal", i) for i in range(len(seals))]
+    imgs = iter(render_all(tasks))
     out = {}
-    for i, (fname, key, el, evo, element, extra) in enumerate(icon_specs()):
-        out[fname] = (make_icon(i, key, el, evo, element), (0.5, 0.5), {**base, **extra, "note": f"界面图标：{extra['name']}"})
+    for fname, key, el, evo, element, extra in old:
+        out[fname] = (next(imgs), (0.5, 0.5), {**base, **extra, "note": f"界面图标：{extra['name']}"})
+    for fname, _fn, _fs, _seed, extra in new:
+        out[fname] = (next(imgs), (0.5, 0.5), {**base, **extra, "note": note_for(extra)})
+    for spec in seals:
+        extra = spec["meta"]
+        out[spec["fname"]] = (next(imgs), (0.5, 0.5), {**base, **extra, "note": note_for(extra)})
     return out
 
 
@@ -890,10 +1846,12 @@ def main() -> dict:
         "px_per_unit": V.PPU,
         "display_px_1x": SIZE,
         "el_colors": {k: S.rgb_to_hex(tuple(int(round(c * 255)) for c in v)) for k, v in EL_INK.items()},
+        "accent_colors": {k: S.rgb_to_hex(tuple(int(round(c * 255)) for c in v)) for k, v in ACC_INK.items()},
+        "seal_generator": "art/post/ui_seals.py（由 ui_icons.py 调用，写进同一个 ui/ 与 meta.json）",
         "files": files,
     }
     (UI_DIR / "meta.json").write_text(V.dump_json(meta), encoding="utf-8")
-    print(f"写出 {len(items)} 个图标，共 {total / 1024:.1f} KB，用时 {time.perf_counter() - t0:.1f} s → {UI_DIR}")
+    print(f"写出 {len(items)} 个图标/印章，共 {total / 1024:.1f} KB，用时 {time.perf_counter() - t0:.1f} s → {UI_DIR}")
     return items
 
 
