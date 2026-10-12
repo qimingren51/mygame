@@ -108,6 +108,48 @@ impl Grid {
             }
         }
     }
+
+    /// 中心离 (x, y) 不超过 range 的妖物里最近的 k 只，按距离从近到远写进 out（距离相同的按扫描顺序）。
+    pub fn nearest_k(&self, en: &Enemies, x: f32, y: f32, range: f32, k: usize, out: &mut Vec<u32>) {
+        out.clear();
+        if k == 0 {
+            return;
+        }
+        let mut d2s: [f32; 64] = [0.0; 64];
+        let k = k.min(d2s.len());
+        let range2 = range * range;
+        let (c0, c1) = (self.col(x - range), self.col(x + range));
+        let (r0, r1) = (self.row(y - range), self.row(y + range));
+        for row in r0..=r1 {
+            for col in c0..=c1 {
+                for &i in self.cell(row * self.cols + col) {
+                    let iu = i as usize;
+                    if !en.alive[iu] {
+                        continue;
+                    }
+                    let (dx, dy) = (en.x[iu] - x, en.y[iu] - y);
+                    let d2 = dx * dx + dy * dy;
+                    if d2 > range2 || (out.len() == k && d2 >= d2s[k - 1]) {
+                        continue;
+                    }
+                    // 插入排序（k 很小）
+                    let mut j = if out.len() < k {
+                        out.push(i);
+                        out.len() - 1
+                    } else {
+                        k - 1
+                    };
+                    while j > 0 && d2s[j - 1] > d2 {
+                        d2s[j] = d2s[j - 1];
+                        out[j] = out[j - 1];
+                        j -= 1;
+                    }
+                    d2s[j] = d2;
+                    out[j] = i;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +184,34 @@ mod tests {
                 .map(|i| i as u32)
                 .collect();
             assert_eq!(got, want);
+        }
+    }
+
+    #[test]
+    fn nearest_k_matches_brute_force() {
+        let mut en = Enemies::default();
+        let mut rng = lantern_core::Pcg32::new(4, 0);
+        for _ in 0..600 {
+            let i = en.alloc().unwrap();
+            en.x[i] = rng.range_f32(-700.0, 700.0);
+            en.y[i] = rng.range_f32(-700.0, 700.0);
+            en.r[i] = 10.0;
+        }
+        let mut g = Grid::default();
+        g.build(&en, 0.0, 0.0, 800.0, 800.0);
+        let mut got = Vec::new();
+        for _ in 0..50 {
+            let (x, y) = (rng.range_f32(-500.0, 500.0), rng.range_f32(-500.0, 500.0));
+            let range = rng.range_f32(50.0, 400.0);
+            let k = 1 + rng.below(12) as usize;
+            g.nearest_k(&en, x, y, range, k, &mut got);
+            let d2 = |i: usize| (en.x[i] - x) * (en.x[i] - x) + (en.y[i] - y) * (en.y[i] - y);
+            let mut want: Vec<usize> = en.iter_alive().filter(|&i| d2(i) <= range * range).collect();
+            want.sort_by(|&a, &b| d2(a).total_cmp(&d2(b)));
+            want.truncate(k);
+            let got_d: Vec<f32> = got.iter().map(|&i| d2(i as usize)).collect();
+            let want_d: Vec<f32> = want.iter().map(|&i| d2(i)).collect();
+            assert_eq!(got_d, want_d);
         }
     }
 }

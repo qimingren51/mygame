@@ -1,229 +1,366 @@
 //! 音频层（docs/DESIGN.md 第 10 节）。只消费模拟事件，不影响模拟。
 //!
-//! 启动时用代码合成几种音色（不用音频文件），运行时只负责播放：
-//! 命中是木鱼，击杀和闪避是古筝拨弦，拾取魂火音高一路爬升，受伤是低沉的闷响，升级是编钟。
-//! 同类声音每帧限量，几百次命中也不会炸耳朵。程序生成的背景音乐在 M2 移植。
+//! - 启动时用代码合成全部乐器和音效（[`synth`]、[`sfx`]），不用音频文件。
+//! - 音效和音乐各走一条轨道，音量来自设置；音乐轨道带低通滤波，升级选择、暂停时变闷。
+//! - 背景音乐（[`music`]）：低音持续音 + 按种子生成的五声旋律 + 随局势加强的鼓点；夜主出场后换成更紧的节奏。
+//! - 同类声音有最短间隔，几百次命中也不会炸耳朵。
 
-use std::f32::consts::TAU;
-use std::sync::Arc;
+use std::time::Duration;
 
 use bevy::prelude::*;
-use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
-use kira::{AudioManager, AudioManagerSettings, DefaultBackend, Frame};
+use kira::effect::filter::{FilterBuilder, FilterHandle};
+use kira::sound::static_sound::StaticSoundData;
+use kira::track::{TrackBuilder, TrackHandle};
+use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Tween};
 
-use lantern_sim::{AppState, SimEvent, SimOutbox};
+use lantern_core::step::TICK_HZ;
+use lantern_platform::Settings;
+use lantern_sim::combat::StrikeFx;
+use lantern_sim::pickups::PickupKind;
+use lantern_sim::{AppState, Director, RunSetup, RunState, SimEvent, SimOutbox, SimPhase, Tick};
 
-const SAMPLE_RATE: u32 = 48_000;
+mod music;
+mod sfx;
+mod synth;
 
-/// D 羽调五声音阶（D F G A C），从 D4 起两个八度。
-const PENTATONIC: [f32; 10] = [293.66, 349.23, 392.0, 440.0, 523.25, 587.33, 698.46, 783.99, 880.0, 1046.5];
+use music::{Music, MusicMode};
+use sfx::{Instruments, Sfx};
+use synth::pent;
 
 pub struct AudioPlugin;
 
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_audio)
-            .add_systems(OnEnter(AppState::Run), |mut audio: NonSendMut<Audio>| audio.start_run())
-            .add_systems(Update, play_sim_events.run_if(in_state(AppState::Run)));
+            .add_systems(OnEnter(AppState::Title), |mut a: NonSendMut<Audio>| {
+                a.set_mode(MusicMode::Title, None)
+            })
+            .add_systems(OnEnter(AppState::Run), start_run)
+            .add_systems(
+                Update,
+                (
+                    apply_settings,
+                    play_sim_events.run_if(in_state(AppState::Run)),
+                    run_music_mode.run_if(in_state(AppState::Run)),
+                    tick_music,
+                )
+                    .chain(),
+            );
     }
+}
+
+/// 线性音量（0–1）换成分贝。
+fn db(v: f32) -> Decibels {
+    if v <= 0.001 { Decibels::SILENCE } else { Decibels(20.0 * v.log10()) }
+}
+
+/// 音效按网页版的增益合成，整体偏轻；音效轨道再提 7 分贝。
+fn sfx_db(v: f32) -> Decibels {
+    let d = db(v);
+    if d == Decibels::SILENCE { d } else { Decibels(d.0 + 7.0) }
 }
 
 /// kira 的后端在部分平台上不能跨线程传递，所以作为 NonSend 资源放在主线程。
 pub struct Audio {
-    manager: Option<AudioManager>,
-    pluck: StaticSoundData,
-    wood: StaticSoundData,
-    thud: StaticSoundData,
-    bell: StaticSoundData,
-    /// 拾取魂火的音阶位置；停顿一会儿回到起点
-    pickup_step: usize,
-    pickup_idle: f32,
-    kill_step: usize,
+    /// 管理器被丢掉时声音就停了，一直留着
+    _manager: Option<AudioManager>,
+    sfx_track: Option<TrackHandle>,
+    music_track: Option<TrackHandle>,
+    music_filter: Option<FilterHandle>,
+    sfx: Sfx,
+    music: Music,
+    /// 各种音效上次播放的时刻（秒），用于限制间隔
+    last: Vec<(&'static str, f64)>,
+    now: f64,
+    /// 拾取魂火的连拾次数；停顿一会儿回到起点
+    gem_chain: i32,
+    gem_last: f64,
+    muffled: bool,
+    /// 上一帧的模拟阶段：离开升级选择时响一声确认
+    last_phase: Option<SimPhase>,
 }
 
 impl Audio {
-    fn play(&mut self, sound: StaticSoundData) {
-        let Some(manager) = &mut self.manager else { return };
-        if let Err(e) = manager.play(sound) {
+    /// 同名音效的最短间隔。
+    fn can(&mut self, name: &'static str, gap: f64) -> bool {
+        let now = self.now;
+        match self.last.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, t)) if now - *t < gap => false,
+            Some((_, t)) => {
+                *t = now;
+                true
+            }
+            None => {
+                self.last.push((name, now));
+                true
+            }
+        }
+    }
+
+    fn play_on(track: Option<&mut TrackHandle>, sound: StaticSoundData) {
+        if let Some(track) = track
+            && let Err(e) = track.play(sound)
+        {
             warn!("播放失败：{e}");
         }
     }
 
-    /// 以 D4 为基准合成的音色，按目标音高变速播放。
-    fn note(&mut self, base: &StaticSoundData, hz: f32, volume_db: f32) {
-        let rate = f64::from(hz / PENTATONIC[0]);
-        let sound = base.playback_rate(rate).volume(volume_db);
-        self.play(sound);
+    fn play(&mut self, sound: &StaticSoundData) {
+        Self::play_on(self.sfx_track.as_mut(), sound.clone());
     }
 
-    fn start_run(&mut self) {
-        self.pickup_step = 0;
-        self.kill_step = 0;
-        let pluck = self.pluck.clone();
-        self.note(&pluck, PENTATONIC[0], -4.0);
+    fn play_with(&mut self, sound: &StaticSoundData, rate: f64, volume: f32) {
+        Self::play_on(self.sfx_track.as_mut(), sound.playback_rate(rate).volume(Decibels(volume)));
+    }
+
+    fn set_mode(&mut self, mode: MusicMode, seed: Option<u64>) {
+        let Self { music, music_track, .. } = self;
+        music.set_mode(mode, seed, music_track.as_mut());
+    }
+
+    fn muffle(&mut self, on: bool) {
+        if on == self.muffled {
+            return;
+        }
+        self.muffled = on;
+        if let Some(f) = &mut self.music_filter {
+            let tween = Tween { duration: Duration::from_millis(150), ..default() };
+            f.set_cutoff(if on { 650.0 } else { 18_000.0 }, tween);
+        }
     }
 }
 
 fn init_audio(world: &mut World) {
-    let manager = match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
+    let settings = world.get_resource::<Settings>().cloned().unwrap_or_default();
+    let mut manager = match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
         Ok(m) => Some(m),
         Err(e) => {
             warn!("没有可用的音频输出，静音运行：{e}");
             None
         }
     };
+    let (mut sfx_track, mut music_track, mut music_filter) = (None, None, None);
+    if let Some(m) = &mut manager {
+        sfx_track = m.add_sub_track(TrackBuilder::new().volume(sfx_db(settings.sfx_volume))).ok();
+        let mut builder = TrackBuilder::new().volume(db(settings.music_volume));
+        music_filter = Some(builder.add_effect(FilterBuilder::new().cutoff(18_000.0)));
+        music_track = m.add_sub_track(builder).ok();
+    }
     world.insert_non_send(Audio {
-        manager,
-        pluck: pluck(PENTATONIC[0], 1.4),
-        wood: woodblock(),
-        thud: thud(),
-        bell: bell(PENTATONIC[0], 2.2),
-        pickup_step: 0,
-        pickup_idle: 0.0,
-        kill_step: 0,
+        _manager: manager,
+        sfx_track,
+        music_track,
+        music_filter,
+        sfx: Sfx::new(),
+        music: Music::new(Instruments::new()),
+        last: Vec::new(),
+        now: 0.0,
+        gem_chain: 0,
+        gem_last: 0.0,
+        muffled: false,
+        last_phase: None,
     });
 }
 
-fn play_sim_events(time: Res<Time>, outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
-    audio.pickup_idle += time.delta_secs();
-    if audio.pickup_idle > 0.6 {
-        audio.pickup_step = 0;
+/// 设置里的音量变了就跟着改。
+fn apply_settings(settings: Option<Res<Settings>>, mut audio: NonSendMut<Audio>) {
+    let Some(s) = settings else { return };
+    if !s.is_changed() {
+        return;
     }
-    // 同类声音每帧限量
-    let (mut hits, mut kills, mut picks) = (0, 0, 0);
+    let tween = Tween { duration: Duration::from_millis(100), ..default() };
+    if let Some(t) = &mut audio.sfx_track {
+        t.set_volume(sfx_db(s.sfx_volume), tween);
+    }
+    if let Some(t) = &mut audio.music_track {
+        t.set_volume(db(s.music_volume), tween);
+    }
+}
+
+fn start_run(setup: Res<RunSetup>, mut audio: NonSendMut<Audio>) {
+    audio.gem_chain = 0;
+    audio.set_mode(MusicMode::Play, Some(setup.seed));
+}
+
+/// 局势：开局、3 分钟、6.5 分钟三档；夜主在场时换成夜主的音乐。选择、暂停、结束时音乐变闷。
+fn run_music_mode(
+    tick: Option<Res<Tick>>,
+    director: Option<Res<Director>>,
+    phase: Option<Res<SimPhase>>,
+    run: Option<Res<State<RunState>>>,
+    mut audio: NonSendMut<Audio>,
+) {
+    let secs = tick.map_or(0, |t| t.0 / u64::from(TICK_HZ));
+    let boss = director.is_some_and(|d| d.boss.is_some());
+    let over = phase.as_deref() == Some(&SimPhase::Over);
+    if !over {
+        audio.music.intensity = if secs < 180 {
+            0
+        } else if secs < 390 {
+            1
+        } else {
+            2
+        };
+        let mode = if boss { MusicMode::Boss } else { MusicMode::Play };
+        if audio.music.mode != mode {
+            audio.set_mode(mode, None);
+        }
+    }
+    let menu = phase.as_deref().is_some_and(|p| *p != SimPhase::Play)
+        || run.is_some_and(|r| *r.get() != RunState::Playing);
+    audio.muffle(menu);
+    let now = phase.as_deref().copied();
+    if audio.last_phase == Some(SimPhase::LevelUp) && now != Some(SimPhase::LevelUp) {
+        let s = audio.sfx.select.clone();
+        audio.play(&s);
+    }
+    audio.last_phase = now;
+}
+
+fn tick_music(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
+    audio.now = time.elapsed_secs_f64();
+    let now = audio.now;
+    let Audio { music, music_track, .. } = &mut *audio;
+    music.tick(now, music_track.as_mut());
+}
+
+fn play_sim_events(outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
+    let a = &mut *audio;
+    if a.now - a.gem_last > 0.6 {
+        a.gem_chain = 0;
+    }
     for ev in &outbox.0 {
         match *ev {
-            SimEvent::Hit { crit, .. } if hits < 2 => {
-                hits += 1;
-                let wood = audio.wood.clone();
-                audio.note(
-                    &wood,
-                    if crit { PENTATONIC[2] } else { PENTATONIC[0] },
-                    if crit { -8.0 } else { -14.0 },
-                );
+            SimEvent::Hit { crit, kind, .. } => {
+                if kind == lantern_sim::HitKind::Dot {
+                    continue;
+                }
+                if crit {
+                    if a.can("crit", 0.06) {
+                        let s = a.sfx.crit.clone();
+                        a.play(&s);
+                    }
+                } else if a.can("hit", 0.045) {
+                    let rate = 0.8 + (a.now * 7919.0).fract() * 0.5;
+                    let s = a.sfx.hit.clone();
+                    a.play_with(&s, rate, 0.0);
+                }
             }
-            SimEvent::Kill { .. } if kills < 2 => {
-                kills += 1;
-                audio.kill_step = (audio.kill_step + 3) % 5;
-                let hz = PENTATONIC[audio.kill_step] * 0.5;
-                let pluck = audio.pluck.clone();
-                audio.note(&pluck, hz, -12.0);
+            SimEvent::Kill { .. } if a.can("kill", 0.04) => {
+                let rate = 0.85 + (a.now * 104_729.0).fract() * 0.3;
+                let s = a.sfx.kill.clone();
+                a.play_with(&s, rate, 0.0);
             }
-            SimEvent::GemPicked { .. } if picks < 1 => {
-                picks += 1;
-                audio.pickup_idle = 0.0;
-                let hz = PENTATONIC[audio.pickup_step.min(PENTATONIC.len() - 1)] * 2.0;
-                audio.pickup_step = (audio.pickup_step + 1).min(PENTATONIC.len() - 1);
-                let pluck = audio.pluck.clone();
-                audio.note(&pluck, hz, -16.0);
+            SimEvent::GemPicked { .. } if a.can("gem", 0.05) => {
+                a.gem_last = a.now;
+                // 连续拾取时音高一路爬升
+                let rate = f64::from(pent(10 + a.gem_chain % 12) / pent(10));
+                a.gem_chain += 1;
+                let s = a.sfx.gem.clone();
+                a.play_with(&s, rate, 0.0);
             }
             SimEvent::Dash { .. } => {
-                let pluck = audio.pluck.clone();
-                audio.note(&pluck, PENTATONIC[3], -6.0);
+                let s = a.sfx.dash.clone();
+                a.play(&s);
             }
-            SimEvent::PlayerHurt { .. } => {
-                let thud = audio.thud.clone();
-                audio.play(thud.volume(-4.0));
+            SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } if a.can("hurt", 0.2) => {
+                let s = a.sfx.hurt.clone();
+                a.play(&s);
             }
-            SimEvent::LevelUp { .. } => {
-                let bell = audio.bell.clone();
-                audio.note(&bell, PENTATONIC[5], -6.0);
+            SimEvent::LevelUp { .. } if a.can("level", 0.3) => {
+                let s = a.sfx.level_up.clone();
+                a.play(&s);
             }
-            SimEvent::PlayerDied => {
-                let bell = audio.bell.clone();
-                audio.note(&bell, PENTATONIC[0] * 0.5, -2.0);
+            SimEvent::ChestOpened { count, .. } => {
+                let i = if count >= 5 {
+                    2
+                } else if count >= 3 {
+                    1
+                } else {
+                    0
+                };
+                let s = a.sfx.chest[i].clone();
+                a.play(&s);
+            }
+            SimEvent::Evolve { .. } => {
+                let s = a.sfx.evolution.clone();
+                a.play(&s);
+            }
+            SimEvent::Resonance { .. } | SimEvent::Sheng { .. } | SimEvent::Taiji | SimEvent::Buff { .. }
+                if a.can("res", 0.3) =>
+            {
+                let s = a.sfx.resonance.clone();
+                a.play(&s);
+            }
+            SimEvent::Ult => {
+                let s = a.sfx.ult.clone();
+                a.play(&s);
+            }
+            SimEvent::UltReady => {
+                let s = a.sfx.ult_ready.clone();
+                a.play(&s);
+            }
+            SimEvent::SwordFired { .. } if a.can("sword", 0.1) => {
+                let s = a.sfx.sword.clone();
+                a.play(&s);
+            }
+            SimEvent::CraneStrike { .. } if a.can("crane", 0.08) => {
+                let s = a.sfx.crane.clone();
+                a.play(&s);
+            }
+            SimEvent::Strike { fx, .. } => {
+                let (name, gap, sound) = match fx {
+                    StrikeFx::Pulse => ("pulse", 0.4, &a.sfx.bell_pulse),
+                    StrikeFx::Toll => ("toll", 0.5, &a.sfx.big_bell),
+                    StrikeFx::Seal { .. } => ("seal", 0.12, &a.sfx.seal),
+                    StrikeFx::Blast(_) => ("blast", 0.09, &a.sfx.blast),
+                    StrikeFx::Quake => ("quake", 0.3, &a.sfx.quake),
+                    StrikeFx::Taiji => ("taiji", 1.0, &a.sfx.resonance),
+                    StrikeFx::Ult | StrikeFx::None => continue,
+                };
+                let s = sound.clone();
+                if a.can(name, gap) {
+                    a.play(&s);
+                }
+            }
+            SimEvent::Elite { .. } => {
+                let s = a.sfx.warn.clone();
+                a.play(&s);
+            }
+            SimEvent::BossArrived { .. } | SimEvent::Surge => {
+                let s = a.sfx.warn_big.clone();
+                a.play(&s);
+            }
+            SimEvent::Pickup { kind: PickupKind::Bell, .. } => {
+                let s = a.sfx.soul_bell.clone();
+                a.play(&s);
+            }
+            SimEvent::PlayerHealed { .. } if a.can("heal", 0.5) => {
+                let s = a.sfx.heal.clone();
+                a.play(&s);
+            }
+            SimEvent::ShieldUp if a.can("shield", 0.5) => {
+                let s = a.sfx.shield.clone();
+                a.play(&s);
+            }
+            SimEvent::Combo { .. } => {
+                let s = a.sfx.combo.clone();
+                a.play(&s);
+            }
+            SimEvent::Encounter { .. } => {
+                let s = a.sfx.event.clone();
+                a.play(&s);
+            }
+            SimEvent::CritterLooted { .. } => {
+                let s = a.sfx.coins.clone();
+                a.play(&s);
+            }
+            SimEvent::RunOver { won } => {
+                a.set_mode(MusicMode::None, None);
+                let s = if won { a.sfx.victory.clone() } else { a.sfx.defeat.clone() };
+                a.play(&s);
             }
             _ => {}
         }
     }
-}
-
-fn sound(frames: Vec<Frame>) -> StaticSoundData {
-    StaticSoundData {
-        sample_rate: SAMPLE_RATE,
-        frames: Arc::from(frames),
-        settings: StaticSoundSettings::default(),
-        slice: None,
-    }
-}
-
-/// 简单的 xorshift 噪声，合成时用；固定种子，每次启动合成的音色一样。
-struct Noise(u32);
-
-impl Noise {
-    fn next(&mut self) -> f32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 17;
-        self.0 ^= self.0 << 5;
-        self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0
-    }
-}
-
-/// Karplus-Strong 拨弦：一段噪声在延迟线里反复低通衰减，听起来像古筝的弦。
-fn pluck(hz: f32, secs: f32) -> StaticSoundData {
-    let len = (SAMPLE_RATE as f32 / hz).round() as usize;
-    let mut noise = Noise(0x2545_f491);
-    let mut line: Vec<f32> = (0..len).map(|_| noise.next()).collect();
-    let total = (SAMPLE_RATE as f32 * secs) as usize;
-    let fade = SAMPLE_RATE as usize / 50;
-    let frames = (0..total)
-        .map(|i| {
-            let j = i % len;
-            let s = line[j];
-            line[j] = 0.996 * 0.5 * (s + line[(j + 1) % len]);
-            let tail = if i + fade > total { (total - i) as f32 / fade as f32 } else { 1.0 };
-            Frame::from_mono(s * 0.35 * tail)
-        })
-        .collect();
-    sound(frames)
-}
-
-/// 木鱼：短促的正弦加一点噪声的敲击声。
-fn woodblock() -> StaticSoundData {
-    let total = SAMPLE_RATE as usize / 10;
-    let mut noise = Noise(0x1234_5678);
-    let frames = (0..total)
-        .map(|i| {
-            let t = i as f32 / SAMPLE_RATE as f32;
-            let env = (-t * 60.0).exp();
-            let tone =
-                (TAU * PENTATONIC[0] * 3.0 * t).sin() * 0.6 + (TAU * PENTATONIC[0] * 4.7 * t).sin() * 0.25;
-            let click = noise.next() * (-t * 400.0).exp() * 0.4;
-            Frame::from_mono((tone * env + click) * 0.5)
-        })
-        .collect();
-    sound(frames)
-}
-
-/// 受伤：低沉的闷响（下滑的低频正弦加噪声）。
-fn thud() -> StaticSoundData {
-    let total = SAMPLE_RATE as usize * 3 / 10;
-    let mut noise = Noise(0x0bad_cafe);
-    let mut phase = 0.0f32;
-    let frames = (0..total)
-        .map(|i| {
-            let t = i as f32 / SAMPLE_RATE as f32;
-            let hz = 110.0 * (-t * 6.0).exp() + 50.0;
-            phase += TAU * hz / SAMPLE_RATE as f32;
-            let env = (-t * 12.0).exp();
-            Frame::from_mono((phase.sin() * 0.8 + noise.next() * 0.15 * (-t * 30.0).exp()) * env * 0.7)
-        })
-        .collect();
-    sound(frames)
-}
-
-/// 编钟：几个不成整数倍的泛音，各自衰减。
-fn bell(hz: f32, secs: f32) -> StaticSoundData {
-    let partials = [(1.0, 1.0, 1.2), (2.76, 0.5, 2.5), (5.4, 0.25, 4.0), (8.93, 0.12, 6.0)];
-    let total = (SAMPLE_RATE as f32 * secs) as usize;
-    let frames = (0..total)
-        .map(|i| {
-            let t = i as f32 / SAMPLE_RATE as f32;
-            let attack = (t * 400.0).min(1.0);
-            let s: f32 =
-                partials.iter().map(|&(m, a, d)| (TAU * hz * m * t).sin() * a * (-t * d).exp()).sum();
-            Frame::from_mono(s * attack * 0.25)
-        })
-        .collect();
-    sound(frames)
 }

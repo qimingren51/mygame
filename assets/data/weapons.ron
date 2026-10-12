@@ -1,10 +1,10 @@
-// 法器（移植自网页版 data/weapons.ts）。levels 从第 1 级到满级（8 级）。
-// M1 只有灯火；符剑、霜铃、纸鹤、山印与进化在 M2 加入。
+// 法器（移植自网页版 data/weapons.ts 与 sim/weapons.ts）。最多 6 件，levels 从第 1 级到满级（8 级）。
+// 进化：满级并持有 evolution.passive 心法后，下次升级必出；进化后换成 evolution 里的行为参数和数值。
+// “数量”都再加属性 Amount（山印只加 Amount / amount_div）；冷却乘以 Cooldown，范围乘以 Area。
 [
     (
-        id: "lamp",
-        name: "灯火",
-        element: Fire,
+        id: "lamp", name: "灯火", icon: "灯", element: Fire,
+        desc: "火焰环绕周身，烧灼靠近的妖物。",
         // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
         behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
         levels: [
@@ -17,5 +17,111 @@
             (count: 6, radius: 78.0, damage: 33.0),
             (count: 6, radius: 82.0, damage: 36.0),
         ],
+        evolution: Some((
+            name: "不夜城", passive: "changming",
+            desc: "十盏灯笼环城而行，范围更大、伤害翻倍。",
+            behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0),
+            level: (count: 10, radius: 92.0, damage: 79.2),
+        )),
+    ),
+    (
+        id: "sword", name: "符剑", icon: "剑", element: Metal,
+        desc: "自动射出追踪符剑，可穿透。",
+        // 朝 460 内最近的妖物齐射，扇形间隔 0.14 弧度；飞剑速度 380、存活 1.5 秒、追踪转向 8 弧度/秒
+        behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 6.0,
+                         knockback: 30.0, spread: 0.14, retry: 0.2),
+        levels: [
+            (cooldown: 1.09, count: 1, damage: 16.0, pierce: 1),
+            (cooldown: 1.03, count: 1, damage: 20.0, pierce: 1),
+            (cooldown: 0.97, count: 2, damage: 24.0, pierce: 2),
+            (cooldown: 0.91, count: 2, damage: 28.0, pierce: 2),
+            (cooldown: 0.85, count: 2, damage: 32.0, pierce: 2),
+            (cooldown: 0.79, count: 3, damage: 36.0, pierce: 3),
+            (cooldown: 0.73, count: 3, damage: 40.0, pierce: 3),
+            (cooldown: 0.67, count: 3, damage: 44.0, pierce: 3),
+        ],
+        evolution: Some((
+            name: "万剑归宗", passive: "jianyi",
+            desc: "飞剑连发，无限穿透。",
+            behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
+                             knockback: 30.0, spread: 0.14, retry: 0.2),
+            level: (cooldown: 0.42, count: 3, damage: 70.4, pierce: 999),
+        )),
+    ),
+    (
+        id: "bell", name: "霜铃", icon: "铃", element: Water,
+        desc: "周期震出寒波，伤害并减速周围妖物。",
+        // 寒波击退 40，减速 35% 持续 1.5 秒
+        behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5),
+        levels: [
+            (cooldown: 2.85, radius: 79.0, damage: 9.0),
+            (cooldown: 2.70, radius: 88.0, damage: 12.0),
+            (cooldown: 2.55, radius: 97.0, damage: 15.0),
+            (cooldown: 2.40, radius: 106.0, damage: 18.0),
+            (cooldown: 2.25, radius: 115.0, damage: 21.0),
+            (cooldown: 2.10, radius: 124.0, damage: 24.0),
+            (cooldown: 1.95, radius: 133.0, damage: 27.0),
+            (cooldown: 1.80, radius: 142.0, damage: 30.0),
+        ],
+        evolution: Some((
+            name: "寒山钟", passive: "jingxin",
+            desc: "每 6 秒钟鸣全屏，冻结所有妖物。",
+            // 每 6 秒（乘以冷却）全屏钟鸣：冻结 1.5 秒（夜主除外）、伤害 90（对夜主单次封顶 400）
+            behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5,
+                            toll: Some((period: 6.0, damage: 90.0, freeze: 1.5, boss_cap: 400.0))),
+            level: (cooldown: 1.80, radius: 184.6, damage: 45.0),
+        )),
+    ),
+    (
+        id: "crane", name: "纸鹤", icon: "鹤", element: Wood,
+        desc: "纸鹤自动扑向妖物，撞击后折返。",
+        // 平时绕身（半径 34）；随机扑向 340 内最近 3 只之一，撞到即伤害，休息 0.35 秒；速度 250 + 6·等级
+        behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.35,
+                         knockback: 50.0, speed: (250.0, 6.0, 0.0), steer: 7.0, reach: 6.0),
+        levels: [
+            (count: 1, damage: 12.0),
+            (count: 1, damage: 15.0),
+            (count: 2, damage: 18.0),
+            (count: 2, damage: 21.0),
+            (count: 3, damage: 24.0),
+            (count: 3, damage: 27.0),
+            (count: 4, damage: 30.0),
+            (count: 4, damage: 33.0),
+        ],
+        evolution: Some((
+            name: "千鹤引", passive: "zhezhi",
+            desc: "十只纸鹤随身，扑击更快更狠。",
+            behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.2,
+                             knockback: 50.0, speed: (330.0, 0.0, 0.0), steer: 7.0, reach: 6.0),
+            level: (count: 10, damage: 49.5),
+        )),
+    ),
+    (
+        id: "seal", name: "山印", icon: "印", element: Earth,
+        desc: "石印从天而降，范围伤害并击晕。",
+        // 从 300 内最近 12 只里随机选落点（不足时在主角周围随机），预警 0.45 秒、依次间隔 0.12 秒；
+        // 落地击退 90、击晕 0.5 秒
+        behavior: Drop(range: 300.0, candidates: 12, delay: 0.45, stagger: 0.12, knockback: 90.0,
+                       stun: 0.5, scatter: (150.0, 100.0), amount_div: 2),
+        levels: [
+            (cooldown: 3.98, count: 1, radius: 42.0, damage: 30.0),
+            (cooldown: 3.76, count: 1, radius: 46.0, damage: 38.0),
+            (cooldown: 3.54, count: 2, radius: 50.0, damage: 46.0),
+            (cooldown: 3.32, count: 2, radius: 54.0, damage: 54.0),
+            (cooldown: 3.10, count: 2, radius: 58.0, damage: 62.0),
+            (cooldown: 2.88, count: 3, radius: 62.0, damage: 70.0),
+            (cooldown: 2.66, count: 3, radius: 66.0, damage: 78.0),
+            (cooldown: 2.44, count: 3, radius: 70.0, damage: 86.0),
+        ],
+        evolution: Some((
+            name: "镇岳", passive: "houde",
+            desc: "巨岩砸出地裂，裂缝持续伤害并减速。",
+            // 地裂：半径 ×0.85、持续 2.5 秒、每 0.5 秒造成落地伤害的 25%、减速 40%
+            behavior: Drop(range: 300.0, candidates: 12, delay: 0.45, stagger: 0.12, knockback: 90.0,
+                           stun: 0.5, scatter: (150.0, 100.0), amount_div: 2,
+                           fissure: Some((radius_scale: 0.85, life: 2.5, tick: 0.5, damage_scale: 0.25,
+                                          slow: 0.4, slow_time: 0.6))),
+            level: (cooldown: 2.6, count: 4, radius: 140.0, damage: 129.0),
+        )),
     ),
 ]

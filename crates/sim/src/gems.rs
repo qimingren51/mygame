@@ -7,7 +7,8 @@ use bevy_math::Vec2;
 use lantern_core::StateHasher;
 use lantern_core::step::DT;
 
-use crate::run::{Progress, RunPlan, Stats};
+use crate::run::{Progress, RunPlan};
+use crate::stats::Stats;
 use crate::{GameContent, Player, Pos, SimEvent, SimOutbox};
 
 /// 池子的硬上限；内容数据里的 `gems.cap` 是软上限，必须小于它。
@@ -116,7 +117,8 @@ pub(crate) fn update_gems(
     let c = &content.0;
     let g = &c.run.gems;
     let p = player.0;
-    let mag2 = stats.magnet * stats.magnet;
+    let magnet = stats.get(lantern_content::Stat::Magnet);
+    let mag2 = magnet * magnet;
     let reach = c.player.radius + g.reach;
     let mut i = 0;
     while i < gems.n {

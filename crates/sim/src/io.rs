@@ -2,7 +2,11 @@
 
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
-use lantern_content::Rank;
+use lantern_content::{Element, Rank};
+
+use crate::combat::StrikeFx;
+use crate::flow::ChestSource;
+use crate::pickups::PickupKind;
 
 /// 每一步的移动输入。方向先量化成 i8，实际游玩和回放看到的数值完全一样。
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,8 +36,28 @@ impl InputFrame {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SimCommand {
     Dash,
+    /// 燃灯（充满时才生效）
+    Ult,
+    /// 升级时选第 i 个选项
+    Choose(u8),
+    /// 重抽升级选项
+    Reroll,
+    /// 跳过这次升级（得到灯油）
+    Skip,
+    /// 确认宝箱、进化演出
+    Ack,
     /// 跑分模式下改变场上保持的妖物数量（分段跑分用）；普通模式下忽略
     BenchTarget(u32),
+}
+
+/// 伤害数字的种类。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitKind {
+    Normal,
+    /// 持续伤害（灼烧、地裂）、连锁爆炸
+    Dot,
+    /// 追加飞剑
+    Bonus,
 }
 
 /// 等待下一步处理的命令。
@@ -41,6 +65,7 @@ pub enum SimCommand {
 pub struct SimCommands(pub Vec<SimCommand>);
 
 /// 模拟发出的事件。保持小而且可复制，预热之后不再分配内存。
+/// 画面、音频、界面据此播放效果；需要持续显示的状态（法器、弹幕、奇遇……）直接读资源。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SimEvent {
     Dash {
@@ -51,6 +76,7 @@ pub enum SimEvent {
         pos: Vec2,
         damage: f32,
         crit: bool,
+        kind: HitKind,
     },
     /// 击杀；kind 是 `enemies.ron` 里的下标
     Kill {
@@ -64,9 +90,95 @@ pub enum SimEvent {
     PlayerHurt {
         amount: f32,
     },
+    PlayerHealed {
+        amount: f32,
+    },
+    ShieldUp,
+    ShieldBroken,
     PlayerDied,
     LevelUp {
         level: u32,
+    },
+    /// 符剑齐射；weapon 是 `weapons.ron` 下标
+    SwordFired {
+        weapon: u16,
+    },
+    CraneStrike {
+        pos: Vec2,
+    },
+    /// 范围打击：寒波、钟鸣、石印落地、爆炸、震地、太极、燃灯
+    Strike {
+        pos: Vec2,
+        radius: f32,
+        fx: StrikeFx,
+    },
+    /// 共鸣升阶
+    Resonance {
+        element: Element,
+        tier: u8,
+    },
+    /// 相生点亮；index 是 `elements.ron` 里 sheng 的下标
+    Sheng {
+        index: u8,
+    },
+    Taiji,
+    /// 进化演出开始
+    Evolve {
+        weapon: u16,
+    },
+    ChestOpened {
+        count: u8,
+        source: ChestSource,
+    },
+    /// 精英出场
+    Elite {
+        kind: u16,
+        count: u8,
+    },
+    Surge,
+    BossArrived {
+        kind: u16,
+    },
+    BossVolley {
+        pos: Vec2,
+    },
+    BossSummon {
+        pos: Vec2,
+    },
+    BossDefeated {
+        pos: Vec2,
+    },
+    Pickup {
+        kind: PickupKind,
+        pos: Vec2,
+    },
+    /// 连斩达到提示的数
+    Combo {
+        count: u32,
+    },
+    UltReady,
+    Ult,
+    /// 奇遇出现；kind 是 `events.ron` 里 kinds 的下标
+    Encounter {
+        kind: u16,
+        pos: Vec2,
+    },
+    CritterFled {
+        pos: Vec2,
+    },
+    CritterLooted {
+        pos: Vec2,
+    },
+    /// 古灯增益；index 是 `events.ron` 里 buffs 的下标
+    Buff {
+        index: u16,
+    },
+    /// 血祭坛：失去的生命
+    Sacrifice {
+        amount: f32,
+    },
+    RunOver {
+        won: bool,
     },
 }
 

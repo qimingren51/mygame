@@ -1,26 +1,25 @@
 //! 回放往返：录制一局 → 存成文本 → 解析 → 重放，每秒的状态哈希必须一致。
 
-use std::path::Path;
+mod common;
 
 use bevy_math::{Vec2, ops};
-use lantern_content::Content;
-use lantern_sim::{InputFrame, Replay, SimCommand, SimHarness};
+use lantern_sim::{InputFrame, OmenPick, Replay, RunMode, RunSetup, SimCommand, SimHarness};
 
-fn content() -> Content {
-    Content::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).expect("内容数据")
-}
+use common::{bot_step, content};
 
 fn record(seed: u64, ticks: u64) -> (Replay, Vec<(u64, u64)>) {
-    let mut sim = SimHarness::new(content(), seed);
+    let mut setup = RunSetup::new(seed, RunMode::Normal);
+    setup.omen = Some(OmenPick { id: "element".into(), element: Some(lantern_content::Element::Fire) });
+    setup.meta.insert("dmg".into(), 2);
+    let mut sim = SimHarness::with_setup(content(), setup);
     sim.record("test");
-    for tick in 0..ticks {
-        if sim.is_over() {
-            break;
-        }
-        let t = tick as f32 / 60.0;
+    let mut step = 0u64;
+    while sim.tick() < ticks && !sim.is_over() {
+        let t = step as f32 / 60.0;
         let dir = Vec2::new(ops::cos(t * 0.4), ops::sin(t * 0.9));
-        let cmds: &[SimCommand] = if tick % 150 == 75 { &[SimCommand::Dash] } else { &[] };
-        sim.step(InputFrame::quantize(dir), cmds);
+        let cmds: &[SimCommand] = if step % 150 == 75 { &[SimCommand::Dash] } else { &[] };
+        bot_step(&mut sim, InputFrame::quantize(dir), cmds);
+        step += 1;
     }
     let hashes = sim.hashes().iter().map(|c| (c.tick, c.hash)).collect();
     (sim.replay().expect("在录制").clone(), hashes)
@@ -39,7 +38,9 @@ fn play(replay: Replay) -> (Vec<(u64, u64)>, Option<u64>) {
 fn replay_roundtrip_reproduces_the_run() {
     let (replay, original) = record(99, 90 * 60);
     assert!(!replay.commands.is_empty(), "应该录到闪避命令");
-    assert!(replay.inputs.len() < replay.ticks as usize, "输入应该被游程编码压缩");
+    assert!(replay.inputs.len() < replay.steps as usize, "输入应该被游程编码压缩");
+    assert!(replay.commands.iter().any(|(_, c)| matches!(c, SimCommand::Choose(_))), "应该录到升级选择");
+    assert!(replay.steps > replay.ticks, "选择阶段的步也要录下来");
     assert_eq!(replay.content_hash, content().hash);
 
     let text = replay.to_ron();
@@ -52,11 +53,18 @@ fn replay_roundtrip_reproduces_the_run() {
 }
 
 #[test]
+fn old_format_is_rejected_with_a_clear_message() {
+    let err = Replay::parse("(format: 1, game_version: \"0.1.0\", seed: 1)").unwrap_err();
+    assert!(err.contains("格式版本 1"), "{err}");
+}
+
+#[test]
 fn tampered_replay_is_detected() {
     let (mut replay, _) = record(5, 20 * 60);
     // 把中间一段输入改掉
     let mid = replay.inputs.len() / 2;
     replay.inputs[mid].mx = replay.inputs[mid].mx.wrapping_add(60);
+    replay.inputs[mid].my = replay.inputs[mid].my.wrapping_add(60);
     let (_, diverged) = play(replay);
     assert!(diverged.is_some(), "改过的回放应该报告分歧");
 }

@@ -62,7 +62,7 @@ fn update_status(
     let mut s = if p.finished {
         format!("回放结束（{:02}:{:02}）　Enter　回到标题", secs / 60, secs % 60)
     } else {
-        format!("回放中　种子 {}　共 {:02}:{:02}", p.replay.seed, secs / 60, secs % 60)
+        format!("回放中　种子 {}　共 {:02}:{:02}", p.replay.setup.seed, secs / 60, secs % 60)
     };
     if let Some(tick) = p.diverged_at {
         s.push_str(&format!("\n与录制时不一致：从第 {tick} 步起"));

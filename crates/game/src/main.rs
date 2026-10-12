@@ -12,7 +12,7 @@ use bevy::window::{MonitorSelection, PresentMode, WindowMode, WindowResolution};
 use lantern_audio::AudioPlugin;
 use lantern_content::Content;
 use lantern_core::step::{MAX_CATCHUP_TICKS, TICK_HZ};
-use lantern_platform::{PlatformPlugin, Settings, paths};
+use lantern_platform::{PlatformPlugin, Profile, Settings, paths};
 use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
 use lantern_ui::{SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
@@ -108,6 +108,7 @@ fn main() -> AppExit {
     .insert_resource(Time::<Fixed>::from_hz(f64::from(TICK_HZ)))
     .insert_resource(GameContent(Arc::new(content)))
     .insert_resource(SeedOverride(args.seed))
+    .insert_resource(Profile::load(&paths::data_dir()))
     .add_plugins((
         SimPlugin,
         PlatformPlugin { settings },

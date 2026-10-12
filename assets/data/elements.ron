@@ -1,0 +1,59 @@
+// 五行共鸣、相生、太极（移植自网页版 data/elements.ts 与 sim/build.ts）。
+// 每件法器、每门心法计 1 点，满级（法器还包括已进化）计 2 点；达到 thresholds 时为一、二、三阶。
+// 伤害曲线 (a, b, c) 的 x 是分钟数；追加飞剑的 x 是主角等级。
+(
+    thresholds: [2, 4, 6],
+    elements: [
+        (id: Metal, name: "金", resonance: "锐", color: "#E9D9A6", tiers: [
+            (desc: "暴击率 +10%", effects: [Add(CritChance, 0.10)]),
+            (desc: "暴击伤害 +50%", effects: [Add(CritMult, 0.50)]),
+            (desc: "暴击时追加飞剑", effects: [
+                Trigger(on: Crit, chance: 0.5, only: NotBonus,
+                        action: BonusSword(damage: (10.0, 1.0, 0.0), pierce: 2, speed: 380.0, life: 1.5,
+                                           turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
+            ]),
+        ]),
+        (id: Wood, name: "木", resonance: "生", color: "#6FD6A0", tiers: [
+            (desc: "每秒回复 0.5% 生命", effects: [Add(Regen, 0.005)]),
+            (desc: "数量 +1", effects: [Add(Amount, 1.0)]),
+            (desc: "击杀回复生命", effects: [Trigger(on: Kill, action: Heal(0.4))]),
+        ]),
+        (id: Water, name: "水", resonance: "凝", color: "#6FB8FF", tiers: [
+            (desc: "命中减速", effects: [Trigger(on: Hit, action: Slow(amount: 0.2, duration: 1.0))]),
+            (desc: "命中有概率冰冻", effects: [Trigger(on: Hit, chance: 0.12, action: Freeze(duration: 1.0))]),
+            (desc: "冰冻目标易伤并碎裂", effects: [
+                Add(FrozenDamage, 0.5),
+                Trigger(on: Kill, only: TargetFrozen,
+                        action: Explode(radius: 52.0, damage: (10.0, 5.0, 0.0), kind: Ice)),
+            ]),
+        ]),
+        (id: Fire, name: "火", resonance: "焚", color: "#FF8A3D", tiers: [
+            (desc: "命中附加灼烧", effects: [Trigger(on: Hit, action: Burn(duration: 3.0, ratio: 0.2))]),
+            (desc: "灼烧可叠加", effects: [Add(BurnStacks, 4.0)]),
+            (desc: "妖物死亡时爆炸", effects: [
+                Trigger(on: Kill, action: Explode(radius: 46.0, damage: (8.0, 4.0, 0.0), kind: Fire)),
+            ]),
+        ]),
+        (id: Earth, name: "土", resonance: "固", color: "#C9925A", tiers: [
+            (desc: "周期获得护盾", effects: [Shield(amount: (20.0, 5.0, 0.0))]),
+            (desc: "击退加倍", effects: [Mul(Knockback, 1.0)]),
+            (desc: "护盾破碎时震地", effects: [
+                Trigger(on: ShieldBreak,
+                        action: Quake(radius: 150.0, damage: (30.0, 6.0, 0.0), knockback: 120.0, stun: 0.8)),
+            ]),
+        ]),
+    ],
+    // 木 → 火 → 土 → 金 → 水 → 木
+    sheng: [
+        (from: Wood, to: Fire, name: "木生火", desc: "灼烧伤害 +30%", effects: [Mul(BurnDamage, 0.3)]),
+        (from: Fire, to: Earth, name: "火生土", desc: "护盾恢复加快", effects: [Add(ShieldCooldown, -4.0)]),
+        (from: Earth, to: Metal, name: "土生金", desc: "被击晕的目标必定暴击", effects: [Add(StunCrit, 1.0)]),
+        (from: Metal, to: Water, name: "金生水", desc: "暴击使目标减速", effects: [
+            Trigger(on: Crit, action: Slow(amount: 0.35, duration: 1.5)),
+        ]),
+        (from: Water, to: Wood, name: "水生木", desc: "生命回复翻倍", effects: [Mul(Regen, 1.0)]),
+    ],
+    taiji: (name: "太极", desc: "每 30 秒全屏轮转五行之力", effects: [
+        Trigger(on: Periodic(30.0), action: ScreenDamage(damage: (40.0, 16.0, 0.0), boss_cap: 600.0)),
+    ]),
+)

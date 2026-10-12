@@ -78,7 +78,7 @@ fn replay(args: &[String]) -> Result<(), String> {
     if replay.content_hash != content.hash {
         println!("注意：回放录制时的内容数据与当前不同（游戏版本 {}），结果可能不一致", replay.game_version);
     }
-    let (ticks, checkpoints, seed) = (replay.ticks, replay.hashes.len(), replay.seed);
+    let (ticks, checkpoints, seed) = (replay.ticks, replay.hashes.len(), replay.setup.seed);
     let start = Instant::now();
     let mut sim = SimHarness::from_replay(content, replay);
     while !sim.playback().is_some_and(|p| p.finished) && !sim.is_over() {

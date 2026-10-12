@@ -4,22 +4,31 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 use bevy_state::prelude::*;
 
+use lantern_content::Stat;
 use lantern_core::step::{DT, HASH_INTERVAL};
-use lantern_core::{StateHasher, Streams};
+use lantern_core::{StateHasher, Stream, Streams};
 
-use crate::combat::HitQueue;
+use crate::boss::Foes;
+use crate::build::Build;
+use crate::combat::{ActionQueue, DamageLog, Deaths, HitQueue, Strikes};
 use crate::crowd::Crowd;
+use crate::encounters::Encounters;
 use crate::enemies::Enemies;
+use crate::flow::{Flow, SimPhase, StepGate};
 use crate::gems::Gems;
-use crate::run::{Director, Progress, RunPlan, SimView, Stats};
+use crate::pickups::Pickups;
+use crate::run::{Director, Progress, RunPlan, SimView};
 use crate::spatial::Grid;
+use crate::stats::{StatsDirty, collect};
+use crate::weapons::drop::{Fissures, Seals};
+use crate::weapons::volley::Shots;
 use crate::weapons::{Arsenal, WeaponSlot};
 use crate::{
     Body, GameContent, Health, InputFrame, NextSimId, Player, Pos, PrevPos, RunEntity, RunSetup, RunState,
     SimCommands, SimId,
 };
 
-/// 已经完成的步数。
+/// 游戏时间走过的步数（升级选择等阶段不计）。
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tick(pub u64);
 
@@ -48,7 +57,13 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     let c = &content.0;
     let p = &c.player;
     let mut rng = Streams::new(setup.seed);
-    let plan = RunPlan::new(c, setup.mode, &mut rng);
+    let plan = RunPlan::new(c, setup.mode, setup.god, &mut rng);
+    let start_weapon = c.weapon_index(&p.start_weapon).expect("内容校验保证引用存在");
+    let arsenal = Arsenal(vec![WeaponSlot::new(start_weapon)]);
+    let mut build = Build::new(c, &setup);
+    build.compute_resonance(c, &arsenal);
+    let (stats, effects) = collect(c, &setup, &build, None);
+    let max_hp = stats.max_hp();
     let mut ids = NextSimId::default();
     commands.spawn((
         ids.alloc(),
@@ -56,24 +71,45 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
         Pos(Vec2::ZERO),
         PrevPos(Vec2::ZERO),
         Body { radius: p.radius },
-        Health { hp: p.max_hp, max: p.max_hp },
+        Health { hp: max_hp, max: max_hp },
         Player::default(),
     ));
-    let start_weapon = c.weapon_index(&p.start_weapon).expect("内容校验保证引用存在");
+    let ev = &c.events;
+    let encounters = Encounters {
+        next_at: rng.get(Stream::Event).range_f32(ev.first.0, ev.first.1),
+        ..Default::default()
+    };
+    let flow = Flow { rerolls: stats.get(Stat::Rerolls).round().max(0.0) as u32, ..Default::default() };
     commands.insert_resource(ids);
     commands.insert_resource(Tick(0));
     commands.insert_resource(SimRng(rng));
     commands.insert_resource(plan);
     commands.insert_resource(SimView::new(c));
-    commands.insert_resource(Stats::base(p));
+    commands.insert_resource(stats);
+    commands.insert_resource(effects);
+    commands.insert_resource(StatsDirty(false));
+    commands.insert_resource(build);
+    commands.insert_resource(arsenal);
+    commands.insert_resource(flow);
+    commands.insert_resource(SimPhase::Play);
+    commands.insert_resource(StepGate::default());
     commands.insert_resource(Progress::default());
     commands.insert_resource(Director::default());
-    commands.insert_resource(Arsenal(vec![WeaponSlot::new(start_weapon)]));
     commands.insert_resource(Enemies::default());
     commands.insert_resource(Gems::default());
     commands.insert_resource(Grid::default());
     commands.insert_resource(Crowd::default());
     commands.insert_resource(HitQueue::default());
+    commands.insert_resource(Strikes::default());
+    commands.insert_resource(ActionQueue::default());
+    commands.insert_resource(Deaths::default());
+    commands.insert_resource(DamageLog::default());
+    commands.insert_resource(Shots::default());
+    commands.insert_resource(Seals::default());
+    commands.insert_resource(Fissures::default());
+    commands.insert_resource(Foes::default());
+    commands.insert_resource(Pickups::default());
+    commands.insert_resource(encounters);
     commands.insert_resource(HashLog::default());
     commands.insert_resource(InputFrame::default());
     commands.insert_resource(SimCommands::default());
@@ -83,10 +119,9 @@ pub(crate) fn end_run(mut commands: Commands, q: Query<Entity, With<RunEntity>>)
     for e in &q {
         commands.entity(e).despawn();
     }
-    commands.remove_resource::<Tick>();
+    // 大块的池子立即释放；结算界面还要读的（进度、构筑、流程）留到下一局开局时覆盖
     commands.remove_resource::<SimRng>();
     commands.remove_resource::<NextSimId>();
-    commands.remove_resource::<RunPlan>();
     commands.remove_resource::<Enemies>();
     commands.remove_resource::<Gems>();
     commands.remove_resource::<Grid>();
@@ -111,9 +146,9 @@ pub(crate) fn save_prev_pos(
     gems.py[..n].copy_from_slice(&gems.y[..n]);
 }
 
-/// 主角倒下后进入结束状态，模拟停下。
-pub(crate) fn check_over(player: Single<&Health, With<Player>>, mut next: ResMut<NextState<RunState>>) {
-    if player.hp <= 0.0 {
+/// 模拟进入结束阶段后，界面层的状态跟着切到 Over。
+pub(crate) fn sync_run_state(phase: Res<SimPhase>, mut next: ResMut<NextState<RunState>>) {
+    if *phase == SimPhase::Over {
         next.set(RunState::Over);
     }
 }
@@ -122,23 +157,31 @@ pub(crate) fn advance_tick(mut tick: ResMut<Tick>) {
     tick.0 += 1;
 }
 
-pub(crate) fn record_hash(
-    tick: Res<Tick>,
-    rng: Res<SimRng>,
-    en: Res<Enemies>,
-    gems: Res<Gems>,
-    arsenal: Res<Arsenal>,
-    progress: Res<Progress>,
-    mut log: ResMut<HashLog>,
-    q: Query<(&SimId, &Pos, Option<&Health>, Option<&Player>)>,
-) {
-    if !tick.0.is_multiple_of(HASH_INTERVAL) {
+#[derive(bevy_ecs::system::SystemParam)]
+pub(crate) struct HashParams<'w, 's> {
+    tick: Res<'w, Tick>,
+    rng: Res<'w, SimRng>,
+    en: Res<'w, Enemies>,
+    gems: Res<'w, Gems>,
+    arsenal: Res<'w, Arsenal>,
+    build: Res<'w, Build>,
+    stats: Res<'w, crate::stats::Stats>,
+    progress: Res<'w, Progress>,
+    shots: Res<'w, Shots>,
+    foes: Res<'w, Foes>,
+    pickups: Res<'w, Pickups>,
+    encounters: Res<'w, Encounters>,
+    q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
+}
+
+pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
+    if !p.tick.0.is_multiple_of(HASH_INTERVAL) {
         return;
     }
     let mut h = StateHasher::new();
-    h.write_u64(tick.0);
-    rng.0.hash_into(&mut h);
-    let mut rows: Vec<_> = q.iter().collect();
+    h.write_u64(p.tick.0);
+    p.rng.0.hash_into(&mut h);
+    let mut rows: Vec<_> = p.q.iter().collect();
     rows.sort_unstable_by_key(|(id, ..)| **id);
     for (id, pos, health, player) in rows {
         h.write_u32(id.0);
@@ -146,18 +189,26 @@ pub(crate) fn record_hash(
         h.write_f32(pos.0.y);
         if let Some(hp) = health {
             h.write_f32(hp.hp);
+            h.write_f32(hp.max);
         }
-        if let Some(p) = player {
-            for v in [p.facing.x, p.facing.y, p.iframe, p.dash_t, p.dash_cd] {
+        if let Some(pl) = player {
+            for v in [pl.facing.x, pl.facing.y, pl.iframe, pl.dash_t, pl.dash_cd, pl.shield] {
                 h.write_f32(v);
             }
         }
     }
-    en.hash_into(&mut h);
-    gems.hash_into(&mut h);
-    arsenal.hash_into(&mut h);
-    h.write_f32(progress.xp);
-    h.write_u32(progress.level);
-    h.write_u32(progress.kills);
-    log.0.push(HashCheckpoint { tick: tick.0, hash: h.finish() });
+    p.en.hash_into(&mut h);
+    p.gems.hash_into(&mut h);
+    p.arsenal.hash_into(&mut h);
+    p.build.hash_into(&mut h);
+    p.stats.hash_into(&mut h);
+    p.shots.hash_into(&mut h);
+    p.foes.hash_into(&mut h);
+    p.pickups.hash_into(&mut h);
+    p.encounters.hash_into(&mut h);
+    h.write_f32(p.progress.xp);
+    h.write_u32(p.progress.level);
+    h.write_u32(p.progress.kills);
+    h.write_f32(p.progress.ult);
+    log.0.push(HashCheckpoint { tick: p.tick.0, hash: h.finish() });
 }

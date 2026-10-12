@@ -1,0 +1,631 @@
+//! 法器与法术的画面（参照网页版 render/weaponViews.ts）：飞剑、纸鹤、石印与预警、地裂、
+//! 寒波与各种环、连锁爆炸、太极、护盾、拾取物、夜主弹幕、奇遇的道具，以及震屏和闪屏。
+//!
+//! 持续存在的东西直接读模拟的资源；一次性的效果（环、印痕、爆炸）收到模拟事件后在这里记下，自己计时淡出。
+//! 纯装饰的随机数用画面层自己的，不影响模拟。
+
+use std::f32::consts::TAU;
+
+use bevy::prelude::*;
+
+use lantern_content::{BlastKind, EventKind};
+use lantern_core::Pcg32;
+use lantern_sim::boss::Foes;
+use lantern_sim::combat::StrikeFx;
+use lantern_sim::encounters::Encounters;
+use lantern_sim::pickups::{PickupKind, Pickups};
+use lantern_sim::weapons::drop::{Fissures, Seals};
+use lantern_sim::weapons::volley::Shots;
+use lantern_sim::{AppState, Arsenal, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox};
+
+use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
+use crate::atlas::{AtlasDb, FrameId};
+use crate::{MainCamera, layer, to_screen};
+
+/// 透视：地面上的圆画成扁圆
+const FLAT: f32 = 0.62;
+
+fn rgb(hex: u32) -> Color {
+    Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+#[derive(Resource)]
+pub(crate) struct FxFrames {
+    sword: FrameId,
+    sword_evo: FrameId,
+    trail: FrameId,
+    crane: Vec<FrameId>,
+    crane_evo: Vec<FrameId>,
+    seal: FrameId,
+    seal_evo: FrameId,
+    seal_mark: FrameId,
+    warn: FrameId,
+    ring: FrameId,
+    ring_ink: FrameId,
+    crack: FrameId,
+    blast: FrameId,
+    taiji: FrameId,
+    shield: FrameId,
+    chest: FrameId,
+    soulbell: FrameId,
+    lotus: FrameId,
+    glow: FrameId,
+    spark: FrameId,
+    spring: Option<FrameId>,
+    rift: Option<FrameId>,
+    rift_glow: Option<FrameId>,
+    lamp: Option<(FrameId, Option<FrameId>)>,
+    altar: Option<(FrameId, Option<FrameId>)>,
+}
+
+pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>) {
+    let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
+    let seq = |prefix: &str| (0..4).filter_map(|i| db.find(&format!("{prefix}_{i}"))).collect::<Vec<_>>();
+    let prop = |asset: &str| {
+        db.find(&format!("{asset}/idle_S_00")).map(|f| (f, db.find(&format!("{asset}/idle_S_00_emit"))))
+    };
+    commands.insert_resource(FxFrames {
+        sword: need("weapons/sword"),
+        sword_evo: need("weapons/sword_evo"),
+        trail: need("weapons/sword_trail"),
+        crane: seq("weapons/crane"),
+        crane_evo: seq("weapons/crane_evo"),
+        seal: need("weapons/seal"),
+        seal_evo: need("weapons/seal_evo"),
+        seal_mark: need("weapons/seal_mark"),
+        warn: need("weapons/warn"),
+        ring: need("weapons/ring"),
+        ring_ink: need("weapons/ring_ink"),
+        crack: need("weapons/crack"),
+        blast: need("weapons/blast"),
+        taiji: need("weapons/taiji"),
+        shield: need("weapons/shield"),
+        chest: need("weapons/chest"),
+        soulbell: need("weapons/soulbell"),
+        lotus: need("weapons/lotus"),
+        glow: need("vfx/glow"),
+        spark: need("vfx/spark"),
+        spring: db.find("ground/spring"),
+        rift: db.find("ground/rift"),
+        rift_glow: db.find("ground/rift_glow"),
+        lamp: prop("ancient_lamp"),
+        altar: prop("blood_altar"),
+    });
+}
+
+#[derive(Clone, Copy)]
+enum OneShot {
+    Ring { color: Color, ink: bool, light: bool, strong: bool },
+    Mark { evolved: bool },
+    Blast { color: Color },
+    Taiji,
+}
+
+struct Live {
+    kind: OneShot,
+    pos: Vec2,
+    r: f32,
+    t: f32,
+    life: f32,
+    rot: f32,
+}
+
+/// 一次性效果、震屏、闪屏。
+#[derive(Resource)]
+pub(crate) struct FxState {
+    rng: Pcg32,
+    live: Vec<Live>,
+    time: f32,
+    pub shake: f32,
+    pub flash: Color,
+}
+
+impl Default for FxState {
+    fn default() -> Self {
+        FxState {
+            rng: Pcg32::new(0xf00d_2026, 3),
+            live: Vec::new(),
+            time: 0.0,
+            shake: 0.0,
+            flash: Color::NONE,
+        }
+    }
+}
+
+const MAX_LIVE: usize = 160;
+
+impl FxState {
+    fn push(&mut self, kind: OneShot, pos: Vec2, r: f32, life: f32) {
+        if self.live.len() >= MAX_LIVE {
+            self.live.remove(0);
+        }
+        let rot = self.rng.range_f32(0.0, TAU);
+        self.live.push(Live { kind, pos, r, t: 0.0, life, rot });
+    }
+
+    fn shake(&mut self, amount: f32) {
+        self.shake = self.shake.max(amount);
+    }
+
+    fn flash(&mut self, color: Color, a: f32) {
+        if a >= self.flash.alpha() {
+            self.flash = color.with_alpha(a);
+        }
+    }
+}
+
+pub(crate) fn reset_fx(mut fx: ResMut<FxState>) {
+    let rng = fx.rng.clone();
+    *fx = FxState { rng, ..default() };
+}
+
+/// 把模拟事件变成一次性效果、震屏、闪屏。
+pub(crate) fn read_fx_events(outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
+    for ev in &outbox.0 {
+        match *ev {
+            SimEvent::Strike { pos, radius, fx: kind } => {
+                let p = to_screen(pos);
+                match kind {
+                    StrikeFx::Pulse => fx.push(
+                        OneShot::Ring { color: rgb(0x6fb8ff), ink: true, light: false, strong: false },
+                        p,
+                        radius,
+                        0.45,
+                    ),
+                    StrikeFx::Toll => {
+                        fx.push(
+                            OneShot::Ring { color: rgb(0xa8d4ff), ink: true, light: true, strong: true },
+                            p,
+                            radius,
+                            0.7,
+                        );
+                        fx.flash(rgb(0x6fb8ff), 0.18);
+                    }
+                    StrikeFx::Seal { evolved } => {
+                        fx.push(OneShot::Mark { evolved }, p, radius, if evolved { 2.4 } else { 1.8 });
+                        fx.push(
+                            OneShot::Ring { color: rgb(0xc9925a), ink: false, light: false, strong: false },
+                            p,
+                            radius * 1.2,
+                            0.35,
+                        );
+                        fx.shake(if evolved { 7.0 } else { 3.0 });
+                    }
+                    StrikeFx::Blast(kind) => {
+                        let color = if kind == BlastKind::Ice { rgb(0x6fb8ff) } else { rgb(0xff8a3d) };
+                        fx.push(OneShot::Blast { color }, p, radius, 0.3);
+                    }
+                    StrikeFx::Quake => {
+                        fx.push(
+                            OneShot::Ring { color: rgb(0xc9925a), ink: false, light: false, strong: false },
+                            p,
+                            radius,
+                            0.5,
+                        );
+                        fx.shake(8.0);
+                    }
+                    StrikeFx::Taiji => fx.push(OneShot::Taiji, p, radius, 1.0),
+                    StrikeFx::Ult => {
+                        fx.push(
+                            OneShot::Ring { color: rgb(0xffd98a), ink: false, light: true, strong: true },
+                            p,
+                            radius * 1.1,
+                            1.0,
+                        );
+                        fx.flash(rgb(0xffd98a), 0.55);
+                        fx.shake(12.0);
+                    }
+                    StrikeFx::None => {}
+                }
+            }
+            SimEvent::PlayerHurt { .. } => {
+                fx.shake(5.0);
+                fx.flash(rgb(0xff3b30), 0.18);
+            }
+            SimEvent::Surge => fx.shake(6.0),
+            SimEvent::BossArrived { .. } => {
+                fx.shake(10.0);
+                fx.flash(rgb(0xff6b5a), 0.2);
+            }
+            SimEvent::BossDefeated { .. } => {
+                fx.shake(12.0);
+                fx.flash(rgb(0xfff1c2), 0.6);
+            }
+            SimEvent::Pickup { kind: PickupKind::Bell, .. } => fx.flash(rgb(0x5fd4c4), 0.15),
+            SimEvent::CritterLooted { .. } => fx.flash(rgb(0xffd98a), 0.2),
+            SimEvent::Sacrifice { .. } => fx.flash(rgb(0xff3b30), 0.25),
+            SimEvent::Buff { .. } => fx.flash(rgb(0xffd98a), 0.2),
+            _ => {}
+        }
+    }
+}
+
+/// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
+pub(crate) fn collect_fx(
+    time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
+    content: Res<GameContent>,
+    db: Res<AtlasDb>,
+    frames: Res<ActorFrames>,
+    f: Res<FxFrames>,
+    res: FxSources,
+    player: Single<(&Pos, &PrevPos, &Player)>,
+    mut fx: ResMut<FxState>,
+    mut pools: ResMut<Pools>,
+    mut glow: ResMut<GlowRequests>,
+) {
+    let dt = time.delta_secs();
+    fx.time += dt;
+    let now = fx.time;
+    let a = fixed.overstep_fraction();
+    let (ppos, pprev, pl) = *player;
+    let hero = to_screen(pprev.0.lerp(ppos.0, a));
+    let lerp = |prev: Vec2, cur: Vec2| to_screen(prev.lerp(cur, a));
+    let px = |frame: FrameId, world: f32| world / db.frame(frame).size.x;
+
+    // ---- 地裂：地面上的墨痕
+    if let Some(fissures) = &res.fissures {
+        for z in &fissures.0 {
+            let k = px(f.crack, z.radius * 2.0);
+            let alpha = ((z.life / z.max_life) + 0.2).min(1.0) * 0.55;
+            pools.fx.push(Draw {
+                scale: Vec2::new(k, k * 0.75),
+                color: Color::WHITE.with_alpha(alpha),
+                ..Draw::new(f.crack, to_screen(z.pos).extend(layer::GROUND + 0.9))
+            });
+        }
+    }
+
+    // ---- 一次性效果
+    let fx = &mut *fx;
+    fx.live.retain_mut(|l| {
+        l.t += dt;
+        l.t < l.life
+    });
+    for l in &fx.live {
+        let u = l.t / l.life;
+        match l.kind {
+            OneShot::Ring { color, ink, light, strong } => {
+                let rr = 12.0 + (l.r - 12.0) * (1.0 - (1.0 - u) * (1.0 - u));
+                let k = px(f.ring, rr * 2.0);
+                let alpha = (1.0 - u) * if strong { 1.0 } else { 0.85 };
+                glow.add(
+                    f.ring,
+                    l.pos.extend(layer::EMISSIVE - 1.0),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    color.with_alpha(alpha),
+                );
+                if ink {
+                    let ki = px(f.ring_ink, rr * 1.9);
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(ki, ki * FLAT),
+                        rot: 0.0,
+                        color: rgb(0x3e5a7e).with_alpha((1.0 - u) * 0.35),
+                        ..Draw::new(f.ring_ink, l.pos.extend(layer::GROUND + 0.92))
+                    });
+                }
+                if light {
+                    glow.light(&frames, &db, l.pos, (color.with_alpha((1.0 - u) * 0.8), rr * 1.1));
+                }
+            }
+            OneShot::Mark { evolved } => {
+                // 山印落地：朱砂印痕，慢慢淡去；印痕是点睛的小印，不随范围无限放大
+                let k = px(f.seal_mark, (l.r * 0.6).min(if evolved { 56.0 } else { 40.0 }));
+                let fade = if u < 0.6 { 1.0 } else { 1.0 - (u - 0.6) / 0.4 };
+                pools.fx.push(Draw {
+                    scale: Vec2::new(k, k * FLAT),
+                    rot: l.rot * 0.15 - 0.15,
+                    color: Color::WHITE.with_alpha(fade * 0.7),
+                    ..Draw::new(f.seal_mark, l.pos.extend(layer::GROUND + 0.93))
+                });
+            }
+            OneShot::Blast { color } => {
+                let k = px(f.blast, l.r * 2.0 * (0.5 + u * 0.7));
+                glow.add(
+                    f.blast,
+                    l.pos.extend(layer::EMISSIVE),
+                    Vec2::splat(k),
+                    0.0,
+                    color.with_alpha(1.0 - u),
+                );
+                glow.light(&frames, &db, l.pos, (color.with_alpha((1.0 - u) * 0.8), l.r * 1.6));
+            }
+            OneShot::Taiji => {
+                // 太极：在主角脚下转一圈后淡出
+                let k = px(f.taiji, (u * 3.0).min(1.0) * l.r * 0.5);
+                pools.fx.push(Draw {
+                    scale: Vec2::new(k, k * 0.6),
+                    rot: now * 2.5,
+                    color: Color::WHITE.with_alpha((1.0 - u) * 0.85),
+                    ..Draw::new(f.taiji, hero.extend(layer::GROUND + 0.95))
+                });
+                let kr = px(f.ring, l.r * 2.0 * u);
+                glow.add(
+                    f.ring,
+                    hero.extend(layer::EMISSIVE),
+                    Vec2::new(kr, kr * 0.6),
+                    0.0,
+                    rgb(0xffd98a).with_alpha(1.0 - u),
+                );
+            }
+        }
+    }
+
+    // ---- 石印：预警和下落
+    if let Some(seals) = &res.seals {
+        for s in &seals.0 {
+            let pulse = 0.55 + 0.25 * (now * 18.0).sin();
+            let show = if s.t > -0.05 { 1.0 } else { 0.4 };
+            let p = to_screen(s.pos);
+            let kr = px(f.ring, s.radius * 2.0);
+            let earth = rgb(0xc9925a);
+            glow.add(
+                f.ring,
+                p.extend(layer::EMISSIVE - 2.0),
+                Vec2::new(kr, kr * FLAT),
+                0.0,
+                earth.with_alpha(pulse * show * 0.8),
+            );
+            glow.add(
+                f.warn,
+                p.extend(layer::EMISSIVE - 2.0),
+                Vec2::new(0.8, 0.8 * FLAT),
+                0.0,
+                earth.with_alpha(pulse * show),
+            );
+            if s.t > 0.0 {
+                let k = (s.t / s.delay).min(1.0);
+                let drop = (1.0 - k) * (1.0 - k) * 150.0;
+                let frame = if s.evolved { f.seal_evo } else { f.seal };
+                let sk = (s.radius / if s.evolved { 70.0 } else { 45.0 }).max(1.0) * (0.8 + k * 0.2);
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(sk),
+                    color: Color::WHITE.with_alpha((k * 3.0).min(1.0)),
+                    ..Draw::new(frame, Vec3::new(p.x, p.y + drop, sort_z(layer::WEAPONS, s.pos.y)))
+                });
+            }
+        }
+    }
+
+    // ---- 飞剑
+    if let Some(shots) = &res.shots {
+        for s in &shots.0 {
+            let p = lerp(s.prev, s.pos);
+            // 屏幕 y 向上，角度取反
+            let ang = -s.vel.y.atan2(s.vel.x);
+            let trail = if s.big {
+                rgb(0xffd98a)
+            } else if s.bonus {
+                rgb(0xcfe3f5)
+            } else {
+                rgb(0xe9f1ff)
+            };
+            let (tk, tky) = if s.big { (1.4, 1.2) } else { (1.1, 0.9) };
+            glow.add(f.trail, p.extend(layer::EMISSIVE), Vec2::new(tk, tky), ang, trail.with_alpha(0.75));
+            let frame = if s.big { f.sword_evo } else { f.sword };
+            pools.fx.push(Draw {
+                scale: Vec2::new(if s.big { 1.15 } else { 1.0 }, 1.0),
+                rot: ang,
+                ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, s.pos.y)))
+            });
+            glow.light(&frames, &db, p, (trail.with_alpha(0.5), if s.big { 40.0 } else { 28.0 }));
+        }
+    }
+
+    // ---- 纸鹤
+    if let Some(arsenal) = &res.arsenal {
+        for slot in &arsenal.0 {
+            let seq = if slot.evolved { &f.crane_evo } else { &f.crane };
+            if slot.cranes.is_empty() || seq.is_empty() {
+                continue;
+            }
+            for (k, c) in slot.cranes.iter().enumerate() {
+                let p = lerp(c.prev, c.pos) + Vec2::new(0.0, 6.0);
+                let frame = seq[((now * 12.0 + k as f32 * 1.3) as usize) % seq.len()];
+                let ang = -c.angle;
+                // 向左飞时上下翻转，保持鹤背朝上
+                let flip_y = if c.angle.cos() < 0.0 { -1.0 } else { 1.0 };
+                pools.fx.push(Draw {
+                    scale: Vec2::new(1.0, flip_y),
+                    rot: ang,
+                    ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, c.pos.y)))
+                });
+                if slot.evolved {
+                    glow.add(
+                        f.glow,
+                        p.extend(layer::EMISSIVE),
+                        Vec2::splat(0.3),
+                        0.0,
+                        rgb(0xffd98a).with_alpha(0.35),
+                    );
+                }
+            }
+        }
+    }
+
+    // ---- 护盾
+    if pl.shield > 0.0 {
+        let k = px(f.shield, 11.0 * 3.2);
+        let alpha = 0.35 + 0.15 * (now * 4.0).sin();
+        glow.add(
+            f.shield,
+            (hero + Vec2::new(0.0, 14.0)).extend(layer::EMISSIVE),
+            Vec2::splat(k),
+            now * 0.6,
+            rgb(0xc9925a).with_alpha(alpha),
+        );
+    }
+
+    // ---- 拾取物
+    if let Some(pickups) = &res.pickups {
+        for it in &pickups.0 {
+            let bob = (now * 3.0 + it.pos.x * 0.1).sin() * 2.0;
+            let p = to_screen(it.pos);
+            let (frame, color, light) = match it.kind {
+                PickupKind::Chest => (f.chest, rgb(0xffd98a), 60.0),
+                PickupKind::Bell => (f.soulbell, rgb(0x5fd4c4), 36.0),
+                PickupKind::Lotus => (f.lotus, rgb(0xffb0c0), 36.0),
+            };
+            pools
+                .fx
+                .push(Draw::new(frame, Vec3::new(p.x, p.y - bob + 2.0, sort_z(layer::WEAPONS, it.pos.y))));
+            glow.add(
+                f.glow,
+                (p + Vec2::new(0.0, 8.0)).extend(layer::EMISSIVE),
+                Vec2::splat(0.5),
+                0.0,
+                color.with_alpha(0.45),
+            );
+            glow.light(&frames, &db, p, (color.with_alpha(0.6), light));
+        }
+    }
+
+    // ---- 夜主弹幕（狐火）
+    if let Some(foes) = &res.foes {
+        for fo in &foes.0 {
+            let p = lerp(fo.prev, fo.pos);
+            glow.add(
+                f.glow,
+                p.extend(layer::EMISSIVE),
+                Vec2::splat(0.35),
+                0.0,
+                rgb(0xff6b5a).with_alpha(0.9),
+            );
+            glow.add(f.spark, p.extend(layer::EMISSIVE + 0.1), Vec2::splat(1.2), now * 3.0, rgb(0xffe0c0));
+            glow.light(&frames, &db, p, (rgb(0xff6b5a).with_alpha(0.6), 36.0));
+        }
+    }
+
+    // ---- 奇遇：灵泉、妖潮裂隙画在地上；古灯、血祭坛是道具
+    if let Some(enc) = &res.encounters {
+        let c = &content.0;
+        for e in &enc.list {
+            let def = &c.events.kinds[e.kind];
+            let p = to_screen(e.pos);
+            let fade = ((def.life - e.t) / 1.5).clamp(0.0, 1.0) * (e.t / 0.5).min(1.0);
+            let color = hex(&def.color);
+            match def.kind {
+                EventKind::Spring { radius, .. } => {
+                    if let Some(frame) = f.spring {
+                        let k = px(frame, radius * 2.6);
+                        pools.fx.push(Draw {
+                            scale: Vec2::splat(k),
+                            color: Color::WHITE.with_alpha(fade),
+                            ..Draw::new(frame, p.extend(layer::GROUND + 0.8))
+                        });
+                    }
+                    glow.light(&frames, &db, p, (color.with_alpha(0.7 * fade), radius * 2.2));
+                }
+                EventKind::Rift { .. } => {
+                    if let Some(frame) = f.rift {
+                        pools.fx.push(Draw {
+                            color: Color::WHITE.with_alpha(fade),
+                            ..Draw::new(frame, p.extend(layer::GROUND + 0.8))
+                        });
+                    }
+                    if let Some(frame) = f.rift_glow {
+                        let pulse = 0.6 + 0.3 * (now * 3.0).sin();
+                        glow.add(
+                            frame,
+                            p.extend(layer::EMISSIVE - 3.0),
+                            Vec2::ONE,
+                            0.0,
+                            color.with_alpha(pulse * fade),
+                        );
+                    }
+                    glow.light(&frames, &db, p, (color.with_alpha(0.6 * fade), 120.0));
+                }
+                EventKind::Shrine { .. } | EventKind::Altar { .. } => {
+                    let prop = if matches!(def.kind, EventKind::Shrine { .. }) { f.lamp } else { f.altar };
+                    if let Some((frame, emit)) = prop {
+                        pools.fx.push(Draw {
+                            color: Color::WHITE.with_alpha(fade.max(0.2)),
+                            ..Draw::new(frame, p.extend(sort_z(layer::ACTORS, e.pos.y)))
+                        });
+                        if let Some(emit) = emit {
+                            glow.add(
+                                emit,
+                                p.extend(layer::EMISSIVE),
+                                Vec2::ONE,
+                                0.0,
+                                Color::WHITE.with_alpha(fade),
+                            );
+                        }
+                    }
+                    // 一圈细环提示可以触碰
+                    let pulse = 0.5 + 0.3 * (now * 4.0).sin();
+                    let k = px(f.ring, 64.0);
+                    glow.add(
+                        f.ring,
+                        p.extend(layer::EMISSIVE - 3.0),
+                        Vec2::new(k, k * FLAT),
+                        0.0,
+                        color.with_alpha(pulse * fade),
+                    );
+                    glow.light(&frames, &db, p + Vec2::new(0.0, 24.0), (color.with_alpha(0.8 * fade), 110.0));
+                }
+                EventKind::Critter { .. } => {
+                    // 金蟾是妖物，自己会画；这里只加一点金光
+                    glow.light(&frames, &db, p, (color.with_alpha(0.7), 70.0));
+                }
+            }
+        }
+    }
+}
+
+/// 用到的模拟资源（开局前都不存在）。
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct FxSources<'w> {
+    shots: Option<Res<'w, Shots>>,
+    seals: Option<Res<'w, Seals>>,
+    fissures: Option<Res<'w, Fissures>>,
+    pickups: Option<Res<'w, Pickups>>,
+    foes: Option<Res<'w, Foes>>,
+    arsenal: Option<Res<'w, Arsenal>>,
+    encounters: Option<Res<'w, Encounters>>,
+}
+
+pub(crate) fn hex(s: &str) -> Color {
+    let v = u32::from_str_radix(s.trim_start_matches('#'), 16).unwrap_or(0xffffff);
+    rgb(v)
+}
+
+/// 闪屏：一张盖住整个画面的半透明色块，跟着镜头。
+#[derive(Component)]
+pub(crate) struct ScreenFlash;
+
+pub(crate) fn spawn_flash(mut commands: Commands) {
+    commands.spawn((
+        ScreenFlash,
+        Sprite { color: Color::NONE, custom_size: Some(Vec2::splat(20_000.0)), ..default() },
+        Transform::from_xyz(0.0, 0.0, layer::NUMBERS + 50.0),
+        DespawnOnExit(AppState::Run),
+    ));
+}
+
+/// 震屏衰减、闪屏淡出。镜头跟随主角之后再加上抖动。
+pub(crate) fn apply_shake_flash(
+    time: Res<Time>,
+    mut fx: ResMut<FxState>,
+    mut cam: Single<&mut Transform, With<MainCamera>>,
+    mut flash: Query<(&mut Sprite, &mut Transform), (With<ScreenFlash>, Without<MainCamera>)>,
+) {
+    let dt = time.delta_secs();
+    if fx.shake > 0.05 {
+        let s = fx.shake;
+        let off = Vec2::new(fx.rng.range_f32(-s, s), fx.rng.range_f32(-s, s)) * 0.6;
+        cam.translation.x += off.x;
+        cam.translation.y += off.y;
+        fx.shake *= (-dt * 10.0).exp();
+    } else {
+        fx.shake = 0.0;
+    }
+    let a = (fx.flash.alpha() - dt * 3.0).max(0.0);
+    fx.flash.set_alpha(a);
+    for (mut sprite, mut tf) in &mut flash {
+        sprite.color = fx.flash;
+        tf.translation.x = cam.translation.x;
+        tf.translation.y = cam.translation.y;
+    }
+}

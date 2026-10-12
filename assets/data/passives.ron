@@ -1,0 +1,24 @@
+// 心法（移植自网页版 data/passives.ts）。最多 6 门，满级 5。
+// per_level 每级加一次；levels 逐级写（第 k 项是升到 k+1 级时新加的效果）。
+[
+    (id: "changming", name: "长明", element: Fire, desc: "攻击范围 +10%", max_level: 5,
+     per_level: [Add(Area, 0.10)]),
+    (id: "luxin", name: "炉心", element: Fire, desc: "伤害 +8%", max_level: 5,
+     per_level: [Add(Damage, 0.08)]),
+    (id: "jianyi", name: "剑意", element: Metal, desc: "暴击伤害 +20%", max_level: 5,
+     per_level: [Add(CritMult, 0.20)]),
+    (id: "ruimu", name: "锐目", element: Metal, desc: "暴击率 +5%", max_level: 5,
+     per_level: [Add(CritChance, 0.05)]),
+    (id: "jingxin", name: "静心", element: Water, desc: "冷却 -6%", max_level: 5,
+     per_level: [Add(Cooldown, -0.06)]),
+    (id: "yinhun", name: "引魂", element: Water, desc: "拾取范围 +25%", max_level: 5,
+     per_level: [Mul(Magnet, 0.25)]),
+    (id: "zhezhi", name: "折纸", element: Wood, desc: "1 / 3 / 5 级时数量 +1", max_level: 5,
+     levels: [[Add(Amount, 1.0)], [], [Add(Amount, 1.0)], [], [Add(Amount, 1.0)]]),
+    (id: "jixing", name: "疾行", element: Wood, desc: "移动速度 +8%", max_level: 5,
+     per_level: [Mul(Speed, 0.08)]),
+    (id: "houde", name: "厚德", element: Earth, desc: "生命上限 +20，护甲 +1", max_level: 5,
+     per_level: [Add(MaxHp, 20.0), Add(Armor, 1.0)]),
+    (id: "panshi", name: "磐石", element: Earth, desc: "受到伤害 -5%", max_level: 5,
+     per_level: [Add(Reduction, 0.05)]),
+]

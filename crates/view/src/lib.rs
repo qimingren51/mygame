@@ -12,6 +12,7 @@ use lantern_sim::{AppState, GameContent, Player, Pos, PrevPos};
 mod actors;
 pub mod atlas;
 mod effects;
+mod fx;
 mod ground;
 pub mod lighting;
 
@@ -54,6 +55,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<actors::Pools>()
             .init_resource::<actors::GlowPool>()
             .init_resource::<actors::GlowRequests>()
+            .init_resource::<fx::FxState>()
             .add_systems(
                 Startup,
                 (
@@ -61,6 +63,7 @@ impl Plugin for ViewPlugin {
                     load_atlas,
                     (
                         actors::build_frames,
+                        fx::build_fx_frames,
                         ground::build_decor,
                         effects::setup_effects,
                         lighting::setup_lighting,
@@ -68,7 +71,10 @@ impl Plugin for ViewPlugin {
                 )
                     .chain(),
             )
-            .add_systems(OnEnter(AppState::Run), (ground::spawn_paper, effects::spawn_number_pool))
+            .add_systems(
+                OnEnter(AppState::Run),
+                (ground::spawn_paper, effects::spawn_number_pool, fx::spawn_flash, fx::reset_fx),
+            )
             .add_systems(
                 OnExit(AppState::Run),
                 (actors::reset_pools, ground::clear_decor, lighting::hide_darkness),
@@ -81,8 +87,11 @@ impl Plugin for ViewPlugin {
                     interpolate,
                     actors::animate_hero,
                     follow_camera,
+                    fx::apply_shake_flash,
                     lighting::follow_main_camera,
                     actors::collect_draws,
+                    fx::read_fx_events,
+                    fx::collect_fx,
                     actors::hero_glow,
                     effects::read_events,
                     effects::update_effects,

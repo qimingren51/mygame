@@ -1,19 +1,22 @@
-// 主角基础数值（移植自网页版 balance.ts 的 PLAYER）。
+// 主角（移植自网页版 balance.ts 的 PLAYER）。会成长的数值（移速、生命、拾取、暴击……）在 stats.ron。
 // 单位：距离是世界单位（与网页版像素一致），时间是秒。
 (
     radius: 11.0,
-    speed: 118.0,
-    max_hp: 100.0,
-    // 魂火吸附半径
-    magnet: 65.0,
     hurt_iframe: 0.5,
-    crit_chance: 0.05,
-    crit_mult: 2.0,
     start_weapon: "lamp",
     dash: (
         duration: 0.16,
         speed: 720.0,
         cooldown: 2.4,
         iframe: 0.3,
+    ),
+    // 燃灯：每击杀一只普通妖物充 1/140，精英充 0.15；充满后对视野内所有妖物造成伤害（x 为分钟），
+    // 对夜主改为最大生命的 5%，同时清掉弹幕。
+    ult: (
+        charge_normal: 0.0071428571,
+        charge_elite: 0.15,
+        damage: (120.0, 48.0, 0.0),
+        knockback: 160.0,
+        boss_fraction: 0.05,
     ),
 )

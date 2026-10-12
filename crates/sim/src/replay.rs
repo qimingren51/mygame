@@ -1,8 +1,9 @@
 //! 回放（docs/DESIGN.md 第 7 节）：录制每一步的输入和命令，重放时逐秒核对状态哈希。
 //!
 //! - 录制在模拟内部完成（[`SimSet::Input`] 的最前面），录到的就是模拟实际看到的输入。
-//! - 文件是 RON：文件头（格式版本、游戏版本、内容哈希、种子、模式），输入按游程编码，
-//!   命令带步数，每秒一个状态哈希。
+//! - 文件是 RON：文件头（格式版本、游戏版本、内容哈希、开局设置），输入按游程编码，
+//!   命令带步序号，每秒（游戏时间）一个状态哈希。
+//! - 按“步”录制：升级选择等阶段游戏时间不走，但每一步都录一个输入，命令记在它生效的那一步。
 //! - 重放时 [`ReplayPlayback`] 在同一位置把输入和命令喂给模拟，平台层的输入被忽略。
 //!
 //! [`SimSet::Input`]: crate::SimSet::Input
@@ -10,15 +11,16 @@
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{HashLog, InputFrame, RunMode, RunSetup, SimCommand, SimCommands, Tick};
+use crate::{HashLog, InputFrame, RunSetup, SimCommand, SimCommands, Tick};
 
 /// 回放文件格式的版本。改动格式时加一，并在 [`Replay::parse`] 里处理旧版本。
-pub const REPLAY_FORMAT: u32 = 1;
+/// 第 2 版：按步录制，文件头带完整的开局设置（夜签、心灯）。第 1 版（M1）不再支持。
+pub const REPLAY_FORMAT: u32 = 2;
 
 /// 一段相同输入的连续步数。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputRun {
-    pub ticks: u32,
+    pub steps: u32,
     pub mx: i8,
     pub my: i8,
 }
@@ -28,25 +30,26 @@ pub struct Replay {
     pub format: u32,
     pub game_version: String,
     pub content_hash: u64,
-    pub seed: u64,
-    pub mode: RunMode,
-    /// 总步数
+    pub setup: RunSetup,
+    /// 总步数（含升级选择等时间不走的步）
+    pub steps: u64,
+    /// 游戏时间走过的步数
     pub ticks: u64,
     pub inputs: Vec<InputRun>,
-    /// (步数, 命令)，按步数排列
+    /// (步序号, 命令)，按步序号排列
     pub commands: Vec<(u64, SimCommand)>,
-    /// (步数, 状态哈希)，每秒一个
+    /// (游戏时间步数, 状态哈希)，每秒一个
     pub hashes: Vec<(u64, u64)>,
 }
 
 impl Replay {
-    pub fn new(game_version: &str, content_hash: u64, seed: u64, mode: RunMode) -> Self {
+    pub fn new(game_version: &str, content_hash: u64, setup: RunSetup) -> Self {
         Replay {
             format: REPLAY_FORMAT,
             game_version: game_version.to_string(),
             content_hash,
-            seed,
-            mode,
+            setup,
+            steps: 0,
             ticks: 0,
             inputs: Vec::new(),
             commands: Vec::new(),
@@ -56,10 +59,10 @@ impl Replay {
 
     fn push_input(&mut self, input: InputFrame) {
         match self.inputs.last_mut() {
-            Some(run) if run.mx == input.mx && run.my == input.my && run.ticks < u32::MAX => run.ticks += 1,
-            _ => self.inputs.push(InputRun { ticks: 1, mx: input.mx, my: input.my }),
+            Some(run) if run.mx == input.mx && run.my == input.my && run.steps < u32::MAX => run.steps += 1,
+            _ => self.inputs.push(InputRun { steps: 1, mx: input.mx, my: input.my }),
         }
-        self.ticks += 1;
+        self.steps += 1;
     }
 
     pub fn to_ron(&self) -> String {
@@ -68,11 +71,19 @@ impl Replay {
     }
 
     pub fn parse(text: &str) -> Result<Replay, String> {
-        let r: Replay = ron::from_str(text).map_err(|e| format!("回放文件格式错误：{e}"))?;
-        if r.format != REPLAY_FORMAT {
-            return Err(format!("回放格式版本 {}，本程序只支持 {REPLAY_FORMAT}", r.format));
+        #[derive(Deserialize)]
+        struct Head {
+            format: u32,
         }
-        Ok(r)
+        // 先只读格式版本（其余字段忽略），旧版本给出明确的提示
+        let head: Head = ron::from_str(text).map_err(|e| format!("回放文件格式错误：{e}"))?;
+        if head.format != REPLAY_FORMAT {
+            return Err(format!(
+                "回放格式版本 {}，本程序只支持 {REPLAY_FORMAT}（旧版本录的回放无法重放）",
+                head.format
+            ));
+        }
+        ron::from_str(text).map_err(|e| format!("回放文件格式错误：{e}"))
     }
 }
 
@@ -82,7 +93,7 @@ pub struct ReplayCursor {
     run: usize,
     used: u32,
     cmd: usize,
-    tick: u64,
+    step: u64,
 }
 
 impl ReplayCursor {
@@ -91,18 +102,18 @@ impl ReplayCursor {
         let run = replay.inputs.get(self.run)?;
         let input = InputFrame { mx: run.mx, my: run.my };
         while let Some(&(t, c)) = replay.commands.get(self.cmd) {
-            if t != self.tick {
+            if t != self.step {
                 break;
             }
             commands.push(c);
             self.cmd += 1;
         }
         self.used += 1;
-        if self.used >= run.ticks {
+        if self.used >= run.steps {
             self.run += 1;
             self.used = 0;
         }
-        self.tick += 1;
+        self.step += 1;
         Some(input)
     }
 }
@@ -128,7 +139,7 @@ impl ReplayPlayback {
 
     /// 回放对应的开局设置。
     pub fn setup(&self) -> RunSetup {
-        RunSetup { seed: self.replay.seed, mode: self.replay.mode }
+        self.replay.setup.clone()
     }
 }
 
@@ -151,25 +162,26 @@ pub(crate) fn feed_playback(
 }
 
 /// 录制：记下模拟这一步实际看到的输入和命令。
-pub(crate) fn record(
-    log: Option<ResMut<ReplayLog>>,
-    tick: Res<Tick>,
-    input: Res<InputFrame>,
-    commands: Res<SimCommands>,
-) {
+pub(crate) fn record(log: Option<ResMut<ReplayLog>>, input: Res<InputFrame>, commands: Res<SimCommands>) {
     let Some(mut log) = log else { return };
+    let step = log.0.steps;
     for &c in &commands.0 {
-        log.0.commands.push((tick.0, c));
+        log.0.commands.push((step, c));
     }
     log.0.push_input(*input);
 }
 
 /// 把新记录的状态哈希抄进回放；重放时和录制的哈希对照。
 pub(crate) fn sync_hashes(
+    tick: Res<Tick>,
     hashes: Res<HashLog>,
     log: Option<ResMut<ReplayLog>>,
     playback: Option<ResMut<ReplayPlayback>>,
 ) {
+    let mut log = log;
+    if let Some(log) = &mut log {
+        log.0.ticks = tick.0;
+    }
     let Some(last) = hashes.0.last() else { return };
     if let Some(mut log) = log
         && log.0.hashes.last().is_none_or(|&(t, _)| t < last.tick)

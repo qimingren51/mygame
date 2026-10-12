@@ -4,15 +4,14 @@
 //! CI 在 Linux 和 Windows 上都跑，对照的是同一份文件，所以跨平台不一致会立刻发现。
 //! 故意修改玩法后，用 `UPDATE_GOLDEN=1 cargo test -p lantern_sim` 重新生成。
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use bevy_math::{Vec2, ops};
-use lantern_content::Content;
 use lantern_sim::{InputFrame, SimCommand, SimHarness};
 
-fn content() -> Content {
-    Content::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).expect("内容数据")
-}
+use common::{bot_step, content};
 
 /// 脚本化输入：绕不规则的圈走，每 2 秒闪避一次，偶尔停下。
 fn scripted(tick: u64) -> (InputFrame, Vec<SimCommand>) {
@@ -26,15 +25,14 @@ fn scripted(tick: u64) -> (InputFrame, Vec<SimCommand>) {
     (InputFrame::quantize(dir), cmds)
 }
 
-/// 跑到指定步数或主角倒下为止，返回每秒的状态哈希。
+/// 跑到指定的游戏时间或主角倒下为止（升级时由机器人选卡），返回每秒的状态哈希。
 fn run(seed: u64, ticks: u64) -> Vec<(u64, u64)> {
     let mut sim = SimHarness::new(content(), seed);
-    for tick in 0..ticks {
-        if sim.is_over() {
-            break;
-        }
-        let (input, cmds) = scripted(tick);
-        sim.step(input, &cmds);
+    let mut step = 0;
+    while sim.tick() < ticks && !sim.is_over() {
+        let (input, cmds) = scripted(step);
+        bot_step(&mut sim, input, &cmds);
+        step += 1;
     }
     assert!(sim.tick() == ticks || sim.is_over());
     sim.hashes().iter().map(|c| (c.tick, c.hash)).collect()

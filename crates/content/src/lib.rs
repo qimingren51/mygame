@@ -3,21 +3,31 @@
 //! 游戏和命令行工具共用这一套结构。数据文件是 RON，错误信息会指出文件名和行列号。
 //! 文件里用字符串 ID 互相引用，加载时检查引用是否存在；模拟开局时再换成数字下标。
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 mod defs;
+mod effects;
 mod validate;
 
 pub use defs::*;
+pub use effects::*;
 
 /// 全部内容数据。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Content {
     pub player: PlayerDef,
+    /// 按 [`Stat::ALL`] 的顺序
+    pub stats: Vec<StatDef>,
     pub run: RunDef,
     pub enemies: Vec<EnemyDef>,
     pub weapons: Vec<WeaponDef>,
+    pub passives: Vec<PassiveDef>,
+    pub elements: ElementsDef,
+    pub omens: Vec<OmenDef>,
+    pub events: EventsDef,
+    pub meta: MetaDef,
     /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
     pub hash: u64,
 }
@@ -56,11 +66,27 @@ impl Content {
     /// 从数据目录（通常是 `assets/data`）加载并校验全部内容。
     pub fn load(data_dir: &Path) -> Result<Content, ContentError> {
         let mut hash = 0xcbf2_9ce4_8422_2325;
+        let player = read(data_dir, "player.ron", &mut hash)?;
+        let stats: BTreeMap<Stat, StatDef> = read(data_dir, "stats.ron", &mut hash)?;
+        let missing: Vec<String> =
+            Stat::ALL.iter().filter(|s| !stats.contains_key(s)).map(|s| format!("{s:?}")).collect();
+        if !missing.is_empty() {
+            return Err(ContentError::Invalid {
+                file: data_dir.join("stats.ron"),
+                msg: format!("缺少这些属性的定义：{}", missing.join("、")),
+            });
+        }
         let mut content = Content {
-            player: read(data_dir, "player.ron", &mut hash)?,
+            player,
+            stats: Stat::ALL.iter().map(|s| stats[s]).collect(),
             run: read(data_dir, "run.ron", &mut hash)?,
             enemies: read(data_dir, "enemies.ron", &mut hash)?,
             weapons: read(data_dir, "weapons.ron", &mut hash)?,
+            passives: read(data_dir, "passives.ron", &mut hash)?,
+            elements: read(data_dir, "elements.ron", &mut hash)?,
+            omens: read(data_dir, "omens.ron", &mut hash)?,
+            events: read(data_dir, "events.ron", &mut hash)?,
+            meta: read(data_dir, "meta.ron", &mut hash)?,
             hash: 0,
         };
         content.hash = hash;
@@ -76,6 +102,23 @@ impl Content {
     /// 法器 ID 对应的下标。
     pub fn weapon_index(&self, id: &str) -> Option<usize> {
         self.weapons.iter().position(|w| w.id == id)
+    }
+
+    /// 心法 ID 对应的下标。
+    pub fn passive_index(&self, id: &str) -> Option<usize> {
+        self.passives.iter().position(|p| p.id == id)
+    }
+
+    pub fn omen_index(&self, id: &str) -> Option<usize> {
+        self.omens.iter().position(|o| o.id == id)
+    }
+
+    pub fn stat(&self, s: Stat) -> StatDef {
+        self.stats[s as usize]
+    }
+
+    pub fn element(&self, e: Element) -> &ElementDef {
+        &self.elements.elements[e.index()]
     }
 }
 
@@ -94,12 +137,15 @@ mod tests {
         assert_eq!(c.run.duration, 600.0);
         assert!(c.enemy_index(&c.run.spawn.base).is_some());
         assert!(c.weapon_index(&c.player.start_weapon).is_some());
+        assert_eq!(c.stats.len(), Stat::COUNT);
+        assert_eq!(c.stat(Stat::CritMult).base, 2.0);
+        assert_eq!(c.meta.cost(0), 120);
     }
 
     #[test]
     fn invalid_values_are_reported_with_file_name() {
         let mut c = Content::load(&repo_data_dir()).unwrap();
-        c.player.speed = -1.0;
+        c.player.dash.speed = -1.0;
         let err = c.validate(Path::new("data")).unwrap_err().to_string();
         assert!(err.contains("player.ron") && err.contains("speed"), "{err}");
     }

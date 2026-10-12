@@ -2,7 +2,8 @@
 """裁剪界面字体子集，输出到 assets/fonts/。
 
 完整的中文字体有十几 MB，这里只保留界面实际用到的字：扫描 crates/ui/src/ 里 Rust 字符串
-字面量中的字（注释不算）和 assets/i18n/ 里的文字，再加上 ASCII 和常用标点。
+字面量中的字（注释不算）、assets/data/ 里内容数据的字符串（法器、心法、夜签的名字和说明）、
+assets/i18n/ 里的文字，再加上 ASCII 和常用标点。
 新增界面文字后重新运行一次。
 
 用法（在仓库根目录）：
@@ -39,16 +40,29 @@ LICENSES = {
     "OFL-NotoSerifSC.txt": "notoserifsc/OFL.txt",
 }
 
-EXTRA = "·：、，。！？（）《》“”‘’—…【】「」％＋－／　"
+# 「•」：标题字体没有间隔号「·」，界面用它代替
+EXTRA = "·•：、，。！？（）《》“”‘’—…【】「」％＋－／　●○★→←↑↓×"
 CJK = re.compile(r"[　-〿㐀-䶿一-鿿＀-￯“”‘’·—…]")
 STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def non_ascii(literal: str) -> set[str]:
+    """字符串字面量里的全部非 ASCII 字（汉字、全角标点、箭头、圆点……）。"""
+    return {c for c in literal if ord(c) > 0x7E and not c.isspace() or c == "　"}
 
 
 def used_chars() -> str:
     chars = {chr(c) for c in range(0x20, 0x7F)} | set(EXTRA)
     for path in (ROOT / "crates" / "ui" / "src").rglob("*.rs"):
+        text = path.read_text(encoding="utf-8")
+        for literal in STRING.findall(text):
+            chars |= non_ascii(literal)
+        # 字符字面量，例如 '●'
+        for ch in re.findall(r"'([^'\\])'", text):
+            chars |= non_ascii(ch)
+    for path in (ROOT / "assets" / "data").glob("*.ron"):
         for literal in STRING.findall(path.read_text(encoding="utf-8")):
-            chars |= set(CJK.findall(literal))
+            chars |= non_ascii(literal)
     for path in (ROOT / "assets" / "i18n").glob("*.ron"):
         chars |= set(CJK.findall(path.read_text(encoding="utf-8")))
     return "".join(sorted(chars))

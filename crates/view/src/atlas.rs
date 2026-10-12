@@ -268,6 +268,16 @@ impl AtlasDb {
     }
 
     /// 把已有精灵换成这一帧（同一页时只改下标，不克隆句柄）。
+    /// 界面用的图片节点（图标）。
+    pub fn ui_image(&self, id: FrameId) -> ImageNode {
+        let f = self.frame(id);
+        let page = &self.pages[f.page];
+        ImageNode::from_atlas_image(
+            page.image.clone(),
+            TextureAtlas { layout: page.layout.clone(), index: f.index },
+        )
+    }
+
     pub fn set(&self, id: FrameId, sprite: &mut Sprite, anchor: &mut Anchor) {
         let f = self.frame(id);
         let page = &self.pages[f.page];

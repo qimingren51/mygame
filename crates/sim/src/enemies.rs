@@ -43,6 +43,15 @@ pub struct Enemies {
     pub slow_amount: Vec<f32>,
     pub frozen: Vec<f32>,
     pub stun: Vec<f32>,
+    /// 灼烧：剩余时间、层数、每层每秒伤害；累计伤害与显示计时（每 0.5 秒冒一个数字）
+    pub burn_t: Vec<f32>,
+    pub burn_stacks: Vec<f32>,
+    pub burn_dps: Vec<f32>,
+    pub burn_acc: Vec<f32>,
+    pub burn_show: Vec<f32>,
+    /// 夜主的出招计时：弹幕、召唤
+    pub atk_t: Vec<f32>,
+    pub summon_t: Vec<f32>,
     /// 妖物种类（`enemies.ron` 里的下标）
     pub kind: Vec<u16>,
     pub alive: Vec<bool>,
@@ -75,6 +84,13 @@ impl Default for Enemies {
             slow_amount: f(),
             frozen: f(),
             stun: f(),
+            burn_t: f(),
+            burn_stacks: f(),
+            burn_dps: f(),
+            burn_acc: f(),
+            burn_show: f(),
+            atk_t: f(),
+            summon_t: f(),
             kind: vec![0; ENEMY_CAP],
             alive: vec![false; ENEMY_CAP],
             generation: vec![0; ENEMY_CAP],
@@ -107,6 +123,13 @@ impl Enemies {
             &mut self.slow_amount,
             &mut self.frozen,
             &mut self.stun,
+            &mut self.burn_t,
+            &mut self.burn_stacks,
+            &mut self.burn_dps,
+            &mut self.burn_acc,
+            &mut self.burn_show,
+            &mut self.atk_t,
+            &mut self.summon_t,
         ] {
             v[i] = 0.0;
         }
@@ -142,7 +165,9 @@ impl Enemies {
         for i in self.iter_alive() {
             h.write_u32(i as u32);
             h.write_u32(u32::from(self.kind[i]));
-            for v in [self.x[i], self.y[i], self.hp[i], self.kx[i], self.ky[i]] {
+            for v in
+                [self.x[i], self.y[i], self.hp[i], self.kx[i], self.ky[i], self.burn_t[i], self.frozen[i]]
+            {
                 h.write_f32(v);
             }
         }

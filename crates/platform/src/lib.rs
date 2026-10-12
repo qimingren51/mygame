@@ -7,12 +7,14 @@ use bevy::input::InputSystems;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
-use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands};
+use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands, SimPhase};
 
 pub mod paths;
+pub mod profile;
 pub mod replays;
 pub mod settings;
 
+pub use profile::Profile;
 pub use settings::Settings;
 
 /// 本帧的抽象操作。由键盘和手柄合并而来，y 轴向下（与模拟一致）。
@@ -29,6 +31,17 @@ pub struct Actions {
     pub bench: bool,
     /// 显示 / 隐藏性能面板
     pub toggle_perf: bool,
+    /// 燃灯
+    pub ult: bool,
+    /// 升级时重抽、跳过
+    pub reroll: bool,
+    pub skip: bool,
+    /// 菜单里移动选择（这一帧按下的方向，y 向下）
+    pub nav: IVec2,
+    /// 数字键 1–9 直接选择（从 0 起）
+    pub pick: Option<u8>,
+    /// 标题界面：心灯
+    pub meta: bool,
 }
 
 /// 跑分时自动绕圈走，代替玩家输入。存在这个资源时，键盘和手柄的移动不交给模拟。
@@ -77,7 +90,38 @@ fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mu
             || (keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::Enter)),
         bench: keys.just_pressed(KeyCode::KeyB),
         toggle_perf: keys.just_pressed(KeyCode::F3),
+        ult: keys.any_just_pressed([KeyCode::KeyE, KeyCode::KeyF]),
+        reroll: keys.just_pressed(KeyCode::KeyR),
+        skip: keys.just_pressed(KeyCode::KeyX),
+        nav: IVec2::ZERO,
+        pick: None,
+        meta: keys.just_pressed(KeyCode::KeyM),
     };
+    let pressed = |a: KeyCode, b: KeyCode| keys.just_pressed(a) || keys.just_pressed(b);
+    if pressed(KeyCode::ArrowLeft, KeyCode::KeyA) {
+        a.nav.x -= 1;
+    }
+    if pressed(KeyCode::ArrowRight, KeyCode::KeyD) {
+        a.nav.x += 1;
+    }
+    if pressed(KeyCode::ArrowUp, KeyCode::KeyW) {
+        a.nav.y -= 1;
+    }
+    if pressed(KeyCode::ArrowDown, KeyCode::KeyS) {
+        a.nav.y += 1;
+    }
+    const DIGITS: [(KeyCode, KeyCode); 9] = [
+        (KeyCode::Digit1, KeyCode::Numpad1),
+        (KeyCode::Digit2, KeyCode::Numpad2),
+        (KeyCode::Digit3, KeyCode::Numpad3),
+        (KeyCode::Digit4, KeyCode::Numpad4),
+        (KeyCode::Digit5, KeyCode::Numpad5),
+        (KeyCode::Digit6, KeyCode::Numpad6),
+        (KeyCode::Digit7, KeyCode::Numpad7),
+        (KeyCode::Digit8, KeyCode::Numpad8),
+        (KeyCode::Digit9, KeyCode::Numpad9),
+    ];
+    a.pick = DIGITS.iter().position(|&(k, n)| pressed(k, n)).map(|i| i as u8);
     for pad in &gamepads {
         // 手柄摇杆 y 轴向上，这里翻转成向下。
         let stick = pad.left_stick() + pad.dpad();
@@ -90,6 +134,22 @@ fn gather_actions(keys: Res<ButtonInput<KeyCode>>, gamepads: Query<&Gamepad>, mu
         a.back |= pad.just_pressed(GamepadButton::East);
         a.pause |= pad.just_pressed(GamepadButton::Start);
         a.quit_to_title |= pad.just_pressed(GamepadButton::Select);
+        a.ult |= pad.just_pressed(GamepadButton::North) || pad.just_pressed(GamepadButton::RightTrigger2);
+        a.reroll |= pad.just_pressed(GamepadButton::North);
+        a.skip |= pad.just_pressed(GamepadButton::West);
+        a.meta |= pad.just_pressed(GamepadButton::West);
+        if pad.just_pressed(GamepadButton::DPadLeft) {
+            a.nav.x -= 1;
+        }
+        if pad.just_pressed(GamepadButton::DPadRight) {
+            a.nav.x += 1;
+        }
+        if pad.just_pressed(GamepadButton::DPadUp) {
+            a.nav.y -= 1;
+        }
+        if pad.just_pressed(GamepadButton::DPadDown) {
+            a.nav.y += 1;
+        }
     }
     if a.toggle_fullscreen {
         a.confirm = false;
@@ -102,12 +162,15 @@ fn feed_sim(
     time: Res<Time>,
     actions: Res<Actions>,
     state: Option<Res<State<RunState>>>,
+    phase: Option<Res<SimPhase>>,
     autopilot: Option<ResMut<AutoPilot>>,
     playback: Option<Res<ReplayPlayback>>,
     mut input: ResMut<InputFrame>,
     mut commands: ResMut<SimCommands>,
 ) {
-    let playing = state.is_some_and(|s| *s.get() == RunState::Playing);
+    // 升级选择等阶段的命令由界面发；这里只管游戏进行中的移动、闪避、燃灯
+    let playing =
+        state.is_some_and(|s| *s.get() == RunState::Playing) && phase.is_some_and(|p| *p == SimPhase::Play);
     // 重放时输入和命令由回放提供
     if playback.is_some() {
         return;
@@ -125,6 +188,9 @@ fn feed_sim(
     *input = InputFrame::quantize(actions.move_dir);
     if actions.dash {
         commands.0.push(SimCommand::Dash);
+    }
+    if actions.ult {
+        commands.0.push(SimCommand::Ult);
     }
 }
 

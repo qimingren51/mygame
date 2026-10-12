@@ -35,7 +35,7 @@ fn start_recording(
     if playback.is_some() {
         return;
     }
-    let replay = Replay::new(env!("CARGO_PKG_VERSION"), content.0.hash, setup.seed, setup.mode);
+    let replay = Replay::new(env!("CARGO_PKG_VERSION"), content.0.hash, setup.clone());
     commands.insert_resource(ReplayLog(replay));
 }
 
@@ -60,7 +60,7 @@ fn finish_recording(mut commands: Commands, log: Option<Res<ReplayLog>>) {
     let dir = replay_dir();
     let stamp =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let path = dir.join(format!("{stamp}-{}.ron", log.0.seed));
+    let path = dir.join(format!("{stamp}-{}.ron", log.0.setup.seed));
     match write_atomic(&path, log.0.to_ron().as_bytes()) {
         Ok(()) => info!("回放已保存：{}", path.display()),
         Err(e) => warn!("保存回放失败：{e}"),

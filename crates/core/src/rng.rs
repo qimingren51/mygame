@@ -133,6 +133,19 @@ impl Streams {
         &mut self.rngs[stream as usize]
     }
 
+    /// 同时借出两个不同的流。
+    pub fn pair(&mut self, a: Stream, b: Stream) -> (&mut Pcg32, &mut Pcg32) {
+        assert_ne!(a, b, "不能同时借出同一个随机流");
+        let (ia, ib) = (a as usize, b as usize);
+        if ia < ib {
+            let (lo, hi) = self.rngs.split_at_mut(ib);
+            (&mut lo[ia], &mut hi[0])
+        } else {
+            let (lo, hi) = self.rngs.split_at_mut(ia);
+            (&mut hi[0], &mut lo[ib])
+        }
+    }
+
     /// 按固定顺序把所有流的状态写进哈希。
     pub fn hash_into(&self, h: &mut crate::StateHasher) {
         for rng in &self.rngs {

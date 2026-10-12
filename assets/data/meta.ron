@@ -1,0 +1,17 @@
+// 心灯（移植自网页版 lantern/game.js 的 META）：用灯油永久点亮，每系最多 5 级。
+// 点亮第 n 级的花费 = round(cost_base × n^cost_exp / cost_round) × cost_round。
+// 网页版锋芒与其他伤害加成相乘，这里按 docs/BALANCE.md 第 3.1 节改为相加。
+(
+    max_level: 5,
+    cost_base: 120.0,
+    cost_exp: 1.6,
+    cost_round: 10.0,
+    lines: [
+        (id: "dmg", name: "锋芒", icon: "锋", desc: "每级伤害 +4%", per_level: [Add(Damage, 0.04)]),
+        (id: "hp", name: "体魄", icon: "体", desc: "每级生命上限 +12", per_level: [Add(MaxHp, 12.0)]),
+        (id: "agi", name: "灵巧", icon: "灵", desc: "每级移速 +3%，拾取范围 +8%",
+         per_level: [Mul(Speed, 0.03), Mul(Magnet, 0.08)]),
+        (id: "luck", name: "气运", icon: "运", desc: "每级重抽 +1，宝箱更易多开",
+         per_level: [Add(Rerolls, 1.0), Add(ChestLuck, 0.03)]),
+    ],
+)

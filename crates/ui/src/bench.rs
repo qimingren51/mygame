@@ -42,7 +42,7 @@ pub(crate) struct BenchRun {
 /// 从标题界面开始跑分。
 pub(crate) fn start(commands: &mut Commands, next: &mut NextState<AppState>) {
     info!("开始跑分");
-    commands.insert_resource(RunSetup { seed: 1, mode: RunMode::Bench { enemies: STAGES[0] } });
+    commands.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: STAGES[0] }));
     commands.insert_resource(AutoPilot::default());
     commands.insert_resource(BenchRun {
         stage: 0,

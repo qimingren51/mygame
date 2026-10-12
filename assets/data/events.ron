@@ -1,0 +1,28 @@
+// 奇遇（移植自网页版 lantern/game.js 的 EVENTS、BUFFS）：夜主出场前，每隔一段时间随机出现一个。
+// distance 是离主角多远，life 是存在多少秒。
+(
+    first: (28.0, 45.0),
+    interval: (40.0, 65.0),
+    kinds: [
+        (id: "toad", name: "金蟾", hint: "追上它，打死就散财", color: "#FFD98A", weight: 3.0,
+         distance: 240.0, life: 20.0, kind: Critter(enemy: "toad")),
+        (id: "spring", name: "灵泉", hint: "站在泉中回复生命", color: "#5FD4C4", weight: 2.0,
+         distance: 240.0, life: 25.0, kind: Spring(radius: 46.0, heal: 0.06)),
+        (id: "shrine", name: "古灯", hint: "触碰获得 30 秒随机增益", color: "#FF8A3D", weight: 2.0,
+         distance: 240.0, life: 35.0, kind: Shrine(radius: 30.0, duration: 30.0)),
+        (id: "altar", name: "血祭坛", hint: "以 25% 生命换一次强化", color: "#FF6B5A", weight: 1.5,
+         distance: 240.0, life: 35.0, kind: Altar(radius: 30.0, cost: 0.25, chests: 1)),
+        (id: "rift", name: "妖潮裂隙", hint: "击败守卫获得宝箱", color: "#B07CF0", weight: 1.5,
+         distance: 280.0, life: 12.0, kind: Rift(
+             minions: (12.0, 3.0, 0.0), spread: (10.0, 70.0),
+             base: "shade", alt: "wisp", alt_share: 0.3,
+             guards: ["fox", "stonelord"], late_guards: ["ghoul"], late_minute: 4.0,
+         )),
+    ],
+    buffs: [
+        (id: "fury", name: "灯焰", desc: "伤害 +50%", color: "#FF8A3D", effects: [Mul(Damage, 0.5)]),
+        (id: "swift", name: "御风", desc: "移速 +40%", color: "#6FD6A0", effects: [Mul(Speed, 0.4)]),
+        (id: "soul", name: "聚魂", desc: "拾取范围 ×3", color: "#5FD4C4", effects: [Mul(Magnet, 2.0)]),
+        (id: "iron", name: "金身", desc: "受到伤害 -60%", color: "#E9D9A6", effects: [Add(Reduction, 0.6)]),
+    ],
+)

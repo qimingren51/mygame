@@ -2,7 +2,7 @@
 
 use bevy_ecs::prelude::*;
 
-use lantern_content::{Content, PlayerDef};
+use lantern_content::Content;
 use lantern_core::{Stream, Streams};
 
 /// 模拟使用的视野，按最宽的宽高比计算，与实际窗口无关（结果才能复现）。
@@ -22,7 +22,7 @@ impl SimView {
     }
 }
 
-/// 跑分模式：保持场上妖物数量，主角无敌，不升级。
+/// 跑分模式：保持场上妖物数量，主角无敌，不升级，没有精英、夜主和奇遇。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RunMode {
     Normal,
@@ -46,19 +46,31 @@ pub struct PackMixEntry {
     pub share: f32,
 }
 
-/// 本局计划：把内容数据里的字符串 ID 换成下标，并在开局随机好配比。
+/// 时间表的一项：出场时刻已经随机好。
+#[derive(Clone, Copy, Debug)]
+pub struct PlannedStep {
+    pub at: f32,
+    /// `run.ron` 里 schedule 的下标
+    pub index: usize,
+    pub done: bool,
+}
+
+/// 本局计划：把内容数据里的字符串 ID 换成下标，并在开局随机好配比和时间表。
 #[derive(Resource, Clone, Debug)]
 pub struct RunPlan {
     pub mode: RunMode,
+    /// 主角不会受伤（跑分模式，或测试用的无敌）
+    pub god: bool,
     pub base_kind: u16,
     pub mix: Vec<MixEntry>,
     pub pack_mix: Vec<PackMixEntry>,
+    pub schedule: Vec<PlannedStep>,
     pub bench_kind: u16,
     pub bench_alt_kind: u16,
 }
 
 impl RunPlan {
-    pub fn new(content: &Content, mode: RunMode, rng: &mut Streams) -> Self {
+    pub fn new(content: &Content, mode: RunMode, god: bool, rng: &mut Streams) -> Self {
         let idx = |id: &str| content.enemy_index(id).expect("内容校验保证引用存在") as u16;
         let s = &content.run.spawn;
         let start = rng.get(Stream::Start);
@@ -83,11 +95,29 @@ impl RunPlan {
                 PackMixEntry { kind, from_minute: p.from_minute, share: base * p.share_scale }
             })
             .collect();
+        let bench = matches!(mode, RunMode::Bench { .. });
+        let schedule = if bench {
+            Vec::new()
+        } else {
+            content
+                .run
+                .schedule
+                .iter()
+                .enumerate()
+                .map(|(index, step)| PlannedStep {
+                    at: start.range_f32(step.at.0, step.at.1),
+                    index,
+                    done: false,
+                })
+                .collect()
+        };
         RunPlan {
             mode,
+            god: god || bench,
             base_kind: idx(&s.base),
             mix,
             pack_mix,
+            schedule,
             bench_kind: idx(&content.run.bench.enemy),
             bench_alt_kind: idx(&content.run.bench.alt_enemy),
         }
@@ -98,59 +128,55 @@ impl RunPlan {
     }
 }
 
-/// 刷怪计时。
-#[derive(Resource, Clone, Debug, Default)]
+/// 刷怪计时、妖潮、夜主。
+#[derive(Resource, Clone, Debug)]
 pub struct Director {
     /// 常规刷怪的累积量，满 1 刷一只
     pub spawn_acc: f32,
     /// 下一群妖物来的时刻（秒）
     pub next_pack: f32,
+    /// 妖潮剩余时间与刷怪倍率
+    pub surge_t: f32,
+    pub surge_mult: f32,
+    /// 场上的夜主
+    pub boss: Option<crate::enemies::EnemyHandle>,
+    /// 夜主在场时的刷怪倍率
+    pub boss_mult: f32,
 }
 
-/// 主角的属性（M2 起由心法、共鸣、夜签等修正来源汇总，docs/DESIGN.md 第 6.6 节）。
-#[derive(Resource, Clone, Debug)]
-pub struct Stats {
-    pub speed: f32,
-    pub magnet: f32,
-    pub area: f32,
-    pub damage: f32,
-    pub crit_chance: f32,
-    pub crit_mult: f32,
-    pub knockback: f32,
-    pub amount: u32,
-    pub max_hp: f32,
-    pub regen: f32,
-}
-
-impl Stats {
-    pub fn base(p: &PlayerDef) -> Self {
-        Stats {
-            speed: p.speed,
-            magnet: p.magnet,
-            area: 1.0,
-            damage: 1.0,
-            crit_chance: p.crit_chance,
-            crit_mult: p.crit_mult,
-            knockback: 1.0,
-            amount: 0,
-            max_hp: p.max_hp,
-            regen: 0.0,
-        }
+impl Default for Director {
+    fn default() -> Self {
+        Director { spawn_acc: 0.0, next_pack: 0.0, surge_t: 0.0, surge_mult: 1.0, boss: None, boss_mult: 1.0 }
     }
 }
 
-/// 经验、等级、击杀。
+/// 经验、等级、击杀、连斩、燃灯充能。
 #[derive(Resource, Clone, Debug)]
 pub struct Progress {
     pub xp: f32,
     pub level: u32,
-    /// 还没选择的升级次数（M2 的升级界面消费）
+    /// 还没选择的升级次数
     pub pending_levels: u32,
     pub kills: u32,
+    pub combo: u32,
+    /// 连斩剩余时间：归零前再击杀就接上
+    pub combo_t: f32,
+    pub best_combo: u32,
+    /// 燃灯充能 0..=1
+    pub ult: f32,
 }
 
 impl Default for Progress {
     fn default() -> Self {
-        Progress { xp: 0.0, level: 1, pending_levels: 0, kills: 0 }
+        Progress {
+            xp: 0.0,
+            level: 1,
+            pending_levels: 0,
+            kills: 0,
+            combo: 0,
+            combo_t: 0.0,
+            best_combo: 0,
+            ult: 0.0,
+        }
     }
 }

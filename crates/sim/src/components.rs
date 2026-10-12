@@ -51,11 +51,25 @@ pub struct Player {
     /// 闪避冷却
     pub dash_cd: f32,
     pub dash_vel: Vec2,
+    /// 土·固的护盾：当前值、获得时的值、打破后重新获得的倒计时
+    pub shield: f32,
+    pub shield_max: f32,
+    pub shield_t: f32,
 }
 
 impl Default for Player {
     fn default() -> Self {
-        Player { facing: Vec2::X, moved: 0.0, iframe: 0.0, dash_t: 0.0, dash_cd: 0.0, dash_vel: Vec2::ZERO }
+        Player {
+            facing: Vec2::X,
+            moved: 0.0,
+            iframe: 0.0,
+            dash_t: 0.0,
+            dash_cd: 0.0,
+            dash_vel: Vec2::ZERO,
+            shield: 0.0,
+            shield_max: 0.0,
+            shield_t: 0.0,
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 // 单局节奏（docs/DESIGN.md 第 6.8 节）。曲线写成 (a, b, c)，表示 a + b·x + c·x²。
-// 数值与网页版一致（docs/PORTING-NOTES.md 第 3 节）。精英、妖潮、夜主的时间表在 M2 加入。
+// 数值与网页版一致（docs/PORTING-NOTES.md 第 3、4 节）。
 (
     // 一局总时长（秒）：撑过 10 分钟并击败夜主即为天明。
     duration: 600.0,
@@ -36,6 +36,19 @@
         ),
     ),
 
+    // 精英、妖潮、夜主：在 at 范围内随机一个时刻出场（每局不同）
+    schedule: [
+        (at: (150.0, 200.0), event: Elite(["fox", "stonelord"])),
+        (at: (270.0, 320.0), event: Elite(["ghoul", "stonelord", "fox"])),
+        (at: (370.0, 420.0), event: Elite(["fox", "ghoul", "stonelord"])),
+        // 妖潮：30 秒，刷怪 ×2.5，同时出一只精英
+        (at: (450.0, 500.0), event: Surge(duration: 30.0, rate_mult: 2.5, elites: ["fox", "ghoul", "stonelord"])),
+        // 9:30 夜主降临，此后刷怪 ×0.4
+        (at: (570.0, 570.0), event: Boss(enemy: "boss", spawn_mult: 0.4)),
+    ],
+    // 击败夜主 0.6 秒后天明
+    win_delay: 0.6,
+
     gems: (
         cap: 380,
         return_after: 8.0,
@@ -44,6 +57,48 @@
         reach: 8.0,
         elite_split: 8,
         elite_scatter: 20.0,
+    ),
+
+    // 精英必掉宝箱和引魂铃；普通妖物 1/220 掉引魂铃（吸来全部魂火），1/260 掉莲子（回复 30% 生命）
+    drops: (
+        reach: 16.0,
+        bell_chance: 0.0045454545,
+        lotus_chance: 0.0038461538,
+        lotus_heal: 0.3,
+    ),
+
+    // 升级选项的权重（docs/PORTING-NOTES.md 第 4.4 节）
+    choices: (
+        slots: 6,
+        weight_evolve: 1000.0,
+        weight_weapon_up: 10.0,
+        weight_new_weapon: 9.0,
+        weight_new_weapon_late: 5.0,
+        late_after: 180.0,
+        weight_passive_up: 7.0,
+        weight_new_passive: 5.0,
+        owned_element_mult: 1.5,
+        favor_mult: 1.3,
+        unfavor_mult: 0.6,
+        inspiration: 0.1,
+        heal: 0.3,
+        oil: 20,
+        skip_oil: 10,
+        // 宝箱：随机数加运气超过 0.93 五连，超过 0.68 三连，否则一个
+        chest_odds: [(0.93, 5), (0.68, 3)],
+    ),
+
+    combo: (
+        window: 2.2,
+        milestones: [100, 300, 500, 1000],
+    ),
+
+    // 灯油：存活每秒 1、击杀每只 0.1、天明 300，再加局内额外所得，乘以灯油倍率
+    oil: (
+        per_second: 1.0,
+        per_kill: 0.1,
+        win: 300,
+        max_seconds: 720.0,
     ),
 
     bench: (

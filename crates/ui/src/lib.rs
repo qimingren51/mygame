@@ -5,14 +5,18 @@
 
 use bevy::prelude::*;
 
-use lantern_core::step::TICK_HZ;
 use lantern_platform::Actions;
-use lantern_sim::{AppState, Progress, RunMode, RunSetup, RunState, Tick};
+use lantern_sim::{AppState, RunState};
 
 mod bench;
+mod choice;
+mod describe;
 mod hud;
 mod perf;
 mod replay_ui;
+mod results;
+mod title;
+mod toasts;
 
 pub use perf::SimTiming;
 
@@ -36,19 +40,15 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SeedOverride>()
             .add_systems(Startup, load_fonts)
-            .add_systems(OnEnter(AppState::Title), spawn_title)
             .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
             .add_systems(OnExit(AppState::Run), bench::cleanup)
             .add_systems(OnEnter(RunState::Paused), spawn_pause)
-            .add_systems(OnEnter(RunState::Over), spawn_over)
             .add_systems(
                 Update,
                 (
-                    title_input.run_if(in_state(AppState::Title)),
                     playing_input.run_if(in_state(RunState::Playing)),
                     paused_input.run_if(in_state(RunState::Paused)),
-                    over_input.run_if(in_state(RunState::Over)),
-                    hud::update_hud.run_if(in_state(AppState::Run)),
+                    (hud::update_hud, hud::update_slots, hud::update_chips).run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
                         .run_if(in_state(RunState::Playing))
@@ -57,70 +57,27 @@ impl Plugin for UiPlugin {
             );
         perf::register(app);
         replay_ui::register(app);
+        title::register(app);
+        choice::register(app);
+        toasts::register(app);
+        results::register(app);
     }
 }
 
 fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut next: ResMut<NextState<AppState>>) {
-    commands.insert_resource(Fonts {
-        title: assets.load("fonts/MaShanZheng-subset.ttf"),
-        body: assets.load("fonts/NotoSerifSC-subset.ttf"),
-    });
-    // M0 没有需要等待的加载，直接进入标题。
+    let title: Handle<Font> = assets.load("fonts/MaShanZheng-subset.ttf");
+    let _ = TITLE_FONT.set(title.id());
+    commands.insert_resource(Fonts { title, body: assets.load("fonts/NotoSerifSC-subset.ttf") });
+    // 没有需要等待的加载，直接进入标题。
     next.set(AppState::Title);
 }
 
+/// 标题字体（马善政毛笔楷书）的资源 ID。这套字体没有间隔号“·”，用它写的字把“·”换成“•”。
+static TITLE_FONT: std::sync::OnceLock<AssetId<Font>> = std::sync::OnceLock::new();
+
 pub(crate) fn text(font: &Handle<Font>, size: f32, color: Color, s: &str) -> impl Bundle {
+    let s = if TITLE_FONT.get() == Some(&font.id()) { s.replace('·', "•") } else { s.to_string() };
     (Text::new(s), TextFont::from(font.clone()).with_font_size(size), TextColor(color))
-}
-
-fn spawn_title(mut commands: Commands, fonts: Res<Fonts>) {
-    commands.spawn((
-        DespawnOnExit(AppState::Title),
-        Node {
-            width: percent(100),
-            height: percent(100),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: px(18),
-            ..default()
-        },
-        children![
-            text(&fonts.title, 128.0, PAPER, "提灯夜行"),
-            text(&fonts.body, 22.0, CINNABAR, concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"))),
-            (Node { height: px(48), ..default() }),
-            text(&fonts.body, 24.0, PAPER, "Enter / 手柄 A　出发"),
-            text(&fonts.body, 18.0, DIM, "B　跑分　　F11　全屏　　Esc　退出"),
-        ],
-    ));
-}
-
-fn title_input(
-    actions: Res<Actions>,
-    seed: Res<SeedOverride>,
-    mut commands: Commands,
-    mut next: ResMut<NextState<AppState>>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    if actions.confirm {
-        let seed = seed.0.unwrap_or_else(random_seed);
-        info!("出发，种子 {seed}");
-        commands.insert_resource(RunSetup { seed, mode: RunMode::Normal });
-        next.set(AppState::Run);
-    } else if actions.bench {
-        bench::start(&mut commands, &mut next);
-    } else if actions.back {
-        exit.write(AppExit::Success);
-    }
-}
-
-/// 只用于挑选新一局的种子，不参与模拟。
-fn random_seed() -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    nanos % 1_000_000_000
 }
 
 fn playing_input(actions: Res<Actions>, mut next: ResMut<NextState<RunState>>) {
@@ -158,45 +115,5 @@ fn paused_input(
         next_app.set(AppState::Title);
     } else if actions.confirm || actions.pause || actions.back {
         next_run.set(RunState::Playing);
-    }
-}
-
-/// 主角倒下。M1-5 换成完整的结算界面。
-fn spawn_over(mut commands: Commands, fonts: Res<Fonts>, progress: Res<Progress>, tick: Res<Tick>) {
-    let secs = tick.0 / u64::from(TICK_HZ);
-    commands.spawn((
-        DespawnOnExit(RunState::Over),
-        Node {
-            width: percent(100),
-            height: percent(100),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: px(16),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.05, 0.06, 0.1, 0.75)),
-        children![
-            text(&fonts.title, 72.0, PAPER, "灯灭"),
-            text(
-                &fonts.body,
-                22.0,
-                PAPER,
-                &format!(
-                    "坚持 {:02}:{:02}　　击杀 {}　　等级 {}",
-                    secs / 60,
-                    secs % 60,
-                    progress.kills,
-                    progress.level
-                )
-            ),
-            text(&fonts.body, 20.0, DIM, "Enter / 手柄 A　回到标题"),
-        ],
-    ));
-}
-
-fn over_input(actions: Res<Actions>, mut next_app: ResMut<NextState<AppState>>) {
-    if actions.confirm || actions.back {
-        next_app.set(AppState::Title);
     }
 }

@@ -3457,6 +3457,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "kira",
+ "lantern_core",
+ "lantern_platform",
  "lantern_sim",
 ]
 
@@ -3503,9 +3505,11 @@ name = "lantern_ui"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "lantern_content",
  "lantern_core",
  "lantern_platform",
  "lantern_sim",
+ "lantern_view",
 ]
 
 [[package]]

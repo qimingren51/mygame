@@ -7,10 +7,11 @@ use lantern_content::{Movement, Rank};
 use lantern_core::Stream;
 use lantern_core::step::DT;
 
-use crate::combat::{PlayerHurt, hurt_player};
+use crate::combat::{ActionQueue, HurtCtx, hurt_player};
 use crate::enemies::Enemies;
 use crate::run::{RunPlan, SimView};
 use crate::spatial::Grid;
+use crate::stats::{Effects, Stats};
 use crate::{GameContent, Health, Player, Pos, SimOutbox, SimRng, Tick};
 
 /// 以玩家为中心重建空间网格。
@@ -30,8 +31,11 @@ pub(crate) fn update_enemies(
     plan: Res<RunPlan>,
     view: Res<SimView>,
     tick: Res<Tick>,
+    stats: Res<Stats>,
+    effects: Res<Effects>,
     mut rng: ResMut<SimRng>,
     mut en: ResMut<Enemies>,
+    mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
@@ -44,8 +48,17 @@ pub(crate) fn update_enemies(
     let relocate_dist = view.radius * content.run.spawn.relocate;
     let spread = content.run.spawn.relocate_spread;
     let face_angle = ops::atan2(player.facing.y, player.facing.x);
-    let god = plan.is_bench();
     let en = &mut *en;
+    let (relocate_rng, combat_rng) = rng.0.pair(Stream::Spawn, Stream::Combat);
+    let mut ctx = HurtCtx {
+        content,
+        stats: &stats,
+        effects: &effects,
+        queue: &mut queue,
+        rng: combat_rng,
+        god: plan.god,
+        outbox: &mut outbox,
+    };
 
     for i in 0..en.hi {
         if !en.alive[i] {
@@ -93,7 +106,7 @@ pub(crate) fn update_enemies(
 
         // 离得太远的普通妖物绕到玩家前方；上一步位置一起改，画面插值不会拖出残影
         if def.rank == Rank::Normal && def.movement == Movement::Chase && d > relocate_dist {
-            let a = face_angle + rng.0.get(Stream::Spawn).range_f32(-spread, spread);
+            let a = face_angle + relocate_rng.range_f32(-spread, spread);
             let (s, c) = ops::sin_cos(a);
             let r = view.radius + content.run.spawn.ring_extra;
             x = px + c * r;
@@ -104,9 +117,8 @@ pub(crate) fn update_enemies(
         en.x[i] = x;
         en.y[i] = y;
 
-        if d < en.r[i] + pr && en.damage[i] > 0.0 && !god {
-            let hurt = PlayerHurt { amount: en.damage[i], iframe: content.player.hurt_iframe };
-            hurt_player(&mut player, &mut health, hurt, &mut outbox);
+        if d < en.r[i] + pr && en.damage[i] > 0.0 {
+            hurt_player(&mut player, &mut health, pos.0, en.damage[i], &mut ctx);
         }
     }
 }

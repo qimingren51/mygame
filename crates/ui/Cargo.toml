@@ -9,7 +9,9 @@ publish.workspace = true
 
 [dependencies]
 lantern_core.workspace = true
+lantern_content.workspace = true
 lantern_sim.workspace = true
+lantern_view.workspace = true
 lantern_platform.workspace = true
 bevy.workspace = true
 
