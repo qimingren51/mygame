@@ -296,6 +296,17 @@ fn play_sim_events(outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
                 let s = a.sfx.ult.clone();
                 a.play(&s);
             }
+            // 五行反应：第一次发生用盖章的声音，之后每种反应换一个音高
+            SimEvent::Reaction { kind, first, .. } => {
+                if first {
+                    let s = a.sfx.resonance.clone();
+                    a.play(&s);
+                } else if a.can("react", 0.12) {
+                    let rate = f64::from(pent(8 + i32::from(kind) % 7) / pent(8));
+                    let s = a.sfx.bell_pulse.clone();
+                    a.play_with(&s, rate, -6.0);
+                }
+            }
             SimEvent::UltReady => {
                 let s = a.sfx.ult_ready.clone();
                 a.play(&s);

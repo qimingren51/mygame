@@ -44,6 +44,8 @@ pub enum SimCommand {
     Reroll,
     /// 跳过这次升级（得到灯油）
     Skip,
+    /// 封印第 i 个选项：永久移出本局卡池，换一个新选项
+    Banish(u8),
     /// 确认宝箱、进化演出
     Ack,
     /// 跑分模式下改变场上保持的妖物数量（分段跑分用）；普通模式下忽略
@@ -58,6 +60,8 @@ pub enum HitKind {
     Dot,
     /// 追加飞剑
     Bonus,
+    /// 五行反应
+    Reaction,
 }
 
 /// 等待下一步处理的命令。
@@ -121,6 +125,16 @@ pub enum SimEvent {
     Sheng {
         index: u8,
     },
+    /// 五行反应；kind 是 `elements.ron` 里 reactions 的下标。first：本局第一次（盖章，停顿 0.3 秒）；
+    /// label：这次要显示名字（同种反应每 2 秒最多一次）
+    Reaction {
+        kind: u8,
+        pos: Vec2,
+        first: bool,
+        label: bool,
+    },
+    /// 封印了一个选项
+    Banished,
     Taiji,
     /// 进化演出开始
     Evolve {

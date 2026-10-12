@@ -4,10 +4,10 @@
     radius: 11.0,
     hurt_iframe: 0.5,
     start_weapon: "lamp",
+    // 闪避：0.16 秒冲刺、0.3 秒无敌；冷却、段数、距离倍率在 stats.ron
     dash: (
         duration: 0.16,
         speed: 720.0,
-        cooldown: 2.4,
         iframe: 0.3,
     ),
     // 燃灯：每击杀一只普通妖物充 1/140，精英充 0.15；充满后对视野内所有妖物造成伤害（x 为分钟），
@@ -18,5 +18,15 @@
         damage: (120.0, 48.0, 0.0),
         knockback: 160.0,
         boss_fraction: 0.05,
+    ),
+    // 照见圈（规则半径，基础值和上限在 stats.ron 的 Reveal）每升一级 +1%；灯光（画面）每级 +0.5%。
+    // 灯焰带：照见圈最外面 20 宽的一圈，每秒伤害 (4 + 等级) × (1 + 0.25 × (灯芯等级 − 1))，
+    // 吃加成区和易伤，不暴击、不打印记（docs/BALANCE.md 第 7.3 节）。
+    reveal: (
+        per_level: 0.01,
+        light_per_level: 0.005,
+        band_width: 20.0,
+        band_dps: (4.0, 1.0, 0.0),
+        band_per_rank: 0.25,
     ),
 )

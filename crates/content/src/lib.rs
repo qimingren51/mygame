@@ -140,6 +140,7 @@ mod tests {
         assert_eq!(c.stats.len(), Stat::COUNT);
         assert_eq!(c.stat(Stat::CritMult).base, 2.0);
         assert_eq!(c.meta.cost(0), 120);
+        assert_eq!(c.passives.len(), 17);
     }
 
     #[test]
@@ -168,6 +169,26 @@ mod tests {
     fn unknown_fields_are_rejected() {
         let r: Result<PlayerDef, _> = ron::from_str("(radius: 1.0, typo: 3)");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn reactions_cover_every_pair() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let el = &c.elements;
+        for (i, &a) in Element::ALL.iter().enumerate() {
+            for &b in &Element::ALL[i + 1..] {
+                let r = el.reaction_between(a, b).unwrap_or_else(|| panic!("{a:?} + {b:?} 没有反应"));
+                assert_eq!(el.reaction_between(b, a), Some(r));
+                // 每一对五行要么相生、要么相克
+                let sheng = el.sheng.iter().any(|s| (s.from, s.to) == (a, b) || (s.from, s.to) == (b, a));
+                assert_ne!(sheng, a.overcomes(b) || b.overcomes(a), "{a:?} {b:?}");
+            }
+        }
+        assert_eq!(el.weapon_points(1, false), 1);
+        assert_eq!(el.weapon_points(4, false), 2);
+        assert_eq!(el.weapon_points(8, false), 3);
+        assert_eq!(el.weapon_points(8, true), 4);
+        assert_eq!(el.passive_points(5), 3);
     }
 
     #[test]

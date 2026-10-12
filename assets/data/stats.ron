@@ -1,7 +1,7 @@
 // 属性的基础值与上下限（docs/DESIGN.md 第 6.6 节，docs/BALANCE.md 第 3.4 节）。
 // 最终值 = clamp((基础值 + Σ加值) × (1 + Σ乘值), min, max)。
 // 加值、乘值来自心法、五行共鸣、相生、夜签、心灯、古灯增益（写成 Add(属性, 值)、Mul(属性, 值)）。
-// M2 照搬网页版：冷却下限 0.6、减伤上限 60%。
+// 伤害只用 Add（加成区相加）；暴击、易伤、克制是独立乘区（docs/BALANCE.md 第 3.1 节）。
 {
     // 输出
     Damage: (base: 1.0, min: 0.0),
@@ -13,25 +13,53 @@
     Knockback: (base: 1.0, min: 0.0, max: 4.0),
     BurnDamage: (base: 1.0, min: 0.0),
     BurnStacks: (base: 1.0, min: 1.0, max: 5.0),
-    FrozenDamage: (base: 0.0, min: 0.0),
+    FrozenVuln: (base: 0.0, min: 0.0),
     StunCrit: (base: 0.0, min: 0.0),
+    ProjSpeed: (base: 1.0, min: 0.2, max: 2.0),
+    ProjLife: (base: 1.0, min: 0.2, max: 2.0),
+    // 减速效果的加值（绝对值）；减速最多 70%
+    SlowPower: (base: 0.0, min: -0.5, max: 0.5),
+    SlowTime: (base: 1.0, min: 0.1),
+    FreezeTime: (base: 1.0, min: 0.1),
+    ReactionDamage: (base: 1.0, min: 0.0),
+    SummonMult: (base: 1.0, min: 0.5, max: 3.0),
     // 生存
     MaxHp: (base: 100.0, min: 1.0),
     Armor: (base: 0.0, min: 0.0, max: 15.0),
     Reduction: (base: 0.0, min: 0.0, max: 0.6),
     // 每秒回复生命上限的比例
     Regen: (base: 0.0, min: 0.0),
+    RegenFlat: (base: 0.0, min: 0.0),
     ShieldCooldown: (base: 10.0, min: 1.0),
     // 治疗倍率；0 表示无法回复生命（不掉莲子、不出灵泉）
     Healing: (base: 1.0, min: 0.0),
+    ShieldMult: (base: 1.0, min: 0.0),
+    ArmorToDamage: (base: 0.0, min: 0.0),
+    OverhealShield: (base: 0.0, min: 0.0, max: 1.0),
+    LotusHeal: (base: 1.0, min: 0.0),
     // 移动与拾取
     Speed: (base: 118.0, min: 30.0, max: 212.0),
     Magnet: (base: 65.0, min: 10.0, max: 400.0),
     Light: (base: 1.0, min: 0.3, max: 2.5),
-    XpGain: (base: 1.0, min: 0.0),
+    // 照见圈：基础 130，最大 220（docs/GAMEPLAY.md 第 4.2 节）；照见易伤 10%，最多 40%
+    Reveal: (base: 130.0, min: 40.0, max: 220.0),
+    RevealVuln: (base: 0.10, min: 0.0, max: 0.40),
+    FlameBand: (base: 0.0, min: 0.0),
+    FlameBandMult: (base: 1.0, min: 0.0),
+    UltCharge: (base: 1.0, min: 0.0),
+    // 闪避：冷却 2.4 秒，最低 0.8 秒；最多 3 段
+    DashCooldown: (base: 2.4, min: 0.8),
+    DashCharges: (base: 1.0, min: 1.0, max: 3.0),
+    DashDistance: (base: 1.0, min: 0.3, max: 3.0),
+    DashStrike: (base: 0.0, min: 0.0),
+    // 魂火价值倍率，最多 ×2
+    XpGain: (base: 1.0, min: 0.0, max: 2.0),
     // 构筑
     Rerolls: (base: 2.0, min: 0.0),
-    Choices: (base: 3.0, min: 1.0, max: 4.0),
+    Banishes: (base: 0.0, min: 0.0),
+    Choices: (base: 3.0, min: 1.0, max: 5.0),
+    // 灵光一闪：三选一变成四选一
+    Inspiration: (base: 0.10, min: 0.0, max: 1.0),
     ChestMin: (base: 1.0, min: 1.0, max: 5.0),
     ChestLuck: (base: 0.0, min: 0.0),
     // 单局规则

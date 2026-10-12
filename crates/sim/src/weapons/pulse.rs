@@ -18,6 +18,7 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
         slot.timer = lv.cooldown * cd;
         let r = lv.radius * ctx.stats.get(Stat::Area);
         let mut s = Strike::new(ctx.player, Area::Circle(r), lv.damage, source, StrikeFx::Pulse);
+        s.element = Some(ctx.content.weapons[slot.def].element);
         s.knockback = knockback;
         s.slow = slow;
         s.slow_time = slow_time;
@@ -29,6 +30,7 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
         if *t <= 0.0 {
             *t = toll.period * cd;
             let mut s = Strike::new(ctx.player, Area::Screen(30.0), toll.damage, source, StrikeFx::Toll);
+            s.element = Some(ctx.content.weapons[slot.def].element);
             s.freeze = toll.freeze;
             s.boss_cap = toll.boss_cap;
             ctx.strikes.0.push(s);

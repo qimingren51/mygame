@@ -130,9 +130,19 @@ impl Acc {
     }
 }
 
-/// 汇总全部修正来源。`buff` 是古灯增益在 `events.ron` 里的下标。
-pub fn collect(content: &Content, setup: &RunSetup, build: &Build, buff: Option<usize>) -> (Stats, Effects) {
+/// 汇总全部修正来源。`buff` 是古灯增益在 `events.ron` 里的下标，`level` 是主角等级
+/// （照见圈、灯光随等级变大）。
+pub fn collect(
+    content: &Content,
+    setup: &RunSetup,
+    build: &Build,
+    buff: Option<usize>,
+    level: u32,
+) -> (Stats, Effects) {
     let mut acc = Acc { add: [0.0; Stat::COUNT], mul: [0.0; Stat::COUNT], effects: Effects::default() };
+    let grown = level.saturating_sub(1) as f32;
+    acc.mul[Stat::Reveal as usize] += content.player.reveal.per_level * grown;
+    acc.mul[Stat::Light as usize] += content.player.reveal.light_per_level * grown;
     for (i, line) in content.meta.lines.iter().enumerate() {
         let lv = setup.meta.get(&line.id).copied().unwrap_or(0).min(content.meta.max_level);
         if lv > 0 {
@@ -150,7 +160,12 @@ pub fn collect(content: &Content, setup: &RunSetup, build: &Build, buff: Option<
         }
     }
     for (e, def) in content.elements.elements.iter().enumerate() {
-        for (k, tier) in def.tiers.iter().enumerate().take(build.tiers[e] as usize) {
+        let reached = build.tiers[e] as usize;
+        for (k, tier) in def.tiers.iter().enumerate().take(reached) {
+            // 到了下一阶，被加强版取代的这一阶不再生效
+            if tier.superseded && k + 1 < reached {
+                continue;
+            }
             acc.apply(&tier.effects, 1.0, Source::Tier, e * 8 + k);
         }
     }
@@ -170,6 +185,8 @@ pub fn collect(content: &Content, setup: &RunSetup, build: &Build, buff: Option<
         v[i] = ((d.base + acc.add[i]) * (1.0 + acc.mul[i])).clamp(d.min, d.max);
     }
     v[Stat::MaxHp as usize] = v[Stat::MaxHp as usize].round();
+    // 载物：每点护甲让加成区再加一点
+    v[Stat::Damage as usize] += v[Stat::Armor as usize] * v[Stat::ArmorToDamage as usize];
     (Stats { v }, acc.effects)
 }
 
@@ -178,6 +195,7 @@ pub(crate) fn refresh_stats(
     content: Res<crate::GameContent>,
     setup: Res<RunSetup>,
     build: Res<Build>,
+    progress: Res<crate::run::Progress>,
     encounters: Res<crate::encounters::Encounters>,
     mut dirty: ResMut<StatsDirty>,
     mut stats: ResMut<Stats>,
@@ -188,7 +206,8 @@ pub(crate) fn refresh_stats(
         return;
     }
     dirty.0 = false;
-    let (new_stats, mut new_effects) = collect(&content.0, &setup, &build, encounters.buff.map(|b| b.0));
+    let (new_stats, mut new_effects) =
+        collect(&content.0, &setup, &build, encounters.buff.map(|b| b.0), progress.level);
     for t in &mut new_effects.periodic {
         if let Some(old) = effects.periodic.iter().find(|o| o.key == t.key) {
             t.elapsed = old.elapsed;

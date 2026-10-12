@@ -155,6 +155,7 @@ pub(crate) fn level_up(
     content: Res<GameContent>,
     plan: Res<RunPlan>,
     mut progress: ResMut<Progress>,
+    mut dirty: ResMut<crate::stats::StatsDirty>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     if plan.is_bench() {
@@ -168,6 +169,8 @@ pub(crate) fn level_up(
         progress.xp -= need;
         progress.level += 1;
         progress.pending_levels += 1;
+        // 照见圈、灯光随等级变大
+        dirty.0 = true;
         outbox.0.push(SimEvent::LevelUp { level: progress.level });
     }
 }

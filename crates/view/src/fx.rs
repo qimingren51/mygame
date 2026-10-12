@@ -8,15 +8,17 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 
-use lantern_content::{BlastKind, EventKind};
+use lantern_content::{BlastKind, Element, EventKind, Stat, WeaponBehavior, ZoneKind};
 use lantern_core::Pcg32;
 use lantern_sim::boss::Foes;
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::encounters::Encounters;
 use lantern_sim::pickups::{PickupKind, Pickups};
+use lantern_sim::reactions::{Herbs, Zones};
+use lantern_sim::reveal::Reveal;
 use lantern_sim::weapons::drop::{Fissures, Seals};
 use lantern_sim::weapons::volley::Shots;
-use lantern_sim::{AppState, Arsenal, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Arsenal, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox, Stats};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
@@ -159,10 +161,34 @@ pub(crate) fn reset_fx(mut fx: ResMut<FxState>) {
     *fx = FxState { rng, ..default() };
 }
 
+/// 五行的颜色（和 `elements.ron` 一致）。
+fn element_rgb(e: Element) -> Color {
+    match e {
+        Element::Metal => rgb(0xe9d9a6),
+        Element::Wood => rgb(0x6fd6a0),
+        Element::Water => rgb(0x6fb8ff),
+        Element::Fire => rgb(0xff8a3d),
+        Element::Earth => rgb(0xc9925a),
+    }
+}
+
 /// 把模拟事件变成一次性效果、震屏、闪屏。
-pub(crate) fn read_fx_events(outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
+pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
     for ev in &outbox.0 {
         match *ev {
+            SimEvent::Reaction { kind, pos, first, .. } => {
+                let r = &content.0.elements.reactions[kind as usize];
+                let color = element_rgb(r.b);
+                fx.push(
+                    OneShot::Ring { color, ink: false, light: first, strong: first },
+                    to_screen(pos),
+                    if first { 90.0 } else { 46.0 },
+                    if first { 0.6 } else { 0.35 },
+                );
+                if first {
+                    fx.flash(color, 0.12);
+                }
+            }
             SimEvent::Strike { pos, radius, fx: kind } => {
                 let p = to_screen(pos);
                 match kind {
@@ -262,6 +288,104 @@ pub(crate) fn collect_fx(
     let hero = to_screen(pprev.0.lerp(ppos.0, a));
     let lerp = |prev: Vec2, cur: Vec2| to_screen(prev.lerp(cur, a));
     let px = |frame: FrameId, world: f32| world / db.frame(frame).size.x;
+
+    // ---- 照见圈：地上一圈淡淡的墨线；灯芯的灯焰带在圈边跳动
+    if let Some(reveal) = &res.reveal
+        && reveal.radius > 0.0
+    {
+        let k = px(f.ring_ink, reveal.radius * 2.0);
+        pools.fx.push(Draw {
+            scale: Vec2::new(k, k * FLAT),
+            color: rgb(0x1d2433).with_alpha(0.22),
+            ..Draw::new(f.ring_ink, hero.extend(layer::GROUND + 0.5))
+        });
+        if reveal.band_dps > 0.0 {
+            let kr = px(f.ring, reveal.radius * 2.0);
+            let flicker = 0.45 + 0.15 * (now * 9.0).sin() + 0.08 * (now * 23.0).sin();
+            glow.add(
+                f.ring,
+                hero.extend(layer::EMISSIVE - 2.5),
+                Vec2::new(kr, kr * FLAT),
+                now * 0.3,
+                rgb(0xff9a4a).with_alpha(flicker),
+            );
+        }
+    }
+
+    // ---- 不夜城的内环火海
+    if let (Some(arsenal), Some(stats)) = (&res.arsenal, &res.stats) {
+        let c = &content.0;
+        for slot in &arsenal.0 {
+            if let WeaponBehavior::Orbit { inner: Some(fire), .. } = slot.behavior(c) {
+                let r = fire.radius * stats.get(Stat::Area);
+                let kr = px(f.ring, r * 2.0);
+                let flicker = 0.55 + 0.2 * (now * 11.0).sin();
+                glow.add(
+                    f.ring,
+                    hero.extend(layer::EMISSIVE - 1.5),
+                    Vec2::new(kr, kr * FLAT),
+                    -now * 1.5,
+                    rgb(0xff7a2a).with_alpha(flicker),
+                );
+                glow.light(&frames, &db, hero, (rgb(0xff8a3d).with_alpha(0.35), r * 1.6));
+            }
+        }
+    }
+
+    // ---- 反应留下的区域：熔岩（橙红的裂纹）、淤泥（暗褐的泥圈）
+    if let Some(zones) = &res.zones {
+        for z in &zones.0 {
+            let p = to_screen(z.pos);
+            let fade = (z.life / 0.5).min(1.0) * ((z.max_life - z.life) / 0.2).min(1.0);
+            match z.kind {
+                ZoneKind::Lava => {
+                    let k = px(f.crack, z.radius * 2.0);
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(k, k * 0.75),
+                        color: rgb(0x5a1a08).with_alpha(0.6 * fade),
+                        ..Draw::new(f.crack, p.extend(layer::GROUND + 0.88))
+                    });
+                    glow.add(
+                        f.glow,
+                        p.extend(layer::EMISSIVE - 3.0),
+                        Vec2::new(z.radius / 40.0, z.radius / 40.0 * FLAT),
+                        0.0,
+                        rgb(0xff5a1f).with_alpha(0.5 * fade),
+                    );
+                }
+                ZoneKind::Mud => {
+                    let k = px(f.ring_ink, z.radius * 2.0);
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(k, k * FLAT),
+                        color: rgb(0x4a3a24).with_alpha(0.55 * fade),
+                        ..Draw::new(f.ring_ink, p.extend(layer::GROUND + 0.87))
+                    });
+                }
+            }
+        }
+    }
+
+    // ---- 灵草（滋生）
+    if let Some(herbs) = &res.herbs {
+        for h in &herbs.list {
+            let p = to_screen(h.pos);
+            let fade = (h.life / 0.6).min(1.0);
+            let sway = (now * 2.4 + h.pos.x * 0.07).sin() * 0.08;
+            pools.fx.push(Draw {
+                scale: Vec2::splat(0.7),
+                rot: sway,
+                color: rgb(0x9cf0b8).with_alpha(fade),
+                ..Draw::new(f.lotus, p.extend(sort_z(layer::WEAPONS, h.pos.y)))
+            });
+            glow.add(
+                f.glow,
+                (p + Vec2::new(0.0, 6.0)).extend(layer::EMISSIVE),
+                Vec2::splat(0.35),
+                0.0,
+                rgb(0x6fd6a0).with_alpha(0.45 * fade),
+            );
+        }
+    }
 
     // ---- 地裂：地面上的墨痕
     if let Some(fissures) = &res.fissures {
@@ -584,6 +708,10 @@ pub(crate) struct FxSources<'w> {
     foes: Option<Res<'w, Foes>>,
     arsenal: Option<Res<'w, Arsenal>>,
     encounters: Option<Res<'w, Encounters>>,
+    reveal: Option<Res<'w, Reveal>>,
+    zones: Option<Res<'w, Zones>>,
+    herbs: Option<Res<'w, Herbs>>,
+    stats: Option<Res<'w, Stats>>,
 }
 
 pub(crate) fn hex(s: &str) -> Color {

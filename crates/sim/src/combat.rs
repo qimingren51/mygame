@@ -1,7 +1,9 @@
-//! 伤害管线（docs/DESIGN.md 第 6.5 节，数值移植自网页版 sim/combat.ts）。
+//! 伤害管线（docs/DESIGN.md 第 6.5 节，公式见 docs/BALANCE.md 第 3.1 节）。
 //!
 //! - 法器、飞剑、范围打击把 [`Hit`] 按顺序放进 [`HitQueue`]，Damage 阶段统一结算：
-//!   暴击 → 扣血 → 命中触发器（灼烧、减速、冰冻……）→ 击退 → 死亡进 [`Deaths`]。
+//!   加成区 → 暴击区 → 易伤区 → 克制区 → 扣血 → 命中触发器（灼烧、减速、冰冻……）→ 击退
+//!   → 五行印记与反应（见 [`crate::reactions`]）→ 死亡进 [`Deaths`]。
+//! - 反应产生的伤害直接追加到同一个队列，本步结算；反应伤害不带五行，所以不会再引起反应。
 //! - 范围打击（寒波、石印、爆炸、震地、太极、燃灯）先排进 [`Strikes`]，在 Weapons 阶段末尾
 //!   按空间网格找到目标，再变成逐个的 [`Hit`]。
 //! - 触发器里不针对单个目标的动作（回复、爆炸、震地、全屏伤害、追加飞剑、天降宝箱）先排进
@@ -11,7 +13,7 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Action, BlastKind, Cond, Content, Rank, Stat};
+use lantern_content::{Action, BlastKind, Cond, Content, Element, Rank, Stat};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
@@ -19,6 +21,8 @@ use crate::enemies::{Enemies, EnemyHandle};
 use crate::flow::Flow;
 use crate::gems::Gems;
 use crate::pickups::{PickupKind, Pickups};
+use crate::reactions::{ReactCtx, ReactRes, mark};
+use crate::reveal::{Reveal, Vuln};
 use crate::run::{Director, Progress, SimView};
 use crate::spatial::Grid;
 use crate::stats::{ActiveTrigger, Effects, Stats};
@@ -33,6 +37,19 @@ pub const HIT_NOCRIT: u8 = 1;
 pub const HIT_DOT: u8 = 2;
 /// 追加飞剑造成的命中（不再触发追加）
 pub const HIT_BONUS: u8 = 4;
+/// 五行反应造成的伤害（显示用）
+pub const HIT_REACT: u8 = 8;
+/// 伤害已经乘过加成区（以触发伤害为基数的反应、熔岩）
+pub const HIT_RAW: u8 = 16;
+/// 伤害原样扣除，不乘任何乘区（斩杀）
+pub const HIT_TRUE: u8 = 32;
+/// 冰爆：这样冻住的妖物再死不触发冰爆
+pub const HIT_BLAST: u8 = 64;
+
+/// 灼烧：每层每秒 = 命中伤害（暴击前）× 20%，持续 3 秒（docs/BALANCE.md 第 3.3 节）。
+/// 冰爆、火·极境的爆炸直接点上灼烧时用。
+pub const BURN_RATIO: f32 = 0.2;
+pub const BURN_TIME: f32 = 3.0;
 
 /// 伤害来源，平衡统计用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -45,6 +62,12 @@ pub enum Source {
     Quake,
     Screen,
     Ult,
+    /// 五行反应（`elements.ron` 里 reactions 的下标）
+    Reaction(u8),
+    /// 灯焰带
+    Band,
+    /// 轻功：闪避穿过的妖物
+    Dash,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -64,6 +87,10 @@ pub struct Hit {
     pub slow: f32,
     pub slow_time: f32,
     pub source: Source,
+    /// 法器命中带的五行：打印记、引起反应；反应、持续伤害、共鸣效果没有
+    pub element: Option<Element>,
+    /// 直接点上几层灼烧（以这一击加成区之后的伤害为基数）
+    pub ignite: f32,
 }
 
 impl Hit {
@@ -80,7 +107,14 @@ impl Hit {
             slow: 0.0,
             slow_time: 0.0,
             source,
+            element: None,
+            ignite: 0.0,
         }
+    }
+
+    pub fn element(mut self, element: Option<Element>) -> Self {
+        self.element = element;
+        self
     }
 
     pub fn knock(mut self, knockback: f32, from: Vec2) -> Self {
@@ -142,6 +176,8 @@ pub struct Strike {
     pub slow_time: f32,
     pub source: Source,
     pub fx: StrikeFx,
+    pub element: Option<Element>,
+    pub ignite: f32,
 }
 
 impl Strike {
@@ -160,6 +196,8 @@ impl Strike {
             slow_time: 0.0,
             source,
             fx,
+            element: None,
+            ignite: 0.0,
         }
     }
 }
@@ -184,7 +222,7 @@ pub struct ActionQueue(pub Vec<Deferred>);
 pub struct Death {
     pub pos: Vec2,
     pub kind: u16,
-    /// 死时处于冰冻（水·凝 三阶的冰爆）
+    /// 死时处于冰冻（水·凝 三阶的冰爆）；被冰爆冻住的不算
     pub frozen: bool,
 }
 
@@ -204,40 +242,123 @@ impl DamageLog {
     }
 }
 
-/// 触发器的条件和概率。概率小于 1 时才消耗随机数。
-pub(crate) fn passes(t: &ActiveTrigger, rng: &mut Pcg32, frozen: bool, flags: u8) -> bool {
+/// 触发器的条件和概率。概率小于 1 时才消耗随机数。`third` 表示这是对同一只妖物的第 3n 次命中。
+pub(crate) fn passes(t: &ActiveTrigger, rng: &mut Pcg32, frozen: bool, flags: u8, third: bool) -> bool {
     let ok = match t.only {
         Cond::Always => true,
         Cond::TargetFrozen => frozen,
         Cond::NotBonus => flags & HIT_BONUS == 0,
+        Cond::ThirdHit => third,
     };
     ok && (t.chance >= 1.0 || rng.chance(t.chance))
 }
 
-/// 在妖物 i 身上立即生效的动作；其余排队。
+/// 硬控：冰冻、击晕、定身。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Hard {
+    Freeze { blast: bool },
+    Stun,
+    Root,
+}
+
+/// 控制递减（docs/BALANCE.md 第 3.3 节）：精英时长减半，6 秒内第二次 × 0.5、第三次起 × 0.25。
+fn diminish(n: &mut u8, t: &mut f32) -> f32 {
+    if *t <= 0.0 {
+        *n = 0;
+    }
+    let m = match *n {
+        0 => 1.0,
+        1 => 0.5,
+        _ => 0.25,
+    };
+    *n = n.saturating_add(1);
+    *t = 6.0;
+    m * 0.5
+}
+
+/// 施加硬控。夜主免疫；精英减半并递减。冰冻时长另乘 [`Stat::FreezeTime`]（调用方算好）。
+pub(crate) fn apply_hard(en: &mut Enemies, i: usize, rank: Rank, kind: Hard, duration: f32) {
+    if duration <= 0.0 || rank == Rank::Boss {
+        return;
+    }
+    let d = if rank == Rank::Elite {
+        duration * diminish(&mut en.hard_n[i], &mut en.hard_t[i])
+    } else {
+        duration
+    };
+    match kind {
+        Hard::Freeze { blast } => {
+            // 已经冻住的，冰爆不改变来源；新冻住的记下来源
+            if en.frozen[i] <= 0.0 || !blast {
+                en.blast_frozen[i] = blast;
+            }
+            en.frozen[i] = en.frozen[i].max(d);
+        }
+        Hard::Stun => en.stun[i] = en.stun[i].max(d),
+        Hard::Root => en.root[i] = en.root[i].max(d),
+    }
+}
+
+/// 晕头（软控）：朝随机方向乱走。夜主免疫；精英减半并递减。
+pub(crate) fn apply_confuse(en: &mut Enemies, i: usize, rank: Rank, duration: f32, dir: f32) {
+    if rank == Rank::Boss {
+        return;
+    }
+    let d = if rank == Rank::Elite {
+        duration * diminish(&mut en.soft_n[i], &mut en.soft_t[i])
+    } else {
+        duration
+    };
+    if d > en.confuse[i] {
+        en.confuse[i] = d;
+        en.confuse_dir[i] = dir;
+    }
+}
+
+/// 减速：效果加上 [`Stat::SlowPower`]、最多 70%，时长乘 [`Stat::SlowTime`]；夜主减半。同类取最大，不叠加。
+pub(crate) fn apply_slow(en: &mut Enemies, i: usize, rank: Rank, stats: &Stats, amount: f32, duration: f32) {
+    let mut a = (amount + stats.get(Stat::SlowPower)).clamp(0.0, 0.7);
+    if rank == Rank::Boss {
+        a *= 0.5;
+    }
+    en.slow_t[i] = en.slow_t[i].max(duration * stats.get(Stat::SlowTime));
+    en.slow_amount[i] = en.slow_amount[i].max(a);
+}
+
+/// 点上灼烧：每层每秒 base × ratio × 灼烧倍率，层数加 stacks（不超过上限）。
+pub(crate) fn ignite(
+    en: &mut Enemies,
+    i: usize,
+    stats: &Stats,
+    base: f32,
+    ratio: f32,
+    stacks: f32,
+    time: f32,
+) {
+    en.burn_t[i] = en.burn_t[i].max(time);
+    en.burn_stacks[i] = (en.burn_stacks[i] + stacks).min(stats.get(Stat::BurnStacks)).max(1.0);
+    en.burn_dps[i] = (en.burn_dps[i] * 0.9).max(base * ratio * stats.get(Stat::BurnDamage));
+}
+
+/// 在妖物 i 身上立即生效的动作；其余排队。`base` 是这一击加成区之后、暴击和易伤之前的伤害。
 fn on_enemy(
     t: &ActiveTrigger,
     stats: &Stats,
     en: &mut Enemies,
     i: usize,
-    boss: bool,
-    dmg: f32,
+    rank: Rank,
+    base: f32,
     queue: &mut ActionQueue,
 ) {
     match t.action {
         Action::Burn { duration, ratio } => {
             en.burn_t[i] = duration;
             en.burn_stacks[i] = (en.burn_stacks[i] + 1.0).min(stats.get(Stat::BurnStacks));
-            en.burn_dps[i] = (en.burn_dps[i] * 0.9).max(dmg * ratio * stats.get(Stat::BurnDamage));
+            en.burn_dps[i] = (en.burn_dps[i] * 0.9).max(base * ratio * stats.get(Stat::BurnDamage));
         }
-        Action::Slow { amount, duration } => {
-            en.slow_t[i] = en.slow_t[i].max(duration);
-            en.slow_amount[i] = en.slow_amount[i].max(amount);
-        }
+        Action::Slow { amount, duration } => apply_slow(en, i, rank, stats, amount, duration),
         Action::Freeze { duration } => {
-            if !boss {
-                en.frozen[i] = en.frozen[i].max(duration);
-            }
+            apply_hard(en, i, rank, Hard::Freeze { blast: false }, duration * stats.get(Stat::FreezeTime))
         }
         action => {
             queue.0.push(Deferred { action, pos: Vec2::new(en.x[i], en.y[i]), target: Some(en.handle(i)) })
@@ -249,6 +370,10 @@ pub(crate) fn resolve_hits(
     content: Res<GameContent>,
     stats: Res<Stats>,
     effects: Res<Effects>,
+    reveal: Res<Reveal>,
+    grid: Res<Grid>,
+    progress: Res<Progress>,
+    tick: Res<Tick>,
     mut rng: ResMut<SimRng>,
     mut hits: ResMut<HitQueue>,
     mut en: ResMut<Enemies>,
@@ -256,28 +381,53 @@ pub(crate) fn resolve_hits(
     mut queue: ResMut<ActionQueue>,
     mut log: ResMut<DamageLog>,
     mut outbox: ResMut<SimOutbox>,
+    mut react: ReactRes,
 ) {
     let content = &content.0;
     let rng = rng.0.get(Stream::Combat);
     let en = &mut *en;
     let crit_chance = stats.get(Stat::CritChance);
+    let crit_mult = stats.get(Stat::CritMult);
+    let dmg_mult = stats.get(Stat::Damage);
     let stun_crit = stats.get(Stat::StunCrit) > 0.0;
-    let frozen_bonus = stats.get(Stat::FrozenDamage);
-    for hit in hits.0.drain(..) {
+    let freeze_time = stats.get(Stat::FreezeTime);
+    let zones = &content.elements.zones;
+    let vuln = Vuln::new(&reveal, &stats, zones.vuln_cap);
+    // 反应产生的命中追加在队尾，本步一起结算
+    let mut list = std::mem::take(&mut hits.0);
+    let mut ctx = ReactCtx::new(content, &stats, &grid, progress.level, tick.secs(), &mut react);
+    let mut k = 0;
+    while k < list.len() {
+        let hit = list[k];
+        k += 1;
         let Some(i) = en.resolve(hit.target) else { continue };
         let def = &content.enemies[en.kind[i] as usize];
-        let boss = def.rank == Rank::Boss;
-        if hit.freeze > 0.0 && !boss {
-            en.frozen[i] = en.frozen[i].max(hit.freeze);
+        let rank = def.rank;
+        let boss = rank == Rank::Boss;
+        if hit.freeze > 0.0 {
+            let blast = hit.flags & HIT_BLAST != 0;
+            apply_hard(en, i, rank, Hard::Freeze { blast }, hit.freeze * freeze_time);
         }
-        let mut dmg = hit.damage * stats.get(Stat::Damage);
-        let crit =
-            hit.flags & HIT_NOCRIT == 0 && (rng.next_f32() < crit_chance || (en.stun[i] > 0.0 && stun_crit));
-        if crit {
-            dmg *= stats.get(Stat::CritMult);
-        }
-        if en.frozen[i] > 0.0 && frozen_bonus > 0.0 {
-            dmg *= 1.0 + frozen_bonus;
+        // 加成区
+        let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * dmg_mult };
+        let crit = hit.flags & (HIT_NOCRIT | HIT_TRUE) == 0
+            && (rng.next_f32() < crit_chance || (en.stun[i] > 0.0 && stun_crit));
+        let mut dmg = base;
+        if hit.flags & HIT_TRUE == 0 {
+            if crit {
+                dmg *= crit_mult;
+            }
+            dmg *= vuln.of(en, i);
+            // 克制区：只对法器的直接命中
+            if let (Some(a), Some(b)) = (hit.element, def.element)
+                && hit.flags & HIT_RAW == 0
+            {
+                if a.overcomes(b) {
+                    dmg *= zones.counter;
+                } else if a == b {
+                    dmg *= zones.same;
+                }
+            }
         }
         if boss && hit.boss_cap > 0.0 {
             dmg = dmg.min(hit.boss_cap);
@@ -287,7 +437,9 @@ pub(crate) fn resolve_hits(
         en.hp[i] -= dmg;
         en.flash[i] = 0.08;
         let pos = Vec2::new(en.x[i], en.y[i]);
-        let kind = if hit.flags & HIT_DOT != 0 {
+        let kind = if hit.flags & HIT_REACT != 0 {
+            HitKind::Reaction
+        } else if hit.flags & HIT_DOT != 0 {
             HitKind::Dot
         } else if hit.flags & HIT_BONUS != 0 {
             HitKind::Bonus
@@ -297,73 +449,99 @@ pub(crate) fn resolve_hits(
         outbox.0.push(SimEvent::Hit { pos: pos - Vec2::new(0.0, en.r[i] + 4.0), damage: dmg, crit, kind });
 
         if hit.flags & HIT_DOT == 0 {
+            en.hit_n[i] = en.hit_n[i].wrapping_add(1);
+            let third = en.hit_n[i].is_multiple_of(3);
             let frozen = en.frozen[i] > 0.0;
             for t in &effects.hit {
-                if passes(t, rng, frozen, hit.flags) {
-                    on_enemy(t, &stats, en, i, boss, dmg, &mut queue);
+                if passes(t, rng, frozen, hit.flags, third) {
+                    on_enemy(t, &stats, en, i, rank, base, &mut queue);
                 }
             }
             if crit {
                 for t in &effects.crit {
-                    if passes(t, rng, frozen, hit.flags) {
-                        on_enemy(t, &stats, en, i, boss, dmg, &mut queue);
+                    if passes(t, rng, frozen, hit.flags, third) {
+                        on_enemy(t, &stats, en, i, rank, base, &mut queue);
                     }
                 }
             }
             if hit.knockback > 0.0 && !boss {
                 let d = pos - hit.from;
                 let len = d.length().max(1e-3);
-                let f = hit.knockback * stats.get(Stat::Knockback)
-                    / if def.rank == Rank::Elite { 3.0 } else { 1.0 };
+                let mut f = hit.knockback * stats.get(Stat::Knockback);
+                if rank == Rank::Elite {
+                    f /= 3.0;
+                }
+                if en.mud[i] > 0.0 {
+                    f *= en.mud[i];
+                }
                 en.kx[i] += d.x / len * f;
                 en.ky[i] += d.y / len * f;
             }
         }
+        if hit.ignite > 0.0 {
+            ignite(en, i, &stats, base, BURN_RATIO, hit.ignite, BURN_TIME);
+        }
+        if let Some(e) = hit.element
+            && hit.flags & (HIT_RAW | HIT_TRUE) == 0
+        {
+            mark(&mut ctx, en, i, e, base, &mut list, rng, &mut outbox);
+        }
 
         if en.hp[i] > 0.0 {
             if hit.stun > 0.0 {
-                en.stun[i] = en.stun[i].max(hit.stun);
+                apply_hard(en, i, rank, Hard::Stun, hit.stun);
             }
             if hit.slow > 0.0 {
-                en.slow_t[i] = en.slow_t[i].max(hit.slow_time);
-                en.slow_amount[i] = en.slow_amount[i].max(hit.slow);
+                apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
             }
         } else {
-            kill(en, i, def.rank, &mut deaths, &mut outbox);
+            kill(en, i, rank, &mut deaths, &mut outbox);
         }
     }
+    list.clear();
+    hits.0 = list;
 }
 
 /// 妖物死亡：移出池子，记下死亡等 Death 阶段处理。
 pub(crate) fn kill(en: &mut Enemies, i: usize, rank: Rank, deaths: &mut Deaths, outbox: &mut SimOutbox) {
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
-    deaths.0.push(Death { pos, kind, frozen: en.frozen[i] > 0.0 });
+    deaths.0.push(Death { pos, kind, frozen: en.frozen[i] > 0.0 && !en.blast_frozen[i] });
     en.kill(i);
     outbox.0.push(SimEvent::Kill { pos, kind, rank });
 }
 
+/// 追加飞剑的额度：每秒补充 `bonus_sword_rate` 把，最多攒这么多（金·极境的上限）。
+#[derive(Resource, Default, Debug)]
+pub struct SwordBudget(pub f32);
+
 /// 执行排队的动作。
 pub(crate) fn run_actions(
+    content: Res<GameContent>,
     stats: Res<Stats>,
     tick: Res<Tick>,
     progress: Res<Progress>,
     en: Res<Enemies>,
-    player: Single<(&Pos, &mut Health), With<Player>>,
+    player: Single<(&Pos, &mut Player, &mut Health)>,
     mut rng: ResMut<SimRng>,
     mut queue: ResMut<ActionQueue>,
     mut strikes: ResMut<Strikes>,
     mut shots: ResMut<Shots>,
     mut pickups: ResMut<Pickups>,
+    mut budget: ResMut<SwordBudget>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let (pos, mut health) = player.into_inner();
+    let (pos, mut pl, mut health) = player.into_inner();
     let p = pos.0;
     let minute = tick.secs() / 60.0;
+    let rate = content.0.elements.bonus_sword_rate;
+    budget.0 = (budget.0 + rate * DT).min(rate);
     for d in queue.0.drain(..) {
         match d.action {
-            Action::Heal(v) => heal(&mut health, v * stats.get(Stat::Healing), &mut outbox),
-            Action::Explode { radius, damage, kind } => {
+            Action::Heal(v) => {
+                heal_overflow(&mut pl, &mut health, &stats, v * stats.get(Stat::Healing), &mut outbox)
+            }
+            Action::Explode { radius, damage, kind, freeze, ignite } => {
                 let mut s = Strike::new(
                     d.pos,
                     Area::Circle(radius),
@@ -372,6 +550,11 @@ pub(crate) fn run_actions(
                     StrikeFx::Blast(kind),
                 );
                 s.flags = HIT_NOCRIT | HIT_DOT;
+                if freeze > 0.0 {
+                    s.freeze = freeze;
+                    s.flags |= HIT_BLAST;
+                }
+                s.ignite = ignite;
                 strikes.0.push(s);
             }
             Action::Quake { radius, damage, knockback, stun } => {
@@ -388,6 +571,10 @@ pub(crate) fn run_actions(
                 strikes.0.push(s);
             }
             Action::BonusSword { damage, pierce, speed, life, turn, hit_radius, knockback } => {
+                if budget.0 < 1.0 {
+                    continue;
+                }
+                budget.0 -= 1.0;
                 let target = d.target.and_then(|h| en.resolve(h).map(|i| (h, Vec2::new(en.x[i], en.y[i]))));
                 let angle = match target {
                     Some((_, t)) => ops::atan2(t.y - p.y, t.x - p.x),
@@ -396,16 +583,19 @@ pub(crate) fn run_actions(
                 shots.fire(crate::weapons::volley::ShotSpec {
                     pos: p,
                     angle,
-                    speed,
-                    life,
+                    speed: speed * stats.get(Stat::ProjSpeed),
+                    life: life * stats.get(Stat::ProjLife),
                     turn,
                     hit_radius,
                     knockback,
                     damage: damage.at(progress.level as f32),
                     pierce,
                     target: target.map(|(h, _)| h),
+                    skip: None,
                     big: false,
                     bonus: true,
+                    flags: HIT_BONUS,
+                    element: Some(Element::Metal),
                     source: Source::BonusSword,
                 });
             }
@@ -429,6 +619,27 @@ pub(crate) fn heal(health: &mut Health, amount: f32, outbox: &mut SimOutbox) {
     health.hp = (health.hp + amount).min(health.max);
     if health.hp > before {
         outbox.0.push(SimEvent::PlayerHealed { amount: health.hp - before });
+    }
+}
+
+/// 回复生命；满血时多出的部分按 [`Stat::OverhealShield`] 转成护盾（木·极境）。
+pub(crate) fn heal_overflow(
+    player: &mut Player,
+    health: &mut Health,
+    stats: &Stats,
+    amount: f32,
+    outbox: &mut SimOutbox,
+) {
+    if amount <= 0.0 || health.hp <= 0.0 {
+        return;
+    }
+    let room = health.max - health.hp;
+    heal(health, amount, outbox);
+    let cap = stats.get(Stat::OverhealShield) * health.max;
+    let extra = amount - room.max(0.0);
+    if cap > 0.0 && extra > 0.0 && player.shield < cap {
+        player.shield = (player.shield + extra).min(cap);
+        player.shield_max = player.shield_max.max(player.shield);
     }
 }
 
@@ -479,6 +690,8 @@ pub(crate) fn process_strikes(
                 slow: s.slow,
                 slow_time: s.slow_time,
                 source: s.source,
+                element: s.element,
+                ignite: s.ignite,
             };
             if boss && s.boss_fraction > 0.0 {
                 hit.damage = en.max_hp[i] * s.boss_fraction;
@@ -490,15 +703,18 @@ pub(crate) fn process_strikes(
     }
 }
 
-/// 灼烧：每步扣血，累计满 1 点、每 0.5 秒冒一个数字。
+/// 灼烧：每步扣血（每跳乘一次易伤），累计满 1 点、每 0.5 秒冒一个数字。
 pub(crate) fn burn(
     content: Res<GameContent>,
+    stats: Res<Stats>,
+    reveal: Res<Reveal>,
     mut en: ResMut<Enemies>,
     mut deaths: ResMut<Deaths>,
     mut log: ResMut<DamageLog>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     let en = &mut *en;
+    let vuln = Vuln::new(&reveal, &stats, content.0.elements.zones.vuln_cap);
     for i in 0..en.hi {
         if !en.alive[i] {
             continue;
@@ -509,7 +725,7 @@ pub(crate) fn burn(
             continue;
         }
         en.burn_t[i] -= DT;
-        let dmg = en.burn_dps[i] * en.burn_stacks[i] * DT;
+        let dmg = en.burn_dps[i] * en.burn_stacks[i] * DT * vuln.of(en, i);
         log.add(Source::Burn, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
         en.burn_acc[i] += dmg;
@@ -614,7 +830,7 @@ pub(crate) fn process_deaths(
 
         let combat = rng.0.get(Stream::Combat);
         for trig in &effects.kill {
-            if passes(trig, combat, d.frozen, 0) {
+            if passes(trig, combat, d.frozen, 0, false) {
                 queue.0.push(Deferred { action: trig.action, pos: d.pos, target: None });
             }
         }
@@ -660,7 +876,7 @@ pub(crate) fn hurt_player(
             player.shield_t = s.get(Stat::ShieldCooldown);
             ctx.outbox.0.push(SimEvent::ShieldBroken);
             for t in &ctx.effects.shield_break {
-                if passes(t, ctx.rng, false, 0) {
+                if passes(t, ctx.rng, false, 0, false) {
                     ctx.queue.0.push(Deferred { action: t.action, pos, target: None });
                 }
             }

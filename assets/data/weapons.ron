@@ -19,9 +19,11 @@
         ],
         evolution: Some((
             name: "不夜城", passive: "changming",
-            desc: "十盏灯笼环城而行，范围更大、伤害翻倍。",
-            behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0),
-            level: (count: 10, radius: 92.0, damage: 79.2),
+            desc: "十盏灯笼环城而行，内圈多一层火海。",
+            // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
+            behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
+                            inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
+            level: (count: 10, radius: 92.0, damage: 72.0),
         )),
     ),
     (
@@ -79,14 +81,15 @@
         behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.35,
                          knockback: 50.0, speed: (250.0, 6.0, 0.0), steer: 7.0, reach: 6.0),
         levels: [
-            (count: 1, damage: 12.0),
-            (count: 1, damage: 15.0),
-            (count: 2, damage: 18.0),
-            (count: 2, damage: 21.0),
-            (count: 3, damage: 24.0),
-            (count: 3, damage: 27.0),
-            (count: 4, damage: 30.0),
-            (count: 4, damage: 33.0),
+            // 前期数量和伤害调高：数量 1,2,2,3,3,4,4,5，伤害 12 + 4·等级（docs/BALANCE.md 第 6.1 节）
+            (count: 1, damage: 16.0),
+            (count: 2, damage: 20.0),
+            (count: 2, damage: 24.0),
+            (count: 3, damage: 28.0),
+            (count: 3, damage: 32.0),
+            (count: 4, damage: 36.0),
+            (count: 4, damage: 40.0),
+            (count: 5, damage: 44.0),
         ],
         evolution: Some((
             name: "千鹤引", passive: "zhezhi",
@@ -121,7 +124,8 @@
                            stun: 0.5, scatter: (150.0, 100.0), amount_div: 2,
                            fissure: Some((radius_scale: 0.85, life: 2.5, tick: 0.5, damage_scale: 0.25,
                                           slow: 0.4, slow_time: 0.6))),
-            level: (cooldown: 2.6, count: 4, radius: 140.0, damage: 129.0),
+            // 范围是满级的 1.6 倍（原型 2 倍）
+            level: (cooldown: 2.6, count: 4, radius: 112.0, damage: 129.0),
         )),
     ),
 ]

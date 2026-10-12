@@ -26,6 +26,14 @@ const FLAME_LIGHT: (Color, f32) = (Color::srgba(1.0, 0.66, 0.376, 0.75), 64.0);
 const GEM_LIGHT: Color = Color::srgba(0.75, 0.94, 1.0, 0.5);
 const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
 const FROZEN_TINT: Color = Color::srgb(0.62, 0.82, 1.0);
+/// 五行印记的颜色，按 金、木、水、火、土
+const MARK_TINT: [Color; 5] = [
+    Color::srgb(1.0, 0.92, 0.6),
+    Color::srgb(0.55, 1.0, 0.7),
+    Color::srgb(0.55, 0.78, 1.0),
+    Color::srgb(1.0, 0.6, 0.35),
+    Color::srgb(0.9, 0.7, 0.45),
+];
 const BURN_TINT: Color = Color::srgb(1.0, 0.55, 0.35);
 /// 同时画光的魂火上限
 const GEM_LIGHT_CAP: usize = 200;
@@ -457,6 +465,9 @@ pub(crate) fn collect_draws(
         } else if en.burn_t[i] > 0.0 {
             let k = 0.5 + 0.5 * (t * 14.0 + en.wob[i]).sin();
             Color::WHITE.mix(&BURN_TINT, k * 0.6)
+        } else if en.mark_t[i] > 0.0 && en.mark[i] > 0 {
+            // 五行印记：淡淡染上那一系的颜色
+            Color::WHITE.mix(&MARK_TINT[en.mark[i] as usize - 1], 0.45)
         } else {
             Color::WHITE
         };

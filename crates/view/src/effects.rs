@@ -24,6 +24,8 @@ const FLASH_LIFE: f32 = 0.3;
 
 const NUMBER_COLOR: Color = Color::srgb(0.96, 0.92, 0.87);
 const CRIT_COLOR: Color = Color::srgb(1.0, 0.82, 0.48);
+/// 五行反应的伤害数字
+const REACT_COLOR: Color = Color::srgb(0.62, 0.92, 0.84);
 const FLASH_LIGHT: Color = Color::srgb(1.0, 0.85, 0.6);
 
 /// 场景道具上的光（石灯笼的灯火）。offset 是相对道具脚底的世界坐标（y 向上）。
@@ -111,12 +113,18 @@ pub(crate) fn read_events(
     let fx = &mut *fx;
     for ev in &outbox.0 {
         match *ev {
-            SimEvent::Hit { pos, damage, crit, .. } => {
+            SimEvent::Hit { pos, damage, crit, kind } => {
                 let Some(&e) = fx.numbers.get(fx.next_number) else { continue };
                 fx.next_number = (fx.next_number + 1) % fx.numbers.len().max(1);
                 let Ok((mut text, mut color, mut num, mut vis)) = numbers.get_mut(e) else { continue };
                 text.0 = format!("{}", damage.round().max(1.0) as u32);
-                color.0 = if crit { CRIT_COLOR } else { NUMBER_COLOR };
+                color.0 = if crit {
+                    CRIT_COLOR
+                } else if kind == lantern_sim::HitKind::Reaction {
+                    REACT_COLOR
+                } else {
+                    NUMBER_COLOR
+                };
                 let jitter = Vec2::new(fx.rng.range_f32(-6.0, 6.0), fx.rng.range_f32(-3.0, 3.0));
                 *num = DamageNumber {
                     t: 0.0,

@@ -65,6 +65,11 @@ pub struct StepGate {
     pub play: bool,
 }
 
+/// 演出停顿：Play 阶段里接下来这么多步时间不走（第一次发生某种反应时停 0.3 秒）。
+/// 停顿在模拟里，回放和不开窗口的重放结果一样。
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct Hold(pub u32);
+
 /// 宝箱的来历（界面显示不同的标题）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChestSource {
@@ -121,6 +126,8 @@ pub struct Flow {
     pub chest_queue: VecDeque<ChestSource>,
     pub pending_evos: VecDeque<usize>,
     pub rerolls: u32,
+    /// 剩余封印次数
+    pub banishes: u32,
     /// 击败夜主后进入结算的时刻
     pub won_at: Option<f32>,
     /// 局内额外得到的灯油（跳过升级、补给、金蟾）
@@ -183,7 +190,8 @@ impl FlowParams<'_, '_> {
     /// 立即重算属性（下一个选项、宝箱的下一项要用到新的构筑）。
     fn refresh(&mut self) {
         let c = &self.content.0;
-        let (stats, mut effects) = collect(c, &self.setup, &self.build, self.encounters.buff.map(|b| b.0));
+        let (stats, mut effects) =
+            collect(c, &self.setup, &self.build, self.encounters.buff.map(|b| b.0), self.progress.level);
         for t in &mut effects.periodic {
             if let Some(old) = self.effects.periodic.iter().find(|o| o.key == t.key) {
                 t.elapsed = old.elapsed;
@@ -207,8 +215,15 @@ impl FlowParams<'_, '_> {
         let c = &self.content.0;
         self.progress.pending_levels -= 1;
         let secs = self.secs();
-        let (offers, inspired) =
-            roll_choices(c, &self.arsenal, &self.build, &self.stats, secs, self.rng.0.get(Stream::Choice));
+        let (offers, inspired) = roll_choices(
+            c,
+            &self.arsenal,
+            &mut self.build,
+            &self.stats,
+            secs,
+            self.rng.0.get(Stream::Choice),
+            true,
+        );
         let level = self.progress.level - self.progress.pending_levels;
         self.flow.choice = Some(Choice { offers, inspired, level });
         *self.phase = SimPhase::LevelUp;
@@ -289,8 +304,12 @@ impl FlowParams<'_, '_> {
 }
 
 /// 每步开头：记下本步是否推进时间。
-pub(crate) fn begin_step(phase: Res<SimPhase>, mut gate: ResMut<StepGate>) {
-    gate.play = *phase == SimPhase::Play;
+pub(crate) fn begin_step(phase: Res<SimPhase>, mut hold: ResMut<Hold>, mut gate: ResMut<StepGate>) {
+    let play = *phase == SimPhase::Play;
+    gate.play = play && hold.0 == 0;
+    if play && hold.0 > 0 {
+        hold.0 -= 1;
+    }
 }
 
 /// 本步推进时间（开头处于 Play 阶段）。
@@ -309,6 +328,7 @@ pub(crate) fn handle_commands(
     mut commands: ResMut<SimCommands>,
     mut strikes: ResMut<Strikes>,
     mut foes: ResMut<Foes>,
+    mut dash_hits: ResMut<crate::player::DashHits>,
     mut player: Query<(&Pos, &mut Player)>,
 ) {
     for cmd in std::mem::take(&mut commands.0) {
@@ -321,13 +341,17 @@ pub(crate) fn handle_commands(
             (SimPhase::Play, SimCommand::Dash) => {
                 let dash = &fp.content.0.player.dash;
                 for (pos, mut p) in &mut player {
-                    if p.dash_cd > 0.0 {
+                    if p.dash_ready == 0 || p.dash_t > 0.0 {
                         continue;
                     }
+                    p.dash_ready -= 1;
                     p.dash_t = dash.duration;
-                    p.dash_vel = p.facing * dash.speed;
+                    p.dash_vel = p.facing * dash.speed * fp.stats.get(Stat::DashDistance);
                     p.iframe = p.iframe.max(dash.iframe);
-                    p.dash_cd = dash.cooldown;
+                    if p.dash_cd <= 0.0 {
+                        p.dash_cd = fp.stats.get(Stat::DashCooldown);
+                    }
+                    dash_hits.0.clear();
                     fp.outbox.0.push(SimEvent::Dash { pos: pos.0 });
                 }
             }
@@ -368,12 +392,51 @@ pub(crate) fn handle_commands(
                 fp.flow.rerolls -= 1;
                 let c = &fp.content.0;
                 let secs = fp.secs();
-                let (offers, inspired) =
-                    roll_choices(c, &fp.arsenal, &fp.build, &fp.stats, secs, fp.rng.0.get(Stream::Choice));
+                let (offers, inspired) = roll_choices(
+                    c,
+                    &fp.arsenal,
+                    &mut fp.build,
+                    &fp.stats,
+                    secs,
+                    fp.rng.0.get(Stream::Choice),
+                    false,
+                );
                 if let Some(choice) = &mut fp.flow.choice {
                     choice.offers = offers;
                     choice.inspired = inspired;
                 }
+            }
+            (SimPhase::LevelUp, SimCommand::Banish(i)) => {
+                let Some(offer) = fp.flow.choice.as_ref().and_then(|c| c.offers.get(i as usize)).copied()
+                else {
+                    continue;
+                };
+                let Some(ban) = offer.banned(&fp.arsenal, &fp.build) else { continue };
+                if fp.flow.banishes == 0 {
+                    continue;
+                }
+                fp.flow.banishes -= 1;
+                fp.build.banished.push(ban);
+                // 被封印的那一项换成新抽的一项，其余不变
+                let content = fp.content.0.clone();
+                let c = &*content;
+                let pool: Vec<_> = offers(c, &fp.arsenal, &fp.build, fp.secs())
+                    .into_iter()
+                    .filter(|(o, _)| fp.flow.choice.as_ref().is_none_or(|ch| !ch.offers.contains(o)))
+                    .collect();
+                let new = pick_weighted(fp.rng.0.get(Stream::Choice), &pool, 1).first().copied();
+                if let Some(choice) = &mut fp.flow.choice {
+                    match new {
+                        Some(o) => choice.offers[i as usize] = o,
+                        None => {
+                            choice.offers.remove(i as usize);
+                        }
+                    }
+                    if choice.offers.is_empty() {
+                        choice.offers.push(Offer::Oil);
+                    }
+                }
+                fp.outbox.0.push(SimEvent::Banished);
             }
             (SimPhase::LevelUp, SimCommand::Skip) => {
                 fp.flow.oil_bonus += fp.content.0.run.choices.skip_oil;

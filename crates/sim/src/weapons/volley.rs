@@ -3,13 +3,13 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Stat, WeaponBehavior};
+use lantern_content::{Element, Stat, WeaponBehavior};
 use lantern_core::StateHasher;
 use lantern_core::step::DT;
 
 use super::{Ctx, WeaponSlot, cooldown_ready};
 use crate::SimEvent;
-use crate::combat::{HIT_BONUS, Hit, HitQueue, Source};
+use crate::combat::{Hit, HitQueue, Source};
 use crate::enemies::{Enemies, EnemyHandle};
 use crate::spatial::Grid;
 
@@ -37,6 +37,9 @@ pub struct Shot {
     pub big: bool,
     /// 金·锐追加的飞剑
     pub bonus: bool,
+    /// 命中时带的标记（[`crate::combat`] 的 HIT_*）与五行
+    pub flags: u8,
+    pub element: Option<Element>,
     pub source: Source,
     hits: [Option<EnemyHandle>; HIT_MEMORY],
     hit_n: u8,
@@ -66,8 +69,12 @@ pub struct ShotSpec {
     pub damage: f32,
     pub pierce: u32,
     pub target: Option<EnemyHandle>,
+    /// 不会命中这只（金刃从它身上迸出）
+    pub skip: Option<EnemyHandle>,
     pub big: bool,
     pub bonus: bool,
+    pub flags: u8,
+    pub element: Option<Element>,
     pub source: Source,
 }
 
@@ -80,6 +87,8 @@ impl Shots {
             return;
         }
         let (sin, cos) = ops::sin_cos(s.angle);
+        let mut hits = [None; HIT_MEMORY];
+        hits[0] = s.skip;
         self.0.push(Shot {
             pos: s.pos,
             prev: s.pos,
@@ -93,9 +102,11 @@ impl Shots {
             target: s.target,
             big: s.big,
             bonus: s.bonus,
+            flags: s.flags,
+            element: s.element,
             source: s.source,
-            hits: [None; HIT_MEMORY],
-            hit_n: 0,
+            hits,
+            hit_n: u8::from(s.skip.is_some()),
         });
     }
 
@@ -122,6 +133,8 @@ pub(crate) fn fire(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     let lv = slot.stats(ctx.content);
     let count = lv.count + ctx.stats.amount();
     let p = ctx.player;
+    let element = Some(ctx.content.weapons[slot.def].element);
+    let (speed, life) = (speed * ctx.stats.get(Stat::ProjSpeed), life * ctx.stats.get(Stat::ProjLife));
     ctx.grid.nearest_k(ctx.en, p.x, p.y, range, count as usize, ctx.found);
     let n = ctx.found.len();
     if n == 0 {
@@ -144,8 +157,11 @@ pub(crate) fn fire(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             damage: lv.damage,
             pierce: lv.pierce,
             target: Some(ctx.en.handle(t)),
+            skip: None,
             big: slot.evolved,
             bonus: false,
+            flags: 0,
+            element,
             source: Source::Weapon(slot.def as u16),
         });
     }
@@ -207,8 +223,9 @@ pub(crate) fn update_shots(
             if s.target == Some(h) {
                 s.target = None;
             }
-            let flags = if s.bonus { HIT_BONUS } else { 0 };
-            hits.0.push(Hit::new(h, s.damage, s.source).knock(s.knockback, s.pos).flags(flags));
+            hits.0.push(
+                Hit::new(h, s.damage, s.source).knock(s.knockback, s.pos).flags(s.flags).element(s.element),
+            );
             s.pierce = s.pierce.saturating_sub(1);
             if s.pierce == 0 {
                 alive = false;

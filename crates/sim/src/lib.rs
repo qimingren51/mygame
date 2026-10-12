@@ -28,8 +28,10 @@ pub mod io;
 mod movement;
 pub mod omens;
 pub mod pickups;
-mod player;
+pub mod player;
+pub mod reactions;
 pub mod replay;
+pub mod reveal;
 pub mod run;
 pub mod spatial;
 pub mod spawn;
@@ -195,7 +197,9 @@ impl Plugin for SimPlugin {
                     )
                         .chain()
                         .in_set(SimSet::Input),
-                    (player::move_player, player::upkeep).chain().in_set(SimSet::Player),
+                    (player::move_player, player::upkeep, reveal::update_reveal)
+                        .chain()
+                        .in_set(SimSet::Player),
                     (spawn::update_spawns, encounters::spawn_encounters).chain().in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
                     boss::boss_attacks.in_set(SimSet::Ai),
@@ -204,6 +208,9 @@ impl Plugin for SimPlugin {
                         combat::run_actions,
                         weapons::update_weapons,
                         weapons::drop::update_seals,
+                        player::dash_strike,
+                        reveal::flame_band,
+                        reactions::update_zones,
                         combat::process_strikes,
                     )
                         .chain()
@@ -215,6 +222,7 @@ impl Plugin for SimPlugin {
                     (
                         gems::update_gems,
                         pickups::update_pickups,
+                        reactions::update_herbs,
                         encounters::update_encounters,
                         stats::refresh_stats,
                     )

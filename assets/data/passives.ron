@@ -1,24 +1,49 @@
-// 心法（移植自网页版 data/passives.ts）。最多 6 门，满级 5。
+#![enable(implicit_some)]
+// 心法（docs/GAMEPLAY.md 第 5.5 节）。最多 6 门，满级 5。不写 element 的是无属性心法，不计五行点数。
 // per_level 每级加一次；levels 逐级写（第 k 项是升到 k+1 级时新加的效果）。
+// M2.5 的 17 门：原有 10 门 + 迅锋、回春、寒意、灯芯、载物、轻功、聚魂。
 [
-    (id: "changming", name: "长明", element: Fire, desc: "攻击范围 +10%", max_level: 5,
-     per_level: [Add(Area, 0.10)]),
-    (id: "luxin", name: "炉心", element: Fire, desc: "伤害 +8%", max_level: 5,
-     per_level: [Add(Damage, 0.08)]),
+    // ---- 金 ----
     (id: "jianyi", name: "剑意", element: Metal, desc: "暴击伤害 +20%", max_level: 5,
      per_level: [Add(CritMult, 0.20)]),
     (id: "ruimu", name: "锐目", element: Metal, desc: "暴击率 +5%", max_level: 5,
      per_level: [Add(CritChance, 0.05)]),
-    (id: "jingxin", name: "静心", element: Water, desc: "冷却 -6%", max_level: 5,
-     per_level: [Add(Cooldown, -0.06)]),
-    (id: "yinhun", name: "引魂", element: Water, desc: "拾取范围 +25%", max_level: 5,
-     per_level: [Mul(Magnet, 0.25)]),
+    (id: "xunfeng", name: "迅锋", element: Metal, desc: "飞行物速度 +10%，持续时间 +10%", max_level: 5,
+     per_level: [Add(ProjSpeed, 0.10), Add(ProjLife, 0.10)]),
+    // ---- 木 ----
     (id: "zhezhi", name: "折纸", element: Wood, desc: "1 / 3 / 5 级时数量 +1", max_level: 5,
      levels: [[Add(Amount, 1.0)], [], [Add(Amount, 1.0)], [], [Add(Amount, 1.0)]]),
+    (id: "huichun", name: "回春", element: Wood, desc: "每秒回复 0.2 生命，莲子回复量 +20%", max_level: 5,
+     per_level: [Add(RegenFlat, 0.2), Add(LotusHeal, 0.2)]),
     (id: "jixing", name: "疾行", element: Wood, desc: "移动速度 +8%", max_level: 5,
      per_level: [Mul(Speed, 0.08)]),
+    // ---- 水 ----
+    (id: "jingxin", name: "静心", element: Water, desc: "冷却 -6%", max_level: 5,
+     per_level: [Add(Cooldown, -0.06)]),
+    (id: "hanyi", name: "寒意", element: Water, desc: "减速效果 +6%，冰冻时长 +10%", max_level: 5,
+     per_level: [Add(SlowPower, 0.06), Add(FreezeTime, 0.10)]),
+    (id: "yinhun", name: "引魂", element: Water, desc: "拾取范围 +25%", max_level: 5,
+     per_level: [Mul(Magnet, 0.25)]),
+    // ---- 火 ----
+    (id: "changming", name: "长明", element: Fire, desc: "攻击范围 +10%", max_level: 5,
+     per_level: [Add(Area, 0.10)]),
+    (id: "luxin", name: "炉心", element: Fire, desc: "伤害 +8%", max_level: 5,
+     per_level: [Add(Damage, 0.08)]),
+    (id: "dengxin", name: "灯芯", element: Fire,
+     desc: "照见圈 +6%，照见易伤 +3%，燃灯充能 +10%；照见圈边缘燃起灯焰带", max_level: 5,
+     per_level: [Mul(Reveal, 0.06), Add(RevealVuln, 0.03), Add(UltCharge, 0.10), Add(FlameBand, 1.0)]),
+    // ---- 土 ----
     (id: "houde", name: "厚德", element: Earth, desc: "生命上限 +20，护甲 +1", max_level: 5,
      per_level: [Add(MaxHp, 20.0), Add(Armor, 1.0)]),
     (id: "panshi", name: "磐石", element: Earth, desc: "受到伤害 -5%", max_level: 5,
      per_level: [Add(Reduction, 0.05)]),
+    (id: "zaiwu", name: "载物", element: Earth, desc: "护盾 +15%；每点护甲让伤害 +1%", max_level: 5,
+     per_level: [Add(ShieldMult, 0.15), Add(ArmorToDamage, 0.01)]),
+    // ---- 无属性 ----
+    (id: "qinggong", name: "轻功", desc: "闪避冷却 -10%；3 级起闪避穿过的妖物受伤，3、5 级各多一段闪避",
+     max_level: 5,
+     per_level: [Mul(DashCooldown, -0.10)],
+     levels: [[], [], [Add(DashStrike, 1.0), Add(DashCharges, 1.0)], [], [Add(DashCharges, 1.0)]]),
+    (id: "juhun", name: "聚魂", desc: "魂火价值 +6%，升级时 5% 概率多一个选项", max_level: 5,
+     per_level: [Add(XpGain, 0.06), Add(Inspiration, 0.05)]),
 ]

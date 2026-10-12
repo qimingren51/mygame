@@ -65,6 +65,13 @@ pub(crate) fn update_enemies(
             continue;
         }
         en.flash[i] = (en.flash[i] - DT).max(0.0);
+        // 印记、反应冷却、熔金、控制递减的计时；淤泥每步由区域重新标记
+        en.mark_t[i] -= DT;
+        en.react_cd[i] -= DT;
+        en.melt_t[i] -= DT;
+        en.hard_t[i] -= DT;
+        en.soft_t[i] -= DT;
+        en.mud[i] = 0.0;
         let def = &content.enemies[en.kind[i] as usize];
 
         let (mut x, mut y) = (en.x[i], en.y[i]);
@@ -78,8 +85,14 @@ pub(crate) fn update_enemies(
 
         if en.frozen[i] > 0.0 {
             en.frozen[i] -= DT;
+            if en.frozen[i] <= 0.0 {
+                en.blast_frozen[i] = false;
+            }
         } else if en.stun[i] > 0.0 {
             en.stun[i] -= DT;
+        } else if en.root[i] > 0.0 {
+            // 定身：不能移动，但仍会还手
+            en.root[i] -= DT;
         } else {
             let mut sp = en.speed[i];
             if en.slow_t[i] > 0.0 {
@@ -89,17 +102,25 @@ pub(crate) fn update_enemies(
                     en.slow_amount[i] = 0.0;
                 }
             }
-            match def.movement {
-                Movement::Chase => {
-                    x += dx / d * sp * DT;
-                    y += dy / d * sp * DT;
-                }
-                Movement::Flee => {
-                    // 背着玩家逃，路线左右摇摆，略慢于玩家，追得上
-                    let (s, c) = ops::sin_cos(ops::sin(t * 3.0 + en.wob[i]) * 0.6);
-                    let (ax, ay) = (-dx / d, -dy / d);
-                    x += (ax * c - ay * s) * sp * DT;
-                    y += (ax * s + ay * c) * sp * DT;
+            if en.confuse[i] > 0.0 {
+                // 晕头：朝随机方向乱走
+                en.confuse[i] -= DT;
+                let (s, c) = ops::sin_cos(en.confuse_dir[i]);
+                x += c * sp * DT;
+                y += s * sp * DT;
+            } else {
+                match def.movement {
+                    Movement::Chase => {
+                        x += dx / d * sp * DT;
+                        y += dy / d * sp * DT;
+                    }
+                    Movement::Flee => {
+                        // 背着玩家逃，路线左右摇摆，略慢于玩家，追得上
+                        let (s, c) = ops::sin_cos(ops::sin(t * 3.0 + en.wob[i]) * 0.6);
+                        let (ax, ay) = (-dx / d, -dy / d);
+                        x += (ax * c - ay * s) * sp * DT;
+                        y += (ax * s + ay * c) * sp * DT;
+                    }
                 }
             }
         }

@@ -3,7 +3,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::{Action, Content, ContentError, Effect, Element, Rank, WeaponBehavior, When};
+use crate::{
+    Action, Content, ContentError, Effect, Element, Rank, ReactionEffect, Stat, WeaponBehavior, When,
+};
 
 struct Checker<'a> {
     dir: &'a Path,
@@ -69,6 +71,10 @@ impl Checker<'_> {
     /// 效果列表。`element_context` 为 true 时允许作用于选定五行的效果（只有夜签有）。
     fn effects(&self, file: &str, owner: &str, list: &[Effect], element_context: bool) -> Res {
         for e in list {
+            if let Effect::Mul(Stat::Damage, _) = e {
+                return self
+                    .fail(file, format!("\"{owner}\"：伤害加成要写成 Add(Damage, …)，加成区是相加的"));
+            }
             match e {
                 Effect::Add(_, v) | Effect::Mul(_, v) => {
                     if !v.is_finite() {
@@ -126,7 +132,10 @@ impl Checker<'_> {
                 )
             }
             Action::Heal(v) => self.positive(file, &[("Heal", *v)]),
-            Action::Explode { radius, .. } => self.positive(file, &[("Explode.radius", *radius)]),
+            Action::Explode { radius, freeze, ignite, .. } => {
+                self.positive(file, &[("Explode.radius", *radius)])?;
+                self.non_negative(file, &[("Explode.freeze", *freeze), ("Explode.ignite", *ignite)])
+            }
             Action::Quake { radius, knockback, stun, .. } => {
                 self.positive(file, &[("Quake.radius", *radius)])?;
                 self.non_negative(file, &[("Quake.knockback", *knockback), ("Quake.stun", *stun)])
@@ -138,10 +147,74 @@ impl Checker<'_> {
         }
     }
 
+    fn reaction(&self, file: &str, id: &str, e: &ReactionEffect) -> Res {
+        let f = file;
+        match *e {
+            ReactionEffect::Spread { count, radius, mult, duration, burn_ratio } => {
+                if count == 0 {
+                    return self.fail(f, format!("反应 \"{id}\"：Spread.count 至少为 1"));
+                }
+                self.positive(
+                    f,
+                    &[("radius", radius), ("mult", mult), ("duration", duration), ("burn_ratio", burn_ratio)],
+                )
+            }
+            ReactionEffect::Zone { radius, duration, dps_ratio, slow, knock_mult, .. } => {
+                self.positive(f, &[("radius", radius), ("duration", duration), ("knock_mult", knock_mult)])?;
+                self.non_negative(f, &[("dps_ratio", dps_ratio)])?;
+                self.fraction(f, "slow", slow)
+            }
+            ReactionEffect::Blades { count, ratio, pierce, speed, life, hit_radius } => {
+                if count == 0 || pierce == 0 {
+                    return self.fail(f, format!("反应 \"{id}\"：Blades.count、pierce 至少为 1"));
+                }
+                self.positive(
+                    f,
+                    &[("ratio", ratio), ("speed", speed), ("life", life), ("hit_radius", hit_radius)],
+                )
+            }
+            ReactionEffect::Frost { freeze, radius, slow, slow_time } => {
+                self.positive(f, &[("freeze", freeze), ("radius", radius), ("slow_time", slow_time)])?;
+                self.fraction(f, "slow", slow)
+            }
+            ReactionEffect::Bloom { radius, root, herb_life, heal, heal_per_second } => self.positive(
+                f,
+                &[
+                    ("radius", radius),
+                    ("root", root),
+                    ("herb_life", herb_life),
+                    ("heal", heal),
+                    ("heal_per_second", heal_per_second),
+                ],
+            ),
+            ReactionEffect::Steam { radius, ratio, per_level, confuse } => {
+                self.positive(f, &[("radius", radius), ("ratio", ratio), ("confuse", confuse)])?;
+                self.non_negative(f, &[("per_level", per_level)])
+            }
+            ReactionEffect::Melt { vuln, duration } => {
+                self.positive(f, &[("vuln", vuln), ("duration", duration)])
+            }
+            ReactionEffect::Sever { ratio, execute } => {
+                self.positive(f, &[("ratio", ratio)])?;
+                self.fraction(f, "execute", execute)
+            }
+            ReactionEffect::Rupture { radius, stun, ratio } => {
+                self.positive(f, &[("radius", radius), ("stun", stun), ("ratio", ratio)])
+            }
+        }
+    }
+
     fn behavior(&self, file: &str, id: &str, b: &WeaponBehavior) -> Res {
         match b {
-            WeaponBehavior::Orbit { hit_cooldown, size, .. } => {
-                self.positive(file, &[("Orbit.hit_cooldown", *hit_cooldown), ("Orbit.size", *size)])
+            WeaponBehavior::Orbit { hit_cooldown, size, inner, .. } => {
+                self.positive(file, &[("Orbit.hit_cooldown", *hit_cooldown), ("Orbit.size", *size)])?;
+                if let Some(f) = inner {
+                    self.positive(
+                        file,
+                        &[("inner.radius", f.radius), ("inner.every", f.every), ("inner.ratio", f.ratio)],
+                    )?;
+                }
+                Ok(())
             }
             WeaponBehavior::Volley { range, speed, life, hit_radius, retry, .. } => self.positive(
                 file,
@@ -210,12 +283,20 @@ impl Content {
             "player.ron",
             &[
                 ("hurt_iframe", p.hurt_iframe),
-                ("dash.cooldown", p.dash.cooldown),
                 ("dash.iframe", p.dash.iframe),
                 ("ult.knockback", p.ult.knockback),
                 ("ult.boss_fraction", p.ult.boss_fraction),
             ],
         )?;
+        c.non_negative(
+            "player.ron",
+            &[
+                ("reveal.per_level", p.reveal.per_level),
+                ("reveal.light_per_level", p.reveal.light_per_level),
+                ("reveal.band_per_rank", p.reveal.band_per_rank),
+            ],
+        )?;
+        c.positive("player.ron", &[("reveal.band_width", p.reveal.band_width)])?;
         if self.weapon_index(&p.start_weapon).is_none() {
             return c.fail("player.ron", format!("start_weapon 引用了不存在的法器 \"{}\"", p.start_weapon));
         }
@@ -305,7 +386,7 @@ impl Content {
                 ("choices.unfavor_mult", ch.unfavor_mult),
             ],
         )?;
-        c.fraction("run.ron", "choices.inspiration", ch.inspiration)?;
+        c.fraction("run.ron", "choices.pity.key_chance", ch.pity.key_chance)?;
         c.fraction("run.ron", "choices.heal", ch.heal)?;
         if ch.chest_odds.windows(2).any(|w| w[0].0 < w[1].0) {
             return c.fail("run.ron", "choices.chest_odds 要按阈值从高到低排列".into());
@@ -398,8 +479,8 @@ impl Content {
             if p.max_level == 0 {
                 return c.fail("passives.ron", format!("心法 \"{}\" 的 max_level 至少为 1", p.id));
             }
-            if p.per_level.is_empty() == p.levels.is_empty() {
-                return c.fail("passives.ron", format!("心法 \"{}\" 要写 per_level 或 levels 之一", p.id));
+            if p.per_level.is_empty() && p.levels.is_empty() {
+                return c.fail("passives.ron", format!("心法 \"{}\" 要写 per_level 或 levels", p.id));
             }
             if !p.levels.is_empty() && p.levels.len() != p.max_level as usize {
                 return c.fail("passives.ron", format!("心法 \"{}\" 的 levels 要有 max_level 项", p.id));
@@ -412,9 +493,35 @@ impl Content {
 
         // ---- elements.ron ----
         let el = &self.elements;
-        if el.thresholds.len() != 3 || el.thresholds.windows(2).any(|w| w[0] >= w[1]) || el.thresholds[0] == 0
+        if el.thresholds.len() != 4 || el.thresholds.windows(2).any(|w| w[0] >= w[1]) || el.thresholds[0] == 0
         {
-            return c.fail("elements.ron", "thresholds 要写 3 个从小到大的正整数".into());
+            return c.fail("elements.ron", "thresholds 要写 4 个从小到大的正整数（一阶到极境）".into());
+        }
+        let max_weapon_level = self.weapons.iter().map(|w| w.levels.len()).max().unwrap_or(0);
+        let max_passive_level = self.passives.iter().map(|p| p.max_level as usize).max().unwrap_or(0);
+        if el.points.weapon.len() < max_weapon_level || el.points.passive.len() < max_passive_level {
+            return c.fail("elements.ron", "points.weapon、points.passive 要覆盖法器和心法的全部等级".into());
+        }
+        c.positive(
+            "elements.ron",
+            &[
+                ("marks.duration", el.marks.duration),
+                ("marks.react_cooldown", el.marks.react_cooldown),
+                ("zones.vuln_cap", el.zones.vuln_cap),
+                ("zones.counter", el.zones.counter),
+                ("zones.same", el.zones.same),
+                ("bonus_sword_rate", el.bonus_sword_rate),
+            ],
+        )?;
+        c.unique("elements.ron", "反应", el.reactions.iter().map(|r| r.id.as_str()))?;
+        for (i, r) in el.reactions.iter().enumerate() {
+            if r.a == r.b {
+                return c.fail("elements.ron", format!("反应 \"{}\" 的两系不能相同", r.id));
+            }
+            if el.reactions[..i].iter().any(|o| (o.a, o.b) == (r.a, r.b) || (o.a, o.b) == (r.b, r.a)) {
+                return c.fail("elements.ron", format!("反应 \"{}\" 和前面的反应是同一对五行", r.id));
+            }
+            c.reaction("elements.ron", &r.id, &r.effect)?;
         }
         if el.elements.len() != Element::ALL.len()
             || el.elements.iter().zip(Element::ALL).any(|(d, e)| d.id != e)
@@ -423,8 +530,11 @@ impl Content {
         }
         for e in &el.elements {
             c.color("elements.ron", &e.name, &e.color)?;
-            if e.tiers.len() != 3 {
-                return c.fail("elements.ron", format!("\"{}\" 要写 3 阶共鸣", e.name));
+            if e.tiers.len() != el.thresholds.len() {
+                return c.fail("elements.ron", format!("\"{}\" 要写 {} 阶共鸣", e.name, el.thresholds.len()));
+            }
+            if e.tiers.last().is_some_and(|t| t.superseded) {
+                return c.fail("elements.ron", format!("\"{}\" 的最后一阶不能写 superseded", e.name));
             }
             for t in &e.tiers {
                 c.effects("elements.ron", &e.name, &t.effects, false)?;

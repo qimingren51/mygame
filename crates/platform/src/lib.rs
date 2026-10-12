@@ -33,9 +33,10 @@ pub struct Actions {
     pub toggle_perf: bool,
     /// 燃灯
     pub ult: bool,
-    /// 升级时重抽、跳过
+    /// 升级时重抽、跳过、封印选中的一项
     pub reroll: bool,
     pub skip: bool,
+    pub banish: bool,
     /// 菜单里移动选择（这一帧按下的方向，y 向下）
     pub nav: IVec2,
     /// 数字键 1–9 直接选择（从 0 起）
@@ -100,6 +101,7 @@ fn gather_actions(
         ult: keys.any_just_pressed([KeyCode::KeyE, KeyCode::KeyF]),
         reroll: keys.just_pressed(KeyCode::KeyR),
         skip: keys.just_pressed(KeyCode::KeyX),
+        banish: keys.just_pressed(KeyCode::KeyC),
         nav: IVec2::ZERO,
         pick: None,
         meta: keys.just_pressed(KeyCode::KeyM),
@@ -145,6 +147,7 @@ fn gather_actions(
         a.ult |= pad.just_pressed(GamepadButton::North) || pad.just_pressed(GamepadButton::RightTrigger2);
         a.reroll |= pad.just_pressed(GamepadButton::North);
         a.skip |= pad.just_pressed(GamepadButton::West);
+        a.banish |= pad.just_pressed(GamepadButton::LeftTrigger);
         a.meta |= pad.just_pressed(GamepadButton::West);
         if pad.just_pressed(GamepadButton::DPadLeft) {
             a.nav.x -= 1;

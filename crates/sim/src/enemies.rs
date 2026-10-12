@@ -52,6 +52,29 @@ pub struct Enemies {
     /// 夜主的出招计时：弹幕、召唤
     pub atk_t: Vec<f32>,
     pub summon_t: Vec<f32>,
+    /// 五行印记：0 没有，否则是 [`lantern_content::Element::index`] + 1；剩余时间；反应冷却
+    pub mark: Vec<u8>,
+    pub mark_t: Vec<f32>,
+    pub react_cd: Vec<f32>,
+    /// 熔金的易伤与剩余时间
+    pub melt: Vec<f32>,
+    pub melt_t: Vec<f32>,
+    /// 定身（缠住）：不能移动，但仍会还手
+    pub root: Vec<f32>,
+    /// 晕头：朝 confuse_dir 方向乱走
+    pub confuse: Vec<f32>,
+    pub confuse_dir: Vec<f32>,
+    /// 在淤泥里：受到的击退乘这个倍率（本步有效）
+    pub mud: Vec<f32>,
+    /// 被命中的次数（水·极境：每第 3 次必定冰冻）
+    pub hit_n: Vec<u8>,
+    /// 当前的冰冻来自冰爆（这样冻住的再死不触发冰爆）
+    pub blast_frozen: Vec<bool>,
+    /// 控制递减（只对精英）：6 秒内受到的硬控、软控次数与窗口剩余时间
+    pub hard_n: Vec<u8>,
+    pub hard_t: Vec<f32>,
+    pub soft_n: Vec<u8>,
+    pub soft_t: Vec<f32>,
     /// 妖物种类（`enemies.ron` 里的下标）
     pub kind: Vec<u16>,
     pub alive: Vec<bool>,
@@ -91,6 +114,21 @@ impl Default for Enemies {
             burn_show: f(),
             atk_t: f(),
             summon_t: f(),
+            mark: vec![0; ENEMY_CAP],
+            mark_t: f(),
+            react_cd: f(),
+            melt: f(),
+            melt_t: f(),
+            root: f(),
+            confuse: f(),
+            confuse_dir: f(),
+            mud: f(),
+            hit_n: vec![0; ENEMY_CAP],
+            blast_frozen: vec![false; ENEMY_CAP],
+            hard_n: vec![0; ENEMY_CAP],
+            hard_t: f(),
+            soft_n: vec![0; ENEMY_CAP],
+            soft_t: f(),
             kind: vec![0; ENEMY_CAP],
             alive: vec![false; ENEMY_CAP],
             generation: vec![0; ENEMY_CAP],
@@ -130,9 +168,24 @@ impl Enemies {
             &mut self.burn_show,
             &mut self.atk_t,
             &mut self.summon_t,
+            &mut self.mark_t,
+            &mut self.react_cd,
+            &mut self.melt,
+            &mut self.melt_t,
+            &mut self.root,
+            &mut self.confuse,
+            &mut self.confuse_dir,
+            &mut self.mud,
+            &mut self.hard_t,
+            &mut self.soft_t,
         ] {
             v[i] = 0.0;
         }
+        self.mark[i] = 0;
+        self.hit_n[i] = 0;
+        self.blast_frozen[i] = false;
+        self.hard_n[i] = 0;
+        self.soft_n[i] = 0;
         Some(i)
     }
 
@@ -165,6 +218,7 @@ impl Enemies {
         for i in self.iter_alive() {
             h.write_u32(i as u32);
             h.write_u32(u32::from(self.kind[i]));
+            h.write_u32(u32::from(self.mark[i]));
             for v in
                 [self.x[i], self.y[i], self.hp[i], self.kx[i], self.ky[i], self.burn_t[i], self.frozen[i]]
             {

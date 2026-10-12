@@ -53,6 +53,8 @@ pub struct WeaponSlot {
     pub timer: f32,
     /// 寒山钟的全屏钟鸣计时（进化后才有）
     pub toll: Option<f32>,
+    /// 不夜城内环火海的计时
+    pub inner_t: f32,
     /// 环绕类法器的当前角度与上一步角度（画面插值用）
     pub angle: f32,
     pub prev_angle: f32,
@@ -71,6 +73,7 @@ impl WeaponSlot {
             evolved: false,
             timer: 0.6,
             toll: None,
+            inner_t: 0.0,
             angle: 0.0,
             prev_angle: 0.0,
             count: 0,

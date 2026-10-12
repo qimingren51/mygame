@@ -4,7 +4,7 @@
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
-use lantern_content::{FissureDef, Stat, WeaponBehavior};
+use lantern_content::{Element, FissureDef, Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::{Ctx, WeaponSlot, cooldown_ready};
@@ -24,6 +24,7 @@ pub struct SealDrop {
     pub fissure: Option<FissureDef>,
     pub evolved: bool,
     pub source: Source,
+    pub element: Option<Element>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -91,6 +92,7 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             fissure,
             evolved: slot.evolved,
             source: Source::Weapon(slot.def as u16),
+            element: Some(ctx.content.weapons[slot.def].element),
         });
     }
 }
@@ -119,6 +121,7 @@ pub(crate) fn update_seals(
         );
         strike.knockback = s.knockback;
         strike.stun = s.stun;
+        strike.element = s.element;
         strikes.0.push(strike);
         if let Some(f) = s.fissure {
             fissures.0.push(Fissure {

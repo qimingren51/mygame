@@ -85,7 +85,7 @@ fn read_events(
             SimEvent::BossDefeated { .. } => msg("夜主伏诛", "天将破晓", hex("#FFF1C2"), true),
             SimEvent::Resonance { element, tier } => {
                 let e = c.element(element);
-                let name = ["一阶", "二阶", "三阶"].get(tier as usize - 1).copied().unwrap_or("");
+                let name = ["一阶", "二阶", "三阶", "极境"].get(tier as usize - 1).copied().unwrap_or("");
                 let desc = e.tiers.get(tier as usize - 1).map(|t| t.desc.as_str()).unwrap_or("");
                 msg(
                     format!("{} · {} 共鸣{name}", e.name, e.resonance),
@@ -93,6 +93,16 @@ fn read_events(
                     element_color(c, element),
                     tier >= 3,
                 )
+            }
+            // 第一次发生：大字盖章并写出说明；之后同种反应每 2 秒最多提示一次
+            SimEvent::Reaction { kind, first, label, .. } if label => {
+                let r = &c.elements.reactions[kind as usize];
+                let color = element_color(c, r.b);
+                if first {
+                    msg(format!("反应 · {}", r.name), r.desc.clone(), color, true)
+                } else {
+                    msg(r.name.clone(), "", color, false)
+                }
             }
             SimEvent::Sheng { index } => {
                 let s = &c.elements.sheng[index as usize];

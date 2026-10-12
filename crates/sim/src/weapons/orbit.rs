@@ -1,4 +1,4 @@
-//! 环绕：火焰绕着主角转，碰到的妖物受伤（灯火 / 不夜城）。
+//! 环绕：火焰绕着主角转，碰到的妖物受伤（灯火 / 不夜城）。不夜城另有一圈贴身的内环火海（持续伤害，不打印记）。
 
 use bevy_math::Vec2;
 
@@ -6,7 +6,7 @@ use lantern_content::{Content, Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::WeaponSlot;
-use crate::combat::{Hit, HitQueue, Source};
+use crate::combat::{HIT_DOT, HIT_NOCRIT, Hit, HitQueue, Source};
 use crate::enemies::Enemies;
 use crate::spatial::Grid;
 use crate::stats::Stats;
@@ -22,7 +22,7 @@ pub(crate) fn update(
     hits: &mut HitQueue,
     found: &mut Vec<u32>,
 ) {
-    let WeaponBehavior::Orbit { spin, hit_cooldown, knockback, size } = *slot.behavior(content) else {
+    let WeaponBehavior::Orbit { spin, hit_cooldown, knockback, size, inner } = *slot.behavior(content) else {
         return;
     };
     let lv = slot.stats(content);
@@ -31,8 +31,9 @@ pub(crate) fn update(
     slot.angle += spin.at(slot.level as f32) * DT;
     slot.count = lv.count + stats.amount();
     slot.radius = lv.radius * area;
-    slot.size = size * area.sqrt();
+    slot.size = size * area;
     let source = Source::Weapon(slot.def as u16);
+    let element = Some(content.weapons[slot.def].element);
     for k in 0..slot.count {
         let c = p + slot.orbit_offset(slot.angle, k);
         found.clear();
@@ -43,7 +44,19 @@ pub(crate) fn update(
                 continue;
             }
             en.lamp_ready[i] = t + hit_cooldown;
-            hits.0.push(Hit::new(en.handle(i), lv.damage, source).knock(knockback, p));
+            hits.0.push(Hit::new(en.handle(i), lv.damage, source).knock(knockback, p).element(element));
+        }
+    }
+    if let Some(f) = inner {
+        slot.inner_t -= DT;
+        if slot.inner_t <= 0.0 {
+            slot.inner_t = f.every;
+            found.clear();
+            grid.query_circle(en, p.x, p.y, f.radius * area, found);
+            for &i in found.iter() {
+                let h = en.handle(i as usize);
+                hits.0.push(Hit::new(h, lv.damage * f.ratio, source).flags(HIT_DOT | HIT_NOCRIT));
+            }
         }
     }
 }

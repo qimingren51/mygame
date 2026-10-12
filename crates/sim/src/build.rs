@@ -1,8 +1,8 @@
-//! 构筑：心法、五行共鸣、升级选项、宝箱（移植自网页版 sim/build.ts）。
+//! 构筑：心法、五行共鸣、升级选项、宝箱（docs/GAMEPLAY.md 第 5.5、5.6、5.8 节）。
 
 use bevy_ecs::prelude::*;
 
-use lantern_content::{Content, Effect, Element};
+use lantern_content::{Content, Effect, Element, Stat};
 use lantern_core::{Pcg32, StateHasher};
 
 use crate::RunSetup;
@@ -23,7 +23,7 @@ pub struct Build {
     pub passives: Vec<PassiveSlot>,
     /// 各系共鸣点数（按 [`Element::ALL`] 的顺序）
     pub points: [u32; 5],
-    /// 各系共鸣阶数 0..=3
+    /// 各系共鸣阶数 0..=4（4 是极境）
     pub tiers: [u8; 5],
     /// 相生是否点亮（按 `elements.ron` 的顺序）
     pub sheng: Vec<bool>,
@@ -33,6 +33,20 @@ pub struct Build {
     pub favor: Option<Element>,
     /// 本局进化次数
     pub evolutions: u32,
+    /// 封印：永久移出本局卡池的法器、心法
+    pub banished: Vec<Banned>,
+    /// 已经开过几次升级（保底用）；前几次升级里出现过的新法器
+    pub levelups: u32,
+    pub early_new: Vec<usize>,
+}
+
+/// 被封印的一项。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Banned {
+    /// `weapons.ron` 下标
+    Weapon(usize),
+    /// `passives.ron` 下标
+    Passive(usize),
 }
 
 /// 共鸣变化的提示。
@@ -66,17 +80,19 @@ impl Build {
         self.passives.iter().find(|p| p.def == def).map_or(0, |p| p.level)
     }
 
-    /// 重算共鸣点数、阶数、相生、太极，返回新点亮的项。
+    /// 重算共鸣点数、阶数、相生、太极，返回新点亮的项。按投入计点（`elements.ron` 的 points）。
     pub fn compute_resonance(&mut self, content: &Content, arsenal: &Arsenal) -> Vec<Awaken> {
+        let el = &content.elements;
         let mut points = [0u32; 5];
         for w in &arsenal.0 {
             let def = &content.weapons[w.def];
-            points[def.element.index()] +=
-                if w.evolved || w.level as usize >= def.levels.len() { 2 } else { 1 };
+            points[def.element.index()] += el.weapon_points(w.level, w.evolved);
         }
         for p in &self.passives {
-            let def = &content.passives[p.def];
-            points[def.element.index()] += if p.level >= def.max_level { 2 } else { 1 };
+            // 无属性心法不计点
+            if let Some(e) = content.passives[p.def].element {
+                points[e.index()] += el.passive_points(p.level);
+            }
         }
         if let Some((el, n)) = self.bonus {
             points[el.index()] += n;
@@ -117,6 +133,11 @@ impl Build {
             h.write_u32(p);
         }
         h.write_u32(self.evolutions);
+        h.write_u32(self.banished.len() as u32);
+    }
+
+    fn is_banned(&self, b: Banned) -> bool {
+        self.banished.contains(&b)
     }
 }
 
@@ -140,13 +161,24 @@ pub enum Offer {
 }
 
 impl Offer {
-    /// 选项所属的五行；补给没有。
+    /// 选项所属的五行；补给、无属性心法没有。
     pub fn element(self, content: &Content, arsenal: &Arsenal, build: &Build) -> Option<Element> {
         match self {
             Offer::Evolve(k) | Offer::WeaponUp(k) => Some(content.weapons[arsenal.0[k].def].element),
             Offer::NewWeapon(d) => Some(content.weapons[d].element),
-            Offer::PassiveUp(k) => Some(content.passives[build.passives[k].def].element),
-            Offer::NewPassive(d) => Some(content.passives[d].element),
+            Offer::PassiveUp(k) => content.passives[build.passives[k].def].element,
+            Offer::NewPassive(d) => content.passives[d].element,
+            Offer::Heal | Offer::Oil => None,
+        }
+    }
+
+    /// 封印这一项时移出卡池的东西；补给不能封印。
+    pub fn banned(self, arsenal: &Arsenal, build: &Build) -> Option<Banned> {
+        match self {
+            Offer::Evolve(k) | Offer::WeaponUp(k) => Some(Banned::Weapon(arsenal.0[k].def)),
+            Offer::NewWeapon(d) => Some(Banned::Weapon(d)),
+            Offer::PassiveUp(k) => Some(Banned::Passive(build.passives[k].def)),
+            Offer::NewPassive(d) => Some(Banned::Passive(d)),
             Offer::Heal | Offer::Oil => None,
         }
     }
@@ -161,43 +193,45 @@ impl Offer {
 pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) -> Vec<(Offer, f32)> {
     let ch = &content.run.choices;
     let mut out = Vec::new();
+    let banned_w = |d: usize| build.is_banned(Banned::Weapon(d));
+    let banned_p = |d: usize| build.is_banned(Banned::Passive(d));
     for (k, w) in arsenal.0.iter().enumerate() {
-        if w.can_evolve(content, build) {
+        if w.can_evolve(content, build) && !banned_w(w.def) {
             out.push((Offer::Evolve(k), ch.weight_evolve));
         }
     }
     for (k, w) in arsenal.0.iter().enumerate() {
-        if !w.evolved && (w.level as usize) < content.weapons[w.def].levels.len() {
+        if !w.evolved && (w.level as usize) < content.weapons[w.def].levels.len() && !banned_w(w.def) {
             out.push((Offer::WeaponUp(k), ch.weight_weapon_up));
         }
     }
     if (arsenal.0.len() as u32) < ch.slots {
         let weight = if secs < ch.late_after { ch.weight_new_weapon } else { ch.weight_new_weapon_late };
         for d in 0..content.weapons.len() {
-            if !arsenal.0.iter().any(|w| w.def == d) {
+            if !arsenal.0.iter().any(|w| w.def == d) && !banned_w(d) {
                 out.push((Offer::NewWeapon(d), weight));
             }
         }
     }
     for (k, p) in build.passives.iter().enumerate() {
-        if p.level < content.passives[p.def].max_level {
+        if p.level < content.passives[p.def].max_level && !banned_p(p.def) {
             out.push((Offer::PassiveUp(k), ch.weight_passive_up));
         }
     }
     if (build.passives.len() as u32) < ch.slots {
         for d in 0..content.passives.len() {
-            if !build.passives.iter().any(|p| p.def == d) {
+            if !build.passives.iter().any(|p| p.def == d) && !banned_p(d) {
                 out.push((Offer::NewPassive(d), ch.weight_new_passive));
             }
         }
     }
-    // 已投入的五行更容易出现，帮助玩家凑共鸣
+    // 已到一阶的五行更容易出现，帮助玩家凑共鸣
     for (o, w) in &mut out {
         if matches!(o, Offer::Evolve(_)) {
             continue;
         }
         let Some(el) = o.element(content, arsenal, build) else { continue };
-        if build.points[el.index()] >= content.elements.thresholds[0] {
+        if build.tiers[el.index()] >= 1 {
             *w *= ch.owned_element_mult;
         }
         if let Some(f) = build.favor {
@@ -228,26 +262,84 @@ pub fn pick_weighted(rng: &mut Pcg32, pool: &[(Offer, f32)], n: usize) -> Vec<Of
 }
 
 /// 升级时抽选项，返回选项和是否“灵光一闪”（多一个选项）。
+/// `fresh` 表示这是一次新的升级（不是重抽），保底按新升级的次数计。
 pub fn roll_choices(
     content: &Content,
     arsenal: &Arsenal,
-    build: &Build,
+    build: &mut Build,
     stats: &Stats,
     secs: f32,
     rng: &mut Pcg32,
+    fresh: bool,
 ) -> (Vec<Offer>, bool) {
     let pool = offers(content, arsenal, build, secs);
     if pool.is_empty() {
         let v = if stats.can_heal() { vec![Offer::Heal, Offer::Oil] } else { vec![Offer::Oil] };
         return (v, false);
     }
-    let mut n = stats.get(lantern_content::Stat::Choices).round().max(1.0) as usize;
+    if fresh {
+        build.levelups += 1;
+    }
+    let mut n = stats.get(Stat::Choices).round().max(1.0) as usize;
     let mut inspired = false;
-    if n >= 3 && rng.chance(content.run.choices.inspiration) {
+    if n >= 3 && rng.chance(stats.get(Stat::Inspiration)) {
         n += 1;
         inspired = true;
     }
-    (pick_weighted(rng, &pool, n), inspired)
+    let mut picks = pick_weighted(rng, &pool, n);
+    let pity = &content.run.choices.pity;
+    let mut forced = 0;
+    // 保底一：前几次升级至少出现几件不同的新法器
+    if build.levelups <= pity.early_levels {
+        let have = build.early_new.len() as u32;
+        let left = pity.early_levels - build.levelups + 1;
+        let fresh_new = |o: &Offer| matches!(o, Offer::NewWeapon(d) if !build.early_new.contains(d));
+        if have < pity.early_new_weapons
+            && pity.early_new_weapons - have >= left
+            && !picks.iter().any(fresh_new)
+        {
+            let cands: Vec<_> = pool.iter().copied().filter(|(o, _)| fresh_new(o)).collect();
+            if let Some(&o) = pick_weighted(rng, &cands, 1).first() {
+                force(&mut picks, o, &mut forced);
+            }
+        }
+        for o in &picks {
+            if let Offer::NewWeapon(d) = *o
+                && !build.early_new.contains(&d)
+            {
+                build.early_new.push(d);
+            }
+        }
+    }
+    // 保底二：法器练到 key_level 以上却缺进化心法时，按概率把那门心法放进选项
+    for w in &arsenal.0 {
+        let Some(evo) = &content.weapons[w.def].evolution else { continue };
+        let Some(pd) = content.passive_index(&evo.passive) else { continue };
+        let missing = !w.evolved && w.level >= pity.key_level && build.passive_level(pd) == 0;
+        let offer = Offer::NewPassive(pd);
+        if missing
+            && pool.iter().any(|(o, _)| *o == offer)
+            && !picks.contains(&offer)
+            && rng.chance(pity.key_chance)
+        {
+            force(&mut picks, offer, &mut forced);
+        }
+    }
+    (picks, inspired)
+}
+
+/// 把保底的一项放进选项：替换从后往前第一个不是保底放进来的。
+fn force(picks: &mut Vec<Offer>, o: Offer, forced: &mut usize) {
+    if picks.contains(&o) {
+        return;
+    }
+    if picks.len() > *forced {
+        let k = picks.len() - 1 - *forced;
+        picks[k] = o;
+    } else {
+        picks.push(o);
+    }
+    *forced += 1;
 }
 
 /// 应用一个选项。返回需要演出的进化（法器在 [`Arsenal`] 里的位置）。

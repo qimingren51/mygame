@@ -10,13 +10,16 @@ use lantern_core::{StateHasher, Stream, Streams};
 
 use crate::boss::Foes;
 use crate::build::Build;
-use crate::combat::{ActionQueue, DamageLog, Deaths, HitQueue, Strikes};
+use crate::combat::{ActionQueue, DamageLog, Deaths, HitQueue, Strikes, SwordBudget};
 use crate::crowd::Crowd;
 use crate::encounters::Encounters;
 use crate::enemies::Enemies;
-use crate::flow::{Flow, SimPhase, StepGate};
+use crate::flow::{Flow, Hold, SimPhase, StepGate};
 use crate::gems::Gems;
 use crate::pickups::Pickups;
+use crate::player::DashHits;
+use crate::reactions::{Discoveries, Herbs, Zones};
+use crate::reveal::Reveal;
 use crate::run::{Director, Progress, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{StatsDirty, collect};
@@ -62,7 +65,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     let arsenal = Arsenal(vec![WeaponSlot::new(start_weapon)]);
     let mut build = Build::new(c, &setup);
     build.compute_resonance(c, &arsenal);
-    let (stats, effects) = collect(c, &setup, &build, None);
+    let (stats, effects) = collect(c, &setup, &build, None, 1);
     let max_hp = stats.max_hp();
     let mut ids = NextSimId::default();
     commands.spawn((
@@ -72,14 +75,18 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
         PrevPos(Vec2::ZERO),
         Body { radius: p.radius },
         Health { hp: max_hp, max: max_hp },
-        Player::default(),
+        Player { dash_ready: stats.get(Stat::DashCharges).round().max(1.0) as u32, ..Player::default() },
     ));
     let ev = &c.events;
     let encounters = Encounters {
         next_at: rng.get(Stream::Event).range_f32(ev.first.0, ev.first.1),
         ..Default::default()
     };
-    let flow = Flow { rerolls: stats.get(Stat::Rerolls).round().max(0.0) as u32, ..Default::default() };
+    let flow = Flow {
+        rerolls: stats.get(Stat::Rerolls).round().max(0.0) as u32,
+        banishes: stats.get(Stat::Banishes).round().max(0.0) as u32,
+        ..Default::default()
+    };
     commands.insert_resource(ids);
     commands.insert_resource(Tick(0));
     commands.insert_resource(SimRng(rng));
@@ -93,6 +100,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(flow);
     commands.insert_resource(SimPhase::Play);
     commands.insert_resource(StepGate::default());
+    commands.insert_resource(Hold::default());
     commands.insert_resource(Progress::default());
     commands.insert_resource(Director::default());
     commands.insert_resource(Enemies::default());
@@ -109,6 +117,12 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Fissures::default());
     commands.insert_resource(Foes::default());
     commands.insert_resource(Pickups::default());
+    commands.insert_resource(Reveal::default());
+    commands.insert_resource(Zones::default());
+    commands.insert_resource(Herbs::default());
+    commands.insert_resource(Discoveries::default());
+    commands.insert_resource(DashHits::default());
+    commands.insert_resource(SwordBudget(c.elements.bonus_sword_rate));
     commands.insert_resource(encounters);
     commands.insert_resource(HashLog::default());
     commands.insert_resource(InputFrame::default());
@@ -171,6 +185,8 @@ pub(crate) struct HashParams<'w, 's> {
     foes: Res<'w, Foes>,
     pickups: Res<'w, Pickups>,
     encounters: Res<'w, Encounters>,
+    zones: Res<'w, Zones>,
+    herbs: Res<'w, Herbs>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -195,6 +211,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
             for v in [pl.facing.x, pl.facing.y, pl.iframe, pl.dash_t, pl.dash_cd, pl.shield] {
                 h.write_f32(v);
             }
+            h.write_u32(pl.dash_ready);
         }
     }
     p.en.hash_into(&mut h);
@@ -206,6 +223,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.foes.hash_into(&mut h);
     p.pickups.hash_into(&mut h);
     p.encounters.hash_into(&mut h);
+    crate::reactions::hash_into(&p.zones, &p.herbs, &mut h);
     h.write_f32(p.progress.xp);
     h.write_u32(p.progress.level);
     h.write_u32(p.progress.kills);

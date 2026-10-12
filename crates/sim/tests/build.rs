@@ -45,18 +45,86 @@ fn zhezhi_adds_amount_at_levels_1_3_5() {
             sim.stats().amount()
         })
         .collect();
-    // 5 级折纸满级计 2 点，木系一阶，还不到二阶（数量 +1 要 4 点）
+    // 5 级折纸计 3 点，木系一阶，还不到二阶（数量 +1 要 7 点）
     assert_eq!(amounts, [0, 1, 1, 2, 2, 3]);
 }
 
 #[test]
-fn a_max_level_weapon_counts_two_points_and_wakes_a_tier() {
+fn a_max_level_weapon_counts_three_points_and_wakes_a_tier() {
     let mut sim = fresh(1);
     let woke = sim.set_build(&[("lamp", 8, false)], &[]);
-    assert_eq!(sim.build().points[Element::Fire.index()], 2);
+    assert_eq!(sim.build().points[Element::Fire.index()], 3);
     assert_eq!(sim.build().tiers[Element::Fire.index()], 1);
     assert!(woke.contains(&Awaken::Tier { element: Element::Fire, tier: 1 }));
     assert_eq!(sim.world().resource::<lantern_sim::Effects>().hit.len(), 1, "火一阶：命中附加灼烧");
+}
+
+#[test]
+fn points_follow_investment() {
+    let mut sim = fresh(1);
+    let pts = |sim: &mut SimHarness, w: &[(&str, u32, bool)], p: &[(&str, u32)]| {
+        sim.set_build(w, p);
+        sim.build().points
+    };
+    let f = Element::Fire.index();
+    assert_eq!(pts(&mut sim, &[("lamp", 3, false)], &[])[f], 1);
+    assert_eq!(pts(&mut sim, &[("lamp", 4, false)], &[])[f], 2);
+    assert_eq!(pts(&mut sim, &[("lamp", 8, true)], &[])[f], 4);
+    assert_eq!(pts(&mut sim, &[], &[("luxin", 2)])[f], 1);
+    assert_eq!(pts(&mut sim, &[], &[("luxin", 3)])[f], 2);
+    // 无属性心法不计点
+    assert_eq!(pts(&mut sim, &[], &[("qinggong", 5), ("juhun", 5)]), [0; 5]);
+    // 一阶 3、二阶 7、三阶 12
+    sim.set_build(&[("lamp", 8, true)], &[("luxin", 5), ("changming", 5), ("dengxin", 2)]);
+    assert_eq!(sim.build().points[f], 11);
+    assert_eq!(sim.build().tiers[f], 2);
+    sim.set_build(&[("lamp", 8, true)], &[("luxin", 5), ("changming", 5), ("dengxin", 3)]);
+    assert_eq!(sim.build().tiers[f], 3);
+}
+
+#[test]
+fn extreme_tier_replaces_tier_three() {
+    let mut sim = fresh(1);
+    let full: [(&str, u32); 3] = [("jianyi", 5), ("ruimu", 5), ("xunfeng", 5)];
+    sim.set_build(&[("sword", 8, true)], &full);
+    assert_eq!(sim.build().tiers[Element::Metal.index()], 3);
+    let crit = &sim.world().resource::<lantern_sim::Effects>().crit;
+    assert_eq!(crit.len(), 1);
+    assert!(crit[0].chance < 1.0, "三阶：50% 追加飞剑");
+    // P0 的内容一系最多 13 点，到不了极境；这里借夜签的加点凑到 20
+    sim.world_mut().resource_mut::<lantern_sim::Build>().bonus = Some((Element::Metal, 10));
+    let woke = sim.set_build(&[("sword", 8, true)], &full);
+    assert!(woke.contains(&Awaken::Tier { element: Element::Metal, tier: 4 }));
+    let crit = &sim.world().resource::<lantern_sim::Effects>().crit;
+    assert_eq!(crit.len(), 1, "极境取代三阶，不会每次暴击追加两把");
+    assert_eq!(crit[0].chance, 1.0);
+}
+
+#[test]
+fn new_passives_change_stats() {
+    let mut sim = fresh(1);
+    sim.set_build(&[], &[("qinggong", 5), ("hanyi", 2), ("dengxin", 1), ("zaiwu", 2), ("houde", 3)]);
+    let s = sim.stats();
+    assert_eq!(s.get(Stat::DashCharges), 3.0);
+    assert!((s.get(Stat::DashCooldown) - 2.4 * 0.5).abs() < 1e-4);
+    assert!((s.get(Stat::SlowPower) - 0.12).abs() < 1e-5);
+    assert_eq!(s.get(Stat::FlameBand), 1.0);
+    // 载物 2 级：每点护甲伤害 +2%，厚德 3 级护甲 3 点
+    assert!((s.get(Stat::Damage) - 1.06).abs() < 1e-5);
+    assert!((s.get(Stat::Reveal) - 130.0 * 1.06).abs() < 1e-3);
+}
+
+#[test]
+fn reveal_grows_with_level() {
+    let mut sim = fresh(1);
+    sim.progress_mut().level = 11;
+    sim.world_mut().resource_mut::<lantern_sim::stats::StatsDirty>().0 = true;
+    idle(&mut sim);
+    assert!((sim.stats().get(Stat::Reveal) - 143.0).abs() < 1e-3);
+    sim.progress_mut().level = 200;
+    sim.world_mut().resource_mut::<lantern_sim::stats::StatsDirty>().0 = true;
+    idle(&mut sim);
+    assert_eq!(sim.stats().get(Stat::Reveal), 220.0, "照见圈最大 220");
 }
 
 #[test]
@@ -85,7 +153,7 @@ fn element_omen_gives_points_and_favor() {
     let mut setup = RunSetup::new(1, RunMode::Normal);
     setup.omen = Some(OmenPick { id: "element".into(), element: Some(Element::Water) });
     let sim = SimHarness::with_setup(content(), setup);
-    assert_eq!(sim.build().points[Element::Water.index()], 2);
+    assert_eq!(sim.build().points[Element::Water.index()], 3);
     assert_eq!(sim.build().tiers[Element::Water.index()], 1);
     assert_eq!(sim.build().favor, Some(Element::Water));
 }
@@ -98,6 +166,7 @@ fn meta_and_omen_modify_stats() {
     let sim = SimHarness::with_setup(content(), setup);
     // (100 + 12 × 5) × (1 − 0.35) = 104
     assert_eq!(sim.stats().max_hp(), 104.0);
+    // 加成区相加：琉璃夜 +40%
     assert!((sim.stats().get(Stat::Damage) - 1.4).abs() < 1e-5);
 }
 

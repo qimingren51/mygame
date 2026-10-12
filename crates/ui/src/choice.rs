@@ -122,6 +122,7 @@ fn sync(
                 inspired,
                 level,
                 flow.rerolls,
+                flow.banishes,
             )
         }
         Shown::Chest(..) => {
@@ -172,6 +173,9 @@ fn input(
                 send(&mut ui, SimCommand::Choose(i as u8));
             } else if actions.reroll && flow.rerolls > 0 {
                 send(&mut ui, SimCommand::Reroll);
+            } else if actions.banish && flow.banishes > 0 {
+                let i = ui.selected;
+                send(&mut ui, SimCommand::Banish(i as u8));
             } else if actions.skip {
                 send(&mut ui, SimCommand::Skip);
             }
@@ -358,6 +362,7 @@ fn spawn_level_up(
     inspired: bool,
     level: u32,
     rerolls: u32,
+    banishes: u32,
 ) {
     commands.spawn(overlay(skin)).with_children(|root| {
         root.spawn(Node {
@@ -385,6 +390,14 @@ fn spawn_level_up(
                 RerollLabel,
                 text(&fonts.body, 16.0, PAPER, &format!("R / 手柄 Y　重抽（剩 {rerolls} 次）")),
             ));
+            if banishes > 0 {
+                foot.spawn(text(
+                    &fonts.body,
+                    16.0,
+                    PAPER,
+                    &format!("C / 手柄 LB　封印选中项（剩 {banishes} 次）"),
+                ));
+            }
             foot.spawn(text(
                 &fonts.body,
                 16.0,

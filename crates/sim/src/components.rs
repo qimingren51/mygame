@@ -48,7 +48,8 @@ pub struct Player {
     pub iframe: f32,
     /// 剩余闪避时间
     pub dash_t: f32,
-    /// 闪避冷却
+    /// 闪避：还能用几段、下一段的充能倒计时
+    pub dash_ready: u32,
     pub dash_cd: f32,
     pub dash_vel: Vec2,
     /// 土·固的护盾：当前值、获得时的值、打破后重新获得的倒计时
@@ -64,6 +65,7 @@ impl Default for Player {
             moved: 0.0,
             iframe: 0.0,
             dash_t: 0.0,
+            dash_ready: 1,
             dash_cd: 0.0,
             dash_vel: Vec2::ZERO,
             shield: 0.0,

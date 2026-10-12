@@ -77,10 +77,13 @@
         late_after: 180.0,
         weight_passive_up: 7.0,
         weight_new_passive: 5.0,
+        // 已到一阶的五行，选项权重 ×1.5
         owned_element_mult: 1.5,
         favor_mult: 1.3,
         unfavor_mult: 0.6,
-        inspiration: 0.1,
+        // 保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上但缺进化心法时，
+        // 每次升级 25% 把那门心法放进选项（docs/GAMEPLAY.md 第 5.8 节）
+        pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25),
         heal: 0.3,
         oil: 20,
         skip_oil: 10,

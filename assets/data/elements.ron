@@ -1,14 +1,31 @@
-// 五行共鸣、相生、太极（移植自网页版 data/elements.ts 与 sim/build.ts）。
-// 每件法器、每门心法计 1 点，满级（法器还包括已进化）计 2 点；达到 thresholds 时为一、二、三阶。
+// 五行共鸣、相生、太极、反应（docs/GAMEPLAY.md 第 5.6、6.2 节，docs/BALANCE.md 第 7.1、7.2 节）。
+// 共鸣按投入计点：法器 Lv1–3 / 4–7 / 8 / 进化 = 1 / 2 / 3 / 4 点；心法 Lv1–2 / 3–4 / 5 = 1 / 2 / 3 点。
+// 达到 thresholds 时为一阶、二阶、三阶、极境。superseded 的一阶在到了下一阶后不再生效（下一阶写了加强版）。
 // 伤害曲线 (a, b, c) 的 x 是分钟数；追加飞剑的 x 是主角等级。
 (
-    thresholds: [2, 4, 6],
+    thresholds: [3, 7, 12, 20],
+    points: (
+        weapon: [1, 1, 1, 2, 2, 2, 2, 3],
+        evolved: 4,
+        passive: [1, 1, 2, 2, 3],
+    ),
+    // 印记 3 秒；每只妖物每秒最多反应一次；每一步最多结算 64 次反应（docs/GAMEPLAY.md 第 6.9 节）
+    marks: (duration: 3.0, react_cooldown: 1.0, max_per_step: 64),
+    // 易伤区最多 +150%；克制 ×1.25、同系 ×0.8（妖物带五行时才有，抢先体验起）
+    zones: (vuln_cap: 1.5, counter: 1.25, same: 0.8),
+    // 金·极境：追加飞剑每秒最多 30 把
+    bonus_sword_rate: 30.0,
     elements: [
         (id: Metal, name: "金", resonance: "锐", color: "#E9D9A6", tiers: [
             (desc: "暴击率 +10%", effects: [Add(CritChance, 0.10)]),
             (desc: "暴击伤害 +50%", effects: [Add(CritMult, 0.50)]),
-            (desc: "暴击时追加飞剑", effects: [
+            (desc: "暴击时 50% 追加飞剑", superseded: true, effects: [
                 Trigger(on: Crit, chance: 0.5, only: NotBonus,
+                        action: BonusSword(damage: (10.0, 1.0, 0.0), pierce: 2, speed: 380.0, life: 1.5,
+                                           turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
+            ]),
+            (desc: "每次暴击都追加飞剑，追加的也能暴击、继续追加", effects: [
+                Trigger(on: Crit,
                         action: BonusSword(damage: (10.0, 1.0, 0.0), pierce: 2, speed: 380.0, life: 1.5,
                                            turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
             ]),
@@ -17,29 +34,46 @@
             (desc: "每秒回复 0.5% 生命", effects: [Add(Regen, 0.005)]),
             (desc: "数量 +1", effects: [Add(Amount, 1.0)]),
             (desc: "击杀回复生命", effects: [Trigger(on: Kill, action: Heal(0.4))]),
+            (desc: "纸鹤数量 ×1.5；满血时多出的回复转成护盾", effects: [
+                Mul(SummonMult, 0.5),
+                Add(OverhealShield, 0.3),
+            ]),
         ]),
         (id: Water, name: "水", resonance: "凝", color: "#6FB8FF", tiers: [
             (desc: "命中减速", effects: [Trigger(on: Hit, action: Slow(amount: 0.2, duration: 1.0))]),
             (desc: "命中有概率冰冻", effects: [Trigger(on: Hit, chance: 0.12, action: Freeze(duration: 1.0))]),
-            (desc: "冰冻目标易伤并碎裂", effects: [
-                Add(FrozenDamage, 0.5),
+            (desc: "冰冻目标易伤并碎裂", superseded: true, effects: [
+                Add(FrozenVuln, 0.5),
                 Trigger(on: Kill, only: TargetFrozen,
                         action: Explode(radius: 52.0, damage: (10.0, 5.0, 0.0), kind: Ice)),
+            ]),
+            (desc: "每第 3 次命中必定冰冻；冰爆也能冰冻", effects: [
+                Add(FrozenVuln, 0.5),
+                Trigger(on: Kill, only: TargetFrozen,
+                        action: Explode(radius: 52.0, damage: (10.0, 5.0, 0.0), kind: Ice, freeze: 1.0)),
+                Trigger(on: Hit, only: ThirdHit, action: Freeze(duration: 1.0)),
             ]),
         ]),
         (id: Fire, name: "火", resonance: "焚", color: "#FF8A3D", tiers: [
             (desc: "命中附加灼烧", effects: [Trigger(on: Hit, action: Burn(duration: 3.0, ratio: 0.2))]),
             (desc: "灼烧可叠加", effects: [Add(BurnStacks, 4.0)]),
-            (desc: "妖物死亡时爆炸", effects: [
+            (desc: "妖物死亡时爆炸", superseded: true, effects: [
                 Trigger(on: Kill, action: Explode(radius: 46.0, damage: (8.0, 4.0, 0.0), kind: Fire)),
+            ]),
+            (desc: "爆炸更大，炸到的直接 5 层灼烧", effects: [
+                Trigger(on: Kill, action: Explode(radius: 69.0, damage: (8.0, 4.0, 0.0), kind: Fire, ignite: 5.0)),
             ]),
         ]),
         (id: Earth, name: "土", resonance: "固", color: "#C9925A", tiers: [
             (desc: "周期获得护盾", effects: [Shield(amount: (20.0, 5.0, 0.0))]),
             (desc: "击退加倍", effects: [Mul(Knockback, 1.0)]),
-            (desc: "护盾破碎时震地", effects: [
+            (desc: "护盾破碎时震地", superseded: true, effects: [
                 Trigger(on: ShieldBreak,
                         action: Quake(radius: 150.0, damage: (30.0, 6.0, 0.0), knockback: 120.0, stun: 0.8)),
+            ]),
+            (desc: "每 3 秒震地一次，范围加倍", effects: [
+                Trigger(on: Periodic(3.0),
+                        action: Quake(radius: 300.0, damage: (30.0, 6.0, 0.0), knockback: 120.0, stun: 0.8)),
             ]),
         ]),
     ],
@@ -51,9 +85,33 @@
         (from: Metal, to: Water, name: "金生水", desc: "暴击使目标减速", effects: [
             Trigger(on: Crit, action: Slow(amount: 0.35, duration: 1.5)),
         ]),
-        (from: Water, to: Wood, name: "水生木", desc: "生命回复翻倍", effects: [Mul(Regen, 1.0)]),
+        (from: Water, to: Wood, name: "水生木", desc: "生命回复翻倍", effects: [Mul(Regen, 1.0), Mul(RegenFlat, 1.0)]),
     ],
     taiji: (name: "太极", desc: "每 30 秒全屏轮转五行之力", effects: [
         Trigger(on: Periodic(30.0), action: ScreenDamage(damage: (40.0, 16.0, 0.0), boss_cap: 600.0)),
     ]),
+    // 五行反应：带着一系印记的妖物被另一系命中时发生（不分先后）。
+    // 前五种是相生，后五种是相克。“触发伤害”是触发那一击在加成区之后、暴击和易伤之前的值。
+    reactions: [
+        (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%",
+         effect: Spread(count: 3, radius: 60.0, mult: 1.5, duration: 3.0, burn_ratio: 0.2)),
+        (a: Fire, b: Earth, id: "rongyan", name: "熔岩", desc: "地上留下熔岩 3 秒，持续伤害",
+         effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 0.6, slow: 0.0, knock_mult: 1.0)),
+        (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透",
+         effect: Blades(count: 3, ratio: 0.5, pierce: 2, speed: 320.0, life: 0.8, hit_radius: 7.0)),
+        (a: Metal, b: Water, id: "ningshuang", name: "凝霜", desc: "冻结 1 秒，周围减速",
+         effect: Frost(freeze: 1.0, radius: 50.0, slow: 0.4, slow_time: 1.5)),
+        (a: Water, b: Wood, id: "zisheng", name: "滋生", desc: "长出灵草：缠住附近妖物，走过去能回血",
+         effect: Bloom(radius: 50.0, root: 1.5, herb_life: 5.0, heal: 2.0, heal_per_second: 6.0)),
+        (a: Water, b: Fire, id: "zhengteng", name: "蒸腾", desc: "蒸汽爆炸，被炸到的妖物晕头乱走",
+         effect: Steam(radius: 70.0, ratio: 1.5, per_level: 2.0, confuse: 1.5)),
+        (a: Fire, b: Metal, id: "rongjin", name: "熔金", desc: "妖物 4 秒内受到伤害 +30%",
+         effect: Melt(vuln: 0.3, duration: 4.0)),
+        (a: Metal, b: Wood, id: "duanmu", name: "断木", desc: "追加两倍斩击；残血小妖直接斩杀",
+         effect: Sever(ratio: 2.0, execute: 0.2)),
+        (a: Wood, b: Earth, id: "lietu", name: "裂土", desc: "地刺破土，周围妖物击晕 1 秒",
+         effect: Rupture(radius: 60.0, stun: 1.0, ratio: 0.5)),
+        (a: Earth, b: Water, id: "yuni", name: "淤泥", desc: "泥沼 4 秒：大幅减速，击退翻倍",
+         effect: Zone(zone: Mud, radius: 70.0, duration: 4.0, dps_ratio: 0.0, slow: 0.6, knock_mult: 2.0)),
+    ],
 )

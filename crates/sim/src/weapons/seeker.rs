@@ -2,7 +2,7 @@
 
 use bevy_math::{Vec2, ops};
 
-use lantern_content::WeaponBehavior;
+use lantern_content::{Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::{Crane, Ctx, TAU, WeaponSlot};
@@ -26,7 +26,8 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     };
     let lv = slot.stats(ctx.content);
     let p = ctx.player;
-    let n = (lv.count + ctx.stats.amount()) as usize;
+    // 召唤物数量再乘木·极境的倍率（向上取整）
+    let n = ((lv.count + ctx.stats.amount()) as f32 * ctx.stats.get(Stat::SummonMult)).ceil() as usize;
     while slot.cranes.len() < n {
         slot.cranes.push(Crane {
             pos: p,
@@ -40,6 +41,7 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     }
     let speed = speed.at(slot.level as f32);
     let source = Source::Weapon(slot.def as u16);
+    let element = Some(ctx.content.weapons[slot.def].element);
     let total = slot.cranes.len();
     let en = ctx.en;
     for (i, c) in slot.cranes.iter_mut().enumerate() {
@@ -70,7 +72,9 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             };
             let target = Vec2::new(en.x[t], en.y[t]);
             if target.distance(c.pos) < en.r[t] + reach {
-                ctx.hits.0.push(Hit::new(en.handle(t), lv.damage, source).knock(knockback, c.pos));
+                ctx.hits
+                    .0
+                    .push(Hit::new(en.handle(t), lv.damage, source).knock(knockback, c.pos).element(element));
                 ctx.outbox.0.push(SimEvent::CraneStrike { pos: c.pos });
                 c.striking = false;
                 c.rest = rest;

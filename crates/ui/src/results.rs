@@ -10,7 +10,7 @@ use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, R
 use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
-use crate::describe::{element_color, hex};
+use crate::describe::{element_color, hex, passive_color};
 use crate::skin::Skin;
 use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
@@ -199,7 +199,7 @@ fn results_body(
                             fonts,
                             Some(&name),
                             &def.name,
-                            element_color(c, def.element),
+                            passive_color(c, def.element),
                             36.0,
                         );
                     }

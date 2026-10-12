@@ -44,6 +44,11 @@ pub(crate) fn element_color(c: &Content, e: Element) -> Color {
     hex(&c.element(e).color)
 }
 
+/// 心法的颜色：无属性心法用素白。
+pub(crate) fn passive_color(c: &Content, e: Option<Element>) -> Color {
+    e.map_or(hex("#E6DFD0"), |e| element_color(c, e))
+}
+
 pub(crate) struct OfferInfo {
     pub rarity: Rarity,
     pub kind: String,
@@ -158,10 +163,10 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 kind,
                 icon: Some(format!("ui/icon_{}", def.id)),
                 glyph: def.name.chars().next().map(String::from).unwrap_or_default(),
-                color: element_color(c, def.element),
+                color: passive_color(c, def.element),
                 name: def.name.clone(),
                 desc: format!("{}。", def.desc),
-                element: Some(def.element),
+                element: def.element,
             }
         }
     }
@@ -182,15 +187,18 @@ pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
         });
     }
     let from = build.points[el.index()];
+    // 按投入计点：升级后的点数减去升级前的
+    let ep = &c.elements;
     let gain = match offer {
-        Offer::NewWeapon(_) | Offer::NewPassive(_) => 1,
+        Offer::NewWeapon(_) => ep.weapon_points(1, false),
+        Offer::NewPassive(_) => ep.passive_points(1),
         Offer::WeaponUp(k) => {
             let w = &arsenal.0[k];
-            u32::from(w.level as usize + 1 >= c.weapons[w.def].levels.len())
+            ep.weapon_points(w.level + 1, false) - ep.weapon_points(w.level, false)
         }
         Offer::PassiveUp(k) => {
             let p = build.passives[k];
-            u32::from(p.level + 1 >= c.passives[p.def].max_level)
+            ep.passive_points(p.level + 1) - ep.passive_points(p.level)
         }
         _ => 0,
     };

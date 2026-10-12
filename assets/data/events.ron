@@ -20,7 +20,7 @@
          )),
     ],
     buffs: [
-        (id: "fury", name: "灯焰", desc: "伤害 +50%", color: "#FF8A3D", effects: [Mul(Damage, 0.5)]),
+        (id: "fury", name: "灯焰", desc: "伤害 +50%", color: "#FF8A3D", effects: [Add(Damage, 0.5)]),
         (id: "swift", name: "御风", desc: "移速 +40%", color: "#6FD6A0", effects: [Mul(Speed, 0.4)]),
         (id: "soul", name: "聚魂", desc: "拾取范围 ×3", color: "#5FD4C4", effects: [Mul(Magnet, 2.0)]),
         (id: "iron", name: "金身", desc: "受到伤害 -60%", color: "#E9D9A6", effects: [Add(Reduction, 0.6)]),

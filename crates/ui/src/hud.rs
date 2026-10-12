@@ -12,7 +12,7 @@ use lantern_sim::{
 use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
-use crate::describe::{element_color, hex};
+use crate::describe::{element_color, hex, passive_color};
 use crate::skin::Skin;
 use crate::{DIM, Fonts, PAPER, text};
 
@@ -448,7 +448,7 @@ pub(crate) fn update_slots(
         p.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
             for s in &build.passives {
                 let def = &c.passives[s.def];
-                let color = element_color(c, def.element);
+                let color = passive_color(c, def.element);
                 let name = format!("ui/icon_{}", def.id);
                 let glyph: String = def.name.chars().take(1).collect();
                 row.spawn(Node {

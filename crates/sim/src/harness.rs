@@ -130,7 +130,8 @@ impl SimHarness {
             .collect();
         let awakened = build.compute_resonance(&content, &arsenal);
         let setup = world.resource::<RunSetup>().clone();
-        let (stats, effects) = collect(&content, &setup, &build, None);
+        let level = world.resource::<crate::run::Progress>().level;
+        let (stats, effects) = collect(&content, &setup, &build, None, level);
         let max = stats.max_hp();
         world.insert_resource(arsenal);
         world.insert_resource(build);
