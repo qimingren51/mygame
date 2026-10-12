@@ -1,0 +1,61 @@
+# 桌面版的检查与测试。只在桌面版相关文件变化时运行（网页小游戏见 pages.yml）。
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/**'
+      - 'assets/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'rustfmt.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'assets/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'rustfmt.toml'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: 安装系统依赖（ALSA、udev、Wayland、xkbcommon）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - name: 安装 Rust（版本见 rust-toolchain.toml）
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: 格式
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: 测试
+        run: cargo test --workspace --locked
+      - name: 模拟跑分（只记录，不作为失败条件）
+        run: cargo run --release --locked -p lantern-tools -- bench --seconds 60
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 安装 Rust（版本见 rust-toolchain.toml）
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: 模拟测试（含跨平台确定性黄金测试）
+        run: cargo test --locked -p lantern_core -p lantern_content -p lantern_sim
+      - name: 检查游戏能在 Windows 上编译
+        run: cargo check --locked -p lantern

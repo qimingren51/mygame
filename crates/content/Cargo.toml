@@ -1,0 +1,15 @@
+[package]
+name = "lantern_content"
+description = "内容数据（法器、妖物、单局节奏……）的结构定义、加载与校验"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+ron.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,5 @@
+# Bevy 0.20 要求 Rust 1.97.1 以上。升级工具链时同时更新 CI 缓存键。
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

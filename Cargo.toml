@@ -1,0 +1,62 @@
+# 提灯夜行 · 桌面版工作区。架构见 docs/DESIGN.md。
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/game"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+lantern_core = { path = "crates/core" }
+lantern_content = { path = "crates/content" }
+lantern_sim = { path = "crates/sim" }
+lantern_view = { path = "crates/view" }
+lantern_audio = { path = "crates/audio" }
+lantern_ui = { path = "crates/ui" }
+lantern_platform = { path = "crates/platform" }
+
+# Bevy 锁定精确版本，只在里程碑之间升级。模拟层只用 ECS 相关的子 crate。
+bevy = { version = "=0.20.0", default-features = false, features = [
+    "default_app",
+    "default_platform",
+    "2d_bevy_render",
+    "ui_bevy_render",
+    "bevy_picking",
+    "ui_picking",
+    "libm",
+] }
+bevy_app = { version = "=0.20.0", default-features = false, features = ["std"] }
+bevy_ecs = { version = "=0.20.0", default-features = false, features = ["std", "multi_threaded"] }
+bevy_math = { version = "=0.20.0", default-features = false, features = ["std", "libm"] }
+bevy_state = { version = "=0.20.0", default-features = false, features = ["std", "bevy_app"] }
+
+kira = { version = "0.12.5", default-features = false, features = ["cpal"] }
+serde = { version = "1", features = ["derive"] }
+ron = "0.12.2"
+directories = "6.0.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Bevy 的系统函数参数多、查询类型长，这两条在 Bevy 项目里只会制造噪音。
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# 开发时：自己的代码轻度优化以便快速编译，依赖（Bevy）全力优化，否则帧率太低没法测试。
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+# 保留符号名，崩溃报告里的调用栈才看得懂。
+strip = "debuginfo"

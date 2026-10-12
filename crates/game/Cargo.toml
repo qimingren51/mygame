@@ -1,0 +1,29 @@
+[package]
+name = "lantern"
+description = "提灯夜行：可执行程序，把各模块的插件组装起来"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "lantern"
+path = "src/main.rs"
+
+[dependencies]
+lantern_core.workspace = true
+lantern_content.workspace = true
+lantern_sim.workspace = true
+lantern_view.workspace = true
+lantern_audio.workspace = true
+lantern_ui.workspace = true
+lantern_platform.workspace = true
+bevy.workspace = true
+
+[features]
+# 开发模式：Bevy 的调试工具与资源热重载。调试面板（egui）在 M1 加入。
+dev = ["bevy/dev"]
+
+[lints]
+workspace = true

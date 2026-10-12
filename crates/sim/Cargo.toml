@@ -1,0 +1,22 @@
+[package]
+name = "lantern_sim"
+description = "玩法模拟：只依赖 ECS，不碰渲染、窗口、音频；同一种子加同一输入，结果逐位相同"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lantern_core.workspace = true
+lantern_content.workspace = true
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_math.workspace = true
+bevy_state.workspace = true
+
+[dev-dependencies]
+ron.workspace = true
+
+[lints]
+workspace = true

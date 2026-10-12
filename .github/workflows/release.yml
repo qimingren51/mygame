@@ -1,0 +1,84 @@
+# 打包桌面版。
+# - 推送 v* 标签（例如 v0.1.0）：打包 Linux 和 Windows 版本，发布到 GitHub Releases（标记为预发布）。
+# - 在 Actions 页面手动运行：只打包，安装包在这次运行的 Artifacts 里下载，适合测试。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 在较旧的 Ubuntu 上构建，生成的程序能在更多发行版上运行（glibc 向后兼容）。
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            exe: lantern
+          - os: windows-latest
+            platform: windows-x86_64
+            exe: lantern.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: 安装系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - name: 安装 Rust（版本见 rust-toolchain.toml）
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: 构建
+        run: cargo build --release --locked -p lantern
+      - name: 打包
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::7}"; fi
+          name="lantern-${version}-${{ matrix.platform }}"
+          mkdir -p "dist/$name"
+          cp "target/release/${{ matrix.exe }}" "dist/$name/"
+          cp -r assets "dist/$name/assets"
+          cp packaging/README.txt "dist/$name/"
+          cd dist
+          if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lantern-${{ matrix.platform }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 发布到 GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "提灯夜行 $GITHUB_REF_NAME" \
+            --generate-notes \
+            --prerelease

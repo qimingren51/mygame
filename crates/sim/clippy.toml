@@ -1,0 +1,30 @@
+# 模拟相关代码必须跨平台得到相同结果（docs/DESIGN.md 第 7 节）。
+# 超越函数在各平台的 C 数学库里实现不同，改用 bevy_math::ops（开启了 libm）。
+disallowed-methods = [
+    { path = "f32::sin", reason = "用 bevy_math::ops::sin，保证跨平台一致" },
+    { path = "f32::cos", reason = "用 bevy_math::ops::cos" },
+    { path = "f32::tan", reason = "用 bevy_math::ops::tan" },
+    { path = "f32::sin_cos", reason = "用 bevy_math::ops::sin_cos" },
+    { path = "f32::asin", reason = "用 bevy_math::ops::asin" },
+    { path = "f32::acos", reason = "用 bevy_math::ops::acos" },
+    { path = "f32::atan", reason = "用 bevy_math::ops::atan" },
+    { path = "f32::atan2", reason = "用 bevy_math::ops::atan2" },
+    { path = "f32::exp", reason = "用 bevy_math::ops::exp" },
+    { path = "f32::exp2", reason = "用 bevy_math::ops::exp2" },
+    { path = "f32::ln", reason = "用 bevy_math::ops::ln" },
+    { path = "f32::log2", reason = "用 bevy_math::ops::log2" },
+    { path = "f32::log10", reason = "用 bevy_math::ops::log10" },
+    { path = "f32::powf", reason = "用 bevy_math::ops::powf" },
+    { path = "f32::powi", reason = "结果依赖优化方式，改用显式乘法或 bevy_math::ops::powf" },
+    { path = "f32::hypot", reason = "用 bevy_math::ops::hypot" },
+    { path = "f32::cbrt", reason = "用 bevy_math::ops::cbrt" },
+    { path = "f64::sin", reason = "模拟里不用 f64 超越函数" },
+    { path = "f64::cos", reason = "模拟里不用 f64 超越函数" },
+    { path = "f64::exp", reason = "模拟里不用 f64 超越函数" },
+    { path = "f64::powf", reason = "模拟里不用 f64 超越函数" },
+]
+# 遍历顺序不确定，会破坏可复现性。需要映射时用 BTreeMap 或排好序的 Vec。
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "遍历顺序不确定；用 BTreeMap 或 Vec" },
+    { path = "std::collections::HashSet", reason = "遍历顺序不确定；用 BTreeSet 或 Vec" },
+]

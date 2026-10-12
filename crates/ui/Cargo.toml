@@ -1,0 +1,17 @@
+[package]
+name = "lantern_ui"
+description = "标题、暂停、信息栏等界面"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lantern_core.workspace = true
+lantern_sim.workspace = true
+lantern_platform.workspace = true
+bevy.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "lantern_view"
+description = "渲染：镜头、插值、图层、光照图、特效"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lantern_sim.workspace = true
+bevy.workspace = true
+
+[lints]
+workspace = true

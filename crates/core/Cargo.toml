@@ -1,0 +1,11 @@
+[package]
+name = "lantern_core"
+description = "定步长、随机流、状态哈希：模拟和工具共用的最底层，不依赖引擎"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
