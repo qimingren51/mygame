@@ -36,6 +36,8 @@ import postprocess as P  # noqa: E402
 import check_asset as C  # noqa: E402
 import contact_sheet as CS  # noqa: E402
 import hero as HERO  # noqa: E402
+sys.path.insert(0, str(ART / "render"))
+from pipeline import render_asset as _render_asset  # noqa: E402
 import shade as SHADE  # noqa: E402
 import rock as ROCK  # noqa: E402
 
@@ -51,65 +53,11 @@ def _rel(p: Path) -> str:
     return str(p.relative_to(ART.parent)) if p.is_relative_to(ART.parent) else str(p)
 
 
-def render_asset(name: str, frame_px: int, build, jobs, meta_extra: dict, pose=None,
-                 sockets_wanted=(), flash=False):
-    """jobs: [(anim, dir, frame_idx, n_frames)]。返回写出的文件夹。"""
-    out = ASSETS / name
-    out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("*.png"):
-        old.unlink()
-    t0 = time.perf_counter()
-    B.reset_scene()
-    B.setup_render(frame_px)
-    B.setup_camera(frame_px)
-    B.verify_camera(frame_px, verbose=False)
-    B.setup_freestyle()
-    root, parts, sockets = build()
-    TIMES.setdefault("build_s", {})[name] = round(time.perf_counter() - t0, 3)
-    TIMES.setdefault("faces", {})[name] = B.face_count(root)
-    sock_out: dict = {s: {} for s in sockets_wanted}
-    anims: dict = {}
-    times = []
-    seen: dict = {}
-    with B.render_lock():
-        for anim, d, i, n in jobs:
-            k = seen[(anim, d)] = seen.get((anim, d), -1) + 1  # 文件帧号 = 该朝向里第几张（--quick 时与姿态帧号不同）
-            if pose:
-                pose(parts, anim, i, n)
-            B.set_direction(root, d)
-            L = B.render_layers(OUT / "_tmp" / f"{name}_{anim}_{d}_{i:02d}")
-            tp = time.perf_counter()
-            R = P.process_layers(L, name)
-            times.append((L["time_s"], time.perf_counter() - tp))
-            base = f"{anim}_{d}_{k:02d}"
-            P.save_png(R["rgba"], out / f"{base}.png")
-            if R["stats"]["emit_px"] > 0 or meta_extra.get("layers"):
-                P.save_png(R["emit"], out / f"{base}_emit.png")
-            if flash:
-                P.save_png(R["flash"], out / f"{base}_flash.png")
-            for s in sockets_wanted:
-                x, y = B.project_point(sockets[s].matrix_world.translation, frame_px)
-                sock_out[s].setdefault(anim, {}).setdefault(d, []).append([round(x, 2), round(y, 2)])
-            a = anims.setdefault(anim, {"frames": 0, "dirs": []})
-            if d not in a["dirs"]:
-                a["dirs"].append(d)
-    for (anim, d, i, n) in jobs:  # 帧数 = 每个朝向实际渲的帧数
-        anims[anim]["frames"] = sum(1 for j in jobs if j[0] == anim and j[1] == d)
-    meta = {"name": name, "size": [frame_px, frame_px], "anchor": list(S.ANCHOR), "anims": anims,
-            "sockets": sock_out}
-    for an, extra in meta_extra.pop("anim_extra", {}).items():
-        meta["anims"][an].update(extra)
-    meta.update(meta_extra)
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-    r = np.array(times)
-    TIMES["frames"][name] = {
-        "n": len(times), "render_px": frame_px * S.RENDER_SCALE,
-        "render_s_mean": round(float(r[:, 0].mean()), 3), "render_s_max": round(float(r[:, 0].max()), 3),
-        "post_s_mean": round(float(r[:, 1].mean()), 3),
-        "total_s": round(time.perf_counter() - t0, 2)}
-    print(f"[{name}] {len(times)} 帧，渲染 {r[:, 0].mean():.2f}s/帧（{frame_px * S.RENDER_SCALE}²），"
-          f"后期 {r[:, 1].mean():.2f}s/帧，共 {time.perf_counter() - t0:.1f}s")
-    return out
+def render_asset(name, frame_px, build, jobs, meta_extra, pose=None, sockets_wanted=(), flash=False, anchor=None):
+    """转给 pipeline.render_asset（与正式出图同一套），输出到 out/style/assets。"""
+    return _render_asset(name, frame_px, build, jobs, ASSETS, meta_extra=meta_extra, pose=pose,
+                         sockets_wanted=sockets_wanted, flash=flash, anchor=anchor, tmp_dir=OUT / "_tmp",
+                         timings=TIMES["frames"])
 
 
 def time_shade_512():
@@ -179,9 +127,9 @@ def main():
                  meta_extra={"category": "enemy", "floating": True, "layers": ["emit", "flash"],
                              "required_sockets": ["eyes"], "shadow_radius_px": 16,
                              "anim_extra": {"idle": {"fps": 8}}, "note": "风格样张：只渲第 0 帧"})
-    for nm, seed in (("rock_a", 9), ("rock_b", 16)):
-        render_asset(nm, S.FRAME["prop"], lambda s=seed: ROCK.build_rock(s), [("idle", "S", 0, 1)],
-                     meta_extra={"category": "prop", "shadow_radius_px": 22, "anim_extra": {"idle": {"fps": 1}}})
+    for nm, v in (("rock_a", "a"), ("rock_b", "b")):
+        render_asset(nm, S.FRAME["prop"], lambda v=v: ROCK.build_rock(v), [("idle", "S", 0, 1)], anchor=S.PROP_ANCHOR,
+                     meta_extra={"category": "prop", "shadow_radius_px": 20, "anim_extra": {"idle": {"fps": 1}}})
     time_shade_512()
     TIMES["render_total_s"] = round(time.perf_counter() - T0, 2)
     for p in (OUT / "_tmp").glob("*"):

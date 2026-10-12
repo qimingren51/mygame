@@ -27,6 +27,7 @@ if str(ART) not in sys.path:
 from style import style as S  # noqa: E402
 
 LIGHT_RADIUS_PX = 100
+SOCKET_LIGHTS = {"lantern": (LIGHT_RADIUS_PX, S.LANTERN_LIGHT), "flame": (70, S.FLAME_LIGHT)}  # 挂点 → 夜景光源
 ZOOM = 3
 
 
@@ -179,9 +180,10 @@ def sheet(assets: list[dict], night: bool = False, pad: int = 6, label: bool = T
                 _label(row, (pad + k * (W + pad), 1), f["key"])
             if night:
                 place_emit(emit, f, A["meta"], at)
-                if "lantern" in f["sockets"]:
-                    sx, sy = f["sockets"]["lantern"]
-                    lights.append((at[0] + sx, at[1] + sy, LIGHT_RADIUS_PX, S.LANTERN_LIGHT))
+                for sn, (rad, col) in SOCKET_LIGHTS.items():
+                    if sn in f["sockets"]:
+                        sx, sy = f["sockets"][sn]
+                        lights.append((at[0] + sx, at[1] + sy, rad, col))
         rows.append(night_composite(row, emit, lights) if night else row.convert("RGB"))
     Wt = max(r.width for r in rows)
     out = Image.new("RGB", (Wt, sum(r.height for r in rows)), rgb(S.PAPER))
@@ -250,6 +252,8 @@ def grid_frames(A: dict, anim: str, dirs: list[str], cols: int = 4, pad: int = 4
     for i in range(n):
         im = Image.new("RGBA", (cols * (W + pad) + pad, rows * (H + pad + 10) + pad), (0, 0, 0, 0))
         for k, d in enumerate(dirs):
+            if d is None:  # 空格（例如 3×3 方位图的中心）
+                continue
             f = next(fr for fr in A["frames"] if fr["key"] == f"{anim}_{d}_{i:02d}")
             x, y = pad + (k % cols) * (W + pad), pad + (k // cols) * (H + pad + 10)
             im.alpha_composite(f["rgba"], (x, y + 10))

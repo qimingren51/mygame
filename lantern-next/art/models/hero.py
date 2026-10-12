@@ -89,7 +89,7 @@ def _materials():
         "seal": B.flat_material("TalismanMark", A["zhusha"]),
         "core": B.emissive_material("LanternCore", S.LANTERN_LIGHT, 1.0),
     }
-    m["window"] = B.window_material("LanternWindow", m["shell"], open_facing=0.45)
+    m["window"] = B.window_material("LanternWindow", m["shell"], open_facing=0.25)  # 窗口小一点，朱砂纸壳要读得出来
     return m
 
 

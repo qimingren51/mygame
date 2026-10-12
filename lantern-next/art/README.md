@@ -101,10 +101,12 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 
 名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
 
-## 正式管线（风格样张）
+## 正式管线
 
 ```bash
-art/.venv/bin/python art/render/style_frame.py           # 约 45 秒；--quick 只渲 walk 第 2 帧
+art/.venv/bin/python art/render/produce.py               # 正式出图 → out/assets/，审图 → out/review/（约 2 分钟）
+art/.venv/bin/python art/render/produce.py --only shade,wisp   # 只重渲部分；--review 只自检 + 重拼审图
+art/.venv/bin/python art/render/style_frame.py           # 风格样张 → out/style/（约 45 秒；--quick 更快）
 art/.venv/bin/python art/post/check_asset.py art/out/style/assets/hero   # 单独自检一个素材
 art/.venv/bin/python art/post/contact_sheet.py <输出目录> <素材文件夹>...  # 单独拼图
 ```
@@ -116,8 +118,17 @@ art/.venv/bin/python art/post/contact_sheet.py <输出目录> <素材文件夹>.
 | `post/postprocess.py` | 4× 缩小、调色板软吸附、墨线叠加与墨晕、纸纹、透明区扩色、闪白剪影 |
 | `post/check_asset.py` | 按输出约定自检（尺寸、边距、脚点漂移、身高、调色板、墨线占比、挂点） |
 | `post/contact_sheet.py` | 白天拼图、3 倍放大、夜景合成、游戏实际大小对比 |
-| `models/hero.py` / `shade.py` / `rock.py` | 提灯剑修、影妖、山石 |
-| `render/style_frame.py` | 渲出上述素材到 `out/style/assets/`，自检并拼审图 |
+| `models/hero.py` | 提灯剑修（idle 6 帧、walk 8 帧，8 向；发带/袖/下摆/发尾/灯笼/符纸有滞后摆动） |
+| `models/shade.py` | 影妖、疾影（同一个墨烟幽灵构造器，float 动画；烟缕按顶点属性 fade 渐隐） |
+| `models/rock.py` / `stone_lantern.py` | 山石 a/b/c（卵石/立石/双石，暗示轮廓线作皴笔）、石灯笼（窗口发光，苔壳） |
+| `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（两个出图脚本共用） |
+| `render/produce.py` | 正式出图 + 自检 + 审图（拼图、夜景、游戏大小、8 向动图） |
+| `render/style_frame.py` | 风格样张 |
+
+墨线分档（物体放进哪个集合就用哪档，见 `bstyle.LINE_COLLECTIONS`）：
+outer 大形体（外轮廓 2.6px + 形线 1.4px + 折痕），inner 小部件（外轮廓 + 1.1px），
+thin 细长彩色部件（只有 1.1px，不进粗外轮廓，灯杖、符纸），none 不描线（眼、发光芯、烟缕）；
+`cun=True` 另加暗示轮廓线作皴笔。道具用 `setup_camera(..., anchor=PROP_ANCHOR)`。
 
 实测要点（bpy 5.2.2）：
 - 物体编号通道在 EXR 里叫 `ViewLayer.Object Index.X`；**只开 Object Index 时全是 0，要同时开 Depth 才会写出**。
@@ -125,6 +136,8 @@ art/.venv/bin/python art/post/contact_sheet.py <输出目录> <素材文件夹>.
 - 内部剪影若也用 2.6px 外线宽，128px 主角六成以上是墨，所以外线宽只给整体外轮廓，内部剪影降一档。
 - 边标记是名为 `freestyle_edge` 的布尔边属性（山石的皴笔用它）。
 - 每帧素材除了 `<动画>_<朝向>_<帧号>.png`，还写 `_emit.png`（发光部件，夜里叠加用），妖物另有 `_flash.png`。
+- 一个物体可以同时链接到多个集合（Freestyle 按集合选线时照样认），外轮廓集合 InkContour 就是这样叠加的。
+- 噪声纹理节点要先设 `noise_dimensions="4D"`，`W` 插口才存在。
 
 ## 不提交到 git 的目录
 

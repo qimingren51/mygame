@@ -406,12 +406,13 @@ def window_material(name: str, shell: bpy.types.Material, open_facing: float = 0
 
 
 # ================================================================ 物体
-def add_object(ob, line: str = "outer", parent=None, cun: bool = False):
+def add_object(ob, line: str = "outer", parent=None, cun: bool = False, contour: bool | None = None):
     """把物体放进对应线宽的集合（见 LINE_COLLECTIONS），outer/inner 同时进外轮廓集合；
-    cun=True 再进皴笔集合。用发光材质的物体自动设 pass_index=1。"""
+    cun=True 再进皴笔集合。contour=True 时 none 物体也参与整体外轮廓（例如包在石头外面的苔壳，
+    它本身不描线，但它的外缘就是剪影）。用发光材质的物体自动设 pass_index=1。"""
     coll = bpy.data.collections[LINE_COLLECTIONS[line]]
     coll.objects.link(ob)
-    if line in ("outer", "inner"):
+    if contour if contour is not None else line in ("outer", "inner"):
         bpy.data.collections[CONTOUR_COLLECTION].objects.link(ob)
     if cun:
         bpy.data.collections[CUN_COLLECTION].objects.link(ob)
@@ -424,7 +425,7 @@ def add_object(ob, line: str = "outer", parent=None, cun: bool = False):
 
 
 def mesh_object(name, build, mat, line="outer", parent=None, loc=(0, 0, 0), rot=(0, 0, 0),
-                scale=(1, 1, 1), smooth=True, sharp_deg=40.0, cun=False):
+                scale=(1, 1, 1), smooth=True, sharp_deg=40.0, cun=False, contour=None):
     """用 bmesh 建网格物体。build(bm) 往 bm 里加几何；mat 可以是材质或材质列表。"""
     me = bpy.data.meshes.new(name)
     bm = bmesh.new()
@@ -441,7 +442,7 @@ def mesh_object(name, build, mat, line="outer", parent=None, loc=(0, 0, 0), rot=
         me.materials.append(m)
     ob = bpy.data.objects.new(name, me)
     ob.location, ob.rotation_euler, ob.scale = loc, rot, scale
-    add_object(ob, line, parent, cun)
+    add_object(ob, line, parent, cun, contour)
     return ob
 
 
@@ -455,7 +456,7 @@ def set_point_attr(ob, name: str, values) -> None:
 def smoke_material(name: str, ramp: list[str], fade_attr: str = "fade", fade_start: float = 0.25,
                    fade_power: float = 1.4, noise_amt: float = 0.35, seed: float = 0.0, **toon_kw):
     """烟缕：假卡通三档颜色，再按顶点属性 fade（0=根部，1=尖端）逐渐透明，并用噪声把透明边缘打散。
-    alpha = 1 - clamp((fade - fade_start)/(1-fade_start))^fade_power ± 噪声。"""
+    透明度 = clamp(f^fade_power + 噪声·f)，f = clamp((fade - fade_start)/(1 - fade_start))。"""
     m = toon_material(name, ramp=ramp, seed=seed, **toon_kw)
     nt = m.node_tree
     N, L = nt.nodes, nt.links
@@ -480,14 +481,12 @@ def smoke_material(name: str, ramp: list[str], fade_attr: str = "fade", fade_sta
     nzs = N.new("ShaderNodeMath"); nzs.operation = "MULTIPLY_ADD"
     nzs.inputs[1].default_value = noise_amt; nzs.inputs[2].default_value = -0.5 * noise_amt
     L.new(nz.outputs["Fac"], nzs.inputs[0])
-    add = N.new("ShaderNodeMath"); add.operation = "ADD"; add.use_clamp = True
-    L.new(pw.outputs["Value"], add.inputs[0]); L.new(nzs.outputs["Value"], add.inputs[1])
-    gate = N.new("ShaderNodeMath"); gate.operation = "MULTIPLY"; gate.use_clamp = True  # 根部不受噪声影响
-    L.new(add.outputs["Value"], gate.inputs[0])
+    gate = N.new("ShaderNodeMath"); gate.operation = "MULTIPLY"  # 噪声只在中后段起作用，根部保持实
+    L.new(nzs.outputs["Value"], gate.inputs[0])
     L.new(mr.outputs["Result"], gate.inputs[1])
-    gate2 = N.new("ShaderNodeMath"); gate2.operation = "MULTIPLY_ADD"; gate2.use_clamp = True
-    gate2.inputs[1].default_value = 4.0; gate2.inputs[2].default_value = 0.0
-    L.new(gate.outputs["Value"], gate2.inputs[0])
+    gate2 = N.new("ShaderNodeMath"); gate2.operation = "ADD"; gate2.use_clamp = True
+    L.new(pw.outputs["Value"], gate2.inputs[0])
+    L.new(gate.outputs["Value"], gate2.inputs[1])
     tr = N.new("ShaderNodeBsdfTransparent")
     mix = N.new("ShaderNodeMixShader")
     L.new(gate2.outputs["Value"], mix.inputs["Fac"])

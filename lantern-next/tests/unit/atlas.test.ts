@@ -32,6 +32,15 @@ const index = existsSync(new URL('index.json', dir))
 const REQUIRED: Record<string, string[]> = {
   vfx: ['light', 'glow', 'eyes', 'shadow', 'spark', 'gem_0', 'gem_1', 'gem_2', 'flame_0', 'flame_1', 'flame_2', 'flame_3', 'ink_0', 'ink_1', 'ink_2', 'lantern'].map((n) => `vfx/${n}`),
   ground: ['ground/wash_0', 'ground/grass_0'],
+  actors: [
+    ...['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'].flatMap((d) => [`hero/idle_${d}_00`, `hero/walk_${d}_07`]),
+    'shade/float_E_00',
+    'shade/float_E_00_flash',
+    'wisp/float_E_00',
+    'wisp/float_E_00_flash',
+    'rock_a/idle_S_00',
+    'stone_lantern/idle_S_00',
+  ],
 };
 
 describe.each(index.atlases)('图集 %s', (name) => {

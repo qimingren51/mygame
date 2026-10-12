@@ -10,7 +10,8 @@
   2. 每个 <动画>_<朝向>_<帧号>.png 都存在、是 RGBA、尺寸等于 meta.size；附带的 _emit/_flash 图尺寸一致
   3. 四周至少 1px 完全透明（不能贴边）
   4. 脚底漂移：同一动画同一朝向的各帧，“脚点”离中位数不超过 FOOT_TOLERANCE_PX
-  5. 身高：各帧身高离全素材中位数不超过 HEIGHT_TOLERANCE；meta 给了 height_px 时也和目标比
+  5. 身高：各帧身高离“同一动画同一朝向”的中位数不超过 HEIGHT_TOLERANCE；全素材中位数和 meta.height_px
+     （有的话）比；某个朝向整体偏离全素材中位数只给警告（道具可能高过头顶）
   6. 调色板：不透明的非墨线像素里，≥90% 离调色板（full_palette + 发光色）在 PALETTE_TOLERANCE 以内
   7. 墨线占比：在合理范围 LINE_RATIO_RANGE 内
   8. 挂点：meta.sockets 里每个挂点都覆盖每个动画、每个朝向、每一帧
@@ -21,7 +22,7 @@
     不会被单个脚尖拉低）
   - 脚点 x：底线往上 BASE_BAND×身高 这一条带里，按 alpha 加权的水平重心
   悬浮的素材（meta.floating=true）只检查 x。
-“身高”：中间列里最上面一个不透明像素到底线的距离；与目标比较时减去一个外线宽
+“身高”：锚点正上方窄列（±TOP_WINDOW×宽）里最上面一个不透明像素到底线的距离；与目标比较时减去一个外线宽
   （外轮廓线在顶部和底部各有约半个线宽伸出模型之外）。
 “墨线像素”：离墨线色 LINE_NEAR 以内的纯墨，或不在调色板容差内、但能解释为“某个调色板色与墨线色的混合、
   墨的比例 ≥ 20%”的过渡像素。焦墨填色（头发、靴子暗面）也算在墨里，所以墨线占比其实是“墨的覆盖率”。
@@ -46,7 +47,8 @@ from style import style as S  # noqa: E402
 LIGHT_COLORS = [S.LANTERN_LIGHT, S.FLAME_LIGHT, S.SOUL_LIGHT, *S.EYE.values()]
 PALETTE_MIN_SHARE = 0.90
 LINE_RATIO_RANGE = (0.05, 0.60)
-BODY_WINDOW = 0.15  # 中间列半宽（相对帧宽）
+BODY_WINDOW = 0.15  # 中间列半宽（相对帧宽）：求底线、脚点
+TOP_WINDOW = 0.06  # 求“头顶”时用更窄的列（头顶/冠就在锚点正上方，两侧摆动的灯笼不算）
 BASE_BAND = 0.12
 ALPHA_OPAQUE = 0.5
 LINE_NEAR = 10.0  # 离墨线色这么近就算纯墨
@@ -104,8 +106,13 @@ def measure(alpha: np.ndarray, anchor_x: float, band_rows: tuple[float, float] |
         y -= 1
     nxt = widths[y + 1] if y + 1 < H else 0.0
     base = y + 0.5 + (widths[y] - thr) / max(widths[y] - nxt, 1e-6)  # 宽度降到阈值的位置（亚像素）
-    # 顶：第一行 alpha 总量的亚像素位置
-    tops = win[top].sum() / max(win[top + 1].sum(), 1e-6) if top + 1 < H else 1.0
+    # 顶：窄列里第一个不透明行，按该行 alpha 总量取亚像素位置
+    t0 = max(0, int(round(anchor_x - TOP_WINDOW * W)))
+    t1 = min(W, int(round(anchor_x + TOP_WINDOW * W)) + 1)
+    tw = alpha[:, t0:t1].astype(np.float64)
+    trows = np.where((tw >= ALPHA_OPAQUE).any(1))[0]
+    top = int(trows[0]) if trows.size else top
+    tops = tw[top].sum() / max(tw[top + 1].sum(), 1e-6) if top + 1 < H else 1.0
     top_f = top + 1 - min(1.0, tops)
     if band_rows is None:
         band_rows = (base - BASE_BAND * (base - top_f), base - FOOT_EXCLUDE_PX)
@@ -229,9 +236,15 @@ def check_asset(asset_dir: Path) -> dict:
             warns.append(f"{an}_{d}：底线 y 中位数 {np.median(fy):.1f}，离锚点 {ay:.1f} 超过 6px")
     heights = np.array([m["height"] for m in ms.values() if m])
     hmed = float(np.median(heights))
-    bad = [(k, m["height"]) for k, m in ms.items() if m and abs(m["height"] - hmed) > S.HEIGHT_TOLERANCE * hmed]
-    for k, h in bad:
-        errors.append(f"{k[0]}_{k[1]}_{k[2]:02d}.png 身高 {h:.0f}px，离中位数 {hmed:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
+    # 逐帧和“同一动画同一朝向”的中位数比（抓缩放跳变）；各朝向的中位数和全素材中位数比只给警告——
+    # 有些朝向里灯杖、灯笼正好在头顶后方，剪影最高点不是头顶（例如主角 NW 向杖头比冠顶高约 19px）
+    for (an, d), lst in groups.items():
+        gmed = float(np.median([m["height"] for m in lst]))
+        for (an2, d2, i), m in ms.items():
+            if m and (an2, d2) == (an, d) and abs(m["height"] - gmed) > S.HEIGHT_TOLERANCE * gmed:
+                errors.append(f"{an}_{d}_{i:02d}.png 身高 {m['height']:.0f}px，离本组中位数 {gmed:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
+        if abs(gmed - hmed) > S.HEIGHT_TOLERANCE * hmed:
+            warns.append(f"{an}_{d}：剪影高 {gmed:.0f}px，与全素材中位数 {hmed:.0f}px 不同（多半是道具高过头顶，请目检）")
     if "height_px" in meta:
         tgt = float(meta["height_px"])
         h_model = hmed - S.LINE_OUTER_PX
