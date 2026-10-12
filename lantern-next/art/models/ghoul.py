@@ -94,8 +94,8 @@ def build_ghoul():
 def pose_ghoul(parts, anim, frame, n):
     """move：沉重大步——腿交替前后（膝随摆动屈伸），上身随步左右晃、微起伏，双臂与同侧腿反向摆，破袍飘。"""
     ph = 2 * math.pi * (frame % n) / n
-    parts["pelvis"].location.z = 1.05 + 0.02 * math.cos(2 * ph)
-    parts["pelvis"].rotation_euler = (0, math.radians(4 * math.sin(ph)), math.radians(5 * math.sin(ph)))
+    parts["pelvis"].location.z = 1.05 + 0.010 * math.cos(2 * ph)
+    parts["pelvis"].rotation_euler = (0, math.radians(0.8 * math.sin(ph)), math.radians(1.5 * math.sin(ph)))
     for nm, sgn in (("L", 1), ("R", -1)):
         s = sgn * math.sin(ph)
         parts[f"hip_{nm}"].rotation_euler = (math.radians(-20 * s), 0, 0)

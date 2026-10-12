@@ -148,8 +148,8 @@ def build_stonelord():
 def pose_stonelord(parts, anim, frame, n):
     """move：缓慢重踏——一条腿抬起再重重踏下（两拍各 4 帧），上身随之左右晃、落地时微沉。"""
     ph = 2 * math.pi * (frame % n) / n
-    parts["pelvis"].location.z = 1.05 - 0.02 * abs(math.cos(ph))
-    parts["pelvis"].rotation_euler = (0, math.radians(3 * math.sin(ph)), 0)
+    parts["pelvis"].location.z = 1.05 - 0.010 * abs(math.cos(ph))
+    parts["pelvis"].rotation_euler = (0, math.radians(1.2 * math.sin(ph)), 0)
     for nm, sgn in (("L", 1), ("R", -1)):
         s = sgn * math.sin(ph)
         lift = max(0.0, s)

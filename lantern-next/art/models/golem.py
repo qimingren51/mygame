@@ -31,7 +31,7 @@ def build_golem():
     I = S.INK
     k = SCALE
     stone = K.toon("GolemStone", I["dan"], wash=0.40, wash_scale=3.0, edge=0.6, edge_power=2.5, seed=31.0)
-    moss = moss_material("GolemMoss", coverage=0.60, up=0.55, seed=5.0)
+    moss = moss_material("GolemMoss", coverage=0.54, up=0.50, seed=5.0)
     hollow = B.flat_material("GolemHollow", I["jiao"])
     eye = B.emissive_material("GolemEye", S.EYE["golem"], 1.0)
     root = B.empty("GolemRoot")
@@ -84,11 +84,12 @@ def pose_golem(parts, anim, frame, n):
     """move：沉重的摇摆步——身体左右滚（绕前后轴）、轻微起伏；两臂交替前后摆、拳头擦地；短腿交替迈步。"""
     ph = 2 * math.pi * (frame % n) / n
     body = parts["body"]
-    body.rotation_euler = (math.radians(4 + 1.5 * math.sin(2 * ph)), math.radians(6 * math.sin(ph)), 0)
-    body.location.z = 0.018 * math.cos(2 * ph)
+    # 摆幅都很小：配准检查量的是背上的最高点（FOOT_TOLERANCE_PX=1.5）
+    body.rotation_euler = (math.radians(4 + 0.6 * math.sin(2 * ph)), math.radians(1.2 * math.sin(ph)), 0)
+    body.location.z = 0.010 * math.cos(2 * ph)
     for nm, sgn in (("L", 1), ("R", -1)):
-        parts[f"arm_{nm}"].rotation_euler = (math.radians(16 * sgn * math.sin(ph)), 0, 0)
-        parts[f"leg_{nm}"].rotation_euler = (math.radians(-14 * sgn * math.sin(ph)), 0, 0)
+        parts[f"arm_{nm}"].rotation_euler = (math.radians(14 * sgn * math.sin(ph)), 0, 0)
+        parts[f"leg_{nm}"].rotation_euler = (math.radians(-10 * sgn * math.sin(ph)), 0, 0)
         parts[f"leg_{nm}"].location.z = SCALE * 0.46 + 0.04 * max(0.0, sgn * math.sin(ph))
     parts["head"].rotation_euler = (math.radians(2 * math.sin(2 * ph + 0.5)), 0, math.radians(-20))
     bpy.context.view_layer.update()

@@ -145,19 +145,19 @@ def build_fox():
 def _fox_tail(root, ang, ln, phase, tph, xo=0.0):
     a = math.radians(ang)
     d = Vector((xo, math.cos(a), math.sin(a)))
-    return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + tph, 0.08, curl=0.5)
+    return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + tph, 0.05, curl=0.5)
 
 
 def pose_fox(parts, anim, frame, n):
     """move：潜行小跑——两腿交替（髋前后摆、膝随之屈伸），身体轻微起伏，前爪交替探出，尾巴波动，破袍飘。"""
     ph = 2 * math.pi * (frame % n) / n
-    parts["body"].location.z = 0.02 * math.cos(2 * ph)
-    parts["torso"].rotation_euler.x = math.radians(35 + 2 * math.sin(2 * ph))
+    parts["body"].location.z = 0.006 * math.cos(2 * ph)
+    parts["torso"].rotation_euler.x = math.radians(35)
     for nm, sgn in (("L", 1), ("R", -1)):
         s = sgn * math.sin(ph)
-        parts[f"hip_{nm}"].rotation_euler = (math.radians(-24 * s), 0, 0)
+        parts[f"hip_{nm}"].rotation_euler = (math.radians(-16 * s), 0, 0)
         parts[f"knee_{nm}"].rotation_euler = (math.radians(14 * max(0.0, -s) + 6), 0, 0)
-        parts[f"arm_{nm}"].rotation_euler = (math.radians(14 * s), 0, 0)
+        parts[f"arm_{nm}"].rotation_euler = (math.radians(9 * s), 0, 0)
     M = parts["M"]
     for ob, troot, ang, ln, tph, xo in parts["tails"]:
         K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))

@@ -41,7 +41,7 @@ def build_toad():
     ink = B.flat_material("ToadInk", I["jiao"])
     eye = B.emissive_material("ToadEye", S.EYE["toad"], 1.0)
     root = B.empty("ToadRoot")
-    yaw = K.yaw_pivot("ToadYaw", root, -8, loc=(0.22, 0, 0))  # 帧下方只有 10px：朝镜头偏得少，并整体后移 0.22 米
+    yaw = K.yaw_pivot("ToadYaw", root, -8, loc=(0.28, 0, 0))  # 帧下方只有 10px：朝镜头偏得少，并整体后移 0.28 米
     body = B.empty("ToadBody", yaw)
     squash = B.empty("ToadSquash", body)
     parts = {"root": root, "body": body, "squash": squash}
@@ -92,7 +92,7 @@ def pose_toad(parts, anim, frame, n):
     body, squash = parts["body"], parts["squash"]
     body.location.z = lift
     body.rotation_euler.x = math.radians(pitch)
-    squash.scale = (1 + (1 - sq) * 0.5, 1 + (1 - sq) * 0.3, sq)
+    squash.scale = (1 + (1 - sq) * 0.25, 1 + (1 - sq) * 0.15, sq)
     for nm, hip in parts["legs"].items():
         if nm == "B":
             hip.rotation_euler.x = math.radians(35 * ext)  # 后腿向后蹬直
