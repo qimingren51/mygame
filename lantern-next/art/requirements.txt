@@ -1,0 +1,5 @@
+# 提灯夜行 美术管线（无头 Blender 渲染）依赖
+# 需要 Python 3.13（bpy 5.2.2 只提供 cp313 manylinux wheel，约 383 MB，解压后 venv 约 1.1 GB）
+bpy==5.2.2
+pillow==12.3.0
+numpy==2.5.3
