@@ -1,16 +1,16 @@
 """把素材文件夹打包成 PixiJS 图集（PNG + JSON）。
 
-用法（在 lantern-next/ 目录下）：
-    art/.venv/bin/python art/post/pack_atlas.py --name vfx --out public/assets art/out/assets/vfx
-    art/.venv/bin/python art/post/pack_atlas.py --name actors --out public/assets art/out/assets/hero art/out/assets/shade ...
-    art/.venv/bin/python art/post/pack_atlas.py --paper art/out/assets/ground/paper.png --out public/assets
+用法（在仓库根目录下；桌面版用 2 倍密度的产物 art/out/assets@2x，输出到 assets/atlas）：
+    art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas art/out/assets@2x/vfx art/out/assets@2x/weapons
+    art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas art/out/assets@2x/hero art/out/assets@2x/shade ...
+    art/.venv/bin/python art/post/pack_atlas.py --paper art/out/assets@2x/ground/paper.png --out assets/atlas
 
 支持两种 meta.json：
   1. 特效/地面格式：{"files": {"light.png": {"size": [w, h], "anchor": [ax, ay], ...}}}
   2. 角色格式（style.py 末尾的输出约定）：{"name", "size", "anchor", "anims": {...}, "sockets": {...}}
 
 输出：
-  <name>.png   图集（2 的幂，最大 2048²）
+  <name>.png   图集（2 的幂，单页最大 4096²；放不下时分页为 <name>_0、<name>_1 …）
   <name>.json  Pixi 的 Spritesheet 格式。帧名为 "<素材名>/<文件名去扩展名>"，例如 "vfx/light"、"hero/walk_E_03"。
                trimmed + spriteSourceSize 记录裁掉的透明边，anchor 是相对原始尺寸的锚点。
                animations：角色素材的每个“动画_朝向”是一个序列，例如 "hero/walk_E"。

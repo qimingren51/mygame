@@ -333,21 +333,41 @@ assets/data/
 
 ## 15. 美术管线对接
 
-管线本身的说明见 `docs/PORTING-NOTES.md` 第 8 节和 `art/README.md`，这里只记 Rust 端依赖的约定。
+管线本身的说明见 `docs/PORTING-NOTES.md` 第 8 节和 `art/README.md`，这里只记 Rust 端依赖的约定。Rust 端只读 `assets/atlas/`，不读 `art/out/`。
 
-- `art/` 从 `lantern-next/art/` 移到了仓库根目录，脚本内部的路径不变，命令改为在仓库根目录执行。
-- **输出位置**：桌面版的图集输出到 `assets/atlas/`。`web/lantern-next/public/assets/` 保持现状，不再更新。
-- **图集格式**：沿用 `pack_atlas.py` 输出的 TexturePacker hash 格式 JSON 加 PNG，外加清单 `index.json`。
-  - Rust 端写一个 `AssetLoader`，读取帧矩形、裁边信息（`spriteSourceSize`、`sourceSize`）、锚点、`animations` 序列，以及 `meta.lantern.assets` 里的尺寸、动画（帧数、fps、方向、`stride_units`）和挂点。
+- `art/` 从 `lantern-next/art/` 移到了仓库根目录，命令在仓库根目录执行。
+- **出图密度**：桌面版用 `LANTERN_ART_DENSITY=2`，即 **4 像素 / 世界单位**（网页版是 2）。视野高 420 个世界单位，1440p 下每个世界单位约 3.4 像素，略微缩小显示。中间产物在 `art/out/assets@2x/`，打包后放到 `assets/atlas/`。`web/lantern-next/public/assets/` 保持 1 倍密度，不再更新。
+- **图集文件**：`assets/atlas/` 下有：
+
+  | 图集 | 内容 |
+  | --- | --- |
+  | `actors` | 主角、妖物、场景道具（含 `_flash`、`_emit` 帧）；放不下一页时自动分页。第一批只有主角和影妖 |
+  | `vfx` | 光源渐变、火焰、魂火、光环、墨点，以及法器与拾取物（`weapons/…`） |
+  | `ground` | 地面装饰。第一批只有水墨草和晕染，下一批加石子、水洼、落叶、竹、灵泉、裂隙 |
+  | `ui` | 法器、进化、心法、五行图标（下一批） |
+  | `paper.png` | 宣纸，单独的平铺贴图 |
+  | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
+
+- **图集格式**：TexturePacker hash 格式 JSON + PNG（直通 alpha，未预乘，颜色已扩散到透明像素）。每帧有：
+  - `frame`：在图集页里的矩形；
+  - `sourceSize`：原图尺寸；`spriteSourceSize`：裁掉透明边后剩下的部分在原图里的位置和大小；
+  - `anchor`：相对原图尺寸的锚点。角色和小妖 `(0.5, 0.875)`，石妖、精英、夜主、场景道具 `(0.5, 0.8)`；特效多为 `(0.5, 0.5)`。
+- **`meta.lantern`**（每页都有）：
+  - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
+  - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
+  - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留，包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category` 等。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。
+- **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
-  - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，白色剪影帧加 `_flash` 后缀。
-  - 方向依次为 `E SE S SW W NW N NE`，y 轴向下。
+  - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；
+  - 白色剪影帧（受击闪白）加 `_flash`，自发光层加 `_emit`，例如 `shade/float_E_03_emit`；
+  - 方向依次为 `E SE S SW W NW N NE`，y 轴向下；
   - 妖物只画 E 方向，往西走时左右镜像；主角 8 个方向都有，不镜像（灯笼始终在右手）。
-- **出图密度**：`PX_PER_UNIT`（最终像素 / 世界单位）现在是 2。视野高 420 个世界单位，1080p 屏幕上每个世界单位约 2.6 像素，1440p 约 3.4 像素，所以桌面版会提高出图密度。美术管线正在把密度做成可调参数（图集写入实际密度），Rust 端按图集里记录的密度换算精灵尺寸，不写死。
-- **透明度**：PNG 是直通 alpha（未预乘），颜色已经扩散到全透明像素。Bevy 精灵默认的 alpha 混合正好匹配。
-- **染色与混合方式**：哪些帧是纯白、需要乘颜色（`tint`），哪些用叠加混合（`blend: add`），现在只记录在 `art/out` 下各素材目录的 `meta.json` 里。约定由 `pack_atlas.py` 把这两项写进图集 JSON 的 `meta.lantern`，Rust 端只读 `assets/atlas/`，不读 `art/out`。
-- **自发光层**：`*_emit.png`（主角灯笼窗、妖眼）已经逐帧渲染，但还没打进图集。M1 做自发光层时一起加进来。
-- **宣纸**：不透明 RGB，512×512，无缝平铺，1 纹素 = 0.5 世界单位。桌面版用 PNG（`assets/atlas/paper.png`），不用 WebP。
+- **白色剪影帧**：`_flash` 是纯白剪影，尺寸、锚点和普通帧相同。受击时整帧换成它（普通混合），不是叠加。主角没有剪影帧。
+- **自发光层**：`_emit` 帧和对应的普通帧尺寸、锚点完全相同，叠加画在暗层之上，所以暗处也能看到灯笼窗、妖眼。没有自发光部件的素材没有 `_emit` 帧。
+- **主角动画**：`idle`（6 帧）、`walk`（8 帧，按移动距离推进，`stride_units` 是一个循环走过的世界距离）、`dash`（4 帧 @16 fps）、`hurt`（2 帧 @10 fps）、`death`（6 帧 @8 fps，不循环），各 8 个方向。
+- **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
+- **已知差异**：`vfx/flame_*`（灯火火焰）目前标的是 `blend: add`，但网页版实际用普通混合画（火焰尖端的墨色要保留）。下一批改成 `normal`。
 
 ## 16. 性能预算
 

@@ -1,0 +1,19 @@
+{
+ "atlases": [
+  "actors",
+  "ground",
+  "vfx"
+ ],
+ "paper": true,
+ "pages": {
+  "actors": [
+   "actors.json"
+  ],
+  "vfx": [
+   "vfx.json"
+  ],
+  "ground": [
+   "ground.json"
+  ]
+ }
+}
