@@ -5,6 +5,8 @@
 ## 桌面版
 
 - 架构设计：`docs/DESIGN.md`。改架构或接口约定（图集格式、帧命名、内容数据结构）时，同步更新这份文档。
+- 玩法与数值：`docs/GAMEPLAY.md`、`docs/BALANCE.md`（复现脚本在 `docs/baseline/`）。M2 照搬网页版作为平衡基线，M2.5 起按这两份文档改。
+- 世界观与命名：`docs/LORE.md`。新增或改名先改那里；界面文字迁到 `assets/i18n/` 时，中文名以它为准。
 - 移植参考：`docs/PORTING-NOTES.md`、`web/lantern-next/`（已冻结的 TS 版）、`web/lantern/`（网页旧版，玩法设计见其中的 `DESIGN.md`）。
 
 ### 目录
@@ -76,7 +78,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
 
 ### 协作
 
-目前有两个 Claude 会话分工合作，各自负责的目录见 `docs/DESIGN.md` 第 19 节。改对方负责的文件之前，先发消息商量。推送前先 `git pull --rebase origin master`。
+目前有四个 Claude 会话分工合作（架构、美术、玩法与数值、世界观与命名），各自负责的文件见 `docs/DESIGN.md` 第 19 节。改对方负责的文件之前，先发消息商量。推送前先 `git pull --rebase origin master`。
 
 ## 网页小游戏（`web/`）
 
