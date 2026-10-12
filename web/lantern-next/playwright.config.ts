@@ -1,4 +1,4 @@
-// 端到端测试：先在仓库根目录 node scripts/build-site.mjs 组装整站，
+// 端到端测试：先在仓库根目录 node web/scripts/build-site.mjs 组装整站，
 // 这里起 serve-site 以线上相同的 /mygame/ 路径访问构建后的页面。
 // 运行：npm run e2e
 

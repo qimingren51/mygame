@@ -1,10 +1,13 @@
-# 推送到 master 后构建整站并发布到 GitHub Pages。
+# 推送到 master 且 web/ 有改动时，构建网页小游戏站点并发布到 GitHub Pages。
 # 需要在仓库 Settings → Pages → Source 选择 “GitHub Actions”。
 name: Pages
 
 on:
   push:
     branches: [master]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -25,13 +28,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: '*/package-lock.json'
+          cache-dependency-path: 'web/*/package-lock.json'
       - name: 构建整站
-        run: node scripts/build-site.mjs --ci
+        run: node web/scripts/build-site.mjs --ci
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: _site
+          path: web/_site
 
   deploy:
     needs: build

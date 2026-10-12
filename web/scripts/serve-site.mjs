@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 在本地以 /mygame/ 路径提供 _site/，和 GitHub Pages 的线上路径一致。
-// 用法：node scripts/serve-site.mjs   然后访问 http://localhost:8000/mygame/
+// 在本地以 /mygame/ 路径提供 web/_site/，和 GitHub Pages 的线上路径一致。
+// 用法：node web/scripts/serve-site.mjs   然后访问 http://localhost:8000/mygame/
 // 环境变量 PORT 可以改端口。
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -33,7 +33,7 @@ const TYPES = {
 };
 
 if (!existsSync(SITE)) {
-  console.error('找不到 _site/，请先运行 node scripts/build-site.mjs');
+  console.error('找不到 _site/，请先运行 node web/scripts/build-site.mjs');
   process.exit(1);
 }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// 组装整站到 _site/，本地和 GitHub Actions 共用。
+// 组装网页小游戏站点到 web/_site/，本地和 GitHub Actions 共用。
 //
 // 规则：
-// - 根目录的网页文件（index.html、.nojekyll 等）原样复制，Markdown 等文档不复制。
+// - web/ 根目录的网页文件（index.html、.nojekyll 等）原样复制，Markdown 等文档不复制。
 // - 一级文件夹里有 vite.config.ts 的：安装依赖并构建，把 dist/ 放到 _site/<文件夹>/。
 // - 一级文件夹里只有 index.html 的：原样复制（静态游戏）。
 //

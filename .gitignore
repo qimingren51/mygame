@@ -7,9 +7,12 @@ dist/
 test-results/
 playwright-report/
 
-# 美术管线的中间文件（只提交打包好的图集）
-*/art/.venv/
-*/art/out/
-*/art/.blender/
+# Rust 构建产物
+/target/
+
+# 美术管线的中间文件（只提交打包好的图集；art/.gitignore 里还有更细的规则）
+art/.venv/
+art/out/
+art/.blender/
 *.blend1
 __pycache__/

@@ -1,5 +1,9 @@
 # 提灯夜行（重构版）· 设计与技术文档
 
+> **已冻结（2026-10-12）**：后续开发转到仓库根目录的 Rust + Bevy 桌面版（`docs/DESIGN.md`），本目录只做必要的修复。
+> 美术管线已移到仓库根目录的 `art/`，下文提到的 `art/...` 都指那里；本目录的 `public/assets/` 保持现状，不再更新。
+> 移植时的参考整理在 `docs/PORTING-NOTES.md`。
+
 玩法设计沿用旧版，见 `../lantern/DESIGN.md`；里程碑 2 迁移玩法时会把那份内容并入这里。
 本文件记录新版的技术架构、水墨画风、美术管线、调试方法和进度。
 
@@ -113,7 +117,7 @@ npm run dev          # 开发服务器（手机连同一局域网：npm run dev 
 npm run typecheck
 npm test             # 单元 + 模拟测试
 npm run bench        # 模拟性能基准（1000 / 2000 只妖物每步耗时）
-npm run e2e          # 端到端测试；先在仓库根目录运行 node scripts/build-site.mjs
+npm run e2e          # 端到端测试；先在仓库根目录运行 node web/scripts/build-site.mjs
 ```
 
 ## 进度
