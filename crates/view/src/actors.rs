@@ -1,20 +1,31 @@
-//! 角色层：主角、妖物、灯火、魂火、影子（docs/DESIGN.md 第 9 节）。
+//! 角色层：主角、妖物、灯火、魂火、影子，以及它们的光源和自发光（docs/DESIGN.md 第 9 节）。
 //!
 //! 妖物和魂火在模拟的池子里，这里用固定的精灵池，每帧只画视野内的，不随妖物生死创建、销毁实体。
-//! 前后关系按脚底 y 排序（z 越大越靠前）。
+//! 前后关系按脚底 y 排序（z 越大越靠前）。光源和自发光帧先攒成 [`Glow`] 请求，由 [`apply_glow`]
+//! 统一写进 Mesh2d 池（光源在光照相机的图层，自发光在暗层之上）。
 
 use std::f32::consts::{FRAC_PI_4, TAU};
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use lantern_sim::{AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState};
 
 use crate::atlas::{AtlasDb, FrameId};
+use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER};
 use crate::{MainCamera, layer, to_screen};
 
 /// 8 个方向，顺序与图集一致：E SE S SW W NW N NE（y 向下，角度顺时针增加）。
 const DIRS: [&str; 8] = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
+
+/// 光源颜色与半径（docs/PORTING-NOTES.md 第 7 节）
+pub(crate) const LANTERN_LIGHT: (Color, f32) = (Color::srgb(1.0, 0.878, 0.69), 200.0);
+const FLAME_LIGHT: (Color, f32) = (Color::srgba(1.0, 0.66, 0.376, 0.75), 64.0);
+const GEM_LIGHT: Color = Color::srgba(0.75, 0.94, 1.0, 0.5);
+const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
+/// 同时画光的魂火上限
+const GEM_LIGHT_CAP: usize = 200;
 
 /// 按脚底 y 排序的 z：越靠下（越近）越大。
 pub fn sort_z(base: f32, sim_y: f32) -> f32 {
@@ -26,8 +37,10 @@ pub fn sort_z(base: f32, sim_y: f32) -> f32 {
 // ---------------------------------------------------------------------------
 
 struct HeroAnim {
+    name: &'static str,
     /// [方向][帧]
     frames: Vec<Vec<FrameId>>,
+    emit: Vec<Vec<FrameId>>,
     fps: f32,
     stride: Option<f32>,
 }
@@ -44,6 +57,7 @@ pub(crate) struct HeroFrames {
 struct EnemyFrames {
     normal: Vec<FrameId>,
     flash: Vec<FrameId>,
+    emit: Vec<FrameId>,
     fps: f32,
     floating: bool,
     shadow_scale: f32,
@@ -55,16 +69,33 @@ pub(crate) struct ActorFrames {
     enemies: Vec<EnemyFrames>,
     flames: Vec<FrameId>,
     gems: [FrameId; 3],
-    shadow: FrameId,
+    pub(crate) shadow: FrameId,
+    pub(crate) light: FrameId,
 }
 
-fn hero_anim(db: &AtlasDb, anim: &str) -> HeroAnim {
-    let meta = db.assets.get("hero").and_then(|a| a.anims.get(anim));
-    let frames = DIRS
-        .iter()
-        .map(|d| db.anim(&format!("hero/{anim}_{d}")).map(<[FrameId]>::to_vec).unwrap_or_default())
-        .collect();
-    HeroAnim { frames, fps: meta.map_or(8.0, |m| m.fps), stride: meta.and_then(|m| m.stride_units) }
+impl ActorFrames {
+    /// 让 light 贴图（径向渐变）画出半径 r 的光所需的缩放。
+    pub(crate) fn light_scale(&self, db: &AtlasDb, r: f32) -> f32 {
+        r * 2.0 / db.frame(self.light).size.x
+    }
+}
+
+fn hero_anim(db: &AtlasDb, name: &'static str) -> HeroAnim {
+    let meta = db.assets.get("hero").and_then(|a| a.anims.get(name));
+    let seq = |suffix: &str| -> Vec<Vec<FrameId>> {
+        DIRS.iter()
+            .map(|d| {
+                db.anim(&format!("hero/{name}_{d}{suffix}")).map(<[FrameId]>::to_vec).unwrap_or_default()
+            })
+            .collect()
+    };
+    HeroAnim {
+        name,
+        frames: seq(""),
+        emit: seq("_emit"),
+        fps: meta.map_or(8.0, |m| m.fps),
+        stride: meta.and_then(|m| m.stride_units),
+    }
 }
 
 /// 影子贴图按素材的影子半径缩放
@@ -98,10 +129,11 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
                 db.anim(&format!("{asset}/{anim}_E{suffix}")).map(<[FrameId]>::to_vec).unwrap_or_default()
             };
             let normal = seq("");
-            let flash = seq("_flash");
+            let same_len = |v: Vec<FrameId>| if v.len() == normal.len() { v } else { Vec::new() };
             EnemyFrames {
-                flash: if flash.len() == normal.len() { flash } else { normal.clone() },
-                normal,
+                flash: same_len(seq("_flash")),
+                emit: same_len(seq("_emit")),
+                normal: normal.clone(),
                 fps: am.fps,
                 floating: meta.floating,
                 shadow_scale: shadow_scale(&db, asset, shadow),
@@ -113,7 +145,44 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         flames: (0..4).map(|i| need(&format!("vfx/flame_{i}"))).collect(),
         gems: [need("vfx/gem_0"), need("vfx/gem_1"), need("vfx/gem_2")],
         shadow,
+        light: need("vfx/light"),
     });
+}
+
+// ---------------------------------------------------------------------------
+// 发光请求：光源（画进光照图）和自发光帧（画在暗层之上），都是叠加混合
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+pub(crate) struct Glow {
+    pub frame: FrameId,
+    /// 颜色乘以贴图；alpha 是强度
+    pub color: Color,
+    pub pos: Vec3,
+    pub scale: f32,
+    pub flip: bool,
+    /// true：光源；false：自发光
+    pub light: bool,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct GlowRequests(pub Vec<Glow>);
+
+impl GlowRequests {
+    pub fn light(&mut self, frames: &ActorFrames, db: &AtlasDb, at: Vec2, (color, radius): (Color, f32)) {
+        self.0.push(Glow {
+            frame: frames.light,
+            color,
+            pos: at.extend(0.0),
+            scale: frames.light_scale(db, radius),
+            flip: false,
+            light: true,
+        });
+    }
+
+    pub fn emit(&mut self, frame: FrameId, pos: Vec2, flip: bool, color: Color) {
+        self.0.push(Glow { frame, color, pos: pos.extend(layer::EMISSIVE), scale: 1.0, flip, light: false });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +199,10 @@ pub(crate) struct HeroView {
     stride: f32,
     last_pos: Vec2,
     dying: bool,
+    /// 本帧画的动作、帧号（灯笼挂点、自发光用）
+    anim: &'static str,
+    frame: usize,
+    emit: Option<FrameId>,
 }
 
 #[derive(Component)]
@@ -151,7 +224,7 @@ pub(crate) fn dress_player(
     commands.entity(add.event().entity).insert((
         sprite,
         anchor,
-        HeroView { dir: 2, ..default() },
+        HeroView { dir: 2, anim: "idle", ..default() },
         Transform::from_xyz(0.0, 0.0, layer::ACTORS),
         Visibility::default(),
     ));
@@ -216,7 +289,11 @@ pub(crate) fn animate_hero(
             (&hero.idle, (view.clock * hero.idle.fps) as usize)
         };
         let seq = &anim.frames[view.dir];
-        if let Some(&id) = seq.get(frame % seq.len().max(1)) {
+        let k = frame % seq.len().max(1);
+        view.anim = anim.name;
+        view.frame = k;
+        view.emit = anim.emit[view.dir].get(k).copied();
+        if let Some(&id) = seq.get(k) {
             db.set(id, &mut sprite, &mut anchor);
         }
         for mut s in &mut shadow {
@@ -225,8 +302,32 @@ pub(crate) fn animate_hero(
     }
 }
 
+/// 主角的灯笼光（在灯笼挂点上）和自发光帧（灯笼窗）。
+pub(crate) fn hero_glow(
+    db: Res<AtlasDb>,
+    frames: Res<ActorFrames>,
+    q: Query<(&Transform, &HeroView)>,
+    mut glow: ResMut<GlowRequests>,
+) {
+    for (tf, view) in &q {
+        let pos = tf.translation.truncate();
+        let socket = db
+            .assets
+            .get("hero")
+            .and_then(|a| a.sockets.get("lantern"))
+            .and_then(|s| s.get(view.anim))
+            .and_then(|s| s.get(DIRS[view.dir]))
+            .and_then(|s| s.get(view.frame))
+            .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
+        glow.light(&frames, &db, pos + socket, LANTERN_LIGHT);
+        if let Some(emit) = view.emit {
+            glow.emit(emit, pos, false, Color::WHITE);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// 精灵池：妖物、妖物影子、灯火、魂火
+// 精灵池：妖物、妖物影子、灯火
 // ---------------------------------------------------------------------------
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -234,13 +335,11 @@ pub(crate) enum Pooled {
     Enemy,
     EnemyShadow,
     Flame,
-    Gem,
 }
 
 /// 每类精灵本帧要显示的内容，攒好后一次写进池子。
-#[derive(Default)]
 pub(crate) struct Draw {
-    frame: Option<FrameId>,
+    frame: FrameId,
     pos: Vec3,
     flip: bool,
     size_scale: f32,
@@ -252,12 +351,9 @@ pub(crate) struct Pools {
     enemy: Vec<Draw>,
     enemy_shadow: Vec<Draw>,
     flame: Vec<Draw>,
-    gem: Vec<Draw>,
     /// 每类已经生成的精灵数
-    spawned: [usize; 4],
+    spawned: [usize; 3],
 }
-
-const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
 
 /// 摄像机看得到的范围（世界坐标，留一点边）。
 fn view_rect(cam: &Transform, proj: &Projection) -> Rect {
@@ -271,6 +367,7 @@ fn view_rect(cam: &Transform, proj: &Projection) -> Rect {
 pub(crate) fn collect_draws(
     time: Res<Time>,
     fixed: Res<Time<Fixed>>,
+    db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     en: Option<Res<Enemies>>,
     gems: Option<Res<Gems>>,
@@ -278,18 +375,19 @@ pub(crate) fn collect_draws(
     player: Single<(&Pos, &PrevPos), With<Player>>,
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
+    mut glow: ResMut<GlowRequests>,
 ) {
+    glow.0.clear();
+    let pools = &mut *pools;
+    pools.enemy.clear();
+    pools.enemy_shadow.clear();
+    pools.flame.clear();
     let (Some(en), Some(gems), Some(arsenal)) = (en, gems, arsenal) else { return };
     let a = fixed.overstep_fraction();
     let t = time.elapsed_secs();
     let rect = view_rect(camera.0, camera.1);
     let (ppos, pprev) = *player;
     let player_now = pprev.0.lerp(ppos.0, a);
-    let pools = &mut *pools;
-    pools.enemy.clear();
-    pools.enemy_shadow.clear();
-    pools.flame.clear();
-    pools.gem.clear();
 
     for i in en.iter_alive() {
         let p = Vec2::new(en.px[i], en.py[i]).lerp(Vec2::new(en.x[i], en.y[i]), a);
@@ -297,30 +395,38 @@ pub(crate) fn collect_draws(
         if !rect.contains(s) {
             continue;
         }
-        let kind = en.kind[i] as usize;
-        let f = &frames.enemies[kind];
-        let n = f.normal.len().max(1);
+        let f = &frames.enemies[en.kind[i] as usize];
+        let n = f.normal.len();
+        if n == 0 {
+            continue;
+        }
         let phase = en.wob[i] / TAU * n as f32;
         let k = ((t * f.fps + phase) as usize) % n;
-        let seq = if en.flash[i] > 0.0 { &f.flash } else { &f.normal };
+        let flashing = en.flash[i] > 0.0 && !f.flash.is_empty();
+        let frame = if flashing { f.flash[k] } else { f.normal[k] };
         let bob = if f.floating { (t * 2.0 + en.wob[i]).sin() * 1.5 + 4.0 } else { 0.0 };
+        let flip = player_now.x < p.x;
+        let body = Vec2::new(s.x, s.y + bob);
         pools.enemy.push(Draw {
-            frame: seq.get(k).copied(),
-            pos: Vec3::new(s.x, s.y + bob, sort_z(layer::ACTORS, p.y)),
-            flip: player_now.x < p.x,
+            frame,
+            pos: body.extend(sort_z(layer::ACTORS, p.y)),
+            flip,
             size_scale: 1.0,
             color: Color::WHITE,
         });
         pools.enemy_shadow.push(Draw {
-            frame: Some(frames.shadow),
+            frame: frames.shadow,
             pos: Vec3::new(s.x, s.y, layer::SHADOW),
             flip: false,
             size_scale: f.shadow_scale,
             color: Color::srgba(1.0, 1.0, 1.0, 0.7),
         });
+        if let Some(&emit) = f.emit.get(k) {
+            glow.emit(emit, body, flip, Color::WHITE);
+        }
     }
 
-    // 灯火：按插值后的角度绕着主角
+    // 灯火：按插值后的角度绕着主角；火焰画在暗层之上（网页版的画法），同时是光源
     for slot in &arsenal.0 {
         let angle = slot.prev_angle + (slot.angle - slot.prev_angle) * a;
         for k in 0..slot.count {
@@ -328,15 +434,18 @@ pub(crate) fn collect_draws(
             let s = to_screen(p);
             let fk = ((t * 10.0) as usize + k as usize) % frames.flames.len();
             pools.flame.push(Draw {
-                frame: Some(frames.flames[fk]),
-                pos: Vec3::new(s.x, s.y, sort_z(layer::ACTORS, p.y)),
+                frame: frames.flames[fk],
+                pos: s.extend(sort_z(layer::WEAPONS, p.y)),
                 flip: false,
                 size_scale: slot.size / 10.0,
                 color: Color::WHITE,
             });
+            glow.light(&frames, &db, s, FLAME_LIGHT);
         }
     }
 
+    // 魂火：自发光，靠近的同时是光源
+    let mut lights = 0;
     for i in 0..gems.n {
         let p = Vec2::new(gems.px[i], gems.py[i]).lerp(Vec2::new(gems.x[i], gems.y[i]), a);
         let s = to_screen(p);
@@ -351,13 +460,12 @@ pub(crate) fn collect_draws(
         } else {
             2
         };
-        pools.gem.push(Draw {
-            frame: Some(frames.gems[size]),
-            pos: Vec3::new(s.x, s.y + 3.0 + (t * 3.0 + i as f32).sin() * 1.5, layer::GEMS),
-            flip: false,
-            size_scale: 1.0,
-            color: GEM_COLOR,
-        });
+        let pos = Vec2::new(s.x, s.y + 3.0 + (t * 3.0 + i as f32).sin() * 1.5);
+        glow.emit(frames.gems[size], pos, false, GEM_COLOR);
+        if lights < GEM_LIGHT_CAP {
+            lights += 1;
+            glow.light(&frames, &db, pos, (GEM_LIGHT, 26.0 + 6.0 * size as f32));
+        }
     }
 }
 
@@ -365,47 +473,40 @@ pub(crate) fn collect_draws(
 pub(crate) fn apply_pools(
     mut commands: Commands,
     db: Res<AtlasDb>,
+    frames: Res<ActorFrames>,
     mut pools: ResMut<Pools>,
     mut q: Query<(&Pooled, &mut Sprite, &mut Anchor, &mut Transform, &mut Visibility)>,
 ) {
     let pools = &mut *pools;
-    let mut used = [0usize; 4];
+    let mut used = [0usize; 3];
     for (kind, mut sprite, mut anchor, mut tf, mut vis) in &mut q {
         let (list, k) = match kind {
             Pooled::Enemy => (&pools.enemy, 0),
             Pooled::EnemyShadow => (&pools.enemy_shadow, 1),
             Pooled::Flame => (&pools.flame, 2),
-            Pooled::Gem => (&pools.gem, 3),
         };
         let Some(d) = list.get(used[k]) else {
-            if *vis != Visibility::Hidden {
-                *vis = Visibility::Hidden;
-            }
+            vis.set_if_neq(Visibility::Hidden);
             continue;
         };
         used[k] += 1;
-        let Some(frame) = d.frame else { continue };
-        db.set(frame, &mut sprite, &mut anchor);
+        db.set(d.frame, &mut sprite, &mut anchor);
         if d.size_scale != 1.0 {
-            sprite.custom_size = Some(db.frame(frame).size * d.size_scale);
+            sprite.custom_size = Some(db.frame(d.frame).size * d.size_scale);
         }
         sprite.flip_x = d.flip;
         sprite.color = d.color;
         tf.translation = d.pos;
-        if *vis != Visibility::Inherited {
-            *vis = Visibility::Inherited;
-        }
+        vis.set_if_neq(Visibility::Inherited);
     }
     // 不够的补上
-    let kinds = [Pooled::Enemy, Pooled::EnemyShadow, Pooled::Flame, Pooled::Gem];
-    let lens = [pools.enemy.len(), pools.enemy_shadow.len(), pools.flame.len(), pools.gem.len()];
-    for k in 0..4 {
-        let have = pools.spawned[k];
-        if lens[k] > have {
-            let first = pools_first_frame(&db);
-            let batch: Vec<_> = (have..lens[k])
+    let kinds = [Pooled::Enemy, Pooled::EnemyShadow, Pooled::Flame];
+    let lens = [pools.enemy.len(), pools.enemy_shadow.len(), pools.flame.len()];
+    for k in 0..kinds.len() {
+        if lens[k] > pools.spawned[k] {
+            let batch: Vec<_> = (pools.spawned[k]..lens[k])
                 .map(|_| {
-                    let (sprite, anchor) = db.sprite(first);
+                    let (sprite, anchor) = db.sprite(frames.shadow);
                     (
                         kinds[k],
                         sprite,
@@ -422,11 +523,77 @@ pub(crate) fn apply_pools(
     }
 }
 
-fn pools_first_frame(db: &AtlasDb) -> FrameId {
-    db.find("vfx/shadow").unwrap_or(FrameId(0))
+/// 发光池里的一个 Mesh2d。
+#[derive(Component)]
+pub(crate) struct GlowSlot {
+    light: bool,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct GlowPool {
+    /// 已生成的光源、自发光数量
+    spawned: [usize; 2],
+}
+
+/// 把发光请求写进 Mesh2d 池：光源在光照相机的图层，自发光在主画面暗层之上。
+pub(crate) fn apply_glow(
+    mut commands: Commands,
+    db: Res<AtlasDb>,
+    glow: Res<GlowRequests>,
+    mut cache: ResMut<FrameMeshes>,
+    mut pool: ResMut<GlowPool>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<AddMaterial>>,
+    mut q: Query<(&GlowSlot, &mut Mesh2d, &mut MeshMaterial2d<AddMaterial>, &mut Transform, &mut Visibility)>,
+) {
+    let (mut lights, mut emits): (Vec<&Glow>, Vec<&Glow>) = (Vec::new(), Vec::new());
+    for g in &glow.0 {
+        if g.light { lights.push(g) } else { emits.push(g) }
+    }
+    let mut used = [0usize; 2];
+    for (slot, mut mesh, mut material, mut tf, mut vis) in &mut q {
+        let (list, k) = if slot.light { (&lights, 0) } else { (&emits, 1) };
+        let Some(g) = list.get(used[k]) else {
+            vis.set_if_neq(Visibility::Hidden);
+            continue;
+        };
+        used[k] += 1;
+        let m = cache.mesh(&db, &mut meshes, g.frame, g.flip);
+        if mesh.0 != m {
+            mesh.0 = m;
+        }
+        let mat = cache.additive(&db, &mut materials, g.frame, g.color);
+        if material.0 != mat {
+            material.0 = mat;
+        }
+        tf.translation = g.pos;
+        tf.scale = Vec3::new(g.scale, g.scale, 1.0);
+        vis.set_if_neq(Visibility::Inherited);
+    }
+    for (k, list) in [lights, emits].iter().enumerate() {
+        let light = k == 0;
+        while pool.spawned[k] < list.len() {
+            pool.spawned[k] += 1;
+            let g = list[0];
+            let mesh = cache.mesh(&db, &mut meshes, g.frame, false);
+            let mat = cache.additive(&db, &mut materials, g.frame, g.color);
+            let mut e = commands.spawn((
+                GlowSlot { light },
+                Mesh2d(mesh),
+                MeshMaterial2d(mat),
+                Transform::default(),
+                Visibility::Hidden,
+                DespawnOnExit(AppState::Run),
+            ));
+            if light {
+                e.insert(RenderLayers::layer(LIGHT_LAYER));
+            }
+        }
+    }
 }
 
 /// 一局结束时精灵池跟着清掉，计数归零。
-pub(crate) fn reset_pools(mut pools: ResMut<Pools>) {
+pub(crate) fn reset_pools(mut pools: ResMut<Pools>, mut glow: ResMut<GlowPool>) {
     *pools = Pools::default();
+    *glow = GlowPool::default();
 }

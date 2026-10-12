@@ -53,9 +53,12 @@ type_complexity = "allow"
 # 开发时：自己的代码轻度优化以便快速编译，依赖（Bevy）全力优化，否则帧率太低没法测试。
 [profile.dev]
 opt-level = 1
+# 只保留行号：调用栈照样能看，构建产物和链接时间小很多（完整调试信息时 target/ 很快涨到几十 GB）
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 [profile.release]
 codegen-units = 1

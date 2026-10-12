@@ -3512,6 +3512,7 @@ name = "lantern_view"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "lantern_content",
  "lantern_core",
  "lantern_sim",
  "serde",

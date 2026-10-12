@@ -1,6 +1,6 @@
 //! 画面层（docs/DESIGN.md 第 9 节）。只读模拟状态，不改变模拟。
 //!
-//! M1-3：图集、主角与妖物精灵、影子、灯火、魂火、地面装饰。光照图、自发光层、伤害数字在 M1-4 加入。
+//! 图集、主角与妖物精灵、影子、灯火、魂火、地面装饰、光照图与自发光、伤害数字与墨点。
 
 use std::path::PathBuf;
 
@@ -11,7 +11,9 @@ use lantern_sim::{AppState, GameContent, Player, Pos, PrevPos};
 
 mod actors;
 pub mod atlas;
+mod effects;
 mod ground;
+pub mod lighting;
 
 use atlas::AtlasDb;
 
@@ -24,6 +26,13 @@ pub mod layer {
     pub const GEMS: f32 = 60.0;
     /// 角色按脚底 y 排序，占 ACTORS ± 1
     pub const ACTORS: f32 = 100.0;
+    /// 暗层：以正片叠底盖上光照图
+    pub const DARKNESS: f32 = 200.0;
+    /// 法器本体（灯火火焰），在暗层之上
+    pub const WEAPONS: f32 = 210.0;
+    /// 自发光（叠加）：灯笼窗、妖眼、魂火
+    pub const EMISSIVE: f32 = 220.0;
+    pub const NUMBERS: f32 = 300.0;
 }
 
 /// 夜色，也是画面清屏色。
@@ -39,24 +48,46 @@ struct AssetRoot(PathBuf);
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(NIGHT))
+        app.add_plugins(lighting::LightingPlugin)
+            .insert_resource(ClearColor(NIGHT))
             .insert_resource(AssetRoot(self.asset_root.clone()))
             .init_resource::<actors::Pools>()
+            .init_resource::<actors::GlowPool>()
+            .init_resource::<actors::GlowRequests>()
             .add_systems(
                 Startup,
-                (setup_camera, load_atlas, (actors::build_frames, ground::build_decor)).chain(),
+                (
+                    setup_camera,
+                    load_atlas,
+                    (
+                        actors::build_frames,
+                        ground::build_decor,
+                        effects::setup_effects,
+                        lighting::setup_lighting,
+                    ),
+                )
+                    .chain(),
             )
-            .add_systems(OnEnter(AppState::Run), ground::spawn_paper)
-            .add_systems(OnExit(AppState::Run), (actors::reset_pools, ground::clear_decor))
+            .add_systems(OnEnter(AppState::Run), (ground::spawn_paper, effects::spawn_number_pool))
+            .add_systems(
+                OnExit(AppState::Run),
+                (actors::reset_pools, ground::clear_decor, lighting::hide_darkness),
+            )
             .add_observer(actors::dress_player)
+            .add_systems(Update, lighting::resize_lightmap)
             .add_systems(
                 Update,
                 (
                     interpolate,
                     actors::animate_hero,
                     follow_camera,
+                    lighting::follow_main_camera,
                     actors::collect_draws,
+                    actors::hero_glow,
+                    effects::read_events,
+                    effects::update_effects,
                     actors::apply_pools,
+                    actors::apply_glow,
                     ground::scroll_paper,
                     ground::update_decor,
                 )
@@ -73,6 +104,8 @@ fn setup_camera(mut commands: Commands, content: Res<GameContent>) {
     commands.spawn((
         Camera2d,
         MainCamera,
+        IsDefaultUiCamera,
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical { viewport_height: content.0.run.view_height },
             ..OrthographicProjection::default_2d()

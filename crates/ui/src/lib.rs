@@ -22,9 +22,6 @@ struct Fonts {
 const PAPER: Color = Color::srgb(0.914, 0.875, 0.78);
 const DIM: Color = Color::srgba(0.914, 0.875, 0.78, 0.6);
 const CINNABAR: Color = Color::srgb(0.80, 0.25, 0.18);
-/// 游戏中信息栏的墨色。M0 还没有夜色暗层，画面是亮的宣纸；M1 加上光照图后再按实际亮度调整。
-const INK: Color = Color::srgba(0.12, 0.11, 0.11, 0.85);
-const INK_DIM: Color = Color::srgba(0.12, 0.11, 0.11, 0.55);
 
 pub struct UiPlugin;
 
@@ -124,8 +121,8 @@ fn spawn_hud(mut commands: Commands, fonts: Res<Fonts>, setup: Res<RunSetup>) {
             ..default()
         },
         children![
-            (Clock, text(&fonts.body, 28.0, INK, "00:00")),
-            text(&fonts.body, 16.0, INK_DIM, &format!("种子 {}", setup.seed)),
+            (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
+            text(&fonts.body, 16.0, DIM, &format!("种子 {}", setup.seed)),
         ],
     ));
     commands.spawn((
@@ -134,7 +131,7 @@ fn spawn_hud(mut commands: Commands, fonts: Res<Fonts>, setup: Res<RunSetup>) {
         children![text(
             &fonts.body,
             16.0,
-            INK_DIM,
+            DIM,
             "WASD / 方向键 / 左摇杆　移动　　空格 / 手柄 A　闪避　　Esc　暂停"
         )],
     ));

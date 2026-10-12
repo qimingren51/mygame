@@ -25,6 +25,8 @@ pub enum Blend {
 pub struct Frame {
     page: usize,
     index: usize,
+    /// 在整页贴图里的纹理坐标（0–1，左上角为原点）
+    pub uv: Rect,
     /// 裁边后的尺寸（世界单位）
     pub size: Vec2,
     pub anchor: Anchor,
@@ -188,9 +190,16 @@ impl AtlasDb {
                 let ay = f.anchor.y * f.source_size.h - s.y as f32;
                 let anchor = Anchor(Vec2::new(ax / r.w as f32 - 0.5, 0.5 - ay / r.h as f32));
                 let meta = page.meta.lantern.frames.get(name);
+                let (pw, ph) = (page.meta.size.w, page.meta.size.h);
                 let frame = Frame {
                     page: page_idx,
                     index,
+                    uv: Rect::new(
+                        r.x as f32 / pw,
+                        r.y as f32 / ph,
+                        (r.x + r.w) as f32 / pw,
+                        (r.y + r.h) as f32 / ph,
+                    ),
                     size: Vec2::new(r.w as f32, r.h as f32) / ppu,
                     anchor,
                     blend: if meta.is_some_and(|m| m.blend == "add") { Blend::Add } else { Blend::Normal },
@@ -224,6 +233,16 @@ impl AtlasDb {
 
     pub fn frame(&self, id: FrameId) -> &Frame {
         &self.frames[id.0 as usize]
+    }
+
+    /// 这一帧所在的整页贴图。
+    pub fn image(&self, id: FrameId) -> Handle<Image> {
+        self.pages[self.frame(id).page].image.clone()
+    }
+
+    /// 这一帧所在的页（同一页的帧可以共用材质）。
+    pub fn page_of(&self, id: FrameId) -> usize {
+        self.frame(id).page
     }
 
     pub fn find(&self, name: &str) -> Option<FrameId> {

@@ -12,6 +12,7 @@ use lantern_sim::{AppState, RunSetup};
 
 use crate::actors::sort_z;
 use crate::atlas::{AtlasDb, FrameId};
+use crate::effects::PropLight;
 use crate::{MainCamera, layer};
 
 const CHUNK: f32 = 512.0;
@@ -59,6 +60,8 @@ struct DecorKind {
     per_chunk: f32,
     /// true：和角色一起按 y 排序（山石、灯笼）；false：平铺在地面
     upright: bool,
+    /// 带光的道具（石灯笼）
+    light: Option<PropLight>,
 }
 
 #[derive(Resource)]
@@ -74,16 +77,19 @@ pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
             frames: frames(&["ground/grass_0", "ground/grass_1", "ground/grass_2", "ground/grass_3"]),
             per_chunk: 14.0,
             upright: false,
+            light: None,
         },
         DecorKind {
             frames: frames(&["ground/wash_0", "ground/wash_1", "ground/wash_2"]),
             per_chunk: 1.2,
             upright: false,
+            light: None,
         },
         DecorKind {
             frames: frames(&["ground/leaves_0", "ground/leaves_1", "ground/pebbles_0", "ground/pebbles_1"]),
             per_chunk: 3.0,
             upright: false,
+            light: None,
         },
         DecorKind {
             frames: frames(&[
@@ -95,13 +101,33 @@ pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
             ]),
             per_chunk: 1.5,
             upright: true,
+            light: None,
         },
         DecorKind {
             frames: frames(&["rock_a/idle_S_00", "rock_b/idle_S_00", "rock_c/idle_S_00"]),
             per_chunk: 0.8,
             upright: true,
+            light: None,
         },
-        DecorKind { frames: frames(&["stone_lantern/idle_S_00"]), per_chunk: 0.25, upright: true },
+        DecorKind {
+            frames: frames(&["stone_lantern/idle_S_00"]),
+            per_chunk: 0.25,
+            upright: true,
+            light: Some(PropLight {
+                // 灯火挂点（图集像素，相对脚底，y 向下）
+                offset: db
+                    .assets
+                    .get("stone_lantern")
+                    .and_then(|a| a.sockets.get("flame"))
+                    .and_then(|s| s.get("idle"))
+                    .and_then(|s| s.get("S"))
+                    .and_then(|s| s.first())
+                    .map_or(Vec2::new(0.0, 20.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit),
+                color: Color::srgba(1.0, 0.784, 0.565, 0.9),
+                radius: 120.0,
+                emit: db.find("stone_lantern/idle_S_00_emit"),
+            }),
+        },
     ];
     commands.insert_resource(Decor {
         kinds: kinds.into_iter().filter(|k| !k.frames.is_empty()).collect(),
@@ -160,7 +186,11 @@ pub(crate) fn update_decor(
                     }
                     let z =
                         if kind.upright { sort_z(layer::ACTORS, y) } else { layer::GROUND + rng.next_f32() };
-                    entities.push(commands.spawn((sprite, anchor, Transform::from_xyz(x, -y, z))).id());
+                    let mut e = commands.spawn((sprite, anchor, Transform::from_xyz(x, -y, z)));
+                    if let Some(light) = kind.light {
+                        e.insert(light);
+                    }
+                    entities.push(e.id());
                 }
             }
             decor.chunks.insert(c, entities);
