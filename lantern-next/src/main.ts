@@ -6,7 +6,7 @@ import { FixedStep } from './core/loop';
 import { clamp } from './core/math';
 import { randomSeed } from './core/rng';
 import { Input } from './platform/input';
-import { createPlaceholderArt } from './render/placeholders';
+import { loadArt } from './render/atlas';
 import { Presenter } from './render/presenter';
 import { QualityScaler, type BloomMode, type QualityLocks } from './render/quality';
 import { createWorld } from './sim/state';
@@ -55,7 +55,8 @@ async function boot(): Promise<void> {
   const seed = num('seed') ?? randomSeed();
   const bench = num('enemies');
   const world = createWorld({ seed, benchTarget: bench === undefined ? 1000 : clamp(Math.round(bench), 0, 2000), god: true });
-  const art = createPlaceholderArt();
+  const { art, report } = await loadArt();
+  if (report.errors.length) console.warn('图集加载问题：', report.errors);
   const presenter = new Presenter(art, {
     actors: params.get('actors') === 'A' ? 'A' : 'B',
     maxLights: clamp(num('lights') ?? 300, 1, 2000),
@@ -122,7 +123,7 @@ async function boot(): Promise<void> {
   requestAnimationFrame(tick);
 
   // 调试接口（Playwright 和手动调试用）
-  (window as unknown as { __lantern: unknown }).__lantern = { app, world, presenter, quality, input, loop };
+  (window as unknown as { __lantern: unknown }).__lantern = { app, world, presenter, quality, input, loop, artReport: report };
 }
 
 boot().catch((err: unknown) => {

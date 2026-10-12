@@ -84,6 +84,23 @@ art/.venv/bin/python art/render/smoke_test.py     # 在仓库的 lantern-next/ �
   多层 EXR 的格式名是 `OPEN_EXR_MULTILAYER`，并且要设置 `media_type='MULTI_LAYER_IMAGE'`，写出的是 multi-part 文件。
 - 表里的耗时来自一个很简单的模型。Freestyle 的视图图计算会随边数增长，换成正式角色后需要重新测。
 
+## 特效与地面贴图（post/vfx_textures.py）
+
+不用 Blender，只用 Pillow + numpy 生成，颜色全部取自 `style/style.py`。固定随机种子，重复运行逐字节相同，约 15 秒。
+
+```bash
+art/.venv/bin/python art/post/vfx_textures.py        # 在仓库的 lantern-next/ 目录下执行
+art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点、宣纸接缝、光照边界与抖动、体积等）
+```
+
+| 输出 | 内容 |
+|---|---|
+| `out/assets/vfx/` | light glow eyes shadow spark gem_0..2 flame_0..3 ink_0..2 lantern + `meta.json`（尺寸、锚点、混合方式） |
+| `out/assets/ground/` | paper（512² 可平铺，RGB）wash_0..2 grass_0..3 + `meta.json` |
+| `out/review/` | `vfx_sheet.png`（纸色底 / 夜色底各一遍，2×）、`paper_tile_2x2.png`（看接缝）、`light_test.png`（看色带） |
+
+名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
+
 ## 不提交到 git 的目录
 
 `.gitignore` 忽略了 `.venv/`、`out/`、`.blender/`：
@@ -92,4 +109,4 @@ art/.venv/bin/python art/render/smoke_test.py     # 在仓库的 lantern-next/ �
 - `out/` 是渲染产物
 - `.blender/` 用来放官方 Blender 压缩包（如果以后要用）
 
-需要提交的只有 `render/`、`requirements.txt`、`README.md` 和 `.gitignore`。
+需要提交的只有 `render/`、`post/`、`style/`、`requirements.txt`、`README.md` 和 `.gitignore`。

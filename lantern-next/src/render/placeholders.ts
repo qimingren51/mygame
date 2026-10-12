@@ -350,12 +350,12 @@ export function createPlaceholderArt(): ArtSet {
     const size = 80;
     const frames: { tex?: Texture }[] = [];
     const flash: { tex?: Texture }[] = [];
-    let eyes: Socket = { x: 0, y: 0 };
+    const eyes: Socket[] = [];
     for (let f = 0; f < 6; f++) {
-      frames.push(actors.add(size, size, 0.5, 0.875, (ctx) => (eyes = drawGhost(ctx, size, f / 6, false, wisp))));
+      frames.push(actors.add(size, size, 0.5, 0.875, (ctx) => eyes.push(drawGhost(ctx, size, f / 6, false, wisp))));
       flash.push(actors.add(size, size, 0.5, 0.875, (ctx) => drawGhost(ctx, size, f / 6, true, wisp)));
     }
-    return { frames, flash, eyes: () => eyes };
+    return { frames, flash, eyes };
   };
   const shade = enemy(false);
   const wisp = enemy(true);
@@ -423,13 +423,15 @@ export function createPlaceholderArt(): ArtSet {
   const paper = Texture.from(drawPaper());
   paper.source.addressMode = 'repeat';
 
-  const anim = (e: ReturnType<typeof enemy>) => ({ frames: e.frames.map(tex), flash: e.flash.map(tex), eyes: e.eyes() });
+  const anim = (e: ReturnType<typeof enemy>) => ({ frames: e.frames.map(tex), flash: e.flash.map(tex), eyes: e.eyes });
   return {
     pxPerUnit: PX,
     hero: {
       idle: heroIdle.map((d) => d.map(tex)),
       walk: heroWalk.map((d) => d.map(tex)),
       lantern: { idle: lanternIdle, walk: lanternWalk },
+      strideUnits: 64,
+      idleFps: 6,
     },
     enemies: { shade: anim(shade), wisp: anim(wisp) },
     vfx: {

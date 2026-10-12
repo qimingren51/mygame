@@ -19,6 +19,8 @@ import { Lighting } from './lighting';
 import { packColor, ParticleLayer } from './particles';
 import type { BloomMode, Quality } from './quality';
 
+// 光照图里的灯光颜色。比 style.py 的 LANTERN_LIGHT（灯笼本身的颜色）淡：
+// 光照图是乘到画面上的，太橙会把宣纸染成橘色。
 const LANTERN_LIGHT = 0xffe0b0;
 const FLAME_LIGHT = 0xffa860;
 const SOUL_LIGHT = 0xbfefff;
@@ -64,7 +66,7 @@ export class Presenter {
   private bloomFilter: AdvancedBloomFilter | null = null;
   private readonly inv: number;
   private readonly anims: ActorAnim[];
-  private readonly eyes: { x: number; y: number }[];
+  private readonly eyes: { x: number; y: number }[][];
   private readonly eyeColor: number[];
   private readonly typeScale: number[];
   private heroDir = 2;
@@ -169,12 +171,12 @@ export class Presenter {
     if (p.moving || p.dashT > 0) {
       this.walkDist += Math.min(moved, 30);
       const frames = hero.walk[this.heroDir] as Texture[];
-      const f = Math.floor((this.walkDist / 64) * frames.length) % frames.length;
+      const f = Math.floor((this.walkDist / hero.strideUnits) * frames.length) % frames.length;
       heroTex = frames[f] as Texture;
       sock = hero.lantern.walk[this.heroDir]?.[f] ?? { x: 0, y: 0 };
     } else {
       const frames = hero.idle[this.heroDir] as Texture[];
-      const f = Math.floor(this.time * 6) % frames.length;
+      const f = Math.floor(this.time * hero.idleFps) % frames.length;
       heroTex = frames[f] as Texture;
       sock = hero.lantern.idle[this.heroDir]?.[f] ?? { x: 0, y: 0 };
     }
@@ -186,7 +188,8 @@ export class Presenter {
     const flicker = 1 + Math.sin(this.time * 13) * 0.02 + Math.sin(this.time * 7.3) * 0.02;
     this.lighting.add(lx, ly, LIGHT_RADIUS * Math.sqrt(w.stats.area) * flicker, LANTERN_LIGHT, 1);
     const lan = this.art.vfx.lantern;
-    this.glow.add(lan, lx, ly, inv, inv, packColor(WARM_CORE, 0.9));
+    // 灯芯贴图本身已带暖色，不再染色
+    this.glow.add(lan, lx, ly, inv, inv, packColor(0xffffff, 0.9));
     if (baked) this.glow.add(this.art.vfx.glow, lx, ly, 0.9, 0.9, packColor(WARM_CORE, 0.45));
 
     // ---- 妖物
@@ -213,7 +216,7 @@ export class Presenter {
       this.actors.push(tex, ex, ey + bob, inv * k * mirror, inv * k, ey);
       const r = en.r[i] as number;
       this.shadows.add(shadowTex, ex, ey, (r * 1.8) / shadowW, (r * 1.8) / shadowW, packColor(0xffffff, 0.55));
-      const eye = this.eyes[type] as { x: number; y: number };
+      const eye = (this.eyes[type] as { x: number; y: number }[])[f] ?? { x: 0, y: 0 };
       const eyeX = ex + eye.x * inv * k * mirror;
       const eyeY = ey + bob + eye.y * inv * k;
       const ec = this.eyeColor[type] as number;
@@ -233,7 +236,7 @@ export class Presenter {
         const fy = prop.y + pr.stoneLanternFlame.y * inv;
         const fl = 1 + Math.sin(t * 9 + prop.phase) * 0.04 + Math.sin(t * 5.1 + prop.phase * 2) * 0.04;
         this.lighting.add(fx, fy + 10, 120 * fl, STONE_LIGHT, 0.9);
-        this.glow.add(lan, fx, fy, inv * 0.8, inv * 0.8, packColor(WARM_CORE, 0.85));
+        this.glow.add(lan, fx, fy, inv * 0.8, inv * 0.8, packColor(0xffffff, 0.85));
         if (baked) this.glow.add(glowTex, fx, fy, 0.7, 0.7, packColor(WARM_CORE, 0.4));
       }
     }

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -360,8 +361,9 @@ def make_shadow(rng) -> Image.Image:
     """接触阴影：焦墨，最大 alpha≈0.45，湿墨边，略不规则。"""
     ss, w, h = 4, 64, 24
     X, Y = grid(h, w, ss)
-    dx, dy = (X - 32.0) / 27.5, (Y - 12.3) / 9.4
-    rho = np.hypot(dx, dy)
+    dx, dy = (X - 32.0) / 27.0, (Y - 12.3) / 9.6
+    # 超椭圆（指数 2.4）：两端比普通椭圆圆润，不会显得尖
+    rho = (np.abs(dx) ** 2.4 + np.abs(dy) ** 2.4) ** (1 / 2.4)
     th = np.arctan2(dy, dx)
     # 不用 2 次谐波（会把椭圆拉尖成叶子形），只让轮廓轻微起伏
     rho = rho / (1.0 + angular_noise(rng, th, harmonics=(3, 4, 5, 6, 8), amp=0.07))
@@ -380,7 +382,7 @@ def make_shadow(rng) -> Image.Image:
     return to_rgba8(col(S.INK["jiao"]), a)
 
 
-def make_ink(rng, k: int) -> Image.Image:
+def make_ink(rng) -> Image.Image:
     """飞溅墨点：主墨团带尖刺 + 卫星墨滴 + 细雾点。"""
     ss, size = 8, 20
     X, Y = grid(size, size, ss)
@@ -447,22 +449,14 @@ def make_gem(rng, size: int, variant: int) -> Image.Image:
     rb = 4.8 * s  # 下部圆头半径
     by = c + 3.6 * s  # 圆头中心
     lean = (1, -1, 1)[variant]
-    # 主火舌：先略向反方向弯，再把尖甩出去
-    tip = (c + lean * 2.4 * s, c - 10.0 * s)
-    pts = bezier([(c, by), (c - lean * 1.8 * s, by - 5.5 * s), (c + lean * 2.8 * s, by - 9.5 * s), tip], 120)
+    curl = (1.0, 1.2, 1.5)[variant]  # 越大的魂火，火舌甩得越开
+    # 主火舌：先略向反方向弯，再把尖甩出去（S 形）
+    tip = (c + lean * 2.4 * curl * s, c - 10.0 * s)
+    pts = bezier([(c, by), (c - lean * 1.8 * curl * s, by - 5.5 * s), (c + lean * 2.8 * curl * s, by - 9.5 * s), tip], 120)
     tt = np.linspace(0, 1, len(pts))
     f = stroke_fields(X, Y, pts, rb * (1.0 - tt) ** 1.1)
     m = np.clip(1.0 - np.hypot(f["perp"], f["over"]) / f["hw"], 0, 1)
     m = np.maximum(m, np.clip(1.0 - np.hypot(X - c, Y - by) / rb, 0, 1))
-    if variant == 2:
-        # 大魂火从圆肚侧上方再分出一缕短火舌，比主火舌矮
-        p2 = bezier([(c - 1.2 * s, by - 2.2 * s), (c - 3.4 * s, by - 4.4 * s), (c - 4.0 * s, by - 6.6 * s), (c - 5.4 * s, by - 8.8 * s)], 80)
-        f2 = stroke_fields(X, Y, p2, 1.8 * s * (1.0 - np.linspace(0, 1, 80)) ** 1.1)
-        m = np.maximum(m, 0.8 * np.clip(1.0 - np.hypot(f2["perp"], f2["over"]) / f2["hw"], 0, 1))
-    if variant >= 1:
-        # 火舌尖上方飘起的一粒小火星
-        ex, ey = tip[0] - lean * 1.6 * s, tip[1] + 0.6 * s
-        m = np.maximum(m, 0.7 * np.clip(1.0 - np.hypot(X - ex, Y - ey) / (0.95 * s), 0, 1))
     m = np.clip(m + 0.06 * noise(rng, X.shape, 1.3 * ss) * (m > 0), 0, 1)
     body = smoothstep(0.0, 0.2, m) * 0.6
     core = smoothstep(0.25, 0.8, m) * np.exp(-(np.hypot((X - c) / (0.9 * rb), (Y - by + 1.0 * s) / (1.25 * rb)) ** 2))
@@ -647,15 +641,15 @@ def make_paper() -> Image.Image:
     # 负值 = 朝更白更透的纸色变亮
     light_dir = col("#F8F2E4") - col(S.PAPER)
     # 1. 大块云状浓淡（纸浆厚薄不匀）
-    cloud = fbm(rng, sh, (70.0, 30.0, 12.0), (0.45, 0.7, 0.4))  # 最低频压低，平铺时不易看出重复
-    dark += 0.15 * cloud
+    cloud = fbm(rng, sh, (70.0, 30.0, 12.0), (0.3, 0.7, 0.5))  # 最低频压低，平铺时不易看出重复
+    dark += 0.13 * cloud
     # 2. 中尺度的絮状纹（宣纸迎光看到的“云纹”）
     floc = noise(rng, sh, 3.2) + 0.6 * noise(rng, sh, 6.0)
     floc = floc / floc.std()
     dark += 0.07 * np.tanh(floc)
     # 3. 长纤维（深）与亮纤维（半透明的白丝）
-    dark += fibre_layer(rng, size, 2, 150, (40, 150), (0.10, 0.30), 0.45, 0.035)
-    dark -= fibre_layer(rng, size, 2, 110, (25, 100), (0.10, 0.26), 0.6, 0.05)
+    dark += fibre_layer(rng, size, 2, 150, (40, 150), (0.14, 0.40), 0.45, 0.035)
+    dark -= fibre_layer(rng, size, 2, 110, (25, 100), (0.12, 0.30), 0.6, 0.05)
     # 4. 大量短细纤维，构成纸面的“毛”
     dark += fibre_layer(rng, size, 2, 900, (4, 18), (0.03, 0.10), 0.4, 0.08)
     dark -= fibre_layer(rng, size, 2, 700, (4, 16), (0.03, 0.09), 0.45, 0.08)
@@ -691,26 +685,34 @@ def make_wash(seed: int, lobes, base_alpha: float, *, tilt=(0.0, 0.0), sweep: fl
     X, Y = grid(h, w, ss)
     sh = X.shape
     nx, ny = (X - w / 2) / (w / 2), (Y - h / 2) / (h / 2)
-    wx = nx + 0.12 * noise(rng, sh, 26 * ss) + 0.025 * noise(rng, sh, 7 * ss)
-    wy = ny + 0.12 * noise(rng, sh, 26 * ss) + 0.025 * noise(rng, sh, 7 * ss)
+    wx = nx + 0.08 * noise(rng, sh, 30 * ss) + 0.05 * noise(rng, sh, 12 * ss) + 0.02 * noise(rng, sh, 5 * ss)
+    wy = ny + 0.08 * noise(rng, sh, 30 * ss) + 0.05 * noise(rng, sh, 12 * ss) + 0.02 * noise(rng, sh, 5 * ss)
     F = np.zeros(sh)
     for cx, cy, rx, ry, wt in lobes:
         F += wt * np.exp(-(((wx - cx) / rx) ** 2 + ((wy - cy) / ry) ** 2))
-    F += 0.05 * noise(rng, sh, 10 * ss)
+    # 边缘的分形起伏：大弯里套小弯，纸纤维让边线再碎一点
+    F += 0.06 * noise(rng, sh, 9 * ss) + 0.035 * noise(rng, sh, 3 * ss) + 0.012 * noise(rng, sh, 1.2 * ss)
+    # 细噪声会在边上掐出几个像素的小洞，看着像瑕疵：取 max(F, 模糊F-余量)，相当于软的闭运算，
+    # 只填窄缝和小洞，凸出去的毛边不受影响
+    F = np.maximum(F, fft_blur(F, 2.5 * ss) - 0.004)
     gy, gx = np.gradient(F, 1.0 / ss)
-    sd = np.clip((F - 0.5) / (np.hypot(gx, gy) + 1e-4), -40, 40)  # 近似的到边缘距离（最终像素），内正外负
+    # 近似的到边缘距离（最终像素），内正外负。梯度模先平滑再设下限，避免鞍点处距离发散出小洞
+    gm = np.maximum(fft_blur(np.hypot(gx, gy), 2.0 * ss), 0.006)
+    sd = np.clip((F - 0.5) / gm, -40, 40)
     # 软硬边：soft=1 是湿接湿的柔边，0 是干后积墨的硬边
-    soft = smoothstep(-0.3, 0.7, noise(rng, sh, 20 * ss))
+    soft = smoothstep(-0.1, 0.9, noise(rng, sh, 20 * ss))
     wtr = 0.6 + 10.0 * soft
     inside = smoothstep(-0.5 * wtr, 0.5 * wtr, sd)
     # 内部：一侧浓一侧淡 + 湿画法的起伏 + 细颗粒
     interior = base_alpha * (1.0 + 0.35 * (tilt[0] * nx + tilt[1] * ny))
     interior = interior + 0.03 * noise(rng, sh, 10 * ss) + 0.012 * noise(rng, sh, 4 * ss) + 0.008 * noise(rng, sh, 0.5 * ss)
     interior -= 0.025 * smoothstep(12.0, 2.0, sd) * (1.0 - soft)  # 硬边内侧被带走的一条淡带
+    # 墨聚的地方（叶瓣中心）再深一层，柔边过渡，出浓淡层次
+    interior += 0.07 * smoothstep(0.62, 0.95, F + 0.08 * noise(rng, sh, 6 * ss))
     # 积墨的边：宽度和浓度沿边变化
     pool_w = 1.4 + 1.0 * smoothstep(-1, 1, noise(rng, sh, 10 * ss))
     pool_k = smoothstep(-1.0, 1.2, noise(rng, sh, 7 * ss))
-    pool = 0.19 * pool_k * (1.0 - soft) ** 1.5 * np.exp(-np.maximum(sd, 0) / pool_w)
+    pool = 0.22 * pool_k * (1.0 - soft) ** 1.5 * np.exp(-np.maximum(sd, 0) / pool_w)
     # 水渍纹（backrun）：内部另一个场的等值线，很淡
     G = noise(rng, sh, 8.0 * ss) + 0.4 * noise(rng, sh, 2.5 * ss)
     tide = 0.025 * np.exp(-(((G - 0.7) / 0.12) ** 2)) * (G < 0.75) * smoothstep(4, 12, sd)
@@ -734,8 +736,8 @@ WASHES = [
     # (种子, 叶瓣 [(cx, cy, rx, ry, 权重)...], 内部浓度, 关键字参数)
     # 0：淡墨，一大片横卧的水洼
     (3101, [(-0.30, 0.05, 0.42, 0.50, 1.0), (0.28, -0.06, 0.40, 0.46, 0.95), (0.0, 0.25, 0.36, 0.30, 0.6), (-0.05, -0.30, 0.30, 0.25, 0.5)], 0.14, {"tilt": (-0.5, 0.3)}),
-    # 1：清墨，两汪相连，右上角溅出一小块
-    (3202, [(-0.42, -0.05, 0.30, 0.48, 1.0), (0.38, 0.08, 0.32, 0.44, 0.95), (0.0, 0.05, 0.25, 0.22, 0.55), (0.55, -0.42, 0.14, 0.18, 0.75)], 0.10, {"tilt": (0.4, 0.0)}),
+    # 1：清墨，两汪相连，右上角另有一小滴
+    (3202, [(-0.42, -0.05, 0.30, 0.48, 1.0), (0.38, 0.08, 0.32, 0.44, 0.95), (0.0, 0.05, 0.25, 0.22, 0.55), (0.62, -0.50, 0.10, 0.13, 0.95)], 0.10, {"tilt": (0.4, 0.0)}),
     # 2：淡墨，侧锋从左下扫向右上，尾端飞白
     (3303, [(-0.60, 0.34, 0.18, 0.30, 0.95), (-0.32, 0.18, 0.26, 0.40, 1.0), (0.0, 0.0, 0.28, 0.40, 1.0), (0.32, -0.16, 0.24, 0.32, 0.9), (0.60, -0.32, 0.16, 0.22, 0.75)], 0.15, {"tilt": (-0.6, 0.2), "sweep": math.atan2(-56.0, 154.0)}),
 ]
@@ -929,6 +931,12 @@ def light_test(light: Image.Image, paper: Image.Image, path: Path) -> None:
 # ============================================================== 主流程
 
 
+def dump_json(obj) -> str:
+    """缩进的 JSON，但数字短列表（size、anchor）写在一行里，方便人看。"""
+    text = json.dumps(obj, ensure_ascii=False, indent=2)
+    return re.sub(r"\[\s*([-0-9.eE]+),\s*([-0-9.eE]+)\s*\]", r"[\1, \2]", text) + "\n"
+
+
 def anchor_entry(img: Image.Image, anchor, **extra):
     return {"size": [img.width, img.height], "anchor": [float(anchor[0]), float(anchor[1])], **extra}
 
@@ -952,7 +960,7 @@ def main() -> dict:
     for i, im in enumerate(make_flames()):
         vfx[f"flame_{i}"] = (im, (0.5, 0.6), {"color": "full", "blend": "add", "tint": False, "anim": "flame", "frame": i, "frames": 4})
     for i in range(3):
-        vfx[f"ink_{i}"] = (make_ink(np.random.default_rng(1300 + i * 17), i), (0.5, 0.5), {"color": "jiao", "blend": "normal"})
+        vfx[f"ink_{i}"] = (make_ink(np.random.default_rng(1300 + i * 17)), (0.5, 0.5), {"color": "jiao", "blend": "normal"})
     vfx["lantern"] = (make_lantern(), (0.5, 0.5), {"color": "full", "blend": "add", "tint": False, "note": "灯笼芯，暖光 LANTERN_LIGHT"})
 
     ground: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
@@ -974,11 +982,11 @@ def main() -> dict:
         meta = {
             "name": name,
             "generator": "art/post/vfx_textures.py",
-            "format": "PNG, straight (non-premultiplied) alpha",
+            "format": "PNG RGBA，直通（非预乘）alpha" + ("；paper.png 为不透明 RGB 平铺图" if name == "ground" else ""),
             "px_per_unit": S.PX_PER_UNIT,
             "files": files,
         }
-        (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (folder / "meta.json").write_text(dump_json(meta), encoding="utf-8")
 
     # 检查图
     tints = {
@@ -991,10 +999,13 @@ def main() -> dict:
         "gem_2": col(S.SOUL_LIGHT),
     }
     entries = []
-    for key, (img, _, extra) in list(vfx.items()) + [(k, v) for k, v in ground.items() if k != "paper"]:
+    order = [k for k in vfx if k != "light"] + [k for k in ground if k.startswith("grass")] + ["light"]
+    order += [k for k in ground if k.startswith("wash")]
+    for key in order:
+        img, _, extra = vfx.get(key) or ground[key]
         mode = "add" if extra.get("blend") == "add" else "over"
         entries.append((key, img, mode, tints.get(key)))
-    entries.append(("paper(crop)", paper.crop((0, 0, 200, 140)).convert("RGBA"), "over", None))
+    entries.append(("paper(crop)", paper.crop((0, 0, 160, 160)).convert("RGBA"), "over", None))
     review_sheet(entries, REVIEW_DIR / "vfx_sheet.png")
     tile = Image.new("RGB", (1024, 1024))
     for ox in (0, 512):

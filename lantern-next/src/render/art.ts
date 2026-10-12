@@ -29,8 +29,12 @@ export interface ArtSet {
     walk: Texture[][];
     /** 灯笼挂点 [动画名][方向][帧] */
     lantern: { idle: Socket[][]; walk: Socket[][] };
+    /** 走路动画播完一整轮对应的移动距离（世界单位），脚步不打滑 */
+    strideUnits: number;
+    idleFps: number;
   };
-  enemies: Record<'shade' | 'wisp', ActorAnim & { eyes: Socket }>;
+  /** eyes：每帧的眼睛挂点（与 frames 一一对应），妖眼的光点画在这里 */
+  enemies: Record<'shade' | 'wisp', ActorAnim & { eyes: Socket[] }>;
   vfx: {
     light: Texture;
     glow: Texture;
