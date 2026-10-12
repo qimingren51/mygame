@@ -1,3 +1,19 @@
+:root {
+  --paper: #ede4cf;
+  --ink: #17140f;
+  --gold: #f2b544;
+  --gold-l: #ffd98a;
+  --vermilion: #c23a2b;
+  --text: #ede6d6;
+  --muted: #a9aec2;
+  --night: #0b0f1c;
+  --serif: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+}
+
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -25,6 +41,7 @@ body {
 
 #perf {
   position: fixed;
+  z-index: 5;
   left: max(8px, env(safe-area-inset-left));
   top: max(6px, env(safe-area-inset-top));
   font: 11px/1.3 ui-monospace, Menlo, monospace;
@@ -34,28 +51,6 @@ body {
   border-radius: 4px;
   pointer-events: none;
   white-space: pre;
-}
-
-#home {
-  position: fixed;
-  right: max(10px, env(safe-area-inset-right));
-  top: max(6px, env(safe-area-inset-top));
-  color: #ffd98a;
-  font-size: 13px;
-  text-decoration: none;
-  background: rgba(10, 12, 22, 0.55);
-  padding: 3px 8px;
-  border-radius: 4px;
-}
-
-#build {
-  position: fixed;
-  right: max(10px, env(safe-area-inset-right));
-  bottom: max(6px, env(safe-area-inset-bottom));
-  margin: 0;
-  color: #8c92a8;
-  font-size: 11px;
-  pointer-events: none;
 }
 
 #fatal {
@@ -100,4 +95,200 @@ body {
   height: 48px;
   border-radius: 50%;
   background: rgba(237, 228, 207, 0.35);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 标题等界面：盖在画面上，画面在后面继续跑 */
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  background: radial-gradient(ellipse at center, rgba(11, 15, 28, 0.35) 0%, rgba(11, 15, 28, 0.82) 70%);
+  text-align: center;
+}
+
+.back-link {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left));
+  top: max(10px, env(safe-area-inset-top));
+  color: var(--gold-l);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.title-name {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: var(--paper);
+  text-shadow: 0 0 24px rgba(255, 194, 122, 0.45), 0 2px 0 rgba(23, 20, 15, 0.9);
+}
+
+.tagline {
+  margin: 0 0 6px;
+  color: var(--gold-l);
+  font-family: var(--serif);
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn {
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 10px;
+  border: 1px solid var(--gold);
+  background: rgba(242, 181, 68, 0.08);
+  color: var(--gold-l);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.btn.primary {
+  border: none;
+  background: var(--gold);
+  color: #1a1406;
+  font-family: var(--serif);
+  font-weight: 900;
+  letter-spacing: 2px;
+  box-shadow: 0 0 20px rgba(242, 181, 68, 0.35);
+}
+
+.btn.big {
+  min-height: 50px;
+  padding: 0 34px;
+  font-size: 18px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toggles {
+  display: flex;
+  gap: 8px;
+}
+
+.toggle {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #3a4466;
+  background: rgba(21, 26, 43, 0.75);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.toggle.off {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+#build {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(6px, env(safe-area-inset-bottom));
+  margin: 0;
+  color: #8c92a8;
+  font-size: 11px;
+}
+
+/* 游戏中的按钮 */
+.icon-btn {
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right));
+  top: max(8px, env(safe-area-inset-top));
+  min-width: 52px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #2e3550;
+  background: rgba(21, 26, 43, 0.75);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dash-btn {
+  position: fixed;
+  right: max(22px, calc(env(safe-area-inset-right) + 10px));
+  bottom: max(22px, calc(env(safe-area-inset-bottom) + 10px));
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 217, 138, 0.55);
+  background: rgba(23, 20, 15, 0.45);
+  color: var(--gold-l);
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 900;
+  touch-action: none;
+}
+
+.dash-btn:active {
+  background: rgba(242, 181, 68, 0.3);
+}
+
+/* 触屏 / 鼠标只显示对应的说明 */
+@media (pointer: coarse) {
+  .mouse-only {
+    display: none !important;
+  }
+}
+
+@media not (pointer: coarse) {
+  .touch-only {
+    display: none !important;
+  }
+}
+
+/* 竖屏提示（仅触屏设备） */
+.rotate-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--night);
+  color: var(--gold-l);
+  font-family: var(--serif);
+  font-size: 18px;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .rotate-hint {
+    display: flex;
+  }
+}
+
+/* 矮屏（手机横屏）压缩间距 */
+@media (max-height: 440px) {
+  .screen {
+    gap: 8px;
+  }
+  .title-name {
+    font-size: 44px;
+  }
 }

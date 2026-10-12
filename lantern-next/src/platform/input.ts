@@ -94,19 +94,21 @@ export class Input {
   sample(dt: number): InputFrame {
     let mx = 0;
     let my = 0;
-    const k = this.keys;
-    if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
-    if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
-    if (k.has('KeyW') || k.has('ArrowUp')) my -= 1;
-    if (k.has('KeyS') || k.has('ArrowDown')) my += 1;
-    if (this.stickId !== null) {
-      const dx = this.sx - this.ox;
-      const dy = this.sy - this.oy;
-      const l = Math.hypot(dx, dy);
-      if (l > 6) {
-        const m = Math.min(1, l / STICK_R);
-        mx = (dx / l) * m;
-        my = (dy / l) * m;
+    if (this.enabled) {
+      const k = this.keys;
+      if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
+      if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
+      if (k.has('KeyW') || k.has('ArrowUp')) my -= 1;
+      if (k.has('KeyS') || k.has('ArrowDown')) my += 1;
+      if (this.stickId !== null) {
+        const dx = this.sx - this.ox;
+        const dy = this.sy - this.oy;
+        const l = Math.hypot(dx, dy);
+        if (l > 6) {
+          const m = Math.min(1, l / STICK_R);
+          mx = (dx / l) * m;
+          my = (dy / l) * m;
+        }
       }
     }
     if (this.auto && mx === 0 && my === 0) {
@@ -116,7 +118,6 @@ export class Input {
       mx = Math.cos(a);
       my = Math.sin(a);
     }
-    if (!this.enabled) mx = my = 0;
     const l = Math.hypot(mx, my);
     if (l > 1) {
       mx /= l;

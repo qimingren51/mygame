@@ -4,6 +4,7 @@
 
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { Container, Rectangle, Sprite, Texture, type Renderer } from 'pixi.js';
+import type { SimEvent } from '../core/bus';
 import { FX, FX_CRIT } from '../core/fxqueue';
 import { SIM_DT } from '../core/loop';
 import { TAU } from '../core/math';
@@ -35,6 +36,12 @@ export interface PresenterOptions {
   maxLights: number;
   /** 场上魂火最多给多少个发光（其余只画不发光） */
   gemLights: number;
+}
+
+/** 事件的其他听众（音频等）；画面层取走事件时顺便转发 */
+export interface SimListener {
+  event(e: SimEvent): void;
+  fx(code: number): void;
 }
 
 export interface FrameStats {
@@ -78,6 +85,7 @@ export class Presenter {
   /** 调试开关 */
   showNumbers = true;
   lightsOn = true;
+  listener: SimListener | null = null;
   private readonly art: ArtSet;
   private readonly opts: PresenterOptions;
 
@@ -306,7 +314,9 @@ export class Presenter {
   }
 
   private consumeEvents(w: World): void {
+    const listener = this.listener;
     w.bus.drain((e) => {
+      listener?.event(e);
       switch (e.k) {
         case 'shake':
           this.cam.shake(e.amount);
@@ -323,6 +333,7 @@ export class Presenter {
     });
     const p = w.player;
     w.fx.drain((code, x, y, a, b) => {
+      listener?.fx(code);
       if (code === FX.HIT) {
         this.fxp.hit(x, y, p.x, p.y);
         this.numbers.add(x, y, a, (b & FX_CRIT) !== 0);

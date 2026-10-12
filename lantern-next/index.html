@@ -15,9 +15,36 @@
 </head>
 <body>
   <div id="game"></div>
-  <div id="perf"></div>
-  <a id="home" href="../">← 全部游戏</a>
-  <p id="build"></p>
+  <div id="perf" hidden></div>
+
+  <section id="title" class="screen">
+    <a class="back-link" href="../">← 全部游戏</a>
+    <h1 class="title-name">提灯夜行</h1>
+    <p class="tagline">新版技术小样 · 灯照见画，千妖夜行</p>
+    <div class="row">
+      <button id="start-btn" class="btn primary big" type="button">开始测试</button>
+      <button id="bench-btn" class="btn" type="button">跑分</button>
+    </div>
+    <p class="hint touch-only">左手按住拖动移动 · 右下角闪避 · 攻击全自动</p>
+    <p class="hint mouse-only">WASD / 方向键移动 · 空格闪避 · Esc 返回标题</p>
+    <div class="toggles">
+      <button class="toggle" type="button" data-audio="music">音乐 开</button>
+      <button class="toggle" type="button" data-audio="sfx">音效 开</button>
+      <button class="toggle" type="button" data-fs hidden>全屏</button>
+    </div>
+    <p id="fs-hint" class="hint" hidden></p>
+    <p id="build"></p>
+  </section>
+
+  <div id="hud" hidden>
+    <button id="back-btn" class="icon-btn" type="button" aria-label="返回标题">返回</button>
+    <button id="dash-btn" class="dash-btn touch-only" type="button" aria-label="闪避">闪</button>
+  </div>
+
+  <div class="rotate-hint" aria-live="polite">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFD98A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M3 9a9 9 0 0 1 4-5 M21 15a9 9 0 0 1-4 5"/></svg>
+    <p>请将手机横过来</p>
+  </div>
   <div id="fatal" hidden></div>
   <script type="module" src="./src/main.ts"></script>
 </body>
