@@ -9,8 +9,9 @@ use bevy_state::prelude::*;
 use lantern_content::Content;
 
 use crate::{
-    AppState, Enemies, GameContent, HashCheckpoint, HashLog, Health, InputFrame, Player, Progress, RunMode,
-    RunSetup, RunState, SimCommand, SimCommands, SimEvent, SimOutbox, SimPlugin, Tick,
+    AppState, Enemies, GameContent, HashCheckpoint, HashLog, Health, InputFrame, Player, Progress, Replay,
+    ReplayLog, ReplayPlayback, RunMode, RunSetup, RunState, SimCommand, SimCommands, SimEvent, SimOutbox,
+    SimPlugin, Tick,
 };
 
 pub struct SimHarness {
@@ -31,6 +32,30 @@ impl SimHarness {
         app.world_mut().resource_mut::<NextState<AppState>>().set(AppState::Run);
         app.world_mut().run_schedule(StateTransition);
         SimHarness { app }
+    }
+
+    /// 从回放开局。之后用 [`SimHarness::step`] 推进（输入由回放提供，传入的参数被忽略），
+    /// 直到 [`SimHarness::playback`] 报告结束。
+    pub fn from_replay(content: Content, replay: Replay) -> Self {
+        let mut sim = Self::with_mode(content, replay.seed, replay.mode);
+        sim.app.insert_resource(ReplayPlayback::new(replay));
+        sim
+    }
+
+    /// 开始录制本局的回放。
+    pub fn record(&mut self, game_version: &str) {
+        let world = self.app.world();
+        let setup = world.resource::<RunSetup>().clone();
+        let hash = world.resource::<GameContent>().0.hash;
+        self.app.insert_resource(ReplayLog(Replay::new(game_version, hash, setup.seed, setup.mode)));
+    }
+
+    pub fn replay(&self) -> Option<&Replay> {
+        self.app.world().get_resource::<ReplayLog>().map(|l| &l.0)
+    }
+
+    pub fn playback(&self) -> Option<&ReplayPlayback> {
+        self.app.world().get_resource::<ReplayPlayback>()
     }
 
     /// 推进一步。本局结束后不再推进。

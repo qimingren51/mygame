@@ -7,9 +7,10 @@ use bevy::input::InputSystems;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
-use lantern_sim::{InputFrame, RunState, SimCommand, SimCommands};
+use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands};
 
 pub mod paths;
+pub mod replays;
 pub mod settings;
 
 pub use settings::Settings;
@@ -46,6 +47,7 @@ impl Plugin for PlatformPlugin {
             .init_resource::<Actions>()
             .add_systems(PreUpdate, (gather_actions, feed_sim).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
+        replays::register(app);
     }
 }
 
@@ -101,10 +103,15 @@ fn feed_sim(
     actions: Res<Actions>,
     state: Option<Res<State<RunState>>>,
     autopilot: Option<ResMut<AutoPilot>>,
+    playback: Option<Res<ReplayPlayback>>,
     mut input: ResMut<InputFrame>,
     mut commands: ResMut<SimCommands>,
 ) {
     let playing = state.is_some_and(|s| *s.get() == RunState::Playing);
+    // 重放时输入和命令由回放提供
+    if playback.is_some() {
+        return;
+    }
     if !playing {
         *input = InputFrame::default();
         return;

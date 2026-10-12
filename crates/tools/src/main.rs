@@ -2,6 +2,7 @@
 //!
 //!   cargo run --release -p lantern-tools -- bench [--enemies 5000] [--seconds 20] [--seed 1]
 //!   cargo run -p lantern-tools -- check-content
+//!   cargo run --release -p lantern-tools -- replay <回放文件>
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -10,13 +11,15 @@ use std::time::Instant;
 use bevy_math::{Vec2, ops};
 use lantern_content::Content;
 use lantern_core::step::TICK_HZ;
-use lantern_sim::{InputFrame, RunMode, SimCommand, SimHarness};
+use lantern_sim::{InputFrame, Replay, RunMode, SimCommand, SimHarness};
 
 const USAGE: &str = "用法：
   lantern-tools bench [--enemies <数量>] [--seconds <秒>] [--seed <种子>]
       跑分：场上保持指定数量的妖物（默认 5000），主角绕圈，统计每步耗时
   lantern-tools check-content
-      校验 assets/data";
+      校验 assets/data
+  lantern-tools replay <回放文件>
+      不开窗口重放，逐秒核对状态哈希，报告第一次出现分歧的步数";
 
 fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")
@@ -67,10 +70,42 @@ fn bench(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn replay(args: &[String]) -> Result<(), String> {
+    let path = args.first().ok_or("replay 后面要跟回放文件的路径")?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 {path} 失败：{e}"))?;
+    let replay = Replay::parse(&text)?;
+    let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
+    if replay.content_hash != content.hash {
+        println!("注意：回放录制时的内容数据与当前不同（游戏版本 {}），结果可能不一致", replay.game_version);
+    }
+    let (ticks, checkpoints, seed) = (replay.ticks, replay.hashes.len(), replay.seed);
+    let start = Instant::now();
+    let mut sim = SimHarness::from_replay(content, replay);
+    while !sim.playback().is_some_and(|p| p.finished) && !sim.is_over() {
+        sim.step(InputFrame::default(), &[]);
+        sim.take_events();
+    }
+    let secs = ticks / u64::from(TICK_HZ);
+    println!(
+        "种子 {seed}，{ticks} 步（{:02}:{:02}），重放用时 {:.2} 秒",
+        secs / 60,
+        secs % 60,
+        start.elapsed().as_secs_f64()
+    );
+    match sim.playback().and_then(|p| p.diverged_at) {
+        None => {
+            println!("全部 {checkpoints} 个检查点与录制时一致");
+            Ok(())
+        }
+        Some(t) => Err(format!("从第 {t} 步（{:.1} 秒）起与录制时不一致", t as f64 / f64::from(TICK_HZ))),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("bench") => bench(&args[1..]),
+        Some("replay") => replay(&args[1..]),
         Some("check-content") => {
             Content::load(&data_dir()).map(|_| println!("内容数据校验通过")).map_err(|e| e.to_string())
         }

@@ -41,6 +41,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 格式
         run: cargo fmt --all --check
+      - name: 界面字体子集不缺字
+        run: |
+          pip install --quiet fonttools
+          python3 crates/ui/fonts.py --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: 测试

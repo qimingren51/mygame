@@ -3495,6 +3495,7 @@ dependencies = [
  "lantern_content",
  "lantern_core",
  "ron",
+ "serde",
 ]
 
 [[package]]

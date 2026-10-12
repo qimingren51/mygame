@@ -13,19 +13,20 @@ use lantern_audio::AudioPlugin;
 use lantern_content::Content;
 use lantern_core::step::{MAX_CATCHUP_TICKS, TICK_HZ};
 use lantern_platform::{PlatformPlugin, Settings, paths};
-use lantern_sim::{GameContent, SimPlugin};
+use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
 use lantern_ui::{SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
 
-const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed]";
+const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件>]";
 
 struct Args {
     seed: Option<u64>,
     windowed: bool,
+    replay: Option<std::path::PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { seed: None, windowed: false };
+    let mut args = Args { seed: None, windowed: false, replay: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -34,6 +35,7 @@ fn parse_args() -> Result<Args, String> {
                 args.seed = Some(v.parse().map_err(|_| format!("种子不是数字：{v}"))?);
             }
             "--windowed" => args.windowed = true,
+            "--replay" => args.replay = Some(it.next().ok_or("--replay 后面要跟回放文件的路径")?.into()),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("不认识的参数：{other}\n{USAGE}")),
         }
@@ -59,6 +61,26 @@ fn main() -> AppExit {
     let content = match Content::load(&assets.join("data")) {
         Ok(c) => c,
         Err(e) => return fatal(&format!("内容数据有误：{e}")),
+    };
+    let playback = match &args.replay {
+        Some(path) => {
+            let text = match std::fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(e) => return fatal(&format!("读取回放 {} 失败：{e}", path.display())),
+            };
+            let replay = match Replay::parse(&text) {
+                Ok(r) => r,
+                Err(e) => return fatal(&e),
+            };
+            if replay.content_hash != content.hash {
+                eprintln!(
+                    "注意：回放录制时的内容数据与当前不同（游戏版本 {}），重放结果可能不一致",
+                    replay.game_version
+                );
+            }
+            Some(ReplayPlayback::new(replay))
+        }
+        None => None,
     };
     let mut settings = Settings::load(&paths::data_dir());
     if args.windowed {
@@ -93,6 +115,10 @@ fn main() -> AppExit {
         AudioPlugin,
         UiPlugin,
     ));
+
+    if let Some(p) = playback {
+        app.insert_resource(p);
+    }
 
     // 一帧最多补 4 步：卡顿时宁可变慢，也不让模拟连续追赶。
     app.world_mut()

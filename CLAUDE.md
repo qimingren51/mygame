@@ -33,9 +33,11 @@ cargo run --features dev                       # 开发模式（Bevy 调试工�
 cargo test --workspace                         # 全部测试
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
-cargo run --release -p lantern-tools -- bench  # 模拟跑分
+cargo run --release -p lantern-tools -- bench  # 模拟跑分（不开窗口，默认 5000 只妖物）
+cargo run --release -p lantern-tools -- replay <文件>  # 校验回放：逐秒核对状态哈希
+cargo run -- --replay <文件>                   # 在游戏里观看回放
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希
-python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools）
+python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）
 ```
 
 Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev`。

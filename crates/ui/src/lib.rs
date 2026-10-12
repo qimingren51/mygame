@@ -12,6 +12,7 @@ use lantern_sim::{AppState, Progress, RunMode, RunSetup, RunState, Tick};
 mod bench;
 mod hud;
 mod perf;
+mod replay_ui;
 
 pub use perf::SimTiming;
 
@@ -55,6 +56,7 @@ impl Plugin for UiPlugin {
                 ),
             );
         perf::register(app);
+        replay_ui::register(app);
     }
 }
 

@@ -23,7 +23,7 @@ impl SimView {
 }
 
 /// 跑分模式：保持场上妖物数量，主角无敌，不升级。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RunMode {
     Normal,
     Bench { enemies: u32 },

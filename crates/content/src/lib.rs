@@ -18,6 +18,8 @@ pub struct Content {
     pub run: RunDef,
     pub enemies: Vec<EnemyDef>,
     pub weapons: Vec<WeaponDef>,
+    /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
+    pub hash: u64,
 }
 
 #[derive(Debug)]
@@ -39,21 +41,29 @@ impl fmt::Display for ContentError {
 
 impl std::error::Error for ContentError {}
 
-fn read<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<T, ContentError> {
+/// 读一个数据文件，同时把原文计入内容哈希。
+fn read<T: serde::de::DeserializeOwned>(dir: &Path, name: &str, hash: &mut u64) -> Result<T, ContentError> {
     let file = dir.join(name);
     let text = std::fs::read_to_string(&file).map_err(|err| ContentError::Io { file: file.clone(), err })?;
+    for b in name.bytes().chain(text.bytes()) {
+        *hash ^= u64::from(b);
+        *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
     ron::from_str(&text).map_err(|err| ContentError::Parse { file, err: Box::new(err) })
 }
 
 impl Content {
     /// 从数据目录（通常是 `assets/data`）加载并校验全部内容。
     pub fn load(data_dir: &Path) -> Result<Content, ContentError> {
-        let content = Content {
-            player: read(data_dir, "player.ron")?,
-            run: read(data_dir, "run.ron")?,
-            enemies: read(data_dir, "enemies.ron")?,
-            weapons: read(data_dir, "weapons.ron")?,
+        let mut hash = 0xcbf2_9ce4_8422_2325;
+        let mut content = Content {
+            player: read(data_dir, "player.ron", &mut hash)?,
+            run: read(data_dir, "run.ron", &mut hash)?,
+            enemies: read(data_dir, "enemies.ron", &mut hash)?,
+            weapons: read(data_dir, "weapons.ron", &mut hash)?,
+            hash: 0,
         };
+        content.hash = hash;
         content.validate(data_dir)?;
         Ok(content)
     }

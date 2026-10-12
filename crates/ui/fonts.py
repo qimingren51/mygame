@@ -7,7 +7,8 @@
 
 用法（在仓库根目录）：
     pip install fonttools
-    python3 crates/ui/fonts.py
+    python3 crates/ui/fonts.py           # 重新生成子集
+    python3 crates/ui/fonts.py --check   # 只检查现有子集是否缺字（CI 用，不下载）
 
 原始字体（OFL 协议）第一次运行时从 google/fonts 下载，缓存在 target/fonts-cache/，不提交。
 """
@@ -62,8 +63,25 @@ def fetch(rel: str) -> Path:
     return dest
 
 
+MANIFEST = OUT / "subset-chars.txt"
+
+
+def check(text: str) -> int:
+    """检查界面用到的字是否都在上次生成子集时的字符清单里（原字体本身没有的字形不算）。"""
+    have = set(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else set()
+    lack = "".join(c for c in text if c not in have)
+    if lack:
+        print(f"字体子集缺字：{lack}")
+        print("新增了界面文字？运行 python3 crates/ui/fonts.py 重新生成字体子集。")
+        return 1
+    print(f"字体子集覆盖全部 {len(text)} 个字符")
+    return 0
+
+
 def main() -> int:
     text = used_chars()
+    if "--check" in sys.argv:
+        return check(text)
     print(f"共 {len(text)} 个字符")
     OUT.mkdir(parents=True, exist_ok=True)
     for name, (rel, weight) in FONTS.items():
@@ -79,6 +97,7 @@ def main() -> int:
         sub.subset(font)
         font.save(OUT / name)
         print(f"{name}: {(OUT / name).stat().st_size / 1024:.0f} KB")
+    MANIFEST.write_text(text, encoding="utf-8")
     for name, rel in LICENSES.items():
         (OUT / name).write_bytes(fetch(rel).read_bytes())
     return 0

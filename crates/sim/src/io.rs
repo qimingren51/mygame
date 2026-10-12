@@ -29,7 +29,7 @@ impl InputFrame {
 }
 
 /// 改变模拟的命令。回放会记录每条命令和它生效的步数。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SimCommand {
     Dash,
     /// 跑分模式下改变场上保持的妖物数量（分段跑分用）；普通模式下忽略

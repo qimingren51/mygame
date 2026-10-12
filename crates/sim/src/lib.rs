@@ -19,6 +19,7 @@ pub mod harness;
 pub mod io;
 mod movement;
 mod player;
+pub mod replay;
 pub mod run;
 pub mod spatial;
 pub mod spawn;
@@ -31,6 +32,7 @@ pub use flow::{AppState, RunState};
 pub use gems::Gems;
 pub use harness::SimHarness;
 pub use io::{InputFrame, SimCommand, SimCommands, SimEvent, SimOutbox};
+pub use replay::{Replay, ReplayLog, ReplayPlayback};
 pub use run::{Progress, RunMode, SimView, Stats};
 pub use tick::{HashCheckpoint, HashLog, SimRng, Tick};
 pub use weapons::Arsenal;
@@ -115,7 +117,9 @@ impl Plugin for SimPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    (tick::save_prev_pos, player::apply_commands).chain().in_set(SimSet::Input),
+                    (replay::feed_playback, replay::record, tick::save_prev_pos, player::apply_commands)
+                        .chain()
+                        .in_set(SimSet::Input),
                     player::move_player.in_set(SimSet::Player),
                     spawn::update_spawns.in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
@@ -125,7 +129,7 @@ impl Plugin for SimPlugin {
                     gems::update_gems.in_set(SimSet::Pickup),
                     gems::level_up.in_set(SimSet::Progress),
                     tick::check_over.in_set(SimSet::Cleanup),
-                    (tick::advance_tick, tick::record_hash).chain().in_set(SimSet::Hash),
+                    (tick::advance_tick, tick::record_hash, replay::sync_hashes).chain().in_set(SimSet::Hash),
                 ),
             )
             // 画面、音频、界面在 Update 里消费完事件后，这里统一清空。
