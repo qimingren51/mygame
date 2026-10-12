@@ -101,9 +101,34 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 
 名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
 
+## 正式管线（风格样张）
+
+```bash
+art/.venv/bin/python art/render/style_frame.py           # 约 45 秒；--quick 只渲 walk 第 2 帧
+art/.venv/bin/python art/post/check_asset.py art/out/style/assets/hero   # 单独自检一个素材
+art/.venv/bin/python art/post/contact_sheet.py <输出目录> <素材文件夹>...  # 单独拼图
+```
+
+| 文件 | 作用 |
+|---|---|
+| `style/style.py` | 风格唯一来源（颜色、尺寸、相机、线条、后期参数、输出约定），只读 |
+| `style/bstyle.py` | Blender 侧：场景/渲染/相机（锚点数值校验）、假卡通材质（晕染+积墨）、发光材质、三档墨线、一次渲染读出填色/墨线/发光遮罩、挂点投影、渲染锁 |
+| `post/postprocess.py` | 4× 缩小、调色板软吸附、墨线叠加与墨晕、纸纹、透明区扩色、闪白剪影 |
+| `post/check_asset.py` | 按输出约定自检（尺寸、边距、脚点漂移、身高、调色板、墨线占比、挂点） |
+| `post/contact_sheet.py` | 白天拼图、3 倍放大、夜景合成、游戏实际大小对比 |
+| `models/hero.py` / `shade.py` / `rock.py` | 提灯剑修、影妖、山石 |
+| `render/style_frame.py` | 渲出上述素材到 `out/style/assets/`，自检并拼审图 |
+
+实测要点（bpy 5.2.2）：
+- 物体编号通道在 EXR 里叫 `ViewLayer.Object Index.X`；**只开 Object Index 时全是 0，要同时开 Depth 才会写出**。
+- Freestyle 的“粗细噪声”修饰器会让平均线宽翻倍且与 amplitude 不成比例，没有用。
+- 内部剪影若也用 2.6px 外线宽，128px 主角六成以上是墨，所以外线宽只给整体外轮廓，内部剪影降一档。
+- 边标记是名为 `freestyle_edge` 的布尔边属性（山石的皴笔用它）。
+- 每帧素材除了 `<动画>_<朝向>_<帧号>.png`，还写 `_emit.png`（发光部件，夜里叠加用），妖物另有 `_flash.png`。
+
 ## 不提交到 git 的目录
 
-`.gitignore` 忽略了 `.venv/`、`out/`、`.blender/`：
+`.gitignore` 忽略了 `.venv/`、`out/`、`.blender/`、`__pycache__/`：
 
 - `.venv/` 约 1.1 GB
 - `out/` 是渲染产物

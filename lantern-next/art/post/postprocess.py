@@ -33,7 +33,7 @@ if str(ART) not in sys.path:
 from style import style as S  # noqa: E402
 
 SNAP_KEEP = 3.0  # 吸附后与调色板色的最大残余偏差（8 位 RGB 欧氏距离）
-INK_BLEED_GAIN = 0.55  # 墨晕外缘的浓度（相对线条本身）
+INK_BLEED_GAIN = 0.35  # 墨晕外缘的浓度（相对线条本身）
 ALPHA_FLOOR = 3 / 255  # 小于这个 alpha 的像素视为全透明
 LIGHT_COLORS = [S.LANTERN_LIGHT, S.FLAME_LIGHT, S.SOUL_LIGHT, *S.EYE.values()]  # 发光色，不吸附也不算“出格”
 
@@ -148,9 +148,12 @@ def paper_grain(h: int, w: int, name: str, strength: float = S.PAPER_OVERLAY) ->
     """返回 (h,w) 的乘数，均值为 1：纤维处略暗，其它地方略亮。"""
     tex = paper_texture()
     oy, ox = asset_offset(name)
-    ys = (np.arange(h) + oy) % tex.shape[0]
-    xs = (np.arange(w) + ox) % tex.shape[1]
-    g = tex[np.ix_(ys, xs)]
+
+    def mirror_idx(n, off, size):  # 镜像平铺：大画布也没有接缝
+        i = (np.arange(n) + off) % (2 * size)
+        return np.where(i >= size, 2 * size - 1 - i, i)
+
+    g = tex[np.ix_(mirror_idx(h, oy, tex.shape[0]), mirror_idx(w, ox, tex.shape[1]))]
     f = 1.0 - strength * (1.0 - g)
     return f / f.mean()
 

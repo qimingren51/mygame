@@ -53,10 +53,15 @@ EDGE_POWER = 3.0  # 积墨只集中在轮廓附近
 CREASE_ANGLE_DEG = 128.0  # Freestyle 折痕角：两面法线夹角大于 180-此值 才算折痕
 SAMPLING_PX = 1.5  # 线条重采样间距（最终像素）
 SPLIT_ANGLE_DEG = 115.0  # 笔画在小于这个 2D 角度的拐角处断开，每段单独收笔
-PRESSURE_PERIOD = 1500.0  # Freestyle 粗细噪声的 period（内部单位，见 _linestyle 注释）
+CUN_MIN_LENGTH_PX = 3.0  # 皴笔（暗示轮廓线）最短长度（最终像素），去掉碎点
 
 # 线宽分级用的集合：物体放进哪个集合，就用哪一档线
-LINE_COLLECTIONS = {"outer": "InkOuter", "inner": "InkInner", "none": "InkNone"}
+#   outer：大形体（外轮廓 + 形线 + 折痕）    inner：小部件（外轮廓 + 内线）
+#   thin：只要细线、不进外轮廓（灯杖、符纸等细长的彩色部件，粗外线会把颜色吃掉）
+#   none：不描线（眼睛墨点、发光芯、烟尾）
+LINE_COLLECTIONS = {"outer": "InkOuter", "inner": "InkInner", "thin": "InkThin", "none": "InkNone"}
+CONTOUR_COLLECTION = "InkContour"  # outer/inner 物体同时链接到这里，参与整体外轮廓
+CUN_COLLECTION = "InkCun"  # 山石等：额外画“暗示轮廓线”作皴笔
 
 LOCK_PATH = ART / "out" / ".render.lock"
 
@@ -86,7 +91,7 @@ def reset_scene():
     """清空成空场景，并建好三档线宽集合。"""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     sc = bpy.context.scene
-    for key, name in LINE_COLLECTIONS.items():
+    for name in [*LINE_COLLECTIONS.values(), CONTOUR_COLLECTION, CUN_COLLECTION]:
         coll = bpy.data.collections.new(name)
         sc.collection.children.link(coll)
     return sc
@@ -146,10 +151,13 @@ def camera_basis():
     return right, up, fwd
 
 
-def setup_camera(frame_px: int, distance: float = 30.0):
+def setup_camera(frame_px: int, distance: float = 30.0, anchor=None):
     """正交相机：俯角 30°，取景宽度 ortho_scale(frame_px)。
-    不用 shift，而是平移相机，让世界原点（脚底）正好落在 (ANCHOR[0]*W, ANCHOR[1]*H)。"""
+    不用 shift，而是平移相机，让世界原点（脚底）正好落在 (anchor[0]*W, anchor[1]*H)。
+    anchor 默认 ANCHOR；道具用 PROP_ANCHOR。记在 scene["sprite_anchor"] 里，project_point 会用它。"""
     sc = bpy.context.scene
+    anchor = tuple(anchor or S.ANCHOR)
+    sc["sprite_anchor"] = anchor
     cam = sc.camera
     if cam is None:
         cam = bpy.data.objects.new("Cam", bpy.data.cameras.new("Cam"))
@@ -167,7 +175,7 @@ def setup_camera(frame_px: int, distance: float = 30.0):
     right, up, fwd = camera_basis()
     w = cd.ortho_scale  # 正方形画面：宽 = 高 = ortho_scale（米）
     # 画面中心对准的世界点：原点向“画面右”挪 (0.5-ax)*w，向“画面上”挪 (ay-0.5)*w
-    target = right * ((0.5 - S.ANCHOR[0]) * w) + up * ((S.ANCHOR[1] - 0.5) * w)
+    target = right * ((0.5 - anchor[0]) * w) + up * ((anchor[1] - 0.5) * w)
     cam.location = target - fwd * distance
     bpy.context.view_layer.update()
     return cam
@@ -179,10 +187,16 @@ def project_point(world_xyz, frame_px: int) -> tuple[float, float]:
     from bpy_extras.object_utils import world_to_camera_view
 
     sc = bpy.context.scene
+    ax, ay = current_anchor()
     co = world_to_camera_view(sc, sc.camera, Vector(world_xyz))
-    x = (co.x - S.ANCHOR[0]) * frame_px
-    y = ((1.0 - co.y) - S.ANCHOR[1]) * frame_px
+    x = (co.x - ax) * frame_px
+    y = ((1.0 - co.y) - ay) * frame_px
     return x, y
+
+
+def current_anchor() -> tuple[float, float]:
+    a = bpy.context.scene.get("sprite_anchor")
+    return (float(a[0]), float(a[1])) if a is not None else tuple(S.ANCHOR)
 
 
 def project_point_analytic(world_xyz) -> tuple[float, float]:
@@ -199,15 +213,16 @@ def verify_camera(frame_px: int, verbose: bool = True) -> float:
     sc = bpy.context.scene
     co = world_to_camera_view(sc, sc.camera, Vector((0, 0, 0)))
     W = H = frame_px * S.RENDER_SCALE
+    ax, ay = current_anchor()
     px, py = co.x * W, (1 - co.y) * H
-    err = max(abs(px - S.ANCHOR[0] * W), abs(py - S.ANCHOR[1] * H)) / S.RENDER_SCALE
+    err = max(abs(px - ax * W), abs(py - ay * H)) / S.RENDER_SCALE
     rng = np.random.default_rng(1)
     for p in rng.uniform(-1, 1, (8, 3)):
         a = project_point(p, frame_px)
         b = project_point_analytic(p)
         err = max(err, abs(a[0] - b[0]), abs(a[1] - b[1]))
     if verbose:
-        print(f"[camera] 原点 → 渲染像素 ({px:.4f}, {py:.4f})，期望 ({S.ANCHOR[0]*W}, {S.ANCHOR[1]*H})；最大误差 {err:.2e} px")
+        print(f"[camera] 原点 → 渲染像素 ({px:.4f}, {py:.4f})，期望 ({ax*W}, {ay*H})；最大误差 {err:.2e} px")
     assert err < 1e-3, f"相机锚点偏差过大：{err}"
     return err
 
@@ -391,11 +406,15 @@ def window_material(name: str, shell: bpy.types.Material, open_facing: float = 0
 
 
 # ================================================================ 物体
-def add_object(ob, line: str = "outer", parent=None):
-    """把物体放进对应线宽的集合（outer 粗线 / inner 细线 / none 不描线），
-    用发光材质的物体自动设 pass_index=1。"""
+def add_object(ob, line: str = "outer", parent=None, cun: bool = False):
+    """把物体放进对应线宽的集合（见 LINE_COLLECTIONS），outer/inner 同时进外轮廓集合；
+    cun=True 再进皴笔集合。用发光材质的物体自动设 pass_index=1。"""
     coll = bpy.data.collections[LINE_COLLECTIONS[line]]
     coll.objects.link(ob)
+    if line in ("outer", "inner"):
+        bpy.data.collections[CONTOUR_COLLECTION].objects.link(ob)
+    if cun:
+        bpy.data.collections[CUN_COLLECTION].objects.link(ob)
     if parent is not None:
         ob.parent = parent
     mats = getattr(getattr(ob, "data", None), "materials", None)
@@ -405,7 +424,7 @@ def add_object(ob, line: str = "outer", parent=None):
 
 
 def mesh_object(name, build, mat, line="outer", parent=None, loc=(0, 0, 0), rot=(0, 0, 0),
-                scale=(1, 1, 1), smooth=True, sharp_deg=40.0):
+                scale=(1, 1, 1), smooth=True, sharp_deg=40.0, cun=False):
     """用 bmesh 建网格物体。build(bm) 往 bm 里加几何；mat 可以是材质或材质列表。"""
     me = bpy.data.meshes.new(name)
     bm = bmesh.new()
@@ -422,8 +441,60 @@ def mesh_object(name, build, mat, line="outer", parent=None, loc=(0, 0, 0), rot=
         me.materials.append(m)
     ob = bpy.data.objects.new(name, me)
     ob.location, ob.rotation_euler, ob.scale = loc, rot, scale
-    add_object(ob, line, parent)
+    add_object(ob, line, parent, cun)
     return ob
+
+
+def set_point_attr(ob, name: str, values) -> None:
+    """给网格写一个逐顶点 float 属性（材质里用 Attribute 节点读，例如烟尾的 fade）。"""
+    me = ob.data
+    attr = me.attributes.get(name) or me.attributes.new(name, "FLOAT", "POINT")
+    attr.data.foreach_set("value", [float(v) for v in values])
+
+
+def smoke_material(name: str, ramp: list[str], fade_attr: str = "fade", fade_start: float = 0.25,
+                   fade_power: float = 1.4, noise_amt: float = 0.35, seed: float = 0.0, **toon_kw):
+    """烟缕：假卡通三档颜色，再按顶点属性 fade（0=根部，1=尖端）逐渐透明，并用噪声把透明边缘打散。
+    alpha = 1 - clamp((fade - fade_start)/(1-fade_start))^fade_power ± 噪声。"""
+    m = toon_material(name, ramp=ramp, seed=seed, **toon_kw)
+    nt = m.node_tree
+    N, L = nt.nodes, nt.links
+    out = next(n for n in N if n.type == "OUTPUT_MATERIAL")
+    link = out.inputs["Surface"].links[0]
+    src = link.from_socket
+    nt.links.remove(link)
+    at = N.new("ShaderNodeAttribute")
+    at.attribute_type = "GEOMETRY"
+    at.attribute_name = fade_attr
+    mr = N.new("ShaderNodeMapRange")
+    mr.inputs["From Min"].default_value = fade_start
+    mr.inputs["From Max"].default_value = 1.0
+    L.new(at.outputs["Fac"], mr.inputs["Value"])
+    pw = N.new("ShaderNodeMath"); pw.operation = "POWER"; pw.inputs[1].default_value = fade_power
+    L.new(mr.outputs["Result"], pw.inputs[0])
+    tc = N.new("ShaderNodeTexCoord")
+    nz = N.new("ShaderNodeTexNoise")
+    nz.inputs["Scale"].default_value = 7.0
+    nz.inputs["Detail"].default_value = 3.0
+    L.new(tc.outputs["Object"], nz.inputs["Vector"])
+    nzs = N.new("ShaderNodeMath"); nzs.operation = "MULTIPLY_ADD"
+    nzs.inputs[1].default_value = noise_amt; nzs.inputs[2].default_value = -0.5 * noise_amt
+    L.new(nz.outputs["Fac"], nzs.inputs[0])
+    add = N.new("ShaderNodeMath"); add.operation = "ADD"; add.use_clamp = True
+    L.new(pw.outputs["Value"], add.inputs[0]); L.new(nzs.outputs["Value"], add.inputs[1])
+    gate = N.new("ShaderNodeMath"); gate.operation = "MULTIPLY"; gate.use_clamp = True  # 根部不受噪声影响
+    L.new(add.outputs["Value"], gate.inputs[0])
+    L.new(mr.outputs["Result"], gate.inputs[1])
+    gate2 = N.new("ShaderNodeMath"); gate2.operation = "MULTIPLY_ADD"; gate2.use_clamp = True
+    gate2.inputs[1].default_value = 4.0; gate2.inputs[2].default_value = 0.0
+    L.new(gate.outputs["Value"], gate2.inputs[0])
+    tr = N.new("ShaderNodeBsdfTransparent")
+    mix = N.new("ShaderNodeMixShader")
+    L.new(gate2.outputs["Value"], mix.inputs["Fac"])
+    L.new(src, mix.inputs[1])
+    L.new(tr.outputs["BSDF"], mix.inputs[2])
+    L.new(mix.outputs["Shader"], out.inputs["Surface"])
+    return m
 
 
 def empty(name, parent=None, loc=(0, 0, 0), rot=(0, 0, 0)):
@@ -480,15 +551,10 @@ def _linestyle(name: str, width_px: float, seed: int):
     cal = t.new(name="Calligraphy", type="CALLIGRAPHY")  # 45° 方向最粗，像斜握的毛笔
     cal.blend = "MIX"
     cal.orientation = math.radians(45)
-    cal.thickness_min = 0.5 * w
-    cal.thickness_max = 1.1 * w
-    nz = t.new(name="Pressure", type="NOISE")  # 行笔压力起伏
-    nz.blend = "ADD"
-    nz.amplitude = 0.3 * w
-    # 实测：这里的 period 不是像素（period≈50 时是逐点锯齿），1500 左右才是一笔里缓慢的轻重变化
-    nz.period = PRESSURE_PERIOD
-    nz.seed = S.LINE_NOISE_SEED + seed
-    nz.use_asymmetric = False
+    cal.thickness_min = 0.45 * w
+    cal.thickness_max = 1.0 * w
+    # 注：试过 NOISE 粗细修饰器做行笔压力，实测平均线宽会翻倍且与 amplitude 不成比例，弃用；
+    # 粗细变化靠书法修饰器（随方向）+ 两端收笔 + 拐角断笔。
     taper = t.new(name="Taper", type="ALONG_STROKE")  # 两端收笔到 LINE_TAPER
     taper.blend = "MULTIPLY"
     taper.mapping = "CURVE"
@@ -503,10 +569,16 @@ def _linestyle(name: str, width_px: float, seed: int):
 
 
 def setup_freestyle(view_layer=None):
-    """两档墨线，作为渲染通道输出（不经合成器）：
-      外线 LINE_OUTER_PX：剪影 + 边界 + 外轮廓（InkOuter 集合里的大形体）
-      内线 LINE_INNER_PX：折痕 + 材质分界（所有描线物体）；以及 InkInner 集合里小部件的剪影/边界
-      InkNone 集合（眼睛墨点、发光芯等）不描线。"""
+    """墨线，作为渲染通道输出（不经合成器）。三种线宽：
+      外线 LINE_OUTER_PX：整组物体的外轮廓（external contour），即剪影最外一圈（InkContour 集合）
+      形线 LINE_FORM_PX：InkOuter 集合（大形体）内部的剪影 + 边界
+      内线 LINE_INNER_PX：所有描线物体的折痕 + 材质分界 + 边标记（freestyle_edge，山石皴笔用）；
+                         InkInner 集合（小部件）的剪影 + 边界
+      细线 LINE_INNER_PX：InkThin 集合（灯杖、符纸）的剪影 + 边界 + 外轮廓，不进粗外线
+      皴笔 LINE_INNER_PX：InkCun 集合（山石）的暗示轮廓线（suggestive contour），曲线短笔触
+      InkNone 集合（眼睛墨点、发光芯、烟尾）不描线。
+    说明：style.py 原意是“剪影+边界+外轮廓”都用外线宽；实测 128px 主角上内部剪影也用 2.6px 时，
+    墨线占不透明像素六成以上、脸全黑，所以内部剪影降一档（见报告里的建议）。"""
     sc = bpy.context.scene
     r = sc.render
     r.use_freestyle = True
@@ -524,8 +596,13 @@ def setup_freestyle(view_layer=None):
     for ls in list(fs.linesets):
         fs.linesets.remove(ls)
     outer_style = _linestyle("InkOuter", S.LINE_OUTER_PX, 0)
+    form_style = _linestyle("InkForm", S.LINE_FORM_PX, 5)
     inner_style = _linestyle("InkInner", S.LINE_INNER_PX, 3)
+    cun_style = _linestyle("InkCun", S.LINE_INNER_PX, 9)
+    cun_style.length_min = CUN_MIN_LENGTH_PX * S.RENDER_SCALE
     colls = {k: bpy.data.collections[v] for k, v in LINE_COLLECTIONS.items()}
+    colls["contour"] = bpy.data.collections[CONTOUR_COLLECTION]
+    colls["cun"] = bpy.data.collections[CUN_COLLECTION]
 
     def lineset(name, style, types, coll, negation="INCLUSIVE"):
         ls = fs.linesets.new(name)
@@ -543,9 +620,13 @@ def setup_freestyle(view_layer=None):
         ls.linestyle = style
         return ls
 
-    lineset("Outer", outer_style, ("silhouette", "border", "external_contour"), colls["outer"])
-    lineset("InnerCrease", inner_style, ("crease", "material_boundary"), colls["none"], "EXCLUSIVE")
-    lineset("InnerDetail", inner_style, ("silhouette", "border", "external_contour"), colls["inner"])
+    lineset("Outer", outer_style, ("external_contour",), colls["contour"])
+    lineset("Form", form_style, ("silhouette", "border"), colls["outer"])
+    lineset("InnerCrease", inner_style, ("crease", "material_boundary", "edge_mark"), colls["none"], "EXCLUSIVE")
+    lineset("InnerDetail", inner_style, ("silhouette", "border"), colls["inner"])
+    lineset("Thin", inner_style, ("silhouette", "border", "external_contour"), colls["thin"])
+    lineset("Cun", cun_style, ("suggestive_contour",), colls["cun"])
+    fs.use_suggestive_contours = False  # 有皴笔物体时 render_layers 再打开（计算较贵）
     return vl
 
 
@@ -622,6 +703,8 @@ def render_layers(out_prefix, keep_exr: bool = False) -> dict:
     vl = sc.view_layers[0]
     vl.use_pass_object_index = True
     vl.use_pass_z = True
+    cun = bpy.data.collections.get(CUN_COLLECTION)
+    vl.freestyle_settings.use_suggestive_contours = bool(cun and len(cun.objects))
     exr = out_prefix.with_suffix(".exr")
     sc.render.filepath = str(exr)
     t0 = time.perf_counter()
@@ -669,11 +752,12 @@ def render_lock(path: Path = LOCK_PATH):
 # ================================================================ 几何小工具（bmesh）
 def lathe(profile, segments=32, radial=None, scale_y=1.0, cap_top=True, cap_bottom=True):
     """旋转体：profile = [(r, z), ...] 自下而上。radial(theta, z) → 半径倍数（做褶皱、竹篾棱）。
-    返回 build(bm) 函数。r=0 的端点合并成一个顶点。"""
+    scale_y 可以是常数或 scale_y(z)（前后比左右扁）。返回 build(bm) 函数。r=0 的端点合并成一个顶点。"""
 
     def build(bm):
         rings = []
         for r, z in profile:
+            sy = scale_y(z) if callable(scale_y) else scale_y
             if r <= 1e-6:
                 rings.append([bm.verts.new((0.0, 0.0, z))])
                 continue
@@ -681,7 +765,7 @@ def lathe(profile, segments=32, radial=None, scale_y=1.0, cap_top=True, cap_bott
             for i in range(segments):
                 th = 2 * math.pi * i / segments
                 k = radial(th, z) if radial else 1.0
-                ring.append(bm.verts.new((r * k * math.cos(th), r * k * math.sin(th) * scale_y, z)))
+                ring.append(bm.verts.new((r * k * math.cos(th), r * k * math.sin(th) * sy, z)))
             rings.append(ring)
         for a, b in zip(rings, rings[1:]):
             if len(a) == 1 and len(b) == 1:
