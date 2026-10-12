@@ -73,8 +73,17 @@ def mix(a: str, b: str, t: float) -> str:
     return rgb_to_hex(tuple(round(x + (y - x) * t) for x, y in zip(ca, cb)))  # type: ignore[arg-type]
 
 
+# 深墨不能再混向重墨（会越混越浅），直接用墨色的相邻档
+INK_RAMPS = {
+    INK["nong"]: [INK["zhong"], INK["nong"], INK["jiao"]],
+    INK["jiao"]: [INK["nong"], INK["jiao"], INK["jiao"]],
+}
+
+
 def shade_ramp(base: str) -> list[str]:
     """一个基础色的三档填色：亮、中、暗。"""
+    if base in INK_RAMPS:
+        return list(INK_RAMPS[base])
     return [mix(base, INK["zhong"], t) for t in SHADE_STEPS]
 
 
@@ -88,7 +97,11 @@ def hex_to_linear(h: str) -> tuple[float, float, float]:
     return srgb_to_linear(r / 255), srgb_to_linear(g / 255), srgb_to_linear(b / 255)
 
 
-BASE_COLORS = [PAPER, PAPER_SHADOW, SKIN, *INK.values(), *ACCENT.values()]
+# 淡彩：颜料兑水后的浅色，大面积衣物用它，保持“水墨为主、颜色为辅”。
+# 纯 ACCENT 只用在小面积的点睛处（灯笼、发带、穗子、印章）。
+WASH = {k: mix(v, PAPER, 0.45) for k, v in ACCENT.items()}
+
+BASE_COLORS = [PAPER, PAPER_SHADOW, SKIN, *INK.values(), *ACCENT.values(), *WASH.values()]
 
 
 def full_palette() -> list[str]:
@@ -111,6 +124,7 @@ PALETTE_TOLERANCE = 18  # 自检时允许的 RGB 欧氏距离（叠纸纹和墨�
 PX_PER_UNIT = 2  # 最终贴图像素 / 游戏世界单位（游戏里同值）
 RENDER_SCALE = 4  # 先放大 4 倍渲染，后期再缩小
 ANCHOR = (0.5, 0.875)  # 脚底锚点（相对帧宽高）；游戏里 Sprite 的 anchor 与此一致
+PROP_ANCHOR = (0.5, 0.8)  # 道具（石块、石灯笼）进深大，锚点上移，下方留出更多空间
 
 # 每类素材的最终帧尺寸（像素，正方形）
 FRAME = {
@@ -131,7 +145,7 @@ HERO_HEIGHT_M = 1.75
 # 自检：同一素材各帧身高与目标的允许偏差
 HEIGHT_TOLERANCE = 0.04
 # 自检：同一动画里脚底位置的允许偏差（最终像素）
-FOOT_TOLERANCE_PX = 1.0
+FOOT_TOLERANCE_PX = 1.5  # 衣摆摆动会带动底边，1.0 太紧
 
 # ---------------------------------------------------------------- 相机与灯光
 
@@ -161,7 +175,8 @@ def dir_rotation_deg(d: int) -> float:
 
 LINE_COLOR = INK["jiao"]
 # 最终像素下的线宽；渲染时乘以 RENDER_SCALE
-LINE_OUTER_PX = 2.6  # 外轮廓
+LINE_OUTER_PX = 2.6  # 外轮廓（只用于整体剪影的最外圈）
+LINE_FORM_PX = 1.4  # 大形体内部的轮廓（袖子压在袍子上等）；全用外轮廓线宽会让角色墨色过半
 LINE_INNER_PX = 1.1  # 内线（折痕、材质分界）
 LINE_NOISE_SEED = 7  # 噪点修饰器固定种子，避免逐帧抖动
 LINE_NOISE_AMPLITUDE_PX = 0.6
@@ -181,14 +196,18 @@ ALPHA_BLEED_PX = 4  # 往透明区域扩展颜色的距离，避免缩放出现�
 
 # ---------------------------------------------------------------- 输出约定
 #
-# 每个素材输出到 art/out/assets/<素材名>/：
-#   <动画>_<朝向>_<帧号两位>.png      最终 RGBA，尺寸为 FRAME[类别]，锚点为 ANCHOR
+# 每个素材输出到 art/out/assets/<素材名>/（素材名小写加下划线，例如 hero、shade、rock_a、stone_lantern）：
+#   <动画>_<朝向>_<帧号两位>.png       最终 RGBA，尺寸为 FRAME[类别]，锚点为 ANCHOR（道具为 PROP_ANCHOR）
 #   <动画>_<朝向>_<帧号两位>_flash.png 白色剪影帧（只有妖物需要）
+#   <动画>_<朝向>_<帧号两位>_emit.png  自发光部件（灯笼窗、妖眼），可选；目前不打进游戏图集
 #   meta.json:
 #     {
 #       "name": "hero", "size": [128, 128], "anchor": [0.5, 0.875],
 #       "anims": {"idle": {"frames": 6, "fps": 8, "dirs": ["E", ...]},
-#                 "walk": {"frames": 8, "fps": 12, "dirs": [...], "stride_units": 26}},
+#                 "walk": {"frames": 8, "fps": 12, "dirs": [...], "stride_units": 80}},
+#       stride_units = 走路动画播完一整轮时主角移动的世界单位。游戏里主角速度约 118 单位/秒，
+#       80 对应每轮约 0.68 秒（8 帧约 12 fps）。衣摆盖住了脚，不会看出打滑。
+#       另可带 category、floating、height_px、layers、required_sockets、shadow_radius_px 等字段。
 #       "sockets": {"lantern": {"idle": {"E": [[x, y], ...每帧], ...}}}
 #     }
 #   挂点坐标单位是最终像素，相对锚点（脚底），x 向右、y 向下。

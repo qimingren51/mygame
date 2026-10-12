@@ -43,7 +43,7 @@ body {
   position: fixed;
   z-index: 5;
   left: max(8px, env(safe-area-inset-left));
-  top: max(6px, env(safe-area-inset-top));
+  bottom: max(6px, env(safe-area-inset-bottom));
   font: 11px/1.3 ui-monospace, Menlo, monospace;
   color: #cfd3e0;
   background: rgba(10, 12, 22, 0.55);

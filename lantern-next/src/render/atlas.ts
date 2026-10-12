@@ -72,14 +72,16 @@ function applyActors(art: ArtSet, sheet: Spritesheet): void {
       eyes: frames.map((_, i) => sock(m.sockets?.eyes?.[animName]?.E?.[i])),
     };
   }
-  const rocks = Object.keys(sheet.textures)
-    .filter((k) => k.startsWith('rock/'))
-    .sort();
+  // 石块：rock_a、rock_b……各取第一帧
+  const rocks = Object.keys(assets)
+    .filter((k) => k.startsWith('rock'))
+    .sort()
+    .map((k) => frame(sheet, `${k}/idle_S_00`));
   if (!rocks.length) throw new Error('角色图集缺少 rock');
   const props: ArtSet['props'] = {
-    rocks: rocks.map((k) => frame(sheet, k)),
-    stoneLantern: frame(sheet, 'stoneLantern/idle_E_00'),
-    stoneLanternFlame: sock(assets.stoneLantern?.sockets?.flame?.idle?.E?.[0]),
+    rocks,
+    stoneLantern: frame(sheet, 'stone_lantern/idle_S_00'),
+    stoneLanternFlame: sock(assets.stone_lantern?.sockets?.flame?.idle?.S?.[0]),
   };
   art.hero = heroArt;
   art.enemies = enemies;

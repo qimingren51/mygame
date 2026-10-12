@@ -48,6 +48,8 @@ def load_asset(folder: Path) -> tuple[str, list[tuple[str, Image.Image, tuple[fl
     else:
         ax, ay = meta.get("anchor", [0.5, 0.875])
         for png in sorted(folder.glob("*.png")):
+            if png.stem.endswith("_emit"):
+                continue  # 自发光层目前不进游戏图集
             img = Image.open(png).convert("RGBA")
             frames.append((f"{name}/{png.stem}", img, (ax, ay)))
         extra = {k: meta[k] for k in ("size", "anchor", "anims", "sockets", "height_px") if k in meta}

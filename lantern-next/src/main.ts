@@ -110,7 +110,7 @@ async function boot(): Promise<void> {
   function startBench(): void {
     // 固定种子、固定画质（自动降级关掉，结果才可比）
     world = newWorld(12345);
-    bench = new Bench();
+    bench = new Bench(clamp(num('benchStage') ?? 10000, 500, 60000));
     world.benchTarget = bench.target;
     manual = { ...quality.levels[0] } as Quality;
     quality.auto = false;

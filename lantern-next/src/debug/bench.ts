@@ -3,8 +3,6 @@
 // 跑分期间画质固定，不自动降级，结果才可比。
 
 export const BENCH_STAGES = [250, 500, 1000, 1500] as const;
-const STAGE_MS = 10000;
-const WARMUP_MS = 2000;
 
 export interface StageResult {
   enemies: number;
@@ -17,6 +15,9 @@ export interface StageResult {
 
 export class Bench {
   stage = 0;
+  /** 每段时长；测试里可以用 ?benchStage= 缩短 */
+  private readonly stageMs: number;
+  private readonly warmupMs: number;
   private t = 0;
   private readonly samples = new Float32Array(2000);
   private n = 0;
@@ -24,6 +25,11 @@ export class Bench {
   private actors = 0;
   private statFrames = 0;
   readonly results: StageResult[] = [];
+
+  constructor(stageMs = 10000) {
+    this.stageMs = stageMs;
+    this.warmupMs = Math.min(2000, stageMs * 0.2);
+  }
 
   get target(): number {
     return BENCH_STAGES[Math.min(this.stage, BENCH_STAGES.length - 1)] as number;
@@ -35,20 +41,20 @@ export class Bench {
 
   /** 总进度 0~1 */
   get progress(): number {
-    return Math.min(1, (this.stage * STAGE_MS + this.t) / (BENCH_STAGES.length * STAGE_MS));
+    return Math.min(1, (this.stage * this.stageMs + this.t) / (BENCH_STAGES.length * this.stageMs));
   }
 
   /** 每帧调用；返回 true 表示进入了下一段（需要改妖物数量） */
   frame(dtMs: number, lights: number, actors: number): boolean {
     if (this.done) return false;
     this.t += dtMs;
-    if (this.t > WARMUP_MS && this.n < this.samples.length) {
+    if (this.t > this.warmupMs && this.n < this.samples.length) {
       this.samples[this.n++] = dtMs;
       this.lights += lights;
       this.actors += actors;
       this.statFrames++;
     }
-    if (this.t < STAGE_MS) return false;
+    if (this.t < this.stageMs) return false;
     this.finishStage();
     this.stage++;
     this.t = 0;
