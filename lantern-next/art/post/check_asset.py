@@ -22,7 +22,8 @@
   现在量的是身体的配准点：
   - y：锚点正上方窄列（±TOP_WINDOW×宽）里最高的不透明像素（冠顶/帽尖），亚像素
   - x：同一窄列里，锚点以上身高 40%~62% 的躯干条带的 alpha 加权重心（同组各帧用同一条带）
-  同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）只查 x。
+  同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）只查 x；
+  vertical_motion（跳跃等本来就大幅上下的动画）也只查 x，并且不查逐帧身高。
 “着地”：非悬浮、非道具素材，锚点附近最低的不透明像素要在锚点上方 6% 身高到下方 10% 帧高之间
   （脚没飘起来、没沉下去；跑动时前脚在 S 向画面上会比锚点低几个像素，属正常）。
 “身高”：锚点（地面）到冠顶的距离。逐帧和同组中位数比（HEIGHT_TOLERANCE）；全素材中位数减半个外线宽后
@@ -167,6 +168,9 @@ def check_asset(asset_dir: Path) -> dict:
     ax, ay = meta["anchor"][0] * W, meta["anchor"][1] * H
     pal = _pal(LIGHT_COLORS + list(meta.get("palette_extra", [])))
     floating = bool(meta.get("floating", False))
+    # vertical_motion：动画本身就上下大幅移动（金蟾跳跃），只查 x 配准，不查逐帧身高和着地
+    vmotion = bool(meta.get("vertical_motion", False))
+    floating = floating or vmotion
 
     # ---- 2/3. 文件、尺寸、边距
     present = {p.name for p in asset_dir.glob("*.png")}
@@ -222,7 +226,7 @@ def check_asset(asset_dir: Path) -> dict:
         if dx > S.FOOT_TOLERANCE_PX or dy > S.FOOT_TOLERANCE_PX:
             errors.append(f"{an}_{d}：配准漂移 x {dx:.2f}px / y {dy:.2f}px，超过 {S.FOOT_TOLERANCE_PX}px")
         for k, m in lst:
-            if abs(m["height"] - gh) > S.HEIGHT_TOLERANCE * gh:
+            if not vmotion and abs(m["height"] - gh) > S.HEIGHT_TOLERANCE * gh:
                 errors.append(f"{an}_{d}_{k[2]:02d}.png 身高 {m['height']:.0f}px，离本组中位数 {gh:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
             if not floating and meta.get("category") != "prop":
                 lo, hi = ay - abs(GROUND_BAND[0]) * gh, ay + GROUND_BAND[1] * H

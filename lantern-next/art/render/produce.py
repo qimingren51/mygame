@@ -36,6 +36,16 @@ from pipeline import render_asset  # noqa: E402
 ASSETS = ART / "out" / "assets"
 REVIEW = ART / "out" / "review"
 ALL = ["hero", "shade", "wisp", "rock_a", "rock_b", "rock_c", "stone_lantern"]
+# 第二批妖物：(模块, 构造/姿态函数名后缀, 帧尺寸键, 帧数, fps, 游戏碰撞半径, 额外 meta)
+BATCH2 = {
+    "golem": ("golem", "golem", "golem", 8, 8, 19, {"category": "enemy"}),
+    "fox": ("fox", "fox", "elite", 8, 12, 24, {"category": "elite"}),
+    "ghoul": ("ghoul", "ghoul", "elite", 8, 8, 30, {"category": "elite"}),
+    "stonelord": ("stonelord", "stonelord", "elite", 8, 6, 28, {"category": "elite"}),
+    "boss": ("fox", "boss", "boss", 8, 8, 44, {"category": "boss", "floating": True}),
+    "toad": ("toad", "toad", "small", 6, 10, 14, {"category": "enemy", "vertical_motion": True}),
+}
+ALL += list(BATCH2)
 HERO_IDLE, HERO_WALK = 6, 8
 SHADE_FRAMES, WISP_FRAMES = 8, 6
 
@@ -74,6 +84,15 @@ def produce(name: str, timings: dict):
                      anchor=S.PROP_ANCHOR, sockets_wanted=("flame",), timings=timings,
                      meta_extra={"category": "prop", "layers": ["emit"], "required_sockets": ["flame"],
                                  "shadow_radius_px": 16, "anim_extra": {"idle": {"fps": 1}}})
+    elif name in BATCH2:
+        import importlib
+        mod, fn, fk, n, fps, radius, extra = BATCH2[name]
+        M = importlib.import_module(mod)
+        render_asset(name, S.FRAME[fk], getattr(M, f"build_{fn}"), [("move", "E", i, n) for i in range(n)], ASSETS,
+                     pose=getattr(M, f"pose_{fn}"), sockets_wanted=("eyes",), flash=True, timings=timings,
+                     meta_extra={**extra, "layers": ["emit", "flash"], "required_sockets": ["eyes"],
+                                 "game_radius": radius, "shadow_radius_px": round(radius * S.PX_PER_UNIT * 0.8),
+                                 "anim_extra": {"move": {"fps": fps}}})
     else:
         raise SystemExit(f"未知素材 {name}")
 
@@ -164,6 +183,69 @@ def build_review(timings: dict):
     timings["review_s"] = round(time.perf_counter() - t, 2)
 
 
+def build_review_batch2(timings: dict):
+    """第二批妖物的审图：排成一排比大小（含主角、影妖、疾影）、逐帧总表、夜景、各自的动图。"""
+    REVIEW.mkdir(parents=True, exist_ok=True)
+    t = time.perf_counter()
+    names = ["hero", "shade", "wisp", "toad", "golem", "fox", "ghoul", "stonelord", "boss"]
+    A = {n: CS.load_asset(ASSETS / n) for n in names}
+    # 1) 同一地面上排成一排（游戏 1 倍大小），再给 3 倍
+    gap = 10
+    ws = [A[n]["meta"]["size"][0] for n in names]
+    W = int(sum(w * 0.72 for w in ws) + gap * (len(names) + 1))
+    Hh = 300
+    day = CS.paper(W, Hh, seed=11)
+    emit = np.zeros((Hh, W, 3), np.float32)
+    x = gap
+    for n in names:
+        f = A[n]["frames"][0]
+        w = A[n]["meta"]["size"][0]
+        at = (x + w * 0.36, Hh - 24)
+        CS.place(day, f, A[n]["meta"], at)
+        CS.place_emit(emit, f, A[n]["meta"], at)
+        x += w * 0.72 + gap
+    day.convert("RGB").save(REVIEW / "batch2_lineup.png")
+    CS.zoom(day.convert("RGB"), 3).save(REVIEW / "batch2_lineup_zoom.png")
+    # 2) 逐帧总表（1 倍、3 倍）
+    rows = [A[n] for n in ("toad", "golem", "fox", "ghoul", "stonelord", "boss")]
+    sh = CS.sheet(rows)
+    sh.save(REVIEW / "batch2_frames.png")
+    CS.zoom(sh, 3).save(REVIEW / "batch2_frames_zoom.png")
+    # 3) 夜景：主角提灯居中，赤面狐、青面鬼在光圈边缘，九尾在后方半明半暗，石将、石妖在暗处只见眼，金蟾在光里
+    w, h = 900, 520
+    day = CS.paper(w, h, seed=13, blotches=10)
+    emit = np.zeros((h, w, 3), np.float32)
+    hf = next(f for f in A["hero"]["frames"] if f["key"] == "idle_S_00")
+    hero_at = (w * 0.50, h * 0.74)
+    lx, ly = hf["sockets"]["lantern"]
+    light = (hero_at[0] + lx, hero_at[1] + ly)
+    R = CS.LIGHT_RADIUS_PX
+    def polar(ang, dist):
+        a = math.radians(ang)
+        return (light[0] + math.cos(a) * dist * R, light[1] + math.sin(a) * dist * R)
+    items = [
+        ("boss", mirrored(A["boss"]["frames"][0]), (w * 0.72, h * 0.42)),
+        ("stonelord", A["stonelord"]["frames"][0], (w * 0.12, h * 0.40)),
+        ("golem", mirrored(A["golem"]["frames"][2]), (w * 0.90, h * 0.86)),
+        ("fox", A["fox"]["frames"][0], polar(175, 0.95)),
+        ("ghoul", mirrored(A["ghoul"]["frames"][0]), polar(5, 1.05)),
+        ("toad", A["toad"]["frames"][0], polar(110, 0.55)),
+        ("hero", hf, hero_at),
+    ]
+    for n, f, pos in sorted(items, key=lambda it: it[2][1]):
+        CS.place(day, f, A[n]["meta"], pos)
+        CS.place_emit(emit, f, A[n]["meta"], pos)
+    night = CS.night_composite(day, emit, [(light[0], light[1], R, S.LANTERN_LIGHT)])
+    night.save(REVIEW / "batch2_night.png")
+    day.convert("RGB").save(REVIEW / "batch2_day_scene.png")
+    # 4) 动图
+    for n in ("toad", "golem", "fox", "ghoul", "stonelord", "boss"):
+        fps = A[n]["meta"]["anims"]["move"]["fps"]
+        CS.gif([f["rgba"] for f in A[n]["frames"]], REVIEW / f"{n}_move.gif", fps,
+               zoom_k=1 if n == "boss" else 2)
+    timings["review2_s"] = round(time.perf_counter() - t, 2)
+
+
 def main(argv):
     T0 = time.perf_counter()
     timings: dict = {}
@@ -183,8 +265,10 @@ def main(argv):
     timings["check_s"] = round(time.perf_counter() - t, 2)
     REVIEW.mkdir(parents=True, exist_ok=True)
     (REVIEW / "check_report.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
-    if all((ASSETS / n / "meta.json").exists() for n in ALL):
+    if all((ASSETS / n / "meta.json").exists() for n in ALL[:7]):
         build_review(timings)
+    if all((ASSETS / n / "meta.json").exists() for n in ALL):
+        build_review_batch2(timings)
     timings["total_s"] = round(time.perf_counter() - T0, 2)
     old = {}
     tp = REVIEW / "timings.json"

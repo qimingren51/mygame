@@ -62,7 +62,7 @@ export class WeaponViews {
   }
 
   sealHit(x: number, y: number, r: number, evo: boolean): void {
-    this.push(K_MARK, evo ? 1 : 0, x, y, r, evo ? 3 : 2.2);
+    this.push(K_MARK, evo ? 1 : 0, x, y, r, evo ? 2.4 : 1.8);
     this.push(K_RING, RING_QUAKE, x, y, r * 1.2, 0.35);
   }
 
@@ -79,7 +79,7 @@ export class WeaponViews {
     // ---- 地裂（镇岳）：地面上的墨痕
     for (const z of w.zones) {
       const k = (z.r * 2) / A.crack.frame.width;
-      L.ground.add(A.crack, z.x, z.y, k, k * 0.75, packColor(0xffffff, Math.min(1, z.life / z.max + 0.2) * 0.85));
+      L.ground.add(A.crack, z.x, z.y, k, k * 0.75, packColor(0xffffff, Math.min(1, z.life / z.max + 0.2) * 0.55));
     }
 
     // ---- 一次性效果
@@ -116,9 +116,10 @@ export class WeaponViews {
         }
       } else if (kind === K_MARK) {
         // 山印落地：朱砂印痕，慢慢淡去
-        const k = (r * 0.9) / A.sealMark.frame.width;
-        const fade = u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
-        L.ground.add(A.sealMark, x, y, k, k * 0.62, packColor(0xffffff, fade * 0.9), (this.rot[i] as number) * 0.15 - 0.15);
+        // 印痕是点睛的小印，不随范围无限放大
+        const k = Math.min(r * 0.6, sub ? 56 : 40) / A.sealMark.frame.width;
+        const fade = u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4;
+        L.ground.add(A.sealMark, x, y, k, k * 0.62, packColor(0xffffff, fade * 0.7), (this.rot[i] as number) * 0.15 - 0.15);
       } else {
         const k = (r * 2 * (0.5 + u * 0.7)) / A.blast.frame.width;
         const c = sub ? 0x6fb8ff : 0xff8a3d;
@@ -130,15 +131,18 @@ export class WeaponViews {
 
     // ---- 山印预警与下落的石印
     for (const s of w.seals) {
-      const k = (s.r * 2) / A.warn.frame.width;
       const pulse = 0.55 + 0.25 * Math.sin(time * 18);
       const show = s.t > -0.05 ? 1 : 0.4;
-      L.glow.add(A.warn, s.x, s.y, k, k * 0.62, packColor(0xc9925a, pulse * show));
+      // 落点范围：细环；中心：固定大小的准星
+      const kr = (s.r * 2) / A.ring.frame.width;
+      L.glow.add(A.ring, s.x, s.y, kr, kr * 0.62, packColor(0xc9925a, pulse * show * 0.8));
+      L.glow.add(A.warn, s.x, s.y, inv * 0.8, inv * 0.8 * 0.62, packColor(0xc9925a, pulse * show));
       if (s.t > 0) {
         const f = Math.min(1, s.t / s.life);
         const drop = (1 - f) * (1 - f) * 150;
         const tex = s.evo ? A.sealEvo : A.seal;
-        const sk = inv * (s.evo ? 1.3 : 1) * (0.8 + f * 0.2);
+        // 石印大小随范围变化：范围越大，砸下来的印越大
+        const sk = inv * Math.max(1, s.r / (s.evo ? 70 : 45)) * (0.8 + f * 0.2);
         L.body.add(tex, s.x, s.y - drop, sk, sk, packColor(0xffffff, Math.min(1, f * 3)));
       }
     }
