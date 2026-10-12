@@ -33,11 +33,16 @@ PAD = 2  # 帧与帧之间的间距
 MARGIN = 1  # 裁边时保留的透明边，线性过滤时不会采到邻居
 
 
-def load_asset(folder: Path) -> tuple[str, list[tuple[str, Image.Image, tuple[float, float]]], dict]:
-    """读取一个素材文件夹，返回 (素材名, [(帧名, 图像, 锚点)], 附加信息)。"""
+def load_asset(folder: Path, emit: bool = True) -> tuple[str, list[dict], dict]:
+    """读取一个素材文件夹，返回 (素材名, 帧列表, 附加信息)。
+
+    每帧是 {"key", "img", "anchor", "blend", "tint"}：
+    - 特效 / 地面格式：blend、tint 取自 meta.json 的 files.<文件>.blend / tint；
+    - 角色格式：普通帧 blend=normal；自发光层 *_emit 是 blend=add（emit=False 时跳过）。
+    """
     meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
     name = meta.get("name") or folder.name
-    frames: list[tuple[str, Image.Image, tuple[float, float]]] = []
+    frames: list[dict] = []
     extra: dict = {}
     if "files" in meta:
         for fname, info in meta["files"].items():
@@ -45,15 +50,27 @@ def load_asset(folder: Path) -> tuple[str, list[tuple[str, Image.Image, tuple[fl
                 continue  # 平铺贴图单独输出，不进图集
             img = Image.open(folder / fname).convert("RGBA")
             ax, ay = info.get("anchor", [0.5, 0.5])
-            frames.append((f"{name}/{Path(fname).stem}", img, (ax, ay)))
+            frames.append(
+                {
+                    "key": f"{name}/{Path(fname).stem}",
+                    "img": img,
+                    "anchor": (ax, ay),
+                    "blend": info.get("blend", "normal"),
+                    "tint": bool(info.get("tint", False)),
+                }
+            )
     else:
         ax, ay = meta.get("anchor", [0.5, 0.875])
         for png in sorted(folder.glob("*.png")):
-            if png.stem.endswith("_emit"):
-                continue  # 自发光层目前不进游戏图集
+            is_emit = png.stem.endswith("_emit")
+            if is_emit and not emit:
+                continue
             img = Image.open(png).convert("RGBA")
-            frames.append((f"{name}/{png.stem}", img, (ax, ay)))
-        extra = {k: meta[k] for k in ("size", "anchor", "anims", "sockets", "height_px") if k in meta}
+            frames.append(
+                {"key": f"{name}/{png.stem}", "img": img, "anchor": (ax, ay), "blend": "add" if is_emit else "normal", "tint": False}
+            )
+        # 角色的元数据原样带进图集（动画、挂点、碰撞半径、影子大小等），文件名之类的除外
+        extra = {k: v for k, v in meta.items() if k not in ("name",)}
     if not frames:
         raise SystemExit(f"{folder}: 没有找到任何帧")
     return name, frames, extra
@@ -154,28 +171,28 @@ def paginate(entries: list[dict], max_size: int) -> list[tuple[list[dict], tuple
     return out
 
 
-def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_SIZE) -> list[str]:
+def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_SIZE, emit: bool = True) -> list[str]:
     """打包并写出图集，返回写出的 JSON 文件名列表（一页时是 <name>.json，多页时是 <name>_0.json …）。"""
     entries: list[dict] = []
     assets: dict = {}
     animations: dict[str, list[str]] = {}
     densities: set[float] = set()
     for folder in folders:
-        aname, frames, extra = load_asset(folder)
+        aname, frames, extra = load_asset(folder, emit)
         d = asset_px_per_unit(folder)
         if d is not None:
             densities.add(d)
         if extra:
             assets[aname] = extra
-        for key, img, (ax, ay) in frames:
-            cropped, rect = trim(img)
-            entries.append({"key": key, "img": cropped, "rect": rect, "src": img.size, "anchor": (ax, ay)})
+        for f in frames:
+            cropped, rect = trim(f["img"])
+            entries.append({**f, "img": cropped, "rect": rect, "src": f["img"].size})
         # 角色素材：按 “动画_朝向” 组成序列（闪白帧单独成组）
         keys = {e["key"] for e in entries}
         if "anims" in extra:
             for anim, info in extra["anims"].items():
                 for d2 in info.get("dirs", ["E"]):
-                    for suffix in ("", "_flash"):
+                    for suffix in ("", "_flash", "_emit"):
                         seq = [f"{aname}/{anim}_{d2}_{f:02d}{suffix}" for f in range(info["frames"])]
                         if all(s in keys for s in seq):
                             animations[f"{aname}/{anim}_{d2}{suffix}"] = seq
@@ -204,7 +221,9 @@ def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_S
             }
         png = out / f"{names[i]}.png"
         sheet.save(png, optimize=True)
-        lantern: dict = {"pxPerUnit": px_per_unit, "page": i, "pages": len(pages)}
+        # 每帧的混合方式与是否染色（只列本页的帧）
+        frame_info = {e["key"]: {"blend": e["blend"], "tint": e["tint"]} for e in page}
+        lantern: dict = {"pxPerUnit": px_per_unit, "page": i, "pages": len(pages), "frames": frame_info}
         # 动画序列和角色元数据只写在第 0 页；多页时读取方要先合并所有页的 frames
         if i == 0:
             lantern["assets"] = assets
@@ -243,12 +262,16 @@ def update_index(out: Path, atlas: str | None = None, paper: bool = False, pages
     path.write_text(json.dumps(idx, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
 
-def write_paper(src: Path, out: Path) -> None:
+def write_paper(src: Path, out: Path, fmt: str = "png") -> None:
+    """宣纸平铺贴图。桌面版用无损 PNG；网页版当年用 WebP（质量 97，低于 95 纤维会被抹平）。"""
     out.mkdir(parents=True, exist_ok=True)
     img = Image.open(src).convert("RGB")
-    dst = out / "paper.webp"
-    # 纸纹对比度很低，质量低于 95 时纤维会被抹平（实测 97 约 16 KB，保留约 85% 细节）
-    img.save(dst, "WEBP", quality=97, method=6)
+    if fmt == "webp":
+        dst = out / "paper.webp"
+        img.save(dst, "WEBP", quality=97, method=6)
+    else:
+        dst = out / "paper.png"
+        img.save(dst, optimize=True)
     print(f"paper: {img.width}×{img.height} → {dst.stat().st_size / 1024:.0f} KB")
 
 
@@ -256,17 +279,19 @@ def main(argv: list[str]) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", help="图集名（输出 <name>.png / <name>.json）")
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--paper", type=Path, help="把平铺的宣纸转成 paper.webp")
+    ap.add_argument("--paper", type=Path, help="写出平铺宣纸 paper.png（或 --paper-format webp）")
+    ap.add_argument("--paper-format", choices=["png", "webp"], default="png")
+    ap.add_argument("--no-emit", action="store_true", help="角色的自发光层 *_emit 不打进图集")
     ap.add_argument("--max", type=int, default=MAX_SIZE, help="单页最大边长（默认 4096）")
     ap.add_argument("folders", nargs="*", type=Path)
     args = ap.parse_args(argv)
     if args.paper:
-        write_paper(args.paper, args.out)
+        write_paper(args.paper, args.out, args.paper_format)
         update_index(args.out, paper=True)
     if args.folders:
         if not args.name:
             raise SystemExit("打包图集需要 --name")
-        pages = build_atlas(args.name, args.folders, args.out, args.max)
+        pages = build_atlas(args.name, args.folders, args.out, args.max, emit=not args.no_emit)
         update_index(args.out, atlas=args.name, pages=pages)
 
 
