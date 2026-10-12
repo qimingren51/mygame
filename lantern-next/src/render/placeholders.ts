@@ -322,7 +322,7 @@ function drawStoneLantern(ctx: CanvasRenderingContext2D, w: number, h: number): 
 
 export function createPlaceholderArt(): ArtSet {
   const actors = new AtlasBuilder(2048);
-  const vfx = new AtlasBuilder(512);
+  const vfx = new AtlasBuilder(1024);
   const ground = new AtlasBuilder(1024);
 
   const heroIdle: { tex?: Texture }[][] = [];
@@ -411,6 +411,168 @@ export function createPlaceholderArt(): ArtSet {
     ctx.fill();
   });
 
+  // 法器与拾取物的占位图（正式的水墨贴图由 art/post/weapon_textures.py 生成）
+  const shape = (w: number, h: number, ax: number, ay: number, draw: (ctx: CanvasRenderingContext2D) => void) => vfx.add(w, h, ax, ay, draw);
+  const drawSword = (ctx: CanvasRenderingContext2D, len: number, gold: boolean) => {
+    ctx.fillStyle = gold ? '#f2c75c' : '#dfe3ea';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(len - 1, 6);
+    ctx.lineTo(12, 3);
+    ctx.lineTo(12, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e2b23a';
+    ctx.fillRect(9, 1, 3, 10);
+    ctx.fillStyle = INK;
+    ctx.fillRect(2, 4, 7, 4);
+  };
+  const ringTex = (white: boolean) => (ctx: CanvasRenderingContext2D) => {
+    ctx.strokeStyle = white ? '#ffffff' : INK;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+  const sword = shape(44, 12, 0.6, 0.5, (ctx) => drawSword(ctx, 44, false));
+  const swordEvo = shape(52, 12, 0.6, 0.5, (ctx) => drawSword(ctx, 52, true));
+  const swordTrail = shape(48, 10, 1, 0.5, (ctx) => {
+    const g = ctx.createLinearGradient(0, 0, 48, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(1, 'rgba(255,255,255,0.9)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, 5);
+    ctx.lineTo(48, 1);
+    ctx.lineTo(48, 9);
+    ctx.closePath();
+    ctx.fill();
+  });
+  const craneFrames = (gold: boolean) =>
+    [0, 1, 2, 3].map((f) =>
+      shape(30, 26, 0.5, 0.5, (ctx) => {
+        const flap = Math.sin((f / 4) * Math.PI * 2) * 7;
+        ctx.fillStyle = '#f4efe4';
+        ctx.strokeStyle = gold ? '#c9962e' : INK;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(28, 13);
+        ctx.lineTo(4, 11);
+        ctx.lineTo(12, 13 - 9 - flap);
+        ctx.lineTo(18, 13);
+        ctx.lineTo(12, 13 + 9 + flap * 0.4);
+        ctx.lineTo(4, 15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }),
+    );
+  const crane = craneFrames(false);
+  const craneEvo = craneFrames(true);
+  const ring = shape(128, 128, 0.5, 0.5, ringTex(true));
+  const ringInk = shape(128, 128, 0.5, 0.5, ringTex(false));
+  const sealBlock = (s: number, gold: boolean) => (ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = '#a8743f';
+    ctx.strokeStyle = gold ? '#e2b23a' : INK;
+    ctx.lineWidth = 2;
+    ctx.fillRect(4, s * 0.35, s - 8, s * 0.5);
+    ctx.strokeRect(4, s * 0.35, s - 8, s * 0.5);
+    ctx.fillStyle = '#c23a2b';
+    ctx.fillRect(4, s * 0.8, s - 8, s * 0.08);
+    ctx.fillStyle = '#857e73';
+    ctx.beginPath();
+    ctx.arc(s / 2, s * 0.3, s * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const seal = shape(40, 44, 0.5, 0.85, sealBlock(40, false));
+  const sealEvo = shape(56, 60, 0.5, 0.85, sealBlock(56, true));
+  const sealMark = shape(64, 64, 0.5, 0.5, (ctx) => {
+    ctx.fillStyle = '#c23a2b';
+    ctx.fillRect(8, 8, 48, 48);
+    ctx.fillStyle = '#ede4cf';
+    ctx.font = '700 30px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('镇', 32, 33);
+  });
+  const crack = shape(128, 96, 0.5, 0.5, (ctx) => {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 3;
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(64, 48);
+      ctx.lineTo(64 + Math.cos(a) * 30, 48 + Math.sin(a) * 22);
+      ctx.lineTo(64 + Math.cos(a + 0.3) * 58, 48 + Math.sin(a + 0.3) * 42);
+      ctx.stroke();
+    }
+  });
+  const warn = shape(64, 64, 0.5, 0.5, (ctx) => {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.arc(32, 32, 28, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  const taiji = shape(128, 128, 0.5, 0.5, (ctx) => {
+    ctx.fillStyle = '#ede4cf';
+    ctx.beginPath();
+    ctx.arc(64, 64, 60, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.arc(64, 64, 60, -Math.PI / 2, Math.PI / 2);
+    ctx.arc(64, 94, 30, Math.PI / 2, -Math.PI / 2, true);
+    ctx.arc(64, 34, 30, Math.PI / 2, -Math.PI / 2);
+    ctx.fill();
+  });
+  const blast = shape(64, 64, 0.5, 0.5, (ctx) => drawRadial(ctx, 64, 1.2));
+  const shield = shape(64, 64, 0.5, 0.5, (ctx) => {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let k = 0; k <= 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      ctx.lineTo(32 + Math.cos(a) * 28, 32 + Math.sin(a) * 28);
+    }
+    ctx.stroke();
+  });
+  const chest = shape(40, 36, 0.5, 0.85, (ctx) => {
+    ctx.fillStyle = '#c23a2b';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2;
+    ctx.fillRect(4, 10, 32, 22);
+    ctx.strokeRect(4, 10, 32, 22);
+    ctx.fillStyle = '#e2b23a';
+    ctx.fillRect(17, 16, 6, 8);
+  });
+  const soulbell = shape(20, 26, 0.5, 0.85, (ctx) => {
+    ctx.fillStyle = '#e2b23a';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(10, 3);
+    ctx.quadraticCurveTo(18, 6, 17, 20);
+    ctx.lineTo(3, 20);
+    ctx.quadraticCurveTo(2, 6, 10, 3);
+    ctx.fill();
+    ctx.stroke();
+  });
+  const lotus = shape(22, 20, 0.5, 0.8, (ctx) => {
+    ctx.fillStyle = '#e8a3a0';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    for (const dx of [-5, 0, 5]) {
+      ctx.beginPath();
+      ctx.ellipse(11 + dx, 10, 4, 7, dx * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  });
+
   const washes = [0, 1, 2].map((k) => ground.add(240, 160, 0.5, 0.5, (ctx) => drawWash(ctx, 240, 160, k)));
   const grasses = [0, 1, 2, 3].map((k) => ground.add(48, 40, 0.5, 1, (ctx) => drawGrass(ctx, 48, 40, k)));
   const rocks = [0, 1].map(() => actors.add(72, 52, 0.5, 0.85, (ctx) => drawRock(ctx, 72, 52)));
@@ -444,6 +606,26 @@ export function createPlaceholderArt(): ArtSet {
       flame: flames.map(tex),
       ink: inks.map(tex),
       lantern: tex(lantern),
+    },
+    weapons: {
+      sword: tex(sword),
+      swordEvo: tex(swordEvo),
+      swordTrail: tex(swordTrail),
+      crane: crane.map(tex),
+      craneEvo: craneEvo.map(tex),
+      ring: tex(ring),
+      ringInk: tex(ringInk),
+      seal: tex(seal),
+      sealEvo: tex(sealEvo),
+      sealMark: tex(sealMark),
+      crack: tex(crack),
+      warn: tex(warn),
+      taiji: tex(taiji),
+      blast: tex(blast),
+      shield: tex(shield),
+      chest: tex(chest),
+      soulbell: tex(soulbell),
+      lotus: tex(lotus),
     },
     props: { rocks: rocks.map(tex), stoneLantern: tex(stoneLantern), stoneLanternFlame: { x: 0, y: -44 } },
     ground: { paper, wash: washes.map(tex), grass: grasses.map(tex) },

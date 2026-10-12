@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '../../src/core/loop';
-import { createWorld } from '../../src/sim/state';
+import { createRun as createWorld } from '../../src/sim/step';
 import { step } from '../../src/sim/step';
 
 const TARGET_MS: Record<number, number> = { 1000: 3, 2000: 6 };

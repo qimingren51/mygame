@@ -31,6 +31,15 @@ export class Enemies {
   readonly ky = new Float32Array(ENEMY_CAP);
   readonly wob = new Float32Array(ENEMY_CAP);
   readonly cdLamp = new Float32Array(ENEMY_CAP);
+  // 灼烧（火·焚）
+  readonly burnT = new Float32Array(ENEMY_CAP);
+  readonly burnStacks = new Float32Array(ENEMY_CAP);
+  readonly burnDps = new Float32Array(ENEMY_CAP);
+  readonly burnAcc = new Float32Array(ENEMY_CAP);
+  readonly burnShow = new Float32Array(ENEMY_CAP);
+  // 夜主的出招计时
+  readonly atk = new Float32Array(ENEMY_CAP);
+  readonly summon = new Float32Array(ENEMY_CAP);
 
   readonly type = new Uint8Array(ENEMY_CAP);
   readonly alive = new Uint8Array(ENEMY_CAP);
@@ -59,6 +68,13 @@ export class Enemies {
     this.kx[i] = 0;
     this.ky[i] = 0;
     this.cdLamp[i] = 0;
+    this.burnT[i] = 0;
+    this.burnStacks[i] = 0;
+    this.burnDps[i] = 0;
+    this.burnAcc[i] = 0;
+    this.burnShow[i] = 0;
+    this.atk[i] = 2;
+    this.summon[i] = 7;
     return i;
   }
 

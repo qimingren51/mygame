@@ -123,6 +123,29 @@ export async function loadArt(): Promise<{ art: ArtSet; report: LoadReport }> {
   if (vfx) {
     try {
       const t = (n: string) => frame(vfx, `vfx/${n}`);
+      // 法器贴图和特效画在同一个 ParticleContainer 里，必须来自同一张图集：缺一样就整张不用
+      const wt = (n: string) => frame(vfx, `weapons/${n}`);
+      const weapons: ArtSet['weapons'] = {
+        sword: wt('sword'),
+        swordEvo: wt('sword_evo'),
+        swordTrail: wt('sword_trail'),
+        crane: [0, 1, 2, 3].map((i) => wt(`crane_${i}`)),
+        craneEvo: [0, 1, 2, 3].map((i) => wt(`crane_evo_${i}`)),
+        ring: wt('ring'),
+        ringInk: wt('ring_ink'),
+        seal: wt('seal'),
+        sealEvo: wt('seal_evo'),
+        sealMark: wt('seal_mark'),
+        crack: wt('crack'),
+        warn: wt('warn'),
+        taiji: wt('taiji'),
+        blast: wt('blast'),
+        shield: wt('shield'),
+        chest: wt('chest'),
+        soulbell: wt('soulbell'),
+        lotus: wt('lotus'),
+      };
+      art.weapons = weapons;
       art.vfx = {
         light: t('light'),
         glow: t('glow'),

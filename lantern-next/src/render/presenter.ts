@@ -5,7 +5,7 @@
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { Container, Rectangle, Sprite, Texture, type Renderer } from 'pixi.js';
 import type { SimEvent } from '../core/bus';
-import { FX, FX_CRIT } from '../core/fxqueue';
+import { FX, FX_CRIT, FX_DOT } from '../core/fxqueue';
 import { SIM_DT } from '../core/loop';
 import { TAU } from '../core/math';
 import { LIGHT_RADIUS } from '../data/balance';
@@ -19,6 +19,7 @@ import { Ground } from './ground';
 import { Lighting } from './lighting';
 import { packColor, ParticleLayer } from './particles';
 import type { BloomMode, Quality } from './quality';
+import { WeaponViews } from './weaponViews';
 
 // 光照图里的灯光颜色。比 style.py 的 LANTERN_LIGHT（灯笼本身的颜色）淡：
 // 光照图是乘到画面上的，太橙会把宣纸染成橘色。
@@ -67,6 +68,8 @@ export class Presenter {
   private readonly glow: ParticleLayer;
   private readonly numbers = new DamageNumbers();
   private readonly fxp: FxParticles;
+  private readonly weaponViews: WeaponViews;
+  private readonly typeTint: number[];
   private readonly flashLights = new FlashLights();
   private readonly screenFlash = new Sprite(Texture.WHITE);
   private flashA = 0;
@@ -101,7 +104,7 @@ export class Presenter {
     this.actorMode = opts.actors;
     this.actors = this.makeActors(opts.actors);
     this.lighting = new Lighting(art.vfx.light, opts.maxLights);
-    this.flames = new ParticleLayer(vfxTex, 256);
+    this.flames = new ParticleLayer(vfxTex, 1024);
     this.glow = new ParticleLayer(vfxTex, 8192, 'add');
 
     this.world.addChild(this.ground.paper, this.ground.decals, this.shadows.view, this.ink.view, this.actors.view);
@@ -118,10 +121,19 @@ export class Presenter {
     this.eyeColor = ENEMY_TYPES.map((t) => ENEMY[t].eye);
     this.typeScale = ENEMY_TYPES.map((t) => (t === 'wisp' || t === 'shade' ? 1 : ENEMY[t].r / ENEMY.shade.r));
     this.fxp = new FxParticles(art);
+    this.weaponViews = new WeaponViews(art);
+    // 还没有专属美术的妖物：借用影妖的图，按轮廓色染色
+    this.typeTint = ENEMY_TYPES.map((t) => (t === 'shade' || t === 'wisp' ? 0xffffff : lighten(ENEMY[t].rim)));
   }
 
   private makeActors(mode: ActorMode): ActorBatch {
     return mode === 'A' ? new ParticleActors(this.art.hero.idle[0]?.[0] as Texture) : new SpriteActors();
+  }
+
+  /** 换了一局：清掉上一局残留的特效 */
+  reset(): void {
+    this.weaponViews.clear();
+    this.fxp.clear();
   }
 
   /** 实时切换角色层的实现（调试面板用） */
@@ -238,7 +250,7 @@ export class Presenter {
       const tex = (flash ? anim.flash[f] : anim.frames[f]) as Texture;
       const mirror = hx < ex ? -1 : 1;
       const bob = Math.sin(t * 3 + i * 1.7) * 1.5;
-      this.actors.push(tex, ex, ey + bob, inv * k * mirror, inv * k, ey);
+      this.actors.push(tex, ex, ey + bob, inv * k * mirror, inv * k, ey, flash ? 0xffffff : (this.typeTint[type] as number));
       const r = en.r[i] as number;
       this.shadows.add(shadowTex, ex, ey, (r * 1.8) / shadowW, (r * 1.8) / shadowW, packColor(0xffffff, 0.55));
       const eye = (this.eyes[type] as { x: number; y: number }[])[f] ?? { x: 0, y: 0 };
@@ -267,9 +279,9 @@ export class Presenter {
     }
 
     // ---- 灯火（绕身的火焰）
-    const L = w.lamp;
-    if (L.count > 0) {
-      const omega = 3.2 + L.lv * 0.12;
+    const L = w.weapons.find((x) => x.id === 'lamp');
+    if (L && L.count > 0) {
+      const omega = L.evo ? 2.4 : 3.2 + L.lv * 0.12;
       const base = L.angle - (1 - alpha) * omega * SIM_DT;
       const flameTex = this.art.vfx.flame;
       const fs = (L.size / 10) * inv;
@@ -283,6 +295,9 @@ export class Presenter {
         this.lighting.add(fx, fy, 64, FLAME_LIGHT, 0.75);
       }
     }
+
+    // ---- 其他法器、法术效果、拾取物
+    this.weaponViews.draw(w, alpha, dt, { ground: this.ink, body: this.flames, glow: this.glow }, this.lighting, hx, hy);
 
     // ---- 魂火
     const g = w.gems;
@@ -352,8 +367,23 @@ export class Presenter {
     w.fx.drain((code, x, y, a, b) => {
       listener?.fx(code);
       if (code === FX.HIT) {
-        this.fxp.hit(x, y, p.x, p.y);
-        this.numbers.add(x, y, a, (b & FX_CRIT) !== 0);
+        if (b & FX_DOT) {
+          this.numbers.add(x, y, a, 2);
+        } else {
+          this.fxp.hit(x, y, p.x, p.y);
+          this.numbers.add(x, y, a, b & FX_CRIT ? 1 : 0);
+        }
+      } else if (code === FX.RING) {
+        this.weaponViews.ring(x, y, a, b);
+      } else if (code === FX.SEAL_HIT) {
+        this.weaponViews.sealHit(x, y, a, b === 1);
+        this.fxp.kill(x, y, 0xc9925a, b === 1);
+      } else if (code === FX.BLAST) {
+        this.weaponViews.blast(x, y, a, b === 1);
+      } else if (code === FX.PLAYER_HIT) {
+        this.numbers.add(x, y, a, 3);
+      } else if (code === FX.PLAYER_HEAL) {
+        this.numbers.add(x, y, a, 4);
       } else if (code === FX.KILL) {
         const eye = this.eyeColor[a] ?? 0xffffff;
         this.fxp.kill(x, y, eye, b === 1);
@@ -363,6 +393,15 @@ export class Presenter {
       }
     });
   }
+}
+
+/** 把轮廓色提亮成染色用的颜色（染色只能变暗，太深的颜色会让整只妖物发黑） */
+function lighten(c: number): number {
+  const r = (c >> 16) & 0xff;
+  const g = (c >> 8) & 0xff;
+  const b = c & 0xff;
+  const f = (v: number) => Math.round(v + (255 - v) * 0.45);
+  return (f(r) << 16) | (f(g) << 8) | f(b);
 }
 
 /** 由朝向向量选 8 个方向之一，带滞后。0=东，顺时针（屏幕 y 向下）。 */

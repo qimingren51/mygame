@@ -34,3 +34,10 @@ export const ENEMY: Record<EnemyType, EnemyDef> = {
 
 /** 类型编号（存进 Uint8Array 用） */
 export const ENEMY_ID: Record<EnemyType, number> = Object.fromEntries(ENEMY_TYPES.map((t, i) => [t, i])) as Record<EnemyType, number>;
+
+/** 精英出场时的提示 */
+export const ELITE_INFO: Record<'fox' | 'ghoul' | 'stonelord', { label: string; color: number }> = {
+  fox: { label: '精英 · 赤面狐', color: 0xff6b5a },
+  ghoul: { label: '小头目 · 青面鬼', color: 0x5fd4a0 },
+  stonelord: { label: '精英 · 石将', color: 0xc9925a },
+};

@@ -43,8 +43,8 @@ test('标题、游戏、返回', async ({ page }, info) => {
   await page.screenshot({ path: info.outputPath('title.png') });
 
   await page.locator('#start-btn').click();
-  await expect(page.locator('#back-btn')).toBeVisible();
-  await expect(page.locator('#dash-btn')).toBeVisible();
+  await expect(page.locator('#game-hud .pause-btn')).toBeVisible();
+  await expect(page.locator('#game-hud .ult-btn')).toBeVisible();
   // 触屏摇杆：在左半屏按住向右拖
   const start = (await dbg(page)).world.player.x;
   await page.mouse.move(200, 250);
@@ -56,7 +56,22 @@ test('标题、游戏、返回', async ({ page }, info) => {
   expect(moved).toBeGreaterThan(40);
   await page.screenshot({ path: info.outputPath('play.png') });
 
-  await page.locator('#back-btn').click();
+  // 升级三选一：直接给经验，等卡片出现，点第一张
+  await page.evaluate(() => {
+    (window as unknown as { __lantern: { world: { pendingLevels: number } } }).__lantern.world.pendingLevels = 1;
+  });
+  await expect(page.locator('#levelup-screen .card').first()).toBeVisible();
+  const cards = await page.locator('#levelup-screen .card').count();
+  expect(cards).toBeGreaterThanOrEqual(3);
+  await page.screenshot({ path: info.outputPath('levelup.png') });
+  await page.locator('#levelup-screen .card').first().click();
+  await expect(page.locator('#levelup-screen')).toBeHidden();
+  expect((await dbg(page)).mode).toBe('play');
+
+  // 暂停 → 放弃本局 → 回到标题
+  await page.locator('#game-hud .pause-btn').click();
+  await expect(page.locator('#pause-screen')).toBeVisible();
+  await page.locator('#pause-screen [data-act="quit"]').click();
   await expect(page.locator('#title')).toBeVisible();
   expect(errors).toEqual([]);
 });

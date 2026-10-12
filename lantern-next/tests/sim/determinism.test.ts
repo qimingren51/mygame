@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { SIM_DT } from '../../src/core/loop';
-import { createWorld, stateHash, type InputFrame, type World } from '../../src/sim/state';
-import { step } from '../../src/sim/step';
+import { stateHash, type InputFrame, type World } from '../../src/sim/state';
+import { createRun, step } from '../../src/sim/step';
+import { botInput, respond } from './bot';
 
-/** 固定的输入脚本：绕大圈走，每 2 秒闪避一次 */
-function run(seed: number, seconds: number, bench: number | null = null): World {
-  const w = createWorld({ seed, benchTarget: bench });
+/** 固定的输入脚本 + 机器人选卡 */
+function run(seed: number, seconds: number, bench: number | null = null, god = true): World {
+  const w = createRun({ seed, benchTarget: bench, god });
   const input: InputFrame = { mx: 0, my: 0 };
   const steps = Math.round(seconds / SIM_DT);
-  for (let s = 0; s < steps; s++) {
-    const a = s * 0.01;
-    input.mx = Math.cos(a);
-    input.my = Math.sin(a);
-    if (s % 120 === 0) w.commands.push({ k: 'dash' });
+  for (let s = 0; s < steps && w.phase !== 'over'; s++) {
+    respond(w);
+    botInput(w, input);
     step(w, SIM_DT, input);
     w.bus.clear();
     w.fx.clear();
@@ -25,6 +24,7 @@ describe('固定种子复现', () => {
     const a = run(20261012, 180);
     const b = run(20261012, 180);
     expect(a.kills).toBeGreaterThan(50);
+    expect(a.level).toBeGreaterThan(5);
     expect(stateHash(a)).toBe(stateHash(b));
   });
 
@@ -32,10 +32,12 @@ describe('固定种子复现', () => {
     expect(stateHash(run(1, 60))).not.toBe(stateHash(run(2, 60)));
   });
 
-  it('跑分模式保持目标数量的妖物', () => {
+  it('跑分模式保持目标数量的妖物，且不升级', () => {
     const w = run(7, 5, 1000);
     expect(w.enemies.count).toBeGreaterThanOrEqual(940);
     expect(w.enemies.count).toBeLessThanOrEqual(1000);
+    expect(w.phase).toBe('play');
+    expect(w.weapons.length).toBe(1);
   });
 
   it('长时间运行不出现 NaN', () => {

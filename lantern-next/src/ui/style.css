@@ -376,3 +376,9 @@ button {
     max-height: 16vh;
   }
 }
+
+/* 正式游戏中只保留调试按钮（?debug=1 时） */
+#hud.in-run #back-btn,
+#hud.in-run #dash-btn {
+  display: none;
+}

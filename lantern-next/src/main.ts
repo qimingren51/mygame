@@ -5,7 +5,8 @@
 import { Application } from 'pixi.js';
 import { onFx, onSimEvent } from './audio/bindings';
 import { installUnlock, unlock } from './audio/engine';
-import { setMusic } from './audio/music';
+import { sfx } from './audio/sfx';
+import { muffle, setMusic } from './audio/music';
 import { FixedStep } from './core/loop';
 import { clamp } from './core/math';
 import { randomSeed } from './core/rng';
@@ -16,11 +17,15 @@ import { Input } from './platform/input';
 import { loadArt } from './render/atlas';
 import { Presenter } from './render/presenter';
 import { QualityScaler, type BloomMode, type Quality, type QualityLocks } from './render/quality';
-import { createWorld, setView, type World } from './sim/state';
-import { step } from './sim/step';
+import { setView, type Command, type World } from './sim/state';
+import { createRun, step } from './sim/step';
 import { showBenchCard } from './ui/benchCard';
+import { Hud } from './ui/hud';
+import { Screens } from './ui/screens';
 import { setupTitle } from './ui/title';
+import { toastFor } from './ui/toasts';
 import './ui/style.css';
+import './ui/game.css';
 
 const params = new URLSearchParams(location.search);
 const num = (k: string): number | undefined => {
@@ -71,12 +76,13 @@ async function boot(): Promise<void> {
     maxLights: clamp(num('lights') ?? 300, 1, 2000),
     gemLights: 200,
   });
-  presenter.listener = { event: onSimEvent, fx: onFx };
+  if (report.paper) document.documentElement.style.setProperty('--paper-img', `url("${new URL('assets/paper.webp', location.href).href}")`);
   const input = new Input(host);
   const loop = new FixedStep();
   const enemyTarget = clamp(Math.round(num('enemies') ?? 1000), 0, 2000);
 
   let mode: Mode = 'title';
+  let lastPhase = '';
   let world: World = newWorld(num('seed'));
   /** 调试面板或跑分手动指定的画质；null 表示用自动画质的当前档位 */
   let manual: Quality | null = null;
@@ -84,28 +90,76 @@ async function boot(): Promise<void> {
   let bench: Bench | null = null;
 
   function newWorld(seed?: number): World {
-    const w = createWorld({ seed: seed ?? randomSeed(), benchTarget: enemyTarget, god: true });
+    const w = createRun({ seed: seed ?? randomSeed(), benchTarget: enemyTarget, god: true });
     setView(w, presenter.cam.viewW, presenter.cam.viewH);
     loop.reset();
     return w;
   }
 
   // ---- 界面
+  const debug = params.get('debug') === '1';
   const hud = $('hud');
   const perf = $('perf');
-  perf.hidden = !(params.get('debug') === '1' || params.has('enemies'));
-  const title = setupTitle({
-    start: () => {
-      world = newWorld(num('seed'));
-      mode = 'play';
-      input.auto = params.get('auto') === '1';
-      input.enabled = true;
-      title.hide();
-      hud.hidden = false;
-      setMusic('play');
+  perf.hidden = !(debug || params.has('enemies'));
+  const send = (c: Command) => world.commands.push(c);
+  const gameHud = new Hud({
+    dash: () => {
+      unlock();
+      input.command({ k: 'dash' });
     },
+    ult: () => {
+      unlock();
+      input.command({ k: 'ult' });
+    },
+    pause: () => setPaused(true),
+  });
+  const screens = new Screens({
+    send,
+    resume: () => setPaused(false),
+    quit: () => toTitle(),
+    again: () => startRun(),
+    sfxSelect: () => sfx.select(),
+  });
+  presenter.listener = {
+    event: (e) => {
+      onSimEvent(e);
+      if (mode === 'play') toastFor(gameHud, e);
+    },
+    fx: onFx,
+  };
+  const title = setupTitle({
+    start: () => startRun(),
     bench: () => startBench(),
   });
+
+  /** 开始一局正式的游戏：正常刷怪、升级三选一、10 分钟后夜主降临 */
+  function startRun(): void {
+    const seed = num('seed') ?? randomSeed();
+    world = createRun({ seed, god: params.get('god') === '1' });
+    setView(world, presenter.cam.viewW, presenter.cam.viewH);
+    presenter.reset();
+    loop.reset();
+    bench = null;
+    mode = 'play';
+    lastPhase = '';
+    input.auto = params.get('auto') === '1';
+    input.enabled = true;
+    title.hide();
+    hud.hidden = !debug;
+    hud.classList.add('in-run');
+    screens.hideAll();
+    screens.paused = false;
+    gameHud.reset();
+    gameHud.el.hidden = false;
+    muffle(false);
+    setMusic('play', seed);
+  }
+
+  function setPaused(on: boolean): void {
+    if (mode !== 'play' || world.phase === 'over') return;
+    screens.paused = on;
+    muffle(on || world.phase !== 'play');
+  }
 
   function startBench(): void {
     // 固定种子、固定画质（自动降级关掉，结果才可比）
@@ -147,18 +201,29 @@ async function boot(): Promise<void> {
       world.benchTarget = enemyTarget;
       fit(true);
     }
+    if (mode === 'play') {
+      // 回到标题时，背景换回跑分场景
+      world = newWorld(num('seed'));
+    }
     bench = null;
     document.getElementById('bench-card')?.remove();
     mode = 'title';
     input.auto = true;
     input.enabled = false;
     hud.hidden = true;
+    hud.classList.remove('in-run');
+    gameHud.el.hidden = true;
+    screens.hideAll();
+    screens.paused = false;
+    muffle(false);
     title.show();
     setMusic('title');
   }
   $('back-btn').addEventListener('click', toTitle);
   addEventListener('keydown', (e) => {
-    if (e.code === 'Escape' && mode !== 'title') toTitle();
+    if (e.code !== 'Escape' || mode === 'title') return;
+    if (mode === 'play') setPaused(!screens.paused);
+    else toTitle();
   });
   const dashBtn = $('dash-btn');
   dashBtn.addEventListener('pointerdown', (e) => {
@@ -237,11 +302,26 @@ async function boot(): Promise<void> {
     fit(false);
     if (quality.sample(dtMs)) fit(true);
     const dt = Math.min(dtMs / 1000, 0.1);
-    const alpha = loop.advance(dt, (sdt) => {
-      input.flushCommands(world.commands);
-      step(world, sdt, input.sample(sdt));
-    });
-    presenter.frame(app.renderer, world, alpha, dt);
+    const paused = mode === 'play' && screens.paused;
+    if (mode === 'play') {
+      // 选择界面、暂停时不响应摇杆
+      input.enabled = world.phase === 'play' && !paused;
+      if (world.phase !== lastPhase) {
+        if (lastPhase !== '' && world.phase === 'play' && !paused) muffle(false);
+        lastPhase = world.phase;
+      }
+    }
+    const alpha = paused
+      ? 1
+      : loop.advance(dt, (sdt) => {
+          input.flushCommands(world.commands);
+          step(world, sdt, input.sample(sdt));
+        });
+    presenter.frame(app.renderer, world, alpha, paused ? 0 : dt);
+    if (mode === 'play') {
+      screens.sync(world, dt);
+      gameHud.update(world);
+    }
     if (mode === 'bench' && bench) {
       if (bench.frame(dtMs, presenter.stats.lights, presenter.stats.actors)) world.benchTarget = bench.target;
       if (bench.done) finishBench(bench);

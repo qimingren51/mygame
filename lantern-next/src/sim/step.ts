@@ -1,37 +1,52 @@
 // 模拟的一步（固定 1/60 秒）。执行顺序沿用旧版 update()：
-// 玩家 → 刷怪 → 建网格 → 妖物移动 → 互相推开 → 法器 → 魂火。
-// 技术验证阶段只包含：移动、闪避、刷怪、灯火、命中击杀、魂火。
+// 玩家 → 护盾 / 太极 → 刷怪 → 建网格 → 妖物（灼烧、移动、接触伤害）→ 互相推开
+// → 法器（飞剑、石印、地裂）→ 弹幕 → 连锁爆炸 → 魂火 → 拾取物 → 升级 / 宝箱 / 胜利。
 
-import { FX, FX_CRIT } from '../core/fxqueue';
-import { TAU } from '../core/math';
-import {
-  ENEMY_SOFT_CAP,
-  PLAYER,
-  enemyDmgScale,
-  gemValueScale,
-  hpScale,
-  spawnRate,
-  xpNeed,
-} from '../data/balance';
-import { ENEMY, ENEMY_ID, ENEMY_TYPES, type EnemyType } from '../data/enemies';
-import { W } from '../data/weapons';
-import { LAMP_MAX_FLAMES, type InputFrame, type World, viewRadius } from './state';
+import { FX, FX_DOT, RING_TAIJI, RING_ULT } from '../core/fxqueue';
+import { PLAYER, xpNeed } from '../data/balance';
+import { ENEMY_ID } from '../data/enemies';
+import { computeStats } from './build';
+import { HIT_NOCRIT, damagePlayer, enemyDef, hitEnemy, killEnemy, processBlasts } from './combat';
+import { checkFlow, handleChoiceCommand } from './flow';
+import { updateBoss, updateSpawns } from './spawn';
+import { createWorld, onScreen, viewRadius, type InputFrame, type World, type WorldOptions } from './state';
+import { updateWeapons } from './weapons';
 
-/** 跑分模式每步最多补充的妖物数 */
-const BENCH_REFILL_PER_STEP = 60;
+export { spawnEnemy } from './spawn';
+export { hitEnemy } from './combat';
+
+/** 开一局：建世界、算属性、满血。 */
+export function createRun(opts: WorldOptions): World {
+  const w = createWorld(opts);
+  computeStats(w);
+  w.player.hp = w.stats.maxHp;
+  return w;
+}
 
 export function step(w: World, dt: number, input: InputFrame): void {
+  if (w.phase !== 'play') {
+    // 等待界面：只处理选择命令，时间不推进
+    for (const c of w.commands) handleChoiceCommand(w, c);
+    w.commands.length = 0;
+    return;
+  }
   w.tick++;
   w.t += dt;
   updatePlayer(w, dt, input);
+  if (w.phase !== 'play') return;
   savePrevPositions(w);
+  updateTimers(w, dt);
   updateSpawns(w, dt);
   const R = viewRadius(w) * 1.8;
   w.grid.build(w.enemies, w.player.x, w.player.y, R, R);
   updateEnemies(w, dt);
   separate(w, dt);
-  updateLamp(w, dt);
+  updateWeapons(w, dt);
+  updateFoes(w, dt);
+  processBlasts(w);
   updateGems(w, dt);
+  updatePickups(w, dt);
+  checkFlow(w);
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +55,7 @@ export function step(w: World, dt: number, input: InputFrame): void {
 
 function updatePlayer(w: World, dt: number, input: InputFrame): void {
   const p = w.player;
+  const s = w.stats;
   p.px = p.x;
   p.py = p.y;
 
@@ -65,6 +81,8 @@ function updatePlayer(w: World, dt: number, input: InputFrame): void {
       p.iframe = Math.max(p.iframe, PLAYER.dashIframe);
       p.dashCd = PLAYER.dashCd;
       w.bus.emit({ k: 'dash' });
+    } else if (c.k === 'ult') {
+      ultimate(w);
     }
   }
   w.commands.length = 0;
@@ -74,31 +92,65 @@ function updatePlayer(w: World, dt: number, input: InputFrame): void {
     p.x += p.dashVX * dt;
     p.y += p.dashVY * dt;
   } else {
-    p.x += mx * w.stats.speed * dt;
-    p.y += my * w.stats.speed * dt;
+    p.x += mx * s.speed * dt;
+    p.y += my * s.speed * dt;
   }
   p.moved = Math.hypot(p.x - p.px, p.y - p.py);
   p.iframe = Math.max(0, p.iframe - dt);
   p.dashCd = Math.max(0, p.dashCd - dt);
+  p.hp = Math.min(s.maxHp, p.hp + s.regen * dt);
 }
 
-function damagePlayer(w: World, amount: number): void {
+/** 燃灯：清屏大招，充满后可用 */
+function ultimate(w: World): void {
+  if (w.ult < 1) return;
+  w.ult = 0;
   const p = w.player;
-  if (p.iframe > 0 || p.dashT > 0) return;
-  p.iframe = PLAYER.iframe;
-  if (w.god) return;
-  const dmg = Math.max(1, amount);
-  p.hp -= dmg;
-  w.bus.emit({ k: 'hurt', amount: dmg });
-  w.bus.emit({ k: 'shake', amount: 5 });
-  w.bus.emit({ k: 'flash', color: 0xff3b30, a: 0.18 });
-  // 技术验证阶段不结束游戏：生命归零时恢复
-  if (p.hp <= 0) p.hp = p.maxHp;
+  w.fx.push(FX.RING, p.x, p.y, viewRadius(w) * 1.1, RING_ULT);
+  w.bus.emit({ k: 'ult' });
+  w.bus.emit({ k: 'flash', color: 0xffd98a, a: 0.55 });
+  w.bus.emit({ k: 'shake', amount: 12 });
+  const dmg = 120 * (1 + 0.4 * (w.t / 60));
+  const en = w.enemies;
+  for (let i = 0; i < en.hi; i++) {
+    if (!en.alive[i] || !onScreen(w, en.x[i] as number, en.y[i] as number, 60)) continue;
+    if (enemyDef(w, i).boss) hitEnemy(w, i, (en.maxHp[i] as number) * 0.05, 0, p.x, p.y, HIT_NOCRIT);
+    else hitEnemy(w, i, dmg, 160, p.x, p.y);
+  }
+  for (const f of w.foes) f.life = 0;
 }
 
-// ---------------------------------------------------------------------------
-// 刷怪
-// ---------------------------------------------------------------------------
+function updateTimers(w: World, dt: number): void {
+  const p = w.player;
+  // 土·固：护盾
+  if (w.tier.earth >= 1 && p.shield <= 0) {
+    p.shieldT -= dt;
+    if (p.shieldT <= 0) {
+      p.shield = 20 + 5 * (w.t / 60);
+      p.shieldMax = p.shield;
+    }
+  }
+  // 太极：每 30 秒全屏轮转五行之力
+  if (w.taiji) {
+    w.taijiT += dt;
+    if (w.taijiT >= 30) {
+      w.taijiT = 0;
+      w.fx.push(FX.RING, p.x, p.y, viewRadius(w), RING_TAIJI);
+      const en = w.enemies;
+      const dmg = 40 * (1 + 0.4 * (w.t / 60));
+      for (let i = 0; i < en.hi; i++) {
+        if (en.alive[i] && onScreen(w, en.x[i] as number, en.y[i] as number)) hitEnemy(w, i, dmg, 0, p.x, p.y, 0, 600);
+      }
+    }
+  }
+  const intensity = w.t < 180 ? 0 : w.t < 390 ? 1 : 2;
+  if (intensity !== w.intensity) {
+    w.intensity = intensity;
+    w.bus.emit({ k: 'intensity', level: intensity });
+  }
+  w.comboT -= dt;
+  if (w.comboT <= 0) w.combo = 0;
+}
 
 function savePrevPositions(w: World): void {
   const en = w.enemies;
@@ -111,58 +163,9 @@ function savePrevPositions(w: World): void {
     g.px[i] = g.x[i] as number;
     g.py[i] = g.y[i] as number;
   }
-}
-
-export function spawnEnemy(w: World, type: EnemyType, x: number, y: number): number {
-  const en = w.enemies;
-  const i = en.alloc();
-  if (i < 0) return -1;
-  const d = ENEMY[type];
-  const m = w.t / 60;
-  const sc = d.boss ? 1 : hpScale(m);
-  en.type[i] = ENEMY_ID[type];
-  en.x[i] = x;
-  en.y[i] = y;
-  en.px[i] = x;
-  en.py[i] = y;
-  en.r[i] = d.r;
-  en.hp[i] = d.hp * sc;
-  en.maxHp[i] = d.hp * sc;
-  en.speed[i] = d.speed * w.rng.spawn.range(0.9, 1.1);
-  en.dmg[i] = d.dmg * enemyDmgScale(m);
-  en.wob[i] = w.rng.spawn.range(0, TAU);
-  return i;
-}
-
-/** 屏幕外一圈的随机位置（对应旧版 ringPos） */
-function ringPos(w: World, extra: number, out: { x: number; y: number }): void {
-  const a = w.rng.spawn.range(0, TAU);
-  const R = viewRadius(w) + extra;
-  out.x = w.player.x + Math.cos(a) * R;
-  out.y = w.player.y + Math.sin(a) * R;
-}
-
-const tmpPos = { x: 0, y: 0 };
-
-function updateSpawns(w: World, dt: number): void {
-  const en = w.enemies;
-  if (w.benchTarget !== null) {
-    let missing = Math.min(w.benchTarget - en.count, BENCH_REFILL_PER_STEP);
-    while (missing-- > 0) {
-      ringPos(w, 40, tmpPos);
-      spawnEnemy(w, w.rng.spawn.chance(0.2) ? 'wisp' : 'shade', tmpPos.x, tmpPos.y);
-    }
-    return;
-  }
-  const m = w.t / 60;
-  let rate = spawnRate(m);
-  if (en.count > ENEMY_SOFT_CAP) rate = 0;
-  w.spawnAcc += rate * dt;
-  while (w.spawnAcc >= 1) {
-    w.spawnAcc -= 1;
-    const type: EnemyType = m >= 1 && w.rng.spawn.chance(0.2) ? 'wisp' : 'shade';
-    ringPos(w, 40, tmpPos);
-    spawnEnemy(w, type, tmpPos.x, tmpPos.y);
+  for (const f of w.foes) {
+    f.px = f.x;
+    f.py = f.y;
   }
 }
 
@@ -176,11 +179,33 @@ function updateEnemies(w: World, dt: number): void {
   const decay = Math.exp(-8 * dt);
   const relocateDist = viewRadius(w) * 1.7;
   const toad = ENEMY_ID.toad;
+  const bossType = ENEMY_ID.boss;
 
   for (let i = 0; i < en.hi; i++) {
     if (!en.alive[i]) continue;
     en.flash[i] = Math.max(0, (en.flash[i] as number) - dt);
     en.wob[i] = (en.wob[i] as number) + dt * 5;
+
+    // 灼烧
+    if ((en.burnT[i] as number) > 0) {
+      en.burnT[i] = (en.burnT[i] as number) - dt;
+      const dmg = (en.burnDps[i] as number) * (en.burnStacks[i] as number) * dt;
+      en.hp[i] = (en.hp[i] as number) - dmg;
+      en.burnAcc[i] = (en.burnAcc[i] as number) + dmg;
+      en.burnShow[i] = (en.burnShow[i] as number) - dt;
+      if ((en.burnShow[i] as number) <= 0 && (en.burnAcc[i] as number) >= 1) {
+        w.fx.push(FX.HIT, en.x[i] as number, (en.y[i] as number) - (en.r[i] as number), en.burnAcc[i] as number, FX_DOT);
+        en.burnAcc[i] = 0;
+        en.burnShow[i] = 0.5;
+      }
+      if ((en.hp[i] as number) <= 0) {
+        killEnemy(w, i);
+        continue;
+      }
+    } else {
+      en.burnStacks[i] = 0;
+      en.burnDps[i] = 0;
+    }
 
     let x = en.x[i] as number;
     let y = en.y[i] as number;
@@ -193,6 +218,7 @@ function updateEnemies(w: World, dt: number): void {
     en.kx[i] = (en.kx[i] as number) * decay;
     en.ky[i] = (en.ky[i] as number) * decay;
 
+    const type = en.type[i] as number;
     if ((en.frozen[i] as number) > 0) {
       en.frozen[i] = (en.frozen[i] as number) - dt;
     } else if ((en.stun[i] as number) > 0) {
@@ -204,25 +230,37 @@ function updateEnemies(w: World, dt: number): void {
         sp *= 1 - (en.slowAmt[i] as number);
         if ((en.slow[i] as number) <= 0) en.slowAmt[i] = 0;
       }
-      x += (dx / d) * sp * dt;
-      y += (dy / d) * sp * dt;
-    }
-
-    const def = ENEMY[ENEMY_TYPES[en.type[i] as number] as EnemyType];
-    // 离得太远的普通妖物绕到玩家前方
-    if (!def.elite && !def.boss && en.type[i] !== toad && d > relocateDist) {
-      const a = Math.atan2(p.faceY, p.faceX) + w.rng.spawn.range(-0.8, 0.8);
-      const R = viewRadius(w) + 40;
-      x = p.x + Math.cos(a) * R;
-      y = p.y + Math.sin(a) * R;
-      // 瞬移：上一步位置也一起改，画面插值时不会拖出残影
-      en.px[i] = x;
-      en.py[i] = y;
+      if (type === toad) {
+        // 金蟾背着玩家逃，略慢于玩家，追得上
+        const wob = Math.sin(w.t * 3 + (en.wob[i] as number)) * 0.6;
+        const ax = -dx / d;
+        const ay = -dy / d;
+        x += (ax * Math.cos(wob) - ay * Math.sin(wob)) * sp * dt;
+        y += (ax * Math.sin(wob) + ay * Math.cos(wob)) * sp * dt;
+      } else {
+        x += (dx / d) * sp * dt;
+        y += (dy / d) * sp * dt;
+      }
     }
     en.x[i] = x;
     en.y[i] = y;
 
+    if (type === bossType) updateBoss(w, i, dt);
+
+    const def = enemyDef(w, i);
+    // 离得太远的普通妖物绕到玩家前方
+    if (!def.elite && !def.boss && type !== toad && d > relocateDist) {
+      const a = Math.atan2(p.faceY, p.faceX) + w.rng.spawn.range(-0.8, 0.8);
+      const R = viewRadius(w) + 40;
+      en.x[i] = p.x + Math.cos(a) * R;
+      en.y[i] = p.y + Math.sin(a) * R;
+      // 瞬移：上一步位置也一起改，画面插值时不会拖出残影
+      en.px[i] = en.x[i] as number;
+      en.py[i] = en.y[i] as number;
+    }
+
     if (d < (en.r[i] as number) + p.r && (en.dmg[i] as number) > 0) damagePlayer(w, en.dmg[i] as number);
+    if (w.phase !== 'play') return;
   }
 }
 
@@ -266,85 +304,29 @@ function separate(w: World, dt: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// 命中与击杀
+// 夜主弹幕
 // ---------------------------------------------------------------------------
 
-export function hitEnemy(w: World, i: number, base: number, kb: number, fromX: number, fromY: number): void {
-  const en = w.enemies;
-  if (!en.alive[i]) return;
-  const s = w.stats;
-  let dmg = base * s.dmg;
-  const crit = w.rng.combat.next() < s.critChance;
-  if (crit) dmg *= s.critMult;
-  en.hp[i] = (en.hp[i] as number) - dmg;
-  en.flash[i] = 0.08;
-  w.fx.push(FX.HIT, en.x[i] as number, (en.y[i] as number) - (en.r[i] as number) - 4, dmg, crit ? FX_CRIT : 0);
-
-  const def = ENEMY[ENEMY_TYPES[en.type[i] as number] as EnemyType];
-  if (kb > 0 && !def.boss) {
-    const dx = (en.x[i] as number) - fromX;
-    const dy = (en.y[i] as number) - fromY;
-    const d = Math.hypot(dx, dy) || 1;
-    const f = (kb * s.kb) / (def.elite ? 3 : 1);
-    en.kx[i] = (en.kx[i] as number) + (dx / d) * f;
-    en.ky[i] = (en.ky[i] as number) + (dy / d) * f;
-  }
-  if ((en.hp[i] as number) <= 0) killEnemy(w, i);
-}
-
-function killEnemy(w: World, i: number): void {
-  const en = w.enemies;
-  if (!en.alive[i]) return;
-  const typeId = en.type[i] as number;
-  const def = ENEMY[ENEMY_TYPES[typeId] as EnemyType];
-  const x = en.x[i] as number;
-  const y = en.y[i] as number;
-  w.kills++;
-  w.fx.push(FX.KILL, x, y, typeId, def.elite ? 1 : 0);
-  if (def.xp > 0) {
-    const value = def.xp * gemValueScale(w.t / 60);
-    if (def.elite) {
-      for (let k = 0; k < 8; k++) w.gems.drop(x + w.rng.loot.range(-20, 20), y + w.rng.loot.range(-20, 20), value / 8);
-    } else {
-      w.gems.drop(x, y, value);
-    }
-  }
-  en.kill(i);
-}
-
-// ---------------------------------------------------------------------------
-// 法器：灯火（环绕的火焰）
-// ---------------------------------------------------------------------------
-
-function updateLamp(w: World, dt: number): void {
-  const L = w.lamp;
+function updateFoes(w: World, dt: number): void {
   const p = w.player;
-  const s = w.stats;
-  const base = W.lamp(L.lv);
-  L.angle += (3.2 + L.lv * 0.12) * dt;
-  L.count = Math.min(LAMP_MAX_FLAMES, base.count);
-  L.radius = base.radius * s.area;
-  L.size = 10 * Math.sqrt(s.area);
-  const ids = w.scratch.ids;
-  const en = w.enemies;
-  for (let f = 0; f < L.count; f++) {
-    const a = L.angle + (f * TAU) / L.count;
-    const x = p.x + Math.cos(a) * L.radius;
-    const y = p.y + Math.sin(a) * L.radius;
-    L.fx[f] = x;
-    L.fy[f] = y;
-    const n = w.grid.queryCircle(en, x, y, L.size, ids);
-    for (let k = 0; k < n; k++) {
-      const i = ids[k] as number;
-      if (!en.alive[i] || (en.cdLamp[i] as number) > w.t) continue;
-      en.cdLamp[i] = w.t + 0.45;
-      hitEnemy(w, i, base.dmg, 50, p.x, p.y);
+  const list = w.foes;
+  for (let k = 0; k < list.length; k++) {
+    const f = list[k];
+    if (!f) continue;
+    f.life -= dt;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    if ((f.x - p.x) ** 2 + (f.y - p.y) ** 2 < (f.r + p.r) ** 2) {
+      damagePlayer(w, f.dmg);
+      list.splice(k--, 1);
+      continue;
     }
+    if (f.life <= 0) list.splice(k--, 1);
   }
 }
 
 // ---------------------------------------------------------------------------
-// 魂火
+// 魂火与拾取物
 // ---------------------------------------------------------------------------
 
 function updateGems(w: World, dt: number): void {
@@ -380,5 +362,31 @@ function addXp(w: World, v: number): void {
     w.xp -= xpNeed(w.level);
     w.level++;
     w.pendingLevels++;
+  }
+}
+
+function updatePickups(w: World, dt: number): void {
+  const p = w.player;
+  const list = w.pickups;
+  const reach = (p.r + 16) ** 2;
+  for (let k = 0; k < list.length; k++) {
+    const it = list[k];
+    if (!it) continue;
+    it.t += dt;
+    if ((it.x - p.x) ** 2 + (it.y - p.y) ** 2 >= reach) continue;
+    list.splice(k--, 1);
+    if (it.kind === 'chest') {
+      w.chestQueue++;
+    } else if (it.kind === 'bell') {
+      const g = w.gems;
+      for (let i = 0; i < g.n; i++) g.pulled[i] = 1;
+      w.bus.emit({ k: 'flash', color: 0x5fd4c4, a: 0.15 });
+    } else {
+      const heal = w.stats.maxHp * 0.3;
+      p.hp = Math.min(w.stats.maxHp, p.hp + heal);
+      w.fx.push(FX.PLAYER_HEAL, p.x, p.y - 20, heal, 0);
+      w.bus.emit({ k: 'heal', amount: heal });
+    }
+    w.bus.emit({ k: 'pickup', kind: it.kind });
   }
 }

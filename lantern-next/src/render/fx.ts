@@ -50,6 +50,10 @@ export class FxParticles {
     return this.n;
   }
 
+  clear(): void {
+    this.n = 0;
+  }
+
   private spawn(kind: number, x: number, y: number, vx: number, vy: number, life: number, size: number, color: number): void {
     // 满了就覆盖最旧的一个（下标 0 附近的通常最旧）
     const i = this.n < this.cap ? this.n++ : (Math.random() * this.cap) | 0;
@@ -247,6 +251,7 @@ export function createDigitTextures(): Texture[] {
 }
 
 const NUM_CAP = 96;
+const NUM_COLORS = [0xf4ead6, 0xffc04a, 0xff9a55, 0xff6b5a, 0x6fd6a0];
 
 export class DamageNumbers {
   readonly layer: ParticleLayer;
@@ -254,7 +259,8 @@ export class DamageNumbers {
   private readonly y = new Float32Array(NUM_CAP);
   private readonly value = new Int32Array(NUM_CAP);
   private readonly t = new Float32Array(NUM_CAP);
-  private readonly crit = new Uint8Array(NUM_CAP);
+  /** 0 普通 1 暴击 2 持续伤害 3 主角受伤 4 回复 */
+  private readonly style = new Uint8Array(NUM_CAP);
   private readonly jx = new Float32Array(NUM_CAP);
   private next = 0;
   private readonly digits: Texture[];
@@ -266,7 +272,7 @@ export class DamageNumbers {
     this.t.fill(99);
   }
 
-  add(x: number, y: number, value: number, crit: boolean): void {
+  add(x: number, y: number, value: number, style: number): void {
     if (!this.enabled) return;
     const i = this.next;
     this.next = (i + 1) % NUM_CAP;
@@ -274,7 +280,7 @@ export class DamageNumbers {
     this.y[i] = y;
     this.value[i] = Math.max(1, Math.round(value));
     this.t[i] = 0;
-    this.crit[i] = crit ? 1 : 0;
+    this.style[i] = style;
     this.jx[i] = (Math.random() - 0.5) * 10;
   }
 
@@ -286,14 +292,14 @@ export class DamageNumbers {
       const t = (this.t[i] as number) + dt;
       this.t[i] = t;
       if (t >= LIFE) continue;
-      const crit = this.crit[i] === 1;
+      const st = this.style[i] as number;
       // 先弹出放大，再上浮淡出
       const pop = t < 0.12 ? 0.7 + (t / 0.12) * 0.5 : 1.2 - Math.min(0.2, (t - 0.12) * 0.8);
-      const scale = (crit ? 0.62 : 0.42) * pop;
+      const scale = (st === 1 ? 0.62 : st === 2 ? 0.32 : st >= 3 ? 0.5 : 0.42) * pop;
       const alpha = t < LIFE - 0.25 ? 1 : (LIFE - t) / 0.25;
       const sx = cam.toScreenX((this.x[i] as number) + (this.jx[i] as number));
       const sy = cam.toScreenY(this.y[i] as number) - 26 - t * 36;
-      const color = packColor(crit ? 0xffc04a : 0xf4ead6, alpha);
+      const color = packColor(NUM_COLORS[st] ?? 0xf4ead6, alpha);
       let v = this.value[i] as number;
       let digits = 0;
       for (let tmp = v; tmp > 0; tmp = (tmp / 10) | 0) digits++;

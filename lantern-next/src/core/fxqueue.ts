@@ -8,9 +8,29 @@ export const FX = {
   KILL: 2,
   /** a = 魂火价值 */
   GEM_PICK: 3,
+  /** 扩散的环（霜铃、寒山钟、震地、燃灯、太极）：a = 最大半径，b = RING_* 种类 */
+  RING: 4,
+  /** 山印落地：a = 半径，b = 1 表示镇岳 */
+  SEAL_HIT: 5,
+  /** 连锁爆炸：a = 半径，b = 0 火 / 1 冰 */
+  BLAST: 6,
+  /** 玩家受到的伤害：a = 数值 */
+  PLAYER_HIT: 7,
+  /** 玩家回复：a = 数值 */
+  PLAYER_HEAL: 8,
 } as const;
 
 export const FX_CRIT = 1;
+/** 持续伤害（灼烧、地裂），数字更小 */
+export const FX_DOT = 2;
+/** 金·锐追加的飞剑 */
+export const FX_BONUS = 4;
+
+export const RING_BELL = 0;
+export const RING_BIGBELL = 1;
+export const RING_QUAKE = 2;
+export const RING_ULT = 3;
+export const RING_TAIJI = 4;
 
 const STRIDE = 5;
 

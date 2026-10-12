@@ -1,6 +1,7 @@
 // 法器数据（移植自旧版 WEAPONS 与 W）。
 
 import type { ElementId } from './elements';
+import type { PassiveId } from './passives';
 
 export const WEAPON_IDS = ['lamp', 'sword', 'bell', 'crane', 'seal'] as const;
 export type WeaponId = (typeof WEAPON_IDS)[number];
@@ -13,7 +14,7 @@ export interface WeaponDef {
   name: string;
   icon: string;
   el: ElementId;
-  evoPassive: string;
+  evoPassive: PassiveId;
   evoName: string;
   desc: string;
   evoDesc: string;
@@ -46,6 +47,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     evoDesc: '巨岩砸出地裂，裂缝持续伤害并减速',
   },
 };
+
+/** 升级说明里各项数值的名称 */
+export const STAT_LABEL = { count: '数量', dmg: '伤害', radius: '范围', pierce: '穿透', cd: '冷却' } as const;
 
 /** 各法器每级数值 */
 export const W = {

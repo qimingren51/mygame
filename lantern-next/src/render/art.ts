@@ -46,6 +46,27 @@ export interface ArtSet {
     ink: Texture[];
     lantern: Texture;
   };
+  /** 法器、法术效果、拾取物。和 vfx 在同一张图集上（同一个 ParticleContainer 里画） */
+  weapons: {
+    sword: Texture;
+    swordEvo: Texture;
+    swordTrail: Texture;
+    crane: Texture[];
+    craneEvo: Texture[];
+    ring: Texture;
+    ringInk: Texture;
+    seal: Texture;
+    sealEvo: Texture;
+    sealMark: Texture;
+    crack: Texture;
+    warn: Texture;
+    taiji: Texture;
+    blast: Texture;
+    shield: Texture;
+    chest: Texture;
+    soulbell: Texture;
+    lotus: Texture;
+  };
   /** 竖立的道具，和角色在同一张图集上（ParticleContainer 要求同一贴图源），参与 y 排序 */
   props: {
     rocks: Texture[];
