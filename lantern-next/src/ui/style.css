@@ -292,3 +292,87 @@ button {
     font-size: 44px;
   }
 }
+
+.dbg-btn {
+  right: max(72px, calc(env(safe-area-inset-right) + 72px));
+  min-width: 40px;
+}
+
+.debug-panel {
+  position: fixed;
+  z-index: 6;
+  right: max(10px, env(safe-area-inset-right));
+  top: max(50px, calc(env(safe-area-inset-top) + 50px));
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(10, 12, 22, 0.85);
+}
+
+.bench-card {
+  z-index: 8;
+  background: rgba(11, 15, 28, 0.9);
+}
+
+.bench-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 28px;
+  color: var(--paper);
+}
+
+.bench-table {
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.bench-table th,
+.bench-table td {
+  padding: 4px 12px;
+  border-bottom: 1px solid #2e3550;
+}
+
+.bench-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.bench-table tr.good td {
+  color: #9be3a8;
+}
+
+.bench-table tr.ok td {
+  color: var(--gold-l);
+}
+
+.bench-table tr.bad td {
+  color: #ff9c8a;
+}
+
+.bench-text {
+  max-width: min(92vw, 640px);
+  max-height: 22vh;
+  overflow: auto;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #cfd3e0;
+  font: 11px/1.35 ui-monospace, Menlo, monospace;
+  text-align: left;
+  white-space: pre;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@media (max-height: 440px) {
+  .bench-table td,
+  .bench-table th {
+    padding: 2px 10px;
+  }
+  .bench-text {
+    max-height: 16vh;
+  }
+}

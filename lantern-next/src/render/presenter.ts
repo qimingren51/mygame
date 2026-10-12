@@ -59,7 +59,8 @@ export class Presenter {
   private readonly ground: Ground;
   private readonly shadows: ParticleLayer;
   private readonly ink: ParticleLayer;
-  readonly actors: ActorBatch;
+  actors: ActorBatch;
+  actorMode: ActorMode;
   readonly lighting: Lighting;
   private readonly flames: ParticleLayer;
   private readonly glowRoot = new Container();
@@ -97,7 +98,8 @@ export class Presenter {
     this.ground = new Ground(art);
     this.shadows = new ParticleLayer(vfxTex, 4096);
     this.ink = new ParticleLayer(vfxTex, 2048);
-    this.actors = opts.actors === 'A' ? new ParticleActors(art.hero.idle[0]?.[0] as Texture) : new SpriteActors();
+    this.actorMode = opts.actors;
+    this.actors = this.makeActors(opts.actors);
     this.lighting = new Lighting(art.vfx.light, opts.maxLights);
     this.flames = new ParticleLayer(vfxTex, 256);
     this.glow = new ParticleLayer(vfxTex, 8192, 'add');
@@ -116,6 +118,21 @@ export class Presenter {
     this.eyeColor = ENEMY_TYPES.map((t) => ENEMY[t].eye);
     this.typeScale = ENEMY_TYPES.map((t) => (t === 'wisp' || t === 'shade' ? 1 : ENEMY[t].r / ENEMY.shade.r));
     this.fxp = new FxParticles(art);
+  }
+
+  private makeActors(mode: ActorMode): ActorBatch {
+    return mode === 'A' ? new ParticleActors(this.art.hero.idle[0]?.[0] as Texture) : new SpriteActors();
+  }
+
+  /** 实时切换角色层的实现（调试面板用） */
+  setActorMode(mode: ActorMode): void {
+    if (mode === this.actorMode) return;
+    const idx = this.world.getChildIndex(this.actors.view);
+    this.world.removeChild(this.actors.view);
+    this.actors.view.destroy({ children: true });
+    this.actors = this.makeActors(mode);
+    this.actorMode = mode;
+    this.world.addChildAt(this.actors.view, idx);
   }
 
   /** 尺寸或画质变化时调用 */
