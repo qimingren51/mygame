@@ -1,0 +1,26 @@
+{
+  "name": "lantern-next",
+  "private": true,
+  "version": "0.1.0",
+  "description": "提灯夜行（重构版）：TypeScript + Vite + PixiJS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bench": "vitest bench --run"
+  },
+  "dependencies": {
+    "pixi-filters": "6.1.5",
+    "pixi.js": "8.21.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.2"
+  }
+}

@@ -11,6 +11,8 @@
 | 提灯夜行 | <https://qimingren51.github.io/mygame/lantern/> | 横屏肉鸽割草：五行共鸣、法器进化、夜签与奇遇让每局都不同，配有国风音效与音乐。撑过十分钟妖潮迎来天明，建议手机横屏游玩。 |
 | 贪吃蛇 | <https://qimingren51.github.io/mygame/snake/> | 经典贪吃蛇，吃到食物会变长，别撞到墙或自己。 |
 
+**开发中预览**：提灯夜行重构版（PixiJS + 水墨美术）<https://qimingren51.github.io/mygame/lantern-next/>，完成后会替换上面的提灯夜行。
+
 ## 手机游玩建议
 
 - **安卓**：用 Chrome 等浏览器打开，标题页点「全屏」或直接「出发」会自动全屏横屏。也可以在浏览器菜单里「添加到主屏幕」，之后从桌面图标打开就是全屏应用。
@@ -20,13 +22,14 @@
 
 ## 本地运行
 
-无需安装依赖，在仓库根目录启动一个静态服务器：
+需要 Node 22。和线上一样组装整站后预览：
 
 ```bash
-python3 -m http.server 8000
+node scripts/build-site.mjs
+node scripts/serve-site.mjs
 ```
 
-然后打开 <http://localhost:8000/>。
+然后打开 <http://localhost:8000/mygame/>。只开发提灯夜行重构版时，在 `lantern-next/` 里运行 `npm ci && npm run dev`。
 
 ## 目录结构
 
@@ -34,7 +37,9 @@ python3 -m http.server 8000
 mygame/
 ├── index.html      首页，列出所有游戏
 ├── lantern/        提灯夜行（设计文档见 lantern/DESIGN.md）
-└── snake/          贪吃蛇
+├── lantern-next/   提灯夜行重构版（TypeScript + Vite + PixiJS，开发中）
+├── snake/          贪吃蛇
+└── scripts/        整站组装与本地预览脚本
 ```
 
-每个游戏是一个独立的文件夹，推送到 `master` 分支后由 GitHub Pages 自动发布。开发约定见 [CLAUDE.md](CLAUDE.md)。
+每个游戏是一个独立的文件夹。推送到 `master` 分支后，由 GitHub Actions 组装整站并发布到 GitHub Pages。开发约定见 [CLAUDE.md](CLAUDE.md)。

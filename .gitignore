@@ -1,0 +1,15 @@
+# 依赖与构建产物（由 GitHub Actions 构建，不提交）
+node_modules/
+_site/
+dist/
+
+# 测试输出
+test-results/
+playwright-report/
+
+# 美术管线的中间文件（只提交打包好的图集）
+*/art/.venv/
+*/art/out/
+*/art/.blender/
+*.blend1
+__pycache__/

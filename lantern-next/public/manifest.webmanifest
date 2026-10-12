@@ -1,0 +1,15 @@
+{
+  "name": "提灯夜行",
+  "short_name": "提灯夜行",
+  "description": "横屏肉鸽割草：五行共鸣、法器进化，撑过十分钟妖潮迎来天明。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0B0F1C",
+  "theme_color": "#0B0F1C",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
