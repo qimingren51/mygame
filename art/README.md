@@ -128,10 +128,10 @@ art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 L
 
 | 输出 | 内容 |
 |---|---|
-| `out/assets*/ui/` | 25 个图标（1 倍 64²、2 倍 128²，锚点居中）：法器 5、进化 5、心法 10、五行 5。`meta.json` 里每个图标有 `kind`、`id`、`el`、`name`，`el_colors` 是五行配色 |
+| `out/assets*/ui/` | 59 个图标（1 倍 64²、2 倍 128²，锚点居中）：法器 5、进化 5、心法 10、五行 5、补给 2、心灯 4 × 点亮 / 未点亮、奇遇 5、古灯增益 4、夜签 10（朱砂双圈）、信息栏 5；另有 13 枚朱砂印章（`post/ui_seals.py`，由 ui_icons 一起生成）。`meta.json` 里每项有 `kind`、`id`、`name` |
 | `out/assets*/weapons/` | 新增 `foxfire_0..2`（夜主弹幕，白色可染色，叠加，朝 +X，建议染 #FF6B5A） |
 | `out/assets*/ground/` | 新增 `spring`（灵泉）、`rift` + `rift_glow`（裂隙与叠加辉光，建议染 #D2386A）、`reed_0..2`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`、`bamboo_0..1` |
-| `out/review*/` | `additions_sheet.png`（图标原大和 32 像素、纸色底和夜色底）、`ground_mock.png`（白天和夜晚的地面合成） |
+| `out/review*/` | `additions_sheet.png`、`ui_icons_more.png`（图标和印章原大 / 32 / 24 像素、纸色底和夜色底、放进界面的效果）、`ground_mock.png`（白天和夜晚的地面合成） |
 
 2D 贴图也按 `LANTERN_ART_DENSITY` 出图：噪声在 1 倍网格上生成再放大，所以 2 倍和 1 倍是同一张画，只是边缘更清楚。
 1 倍的 PNG 逐字节固定，基准在 `post/golden_1x.json`（依赖锁定的 Pillow 12.3.0）。
@@ -145,10 +145,35 @@ art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
 art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
-art/.venv/bin/python art/post/pack_atlas.py --name ui --out assets/atlas $A/ui
+art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait
+mkdir -p assets/atlas/screens && cp art/out/screens/title.png art/out/screens/logo.png assets/atlas/screens/
+art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规则检查 assets/atlas
 ```
 
-格式约定见 `docs/DESIGN.md` 第 15 节。
+格式约定见 `docs/DESIGN.md` 第 15 节。界面图集要加 `--no-trim`（不裁边）。
+
+## 界面九宫格皮肤（post/ui_skin.py）
+
+```bash
+art/.venv/bin/python art/post/ui_skin.py        # → out/skin/*.png + skin.json，审图 out/review@2x/ui_skin_sheet.png、ui_skin_mock.png（约 1 分钟）
+art/.venv/bin/python art/post/test_ui_skin.py   # 自检：清单与文件一致、slice 合法、平铺无缝、拉伸带一致、直通 alpha、确定性、体积
+mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
+```
+
+只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
+格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
+
+## 标题画面与主角头像（render/portrait.py、render/title_hero.py、post/title_screen.py）
+
+```bash
+art/.venv/bin/python art/render/portrait.py --all   # 主角胸像 → out/assets*/portrait/（1 倍 128²、2 倍 256²），约 17 秒
+art/.venv/bin/python art/post/title_screen.py       # 标题画 + logo → out/screens/，审图 → out/review@2x/title_review*.png，约 1 分钟
+```
+
+- 胸像用真实的主角模型、同样的墨线和后期，装进界面图标的圆框；`meta.json` 的 `name` 写 `ui`，所以打包后帧名是 `ui/portrait_hero`。
+- 标题画是夜色水墨长卷：远山、雾、月、松、坡上提灯的主角背影（`title_hero.py` 单独渲染大尺寸背影和石灯笼），左侧留给菜单。
+- logo 用完整版马善政字体写“提灯夜行”，加飞白、墨晕和“夜行”朱砂印。
+- 界面美术用的完整字体由 `post/ui_fonts.py` 下载并缓存到 `out/fonts/`（OFL）；`assets/fonts/` 里只是游戏用的子集。
 
 ## 正式管线
 

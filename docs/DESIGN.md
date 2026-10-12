@@ -367,8 +367,10 @@ assets/data/
   | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
   | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2` |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光） |
-  | `ui` | 界面图标 `ui/icon_<法器或心法 id>`、`ui/icon_<法器 id>_evo`（进化）、`ui/icon_el_<metal\|wood\|water\|fire\|earth>`。屏幕空间用，2 倍下 128²，`pxPerUnit` 对它没有意义 |
+  | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
+  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底） |
+  | `skin/` | 不进 index.json：界面九宫格皮肤，一张图一个文件，清单 `skin.json`（见下面“界面皮肤”） |
   | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
 
 - **图集格式**：TexturePacker hash 格式 JSON + PNG（直通 alpha，未预乘，颜色已扩散到透明像素）。每帧有：
@@ -392,6 +394,37 @@ assets/data/
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
 - **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
 - **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
+- **界面图集 `ui`**：用 `pack_atlas.py --no-trim` 打包，每帧的 `frame` 矩形就是整张原图（`spriteSourceSize` 恒为 `(0, 0, 原图宽, 原图高)`），界面代码直接按矩形取图。全部普通混合、不染色，按 1080p 逻辑像素的 2 倍绘制（128² 的图标在 1080p 下显示 64 像素最清楚）。帧名里的 id 和网页版数据一致：
+
+  | 类别 | 帧 | 尺寸 |
+  | --- | --- | --- |
+  | 法器、进化 | `ui/icon_{lamp,sword,bell,crane,seal}`、加 `_evo` | 128² |
+  | 心法 | `ui/icon_{changming,luxin,jianyi,ruimu,jingxin,yinhun,zhezhi,jixing,houde,panshi}` | 128² |
+  | 五行 | `ui/icon_el_{metal,wood,water,fire,earth}` | 128² |
+  | 补给、货币 | `ui/icon_lotus`（莲子）、`ui/icon_oil`（灯油） | 128² |
+  | 心灯 | `ui/icon_meta_{dmg,hp,agi,luck}`（点亮）、加 `_off`（未点亮） | 128² |
+  | 奇遇 | `ui/icon_enc_{toad,spring,shrine,altar,rift}`，屏幕边缘的奇遇指示也用它 | 128² |
+  | 古灯增益 | `ui/icon_buff_{fury,swift,soul,iron}` | 128² |
+  | 夜签 | `ui/icon_omen_{bloodmoon,fog,glass,foxes,gale,chestrain,element,greed,quiet,wonders}`（朱砂双圈框） | 128² |
+  | 信息栏 | `ui/icon_{kills,pause,dash,ult,level}`；`icon_level` 是等级徽章底，中间留空写数字 | 128² |
+  | 品级印 | `ui/seal_{tian,xuan,ling,fan}`（白文方印） | 128² |
+  | 共鸣印 | `ui/seal_{rui,sheng,ning,fen,gu}`（朱文圆印，五行共鸣激活时盖章） | 128² |
+  | 标记印 | `ui/seal_{evo,elite,boss}` 96×160；`ui/seal_record`（新纪录）96×224 | 竖长 |
+  | 头像 | `ui/portrait_hero`（主角胸像，装在同款圆框里） | 256² |
+
+  印章周围和刻掉的笔画是透明的，直接盖在夜色上对比偏低，最好盖在宣纸卡片上或者垫一层浅色底。
+- **界面皮肤 `skin/`**：给 `ImageNode` + `TextureSlicer` 用的九宫格图，直通 alpha，不裁边。
+  - 清单格式：`{"scale": 2, "items": {"<名字>": {"file", "size": [w, h], "slice": [左, 上, 右, 下], "center": "stretch"|"tile", "sides": "stretch"|"tile", "text": "#rrggbb", "note": "用途"}}}`。`slice` 全 0 的是固定尺寸的图（槽位、圆点、箭头），不切；`text` 是建议的文字颜色；`arrow_marker` 另有 `"tint": true`（白色，按奇遇颜色染）。
+  - `scale: 2`：按 1080p 逻辑像素的 2 倍画。用 `TextureSlicer` 时设 `max_corner_scale = 0.5`；`tile` 的区域用 `SliceScaleMode::Tile { stretch_value: 0.5 }`。
+  - 只横向拉伸的条状元素（按钮、条、提示），节点高度不要超过贴图高度的一半（逻辑像素：按钮 56、血条 14、提示 36 / 44），否则两端会被竖着拉伸。
+  - 内容：
+    - 面板 `panel`（宣纸，毛边）、`panel_dark`（夜色墨底）、`overlay_vignette`（全屏暗角，整张拉伸）；
+    - 卡片 `card_{fan,ling,xuan,tian}`（品级色墨框，天品带金晕）、`card_omen`（夜签，朱砂框）、`card_focus`（焦点高亮，叠在卡片上，切法相同）、`note_box`、`note_box_hi`；
+    - 按钮 `btn`、`btn_primary`（朱砂），各带 `_focus`、`_pressed`、`_disabled`；`pill`、`pill_on`；
+    - 槽位 `slot_l`（法器 128²）、`slot_s`（心法 80²），各带 `_empty`、`_evo`；
+    - 条 `bar_track`、`bar_fill_{hp,xp,boss,shield,unlock}`（填充按百分比设宽度，任何宽度都正常）、`pip`、`pip_on`（心灯进度点）；
+    - 提示 `toast`、`toast_big`、`chip`、`chip_dark`；
+    - 其他 `divider`、`scroll_body` + `scroll_end`（宝箱卷轴，另一端镜像）、`arrow_marker`（屏外奇遇指示，尖角朝 +X，代码旋转）、`focus_ring`（键盘 / 手柄焦点）、`menu_hl`（标题菜单选中项的底）。
 
 ## 16. 性能预算
 
