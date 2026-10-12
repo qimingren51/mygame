@@ -4,6 +4,7 @@
     art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas art/out/assets@2x/vfx art/out/assets@2x/weapons
     art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas art/out/assets@2x/hero art/out/assets@2x/shade ...
     art/.venv/bin/python art/post/pack_atlas.py --paper art/out/assets@2x/ground/paper.png --out assets/atlas
+    art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas art/out/assets@2x/ui art/out/assets@2x/portrait
 
 支持两种 meta.json：
   1. 特效/地面格式：{"files": {"light.png": {"size": [w, h], "anchor": [ax, ay], ...}}}
@@ -171,8 +172,13 @@ def paginate(entries: list[dict], max_size: int) -> list[tuple[list[dict], tuple
     return out
 
 
-def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_SIZE, emit: bool = True) -> list[str]:
-    """打包并写出图集，返回写出的 JSON 文件名列表（一页时是 <name>.json，多页时是 <name>_0.json …）。"""
+def build_atlas(
+    name: str, folders: list[Path], out: Path, max_size: int = MAX_SIZE, emit: bool = True, trim_frames: bool = True
+) -> list[str]:
+    """打包并写出图集，返回写出的 JSON 文件名列表（一页时是 <name>.json，多页时是 <name>_0.json …）。
+
+    trim_frames=False 时不裁透明边：每帧的矩形就是原图大小（界面图标用，代码不用处理 spriteSourceSize）。
+    """
     entries: list[dict] = []
     assets: dict = {}
     animations: dict[str, list[str]] = {}
@@ -185,7 +191,10 @@ def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_S
         if extra:
             assets[aname] = extra
         for f in frames:
-            cropped, rect = trim(f["img"])
+            if trim_frames:
+                cropped, rect = trim(f["img"])
+            else:
+                cropped, rect = f["img"], (0, 0, f["img"].width, f["img"].height)
             entries.append({**f, "img": cropped, "rect": rect, "src": f["img"].size})
         # 角色素材：按 “动画_朝向” 组成序列（闪白帧单独成组）
         keys = {e["key"] for e in entries}
@@ -283,6 +292,7 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--paper-format", choices=["png", "webp"], default="png")
     ap.add_argument("--no-emit", action="store_true", help="角色的自发光层 *_emit 不打进图集")
     ap.add_argument("--max", type=int, default=MAX_SIZE, help="单页最大边长（默认 4096）")
+    ap.add_argument("--no-trim", action="store_true", help="不裁透明边（界面图标：帧矩形 = 原图大小）")
     ap.add_argument("folders", nargs="*", type=Path)
     args = ap.parse_args(argv)
     if args.paper:
@@ -291,7 +301,7 @@ def main(argv: list[str]) -> None:
     if args.folders:
         if not args.name:
             raise SystemExit("打包图集需要 --name")
-        pages = build_atlas(args.name, args.folders, args.out, args.max, emit=not args.no_emit)
+        pages = build_atlas(args.name, args.folders, args.out, args.max, emit=not args.no_emit, trim_frames=not args.no_trim)
         update_index(args.out, atlas=args.name, pages=pages)
 
 
