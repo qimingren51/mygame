@@ -9,6 +9,8 @@ Blender 相关的辅助函数放在 bstyle.py。
 
 from __future__ import annotations
 
+import os
+
 # ---------------------------------------------------------------- 调色板
 
 PAPER = "#EDE4CF"  # 宣纸
@@ -121,13 +123,22 @@ PALETTE_TOLERANCE = 18  # 自检时允许的 RGB 欧氏距离（叠纸纹和墨�
 
 # ---------------------------------------------------------------- 尺寸
 
-PX_PER_UNIT = 2  # 最终贴图像素 / 游戏世界单位（游戏里同值）
-RENDER_SCALE = 4  # 先放大 4 倍渲染，后期再缩小
+# 出图密度：1 = 网页版（2 像素 / 世界单位），2 = 桌面版（4 像素 / 世界单位，1080p / 1440p 上不发糊）。
+# 用环境变量 LANTERN_ART_DENSITY 选择；帧尺寸、线宽、晕染、自检阈值都按密度缩放，
+# 所以同一套模型和参数在两种密度下画出来的样子一致，只是清晰度不同。
+DENSITY = float(os.environ.get("LANTERN_ART_DENSITY", "1"))
+PX_PER_UNIT = 2 * DENSITY  # 最终贴图像素 / 游戏世界单位（写进图集 meta.lantern.pxPerUnit）
+RENDER_SCALE = int(os.environ.get("LANTERN_RENDER_SCALE", "4"))  # 先放大渲染，后期再缩小
 ANCHOR = (0.5, 0.875)  # 脚底锚点（相对帧宽高）；游戏里 Sprite 的 anchor 与此一致
 PROP_ANCHOR = (0.5, 0.8)  # 道具（石块、石灯笼）进深大，锚点上移，下方留出更多空间
+# 体型大的妖物（石妖、精英、夜主）进深也大，用和道具一样的锚点
+BIG_ENEMY_ANCHOR = (0.5, 0.8)
+
+# 输出目录名：1 倍是 out/assets，2 倍是 out/assets@2x
+ASSETS_DIR_NAME = "assets" if DENSITY == 1 else f"assets@{DENSITY:g}x"
 
 # 每类素材的最终帧尺寸（像素，正方形）
-FRAME = {
+_FRAME_1X = {
     "hero": 160,  # 主角放大约 1.25 倍，手机上更醒目
     "small": 80,  # 影妖、疾影、金蟾
     "golem": 112,
@@ -135,6 +146,7 @@ FRAME = {
     "boss": 320,
     "prop": 96,  # 宝箱、祭坛等
 }
+FRAME = {k: int(round(v * DENSITY)) for k, v in _FRAME_1X.items()}
 
 # Blender 建模尺度：1 米 = 25 个世界单位 = 50 个最终像素
 WORLD_UNITS_PER_M = 25.0
@@ -145,7 +157,7 @@ HERO_HEIGHT_M = 2.2
 # 自检：同一素材各帧身高与目标的允许偏差
 HEIGHT_TOLERANCE = 0.04
 # 自检：同一动画里脚底位置的允许偏差（最终像素）
-FOOT_TOLERANCE_PX = 1.5  # 衣摆摆动会带动底边，1.0 太紧
+FOOT_TOLERANCE_PX = 1.5 * DENSITY  # 衣摆摆动会带动底边，1.0 太紧
 
 # ---------------------------------------------------------------- 相机与灯光
 
@@ -175,12 +187,12 @@ def dir_rotation_deg(d: int) -> float:
 
 LINE_COLOR = INK["jiao"]
 # 最终像素下的线宽；渲染时乘以 RENDER_SCALE
-LINE_OUTER_PX = 2.6  # 外轮廓（只用于整体剪影的最外圈）
-LINE_FORM_PX = 1.4  # 大形体内部的轮廓（袖子压在袍子上等）；全用外轮廓线宽会让角色墨色过半
-LINE_INNER_PX = 1.1  # 内线（折痕、材质分界）
+LINE_OUTER_PX = 2.6 * DENSITY  # 外轮廓（只用于整体剪影的最外圈）
+LINE_FORM_PX = 1.4 * DENSITY  # 大形体内部的轮廓（袖子压在袍子上等）；全用外轮廓线宽会让角色墨色过半
+LINE_INNER_PX = 1.1 * DENSITY  # 内线（折痕、材质分界）
 LINE_NOISE_SEED = 7  # 噪点修饰器固定种子，避免逐帧抖动
-LINE_NOISE_AMPLITUDE_PX = 0.6
-LINE_NOISE_PERIOD_PX = 18.0
+LINE_NOISE_AMPLITUDE_PX = 0.6 * DENSITY
+LINE_NOISE_PERIOD_PX = 18.0 * DENSITY
 LINE_TAPER = 0.35  # 首尾收笔：两端线宽缩到这个比例
 
 # ---------------------------------------------------------------- 渲染
@@ -190,9 +202,9 @@ SAMPLES_PREVIEW = 4
 
 # ---------------------------------------------------------------- 后期
 
-INK_BLEED_PX = 0.6  # 墨线晕染（最终像素下的高斯半径）
+INK_BLEED_PX = 0.6 * DENSITY  # 墨线晕染（最终像素下的高斯半径）
 PAPER_OVERLAY = 0.10  # 纸纹叠加强度（正片叠底）
-ALPHA_BLEED_PX = 4  # 往透明区域扩展颜色的距离，避免缩放出现黑边/白边
+ALPHA_BLEED_PX = int(round(4 * DENSITY))  # 往透明区域扩展颜色的距离，避免缩放出现黑边/白边
 
 # ---------------------------------------------------------------- 输出约定
 #

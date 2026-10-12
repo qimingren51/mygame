@@ -27,7 +27,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-MAX_SIZE = 2048
+MAX_SIZE = 4096  # 单页上限；超出时自动分页（lantern-next 的网页版当年用 2048）
+DEFAULT_PX_PER_UNIT = 2.0  # 素材 meta.json 没写 px_per_unit 时的默认密度
 PAD = 2  # 帧与帧之间的间距
 MARGIN = 1  # 裁边时保留的透明边，线性过滤时不会采到邻居
 
@@ -93,86 +94,150 @@ def pack(sizes: list[tuple[int, int]], width: int, height: int) -> list[tuple[in
     return pos
 
 
-def build_atlas(name: str, folders: list[Path], out: Path) -> None:
+def asset_px_per_unit(folder: Path) -> float | None:
+    """素材目录 meta.json 里记录的密度（贴图像素 / 世界单位）；没有记录返回 None。"""
+    meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    v = meta.get("px_per_unit")
+    return float(v) if v is not None else None
+
+
+def fit_page(sizes: list[tuple[int, int]], max_size: int) -> tuple[tuple[int, int], list[tuple[int, int]]] | None:
+    """找能装下全部帧的最小页面（2 的幂，宽 ≥ 高），装不下返回 None。"""
+    total = sum(w * h for w, h in sizes)
+    side = 64
+    while side <= max_size:
+        for w, h in ((side, side // 2), (side, side)):
+            if w * h < total:
+                continue
+            layout = pack(sizes, w, h)
+            if layout:
+                return (w, h), layout
+        side *= 2
+    return None
+
+
+def paginate(entries: list[dict], max_size: int) -> list[tuple[list[dict], tuple[int, int], list[tuple[int, int]]]]:
+    """分页：按素材整组放，同一素材尽量在同一页；单个素材一页放不下时才拆开。"""
+    groups: dict[str, list[dict]] = {}
+    for e in entries:
+        groups.setdefault(e["key"].split("/")[0], []).append(e)
+    pages: list[list[dict]] = []
+    cur: list[dict] = []
+    for group in groups.values():
+        trial = cur + group
+        if fit_page([e["img"].size for e in trial], max_size):
+            cur = trial
+            continue
+        if cur:
+            pages.append(cur)
+            cur = []
+        if fit_page([e["img"].size for e in group], max_size):
+            cur = list(group)
+            continue
+        # 这个素材自己就超过一页：逐帧往下排
+        for e in group:
+            trial = cur + [e]
+            if fit_page([x["img"].size for x in trial], max_size):
+                cur = trial
+            else:
+                if not cur:
+                    raise SystemExit(f"{e['key']} 单帧就超过 {max_size}²")
+                pages.append(cur)
+                cur = [e]
+    if cur:
+        pages.append(cur)
+    out = []
+    for page in pages:
+        fitted = fit_page([e["img"].size for e in page], max_size)
+        assert fitted is not None
+        out.append((page, fitted[0], fitted[1]))
+    return out
+
+
+def build_atlas(name: str, folders: list[Path], out: Path, max_size: int = MAX_SIZE) -> list[str]:
+    """打包并写出图集，返回写出的 JSON 文件名列表（一页时是 <name>.json，多页时是 <name>_0.json …）。"""
     entries: list[dict] = []
     assets: dict = {}
     animations: dict[str, list[str]] = {}
+    densities: set[float] = set()
     for folder in folders:
         aname, frames, extra = load_asset(folder)
+        d = asset_px_per_unit(folder)
+        if d is not None:
+            densities.add(d)
         if extra:
             assets[aname] = extra
         for key, img, (ax, ay) in frames:
             cropped, rect = trim(img)
             entries.append({"key": key, "img": cropped, "rect": rect, "src": img.size, "anchor": (ax, ay)})
         # 角色素材：按 “动画_朝向” 组成序列（闪白帧单独成组）
+        keys = {e["key"] for e in entries}
         if "anims" in extra:
             for anim, info in extra["anims"].items():
-                for d in info.get("dirs", ["E"]):
+                for d2 in info.get("dirs", ["E"]):
                     for suffix in ("", "_flash"):
-                        seq = [f"{aname}/{anim}_{d}_{f:02d}{suffix}" for f in range(info["frames"])]
-                        if all(any(e["key"] == s for e in entries) for s in seq):
-                            animations[f"{aname}/{anim}_{d}{suffix}"] = seq
+                        seq = [f"{aname}/{anim}_{d2}_{f:02d}{suffix}" for f in range(info["frames"])]
+                        if all(s in keys for s in seq):
+                            animations[f"{aname}/{anim}_{d2}{suffix}"] = seq
+    if len(densities) > 1:
+        raise SystemExit(f"{name}: 素材的密度不一致 {sorted(densities)}，不能打进同一张图集")
+    px_per_unit = densities.pop() if densities else DEFAULT_PX_PER_UNIT
 
-    sizes = [e["img"].size for e in entries]
-    total = sum(w * h for w, h in sizes)
-    layout = None
-    dims = (0, 0)
-    for side in (64, 128, 256, 512, 1024, 2048):
-        for w, h in ((side, side // 2), (side, side)):
-            if w * h < total or w > MAX_SIZE:
-                continue
-            layout = pack(sizes, w, h)
-            if layout:
-                dims = (w, h)
-                break
-        if layout:
-            break
-    if not layout:
-        raise SystemExit(f"{name}: 放不进 {MAX_SIZE}² 的图集（共 {len(entries)} 帧，{total} 像素）")
-
-    sheet = Image.new("RGBA", dims, (0, 0, 0, 0))
-    frames_json: dict = {}
-    for e, (x, y) in zip(entries, layout):
-        sheet.paste(e["img"], (x, y))
-        rx, ry, rw, rh = e["rect"]
-        sw, sh = e["src"]
-        frames_json[e["key"]] = {
-            "frame": {"x": x, "y": y, "w": rw, "h": rh},
-            "rotated": False,
-            "trimmed": (rw, rh) != (sw, sh),
-            "spriteSourceSize": {"x": rx, "y": ry, "w": rw, "h": rh},
-            "sourceSize": {"w": sw, "h": sh},
-            "anchor": {"x": e["anchor"][0], "y": e["anchor"][1]},
-        }
-
+    pages = paginate(entries, max_size)
+    multi = len(pages) > 1
+    names = [f"{name}_{i}" if multi else name for i in range(len(pages))]
     out.mkdir(parents=True, exist_ok=True)
-    png = out / f"{name}.png"
-    sheet.save(png, optimize=True)
-    data = {
-        "frames": frames_json,
-        "animations": animations,
-        "meta": {
-            "app": "lantern-next art/post/pack_atlas.py",
-            "version": "1",
-            "image": f"{name}.png",
-            "format": "RGBA8888",
-            "size": {"w": dims[0], "h": dims[1]},
-            "scale": 1,
-            "lantern": {"assets": assets},
-        },
-    }
-    (out / f"{name}.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    used = sum(w * h for w, h in sizes) / (dims[0] * dims[1])
-    print(f"{name}: {len(entries)} 帧 → {dims[0]}×{dims[1]}，利用率 {used:.0%}，{png.stat().st_size / 1024:.0f} KB")
+    for i, (page, dims, layout) in enumerate(pages):
+        sheet = Image.new("RGBA", dims, (0, 0, 0, 0))
+        frames_json: dict = {}
+        for e, (x, y) in zip(page, layout):
+            sheet.paste(e["img"], (x, y))
+            rx, ry, rw, rh = e["rect"]
+            sw, sh = e["src"]
+            frames_json[e["key"]] = {
+                "frame": {"x": x, "y": y, "w": rw, "h": rh},
+                "rotated": False,
+                "trimmed": (rw, rh) != (sw, sh),
+                "spriteSourceSize": {"x": rx, "y": ry, "w": rw, "h": rh},
+                "sourceSize": {"w": sw, "h": sh},
+                "anchor": {"x": e["anchor"][0], "y": e["anchor"][1]},
+            }
+        png = out / f"{names[i]}.png"
+        sheet.save(png, optimize=True)
+        lantern: dict = {"pxPerUnit": px_per_unit, "page": i, "pages": len(pages)}
+        # 动画序列和角色元数据只写在第 0 页；多页时读取方要先合并所有页的 frames
+        if i == 0:
+            lantern["assets"] = assets
+        data = {
+            "frames": frames_json,
+            "animations": animations if i == 0 else {},
+            "meta": {
+                "app": "art/post/pack_atlas.py",
+                "version": "2",
+                "image": f"{names[i]}.png",
+                "format": "RGBA8888",
+                "size": {"w": dims[0], "h": dims[1]},
+                "scale": 1,
+                "related_multi_packs": [f"{n}.json" for j, n in enumerate(names) if j != i],
+                "lantern": lantern,
+            },
+        }
+        (out / f"{names[i]}.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        used = sum(e["img"].size[0] * e["img"].size[1] for e in page) / (dims[0] * dims[1])
+        print(f"{names[i]}: {len(page)} 帧 → {dims[0]}×{dims[1]}，利用率 {used:.0%}，{png.stat().st_size / 1024:.0f} KB")
+    return [f"{n}.json" for n in names]
 
 
-def update_index(out: Path, atlas: str | None = None, paper: bool = False) -> None:
-    """维护 index.json：游戏只加载清单里列出的图集。"""
+def update_index(out: Path, atlas: str | None = None, paper: bool = False, pages: list[str] | None = None) -> None:
+    """维护 index.json：列出已经打包的图集，以及每个图集的分页 JSON。"""
     path = out / "index.json"
     idx = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"atlases": [], "paper": False}
+    idx.setdefault("pages", {})
     if atlas and atlas not in idx["atlases"]:
         idx["atlases"].append(atlas)
         idx["atlases"].sort()
+    if atlas and pages:
+        idx["pages"][atlas] = pages
     if paper:
         idx["paper"] = True
     path.write_text(json.dumps(idx, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -192,6 +257,7 @@ def main(argv: list[str]) -> None:
     ap.add_argument("--name", help="图集名（输出 <name>.png / <name>.json）")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--paper", type=Path, help="把平铺的宣纸转成 paper.webp")
+    ap.add_argument("--max", type=int, default=MAX_SIZE, help="单页最大边长（默认 4096）")
     ap.add_argument("folders", nargs="*", type=Path)
     args = ap.parse_args(argv)
     if args.paper:
@@ -200,8 +266,8 @@ def main(argv: list[str]) -> None:
     if args.folders:
         if not args.name:
             raise SystemExit("打包图集需要 --name")
-        build_atlas(args.name, args.folders, args.out)
-        update_index(args.out, atlas=args.name)
+        pages = build_atlas(args.name, args.folders, args.out, args.max)
+        update_index(args.out, atlas=args.name, pages=pages)
 
 
 if __name__ == "__main__":
