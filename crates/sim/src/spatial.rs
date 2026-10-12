@@ -110,6 +110,7 @@ impl Grid {
     }
 
     /// 中心离 (x, y) 不超过 range 的妖物里最近的 k 只，按距离从近到远写进 out（距离相同的按扫描顺序）。
+    /// 隐身（[`Enemies::cloaked`]）的不算：自动瞄准锁定不到它们。
     pub fn nearest_k(&self, en: &Enemies, x: f32, y: f32, range: f32, k: usize, out: &mut Vec<u32>) {
         out.clear();
         if k == 0 {
@@ -124,7 +125,7 @@ impl Grid {
             for col in c0..=c1 {
                 for &i in self.cell(row * self.cols + col) {
                     let iu = i as usize;
-                    if !en.alive[iu] {
+                    if !en.alive[iu] || en.cloaked[iu] {
                         continue;
                     }
                     let (dx, dy) = (en.x[iu] - x, en.y[iu] - y);

@@ -9,14 +9,19 @@
 
     // 升级所需魂火，x 为当前等级
     xp_need: (4.0, 5.0, 0.6),
-    // 以下 x 为分钟数
-    enemy_hp_scale: (1.0, 0.3, 0.07),
+    // 以下 x 为分钟数（docs/BALANCE.md 第 4.1 节）。杂兵生命增长放缓；精英和小头目沿用原曲线；魂火价值不随时间增长
+    enemy_hp_scale: (1.0, 0.2, 0.04),
+    elite_hp_scale: (1.0, 0.3, 0.07),
     enemy_damage_scale: (1.0, 0.1, 0.0),
-    gem_value_scale: (1.0, 0.25, 0.0),
+    gem_value_scale: (1.0, 0.0, 0.0),
 
     spawn: (
-        rate: (1.6, 1.1, 0.1),
-        soft_cap: 360,
+        rate: (2.0, 1.6, 0.45),
+        // P0 的内容只有 1.0 的三分之一左右，常规刷怪、妖群、合围的数量先乘过渡系数 0.7
+        scale: 0.7,
+        // 常规刷怪的上限按分钟分段；硬上限 2000，任何事件都不超过
+        soft_cap: [(0.0, 300), (3.0, 600), (6.0, 1000)],
+        hard_cap: 2000,
         ring_extra: 40.0,
         relocate: 1.7,
         relocate_spread: 0.8,
@@ -26,31 +31,37 @@
             (enemy: "wisp", from_minute: 1.0, share: (0.08, 0.3), late_minute: 5.0, late_mult: 1.5),
             (enemy: "golem", from_minute: 2.5, share: (0.05, 0.2), late_minute: 5.0, late_mult: 1.6),
         ],
+        // 妖群：0:40 起每 18–32 秒一群，8 + 5m 只，从一侧涌来；不受常规上限限制
         packs: (
             start: 40.0,
             interval: (18.0, 32.0),
-            size: (8.0, 3.0, 0.0),
-            max_alive: 300,
+            size: (8.0, 5.0, 0.0),
             spread: 40.0,
             mix: [(enemy: "wisp", from_minute: 4.0, share_scale: 2.0)],
         ),
     ),
 
-    // 精英、妖潮、夜主：在 at 范围内随机一个时刻出场（每局不同）
+    // P0 青丘的时间表（docs/BALANCE.md 第 4.6 节）：在 at 范围内随机一个时刻出场（每局不同）
     schedule: [
         (at: (150.0, 200.0), event: Elite(["fox", "stonelord"])),
-        (at: (270.0, 320.0), event: Elite(["ghoul", "stonelord", "fox"])),
-        (at: (370.0, 420.0), event: Elite(["fox", "ghoul", "stonelord"])),
-        // 妖潮：30 秒，刷怪 ×2.5，同时出一只精英
-        (at: (450.0, 500.0), event: Surge(duration: 30.0, rate_mult: 2.5, elites: ["fox", "ghoul", "stonelord"])),
-        // 9:30 夜主降临，此后刷怪 ×0.4
-        (at: (570.0, 570.0), event: Boss(enemy: "boss", spawn_mult: 0.4)),
+        // 合围：40 + 10m 只在视野外围成一圈，1.5 倍速合拢，进入 300 以内恢复原速；提前 1 秒预警
+        (at: (230.0, 250.0), event: Encircle(count: (40.0, 10.0, 0.0), extra: 60.0, speed_mult: 1.5,
+                                             release: 300.0, warn: 1.0, enemy: "shade")),
+        // 5:00 小头目青面鬼：宝箱至少三连，必给一次灯坠三选一
+        (at: (300.0, 300.0), event: MiniBoss(enemy: "ghoul", chest_min: 3, charm: true)),
+        (at: (360.0, 400.0), event: Elite(["fox", "stonelord"])),
+        (at: (410.0, 430.0), event: Encircle(count: (40.0, 10.0, 0.0), extra: 60.0, speed_mult: 1.5,
+                                             release: 300.0, warn: 1.0, enemy: "shade")),
+        // 妖潮：30 秒，刷怪 ×3，开头出一只精英
+        (at: (480.0, 480.0), event: Surge(duration: 30.0, rate_mult: 3.0, elites: ["fox", "stonelord"])),
+        // 9:30 夜主九尾降临，此后刷怪 ×0.4；以主角为中心生成半径 600 的结界
+        (at: (570.0, 570.0), event: Boss(enemy: "boss", spawn_mult: 0.4, barrier: 600.0)),
     ],
     // 击败夜主 0.6 秒后天明
     win_delay: 0.6,
 
     gems: (
-        cap: 380,
+        cap: 1500,
         return_after: 8.0,
         accel: 900.0,
         max_speed: 520.0,
@@ -59,12 +70,40 @@
         elite_scatter: 20.0,
     ),
 
-    // 精英必掉宝箱和引魂铃；普通妖物 1/220 掉引魂铃（吸来全部魂火），1/260 掉莲子（回复 30% 生命）
+    // 精英必掉宝箱和引魂铃；普通妖物 1/500 掉引魂铃（吸来全部魂火和金币），1/570 掉莲子（回复 30% 生命）
     drops: (
         reach: 16.0,
-        bell_chance: 0.0045454545,
-        lotus_chance: 0.0038461538,
+        bell_chance: 0.002,
+        lotus_chance: 0.0017544,
         lotus_heal: 0.3,
+    ),
+
+    // 金币（docs/BALANCE.md 第 10.2 节）：小妖 1/60 掉一枚，精英 20、小头目 40、夜主 150，宝箱附带 10–20
+    gold: (
+        normal_chance: 0.0166667,
+        elite: 20,
+        miniboss: 40,
+        boss: 150,
+        chest: (10, 20),
+        coin_value: 5,
+        scatter: 30.0,
+        cap: 400,
+    ),
+
+    // 点灯（docs/GAMEPLAY.md 第 8.3 节）：5 盏石灯笼，离出生点 600–1800；站在旁边 3 秒点亮。
+    // 光区半径 180，区里妖物减速 20%、易伤 15%；全部点亮时夜主少 20% 生命
+    lanterns: (
+        count: 5,
+        distance: (600.0, 1800.0),
+        light_radius: 60.0,
+        light_time: 3.0,
+        zone_radius: 180.0,
+        zone_slow: 0.2,
+        zone_vuln: 0.15,
+        oil: 20,
+        boss_hp: 0.8,
+        heal: 0.3,
+        gold: 20,
     ),
 
     // 升级选项的权重（docs/PORTING-NOTES.md 第 4.4 节）
@@ -96,12 +135,13 @@
         milestones: [100, 300, 500, 1000],
     ),
 
-    // 灯油：存活每秒 1、击杀每只 0.1、天明 300，再加局内额外所得，乘以灯油倍率
+    // 灯油（docs/BALANCE.md 第 10.1 节）：存活每秒 1（最多 600 秒）、击杀每只 0.05、天明 300、
+    // 每盏石灯笼 20（在 lanterns 里），再加局内额外所得，乘以灯油倍率（夜签、更）
     oil: (
         per_second: 1.0,
-        per_kill: 0.1,
+        per_kill: 0.05,
         win: 300,
-        max_seconds: 720.0,
+        max_seconds: 600.0,
     ),
 
     bench: (

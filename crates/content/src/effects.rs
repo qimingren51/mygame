@@ -40,8 +40,12 @@ pub enum Stat {
     /// 减速、冰冻时长倍率
     SlowTime,
     FreezeTime,
-    /// 五行反应的伤害倍率
+    /// 五行反应的伤害倍率；相生、相克反应另乘各自的倍率
     ReactionDamage,
+    ShengReaction,
+    KeReaction,
+    /// 对照见圈外（也不在光区里）的妖物，加成区再加这么多（夜签无月）
+    DarkDamage,
     /// 召唤物（纸鹤）数量倍率，向上取整
     SummonMult,
     // ---- 生存 ----
@@ -104,16 +108,22 @@ pub enum Stat {
     SpawnRate,
     EnemyHp,
     EnemySpeed,
+    /// 妖物伤害倍率、夜主生命倍率（更）
+    EnemyDamage,
+    BossHp,
+    /// 精英带几个词缀
+    Affixes,
     /// 每次出几只精英
     EliteCount,
     /// 奇遇出现频率
     EventRate,
-    /// 灯油收益倍率
+    /// 灯油、金币收益倍率
     OilGain,
+    GoldGain,
 }
 
 impl Stat {
-    pub const ALL: [Stat; 54] = [
+    pub const ALL: [Stat; 61] = [
         Stat::Damage,
         Stat::Area,
         Stat::Cooldown,
@@ -131,6 +141,9 @@ impl Stat {
         Stat::SlowTime,
         Stat::FreezeTime,
         Stat::ReactionDamage,
+        Stat::ShengReaction,
+        Stat::KeReaction,
+        Stat::DarkDamage,
         Stat::SummonMult,
         Stat::MaxHp,
         Stat::Armor,
@@ -165,9 +178,13 @@ impl Stat {
         Stat::SpawnRate,
         Stat::EnemyHp,
         Stat::EnemySpeed,
+        Stat::EnemyDamage,
+        Stat::BossHp,
+        Stat::Affixes,
         Stat::EliteCount,
         Stat::EventRate,
         Stat::OilGain,
+        Stat::GoldGain,
     ];
     pub const COUNT: usize = Stat::ALL.len();
 }
@@ -214,6 +231,25 @@ pub enum Effect {
     Points(u32),
     /// 升级选项偏向夜签选定的五行
     Favor,
+    /// 改变规则的开关（夜签、更、灯坠用）
+    Rule(Rule),
+}
+
+/// 规则开关。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum Rule {
+    /// 相生被动无效（夜签逆克）
+    NoSheng,
+    /// 照见圈外完全看不见（夜签无月，画面用）
+    NoMoon,
+    /// 夜主多一招（三更起）
+    BossExtra,
+}
+
+impl Rule {
+    pub fn bit(self) -> u32 {
+        1 << self as u32
+    }
 }
 
 fn one() -> f32 {

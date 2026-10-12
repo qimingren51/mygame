@@ -190,7 +190,12 @@ fn react(
     let stats = ctx.stats;
     let pos = Vec2::new(en.x[i], en.y[i]);
     let rank = rank_of(c, en, i);
-    let mult = stats.get(Stat::ReactionDamage);
+    // 相生、相克反应各有自己的倍率（夜签逆克让相克反应翻倍）
+    let rd = &c.elements.reactions[r];
+    let sheng =
+        c.elements.sheng.iter().any(|s| (s.from, s.to) == (rd.a, rd.b) || (s.from, s.to) == (rd.b, rd.a));
+    let mult = stats.get(Stat::ReactionDamage)
+        * stats.get(if sheng { Stat::ShengReaction } else { Stat::KeReaction });
     let source = Source::Reaction(r as u8);
     let flags = HIT_RAW | HIT_NOCRIT | HIT_DOT | HIT_REACT;
     let alive = en.hp[i] > 0.0;

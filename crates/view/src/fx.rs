@@ -10,15 +10,19 @@ use bevy::prelude::*;
 
 use lantern_content::{BlastKind, Element, EventKind, Stat, WeaponBehavior, ZoneKind};
 use lantern_core::Pcg32;
-use lantern_sim::boss::Foes;
+use lantern_sim::boss::{BossState, Foes};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::encounters::Encounters;
+use lantern_sim::gold::Coins;
+use lantern_sim::lanterns::Lanterns;
 use lantern_sim::pickups::{PickupKind, Pickups};
 use lantern_sim::reactions::{Herbs, Zones};
 use lantern_sim::reveal::Reveal;
 use lantern_sim::weapons::drop::{Fissures, Seals};
 use lantern_sim::weapons::volley::Shots;
-use lantern_sim::{AppState, Arsenal, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox, Stats};
+use lantern_sim::{
+    AppState, Arsenal, Director, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox, Stats,
+};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
@@ -58,6 +62,8 @@ pub(crate) struct FxFrames {
     rift_glow: Option<FrameId>,
     lamp: Option<(FrameId, Option<FrameId>)>,
     altar: Option<(FrameId, Option<FrameId>)>,
+    stone: Option<(FrameId, Option<FrameId>)>,
+    gem: Option<FrameId>,
 }
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>) {
@@ -92,6 +98,8 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>) {
         rift_glow: db.find("ground/rift_glow"),
         lamp: prop("ancient_lamp"),
         altar: prop("blood_altar"),
+        stone: prop("stone_lantern"),
+        gem: db.find("vfx/gem_0"),
     });
 }
 
@@ -244,6 +252,22 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                     StrikeFx::None => {}
                 }
             }
+            SimEvent::SweepStrike { pos, dir } => {
+                let tip = pos + Vec2::new(dir.cos(), dir.sin()) * 110.0;
+                fx.push(OneShot::Blast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
+                fx.shake(6.0);
+            }
+            SimEvent::RainStrike { pos } => {
+                fx.push(OneShot::Blast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
+            }
+            SimEvent::IllusionDispelled { pos } => fx.push(
+                OneShot::Ring { color: rgb(0xd8c8ff), ink: false, light: true, strong: false },
+                to_screen(pos),
+                60.0,
+                0.5,
+            ),
+            SimEvent::LanternLit { .. } => fx.flash(rgb(0xffd98a), 0.25),
+            SimEvent::EncircleWarn { .. } => fx.flash(rgb(0x1a1020), 0.35),
             SimEvent::PlayerHurt { .. } => {
                 fx.shake(5.0);
                 fx.flash(rgb(0xff3b30), 0.18);
@@ -383,6 +407,147 @@ pub(crate) fn collect_fx(
                 Vec2::splat(0.35),
                 0.0,
                 rgb(0x6fd6a0).with_alpha(0.45 * fade),
+            );
+        }
+    }
+
+    // ---- 石灯笼：没点亮的暗着，站在旁边时一圈进度；点亮后成为光区
+    if let (Some(lanterns), Some((frame, emit))) = (&res.lanterns, f.stone) {
+        let def = &content.0.run.lanterns;
+        for l in &lanterns.0 {
+            let p = to_screen(l.pos);
+            pools.fx.push(Draw {
+                scale: Vec2::splat(1.25),
+                color: if l.lit { Color::WHITE } else { Color::srgb(0.55, 0.55, 0.6) },
+                ..Draw::new(frame, p.extend(sort_z(layer::ACTORS, l.pos.y)))
+            });
+            if l.lit {
+                if let Some(emit) = emit {
+                    glow.add(emit, p.extend(layer::EMISSIVE), Vec2::splat(1.25), 0.0, Color::WHITE);
+                }
+                glow.light(
+                    &frames,
+                    &db,
+                    p + Vec2::new(0.0, 30.0),
+                    (rgb(0xffc56b).with_alpha(0.9), def.zone_radius),
+                );
+                let k = px(f.ring_ink, def.zone_radius * 2.0);
+                pools.fx.push(Draw {
+                    scale: Vec2::new(k, k * FLAT),
+                    color: rgb(0x8a5a1c).with_alpha(0.2),
+                    ..Draw::new(f.ring_ink, p.extend(layer::GROUND + 0.55))
+                });
+            } else {
+                let u = (l.progress / def.light_time).clamp(0.0, 1.0);
+                let pulse = 0.35 + 0.2 * (now * 2.5).sin();
+                let k = px(f.ring, def.light_radius * 2.0);
+                glow.add(
+                    f.ring,
+                    p.extend(layer::EMISSIVE - 3.0),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    rgb(0xffd98a).with_alpha(pulse + u * 0.5),
+                );
+                if u > 0.0 {
+                    glow.light(
+                        &frames,
+                        &db,
+                        p + Vec2::new(0.0, 30.0),
+                        (rgb(0xffc56b).with_alpha(u * 0.8), 60.0 + u * 80.0),
+                    );
+                }
+            }
+        }
+    }
+
+    // ---- 金币：金色的小火珠，被吸住时飞向主角
+    if let (Some(coins), Some(gem)) = (&res.coins, f.gem) {
+        for c in &coins.0 {
+            let p = lerp(c.prev, c.pos);
+            let bob = (now * 4.0 + c.pos.x * 0.13).sin() * 1.5;
+            pools.fx.push(Draw {
+                scale: Vec2::splat(0.75),
+                color: rgb(0xffd24a),
+                ..Draw::new(gem, (p + Vec2::new(0.0, bob)).extend(sort_z(layer::GEMS, c.pos.y)))
+            });
+            glow.add(
+                f.glow,
+                p.extend(layer::EMISSIVE),
+                Vec2::splat(0.22),
+                0.0,
+                rgb(0xffd24a).with_alpha(0.6),
+            );
+        }
+    }
+
+    // ---- 夜主：结界、幻身、九尾扫与狐火雨的预警
+    if let Some(dir) = &res.director
+        && let Some((c, r)) = dir.barrier
+    {
+        let p = to_screen(c);
+        let k = px(f.ring, r * 2.0);
+        let pulse = 0.45 + 0.15 * (now * 2.0).sin();
+        glow.add(
+            f.ring,
+            p.extend(layer::EMISSIVE - 2.0),
+            Vec2::new(k, k * FLAT),
+            0.0,
+            rgb(0xb07cf0).with_alpha(pulse),
+        );
+        let ki = px(f.ring_ink, r * 2.0);
+        pools.fx.push(Draw {
+            scale: Vec2::new(ki, ki * FLAT),
+            color: rgb(0x2a1840).with_alpha(0.5),
+            ..Draw::new(f.ring_ink, p.extend(layer::GROUND + 0.6))
+        });
+    }
+    if let Some(bs) = &res.boss {
+        let c = &content.0;
+        let boss_kind = c.enemies.iter().position(|e| e.boss.is_some());
+        if let Some(kind) = boss_kind {
+            let ef = frames.enemy_frames(kind);
+            if !ef.is_empty() {
+                for (k, m) in bs.illusions.iter().enumerate() {
+                    let p = lerp(m.prev, m.pos);
+                    let frame = ef[((now * 8.0) as usize + k * 3) % ef.len()];
+                    let flicker = 0.45 + 0.15 * (now * 6.0 + k as f32).sin();
+                    pools.fx.push(Draw {
+                        flip: m.pos.x > ppos.0.x,
+                        color: Color::srgb(0.85, 0.75, 1.0).with_alpha(flicker),
+                        ..Draw::new(frame, p.extend(sort_z(layer::ACTORS, m.pos.y)))
+                    });
+                }
+            }
+        }
+        let red = rgb(0xff4a3a);
+        for sw in &bs.sweeps {
+            // 扇形预警：沿扇形铺几排光点，越接近落下越亮
+            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
+            for ring in 1..=4 {
+                let rr = sw.radius * ring as f32 / 4.0;
+                let steps = 3 + ring * 2;
+                for j in 0..=steps {
+                    let a = sw.dir - sw.angle * 0.5 + sw.angle * j as f32 / steps as f32;
+                    let w = sw.origin + Vec2::new(a.cos(), a.sin()) * rr;
+                    glow.add(
+                        f.glow,
+                        to_screen(w).extend(layer::EMISSIVE - 2.0),
+                        Vec2::splat(0.35),
+                        0.0,
+                        red.with_alpha(0.25 + 0.5 * u),
+                    );
+                }
+            }
+        }
+        for d in &bs.drops {
+            let u = (d.t / d.warn).clamp(0.0, 1.0);
+            let k = px(f.ring, d.radius * 2.0);
+            glow.add(
+                f.ring,
+                to_screen(d.pos).extend(layer::EMISSIVE - 2.0),
+                Vec2::new(k, k * FLAT) * (1.2 - 0.2 * u),
+                0.0,
+                red.with_alpha(0.3 + 0.6 * u),
             );
         }
     }
@@ -588,6 +753,7 @@ pub(crate) fn collect_fx(
             let p = to_screen(it.pos);
             let (frame, color, light) = match it.kind {
                 PickupKind::Chest => (f.chest, rgb(0xffd98a), 60.0),
+                PickupKind::BossChest => (f.chest, rgb(0xffe9a8), 90.0),
                 PickupKind::Bell => (f.soulbell, rgb(0x5fd4c4), 36.0),
                 PickupKind::Lotus => (f.lotus, rgb(0xffb0c0), 36.0),
             };
@@ -693,6 +859,24 @@ pub(crate) fn collect_fx(
                     // 金蟾是妖物，自己会画；这里只加一点金光
                     glow.light(&frames, &db, p, (color.with_alpha(0.7), 70.0));
                 }
+                EventKind::Merchant { radius, .. } => {
+                    // 货郎还没有专门的美术：先用一只金边的箱子和一圈金环
+                    pools.fx.push(Draw {
+                        scale: Vec2::splat(1.2),
+                        color: Color::WHITE.with_alpha(fade.max(0.3)),
+                        ..Draw::new(f.chest, p.extend(sort_z(layer::ACTORS, e.pos.y)))
+                    });
+                    let pulse = 0.5 + 0.3 * (now * 3.0).sin();
+                    let k = px(f.ring, radius * 2.0);
+                    glow.add(
+                        f.ring,
+                        p.extend(layer::EMISSIVE - 3.0),
+                        Vec2::new(k, k * FLAT),
+                        0.0,
+                        color.with_alpha(pulse * fade),
+                    );
+                    glow.light(&frames, &db, p + Vec2::new(0.0, 20.0), (color.with_alpha(0.7 * fade), 100.0));
+                }
             }
         }
     }
@@ -712,6 +896,10 @@ pub(crate) struct FxSources<'w> {
     zones: Option<Res<'w, Zones>>,
     herbs: Option<Res<'w, Herbs>>,
     stats: Option<Res<'w, Stats>>,
+    lanterns: Option<Res<'w, Lanterns>>,
+    coins: Option<Res<'w, Coins>>,
+    boss: Option<Res<'w, BossState>>,
+    director: Option<Res<'w, Director>>,
 }
 
 pub(crate) fn hex(s: &str) -> Color {

@@ -1,4 +1,4 @@
-//! 升级三选一、宝箱揭晓、进化演出（移植自网页版 ui/screens.ts）。
+//! 升级三选一、宝箱揭晓、进化演出（移植自网页版 ui/screens.ts）；点灯奖励、货郎。
 //!
 //! 模拟停在选择阶段时，这里画出对应的界面，把玩家的选择作为命令发给模拟。命令要等下一个模拟步才生效，
 //! 发出后到界面刷新之前不再接受输入，避免连按把下一次升级也选掉。
@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use lantern_content::Content;
 use lantern_platform::Actions;
-use lantern_sim::flow::{ChestSource, Flow};
+use lantern_sim::flow::{ChestSource, Flow, LampReward};
 use lantern_sim::{Arsenal, Build, GameContent, Offer, RunState, SimCommand, SimCommands, SimPhase};
 use lantern_view::atlas::AtlasDb;
 
@@ -24,6 +24,9 @@ enum Shown {
     LevelUp(Vec<Offer>, bool),
     Chest(usize, ChestSource),
     Evolve(usize),
+    Lamp(Vec<LampReward>),
+    /// 货郎：宝箱价、灯坠价
+    Shop(u32, u32),
 }
 
 #[derive(Resource, Default)]
@@ -69,6 +72,8 @@ fn current(phase: SimPhase, flow: &Flow) -> Shown {
         }
         SimPhase::Chest => flow.chest.as_ref().map_or(Shown::None, |c| Shown::Chest(c.items.len(), c.source)),
         SimPhase::Evolve => flow.evolving.map_or(Shown::None, Shown::Evolve),
+        SimPhase::Lantern => flow.lamp.clone().map_or(Shown::None, Shown::Lamp),
+        SimPhase::Shop => flow.shop.map_or(Shown::None, |s| Shown::Shop(s.chest_cost, s.charm_cost)),
         _ => Shown::None,
     }
 }
@@ -85,6 +90,7 @@ fn sync(
     flow: Res<Flow>,
     arsenal: Res<Arsenal>,
     build: Res<Build>,
+    progress: Res<lantern_sim::Progress>,
     mut ui: ResMut<ChoiceUi>,
     roots: Query<Entity, With<ChoiceRoot>>,
 ) {
@@ -131,6 +137,10 @@ fn sync(
             }
         }
         Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, k),
+        Shown::Lamp(rewards) => spawn_lamp(&mut commands, c, &fonts, &db, &skin, &rewards),
+        Shown::Shop(chest, charm) => {
+            spawn_shop(&mut commands, &fonts, &db, &skin, chest, charm, progress.gold.floor() as u32)
+        }
     }
 }
 
@@ -182,6 +192,54 @@ fn input(
         }
         SimPhase::Chest if ui.age > 0.4 && (actions.confirm || clicked.is_some()) => {
             send(&mut ui, SimCommand::Ack);
+        }
+        SimPhase::Lantern => {
+            let n = flow.lamp.as_ref().map_or(0, |v| v.len());
+            if n == 0 {
+                return;
+            }
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
+                ui.selected = h.min(n - 1);
+            }
+            if actions.nav.x != 0 {
+                ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(n as i32) as usize;
+            }
+            if ui.age < 0.25 {
+                return;
+            }
+            if let Some(i) = actions.pick.map(usize::from).filter(|&i| i < n).or(clicked) {
+                send(&mut ui, SimCommand::Choose(i as u8));
+            } else if actions.confirm {
+                let i = ui.selected;
+                send(&mut ui, SimCommand::Choose(i as u8));
+            }
+        }
+        SimPhase::Shop => {
+            // 0 宝箱、1 灯坠（还没有）、2 离开
+            if let Some(h) = ui.hovered.take()
+                && actions.pointer_moved
+            {
+                ui.selected = h.min(2);
+            }
+            if actions.nav.x != 0 {
+                ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(3) as usize;
+            }
+            if ui.age < 0.25 {
+                return;
+            }
+            let chosen = actions
+                .pick
+                .map(usize::from)
+                .filter(|&i| i < 3)
+                .or(clicked)
+                .or(actions.confirm.then_some(ui.selected));
+            if actions.back || actions.skip || chosen == Some(2) {
+                send(&mut ui, SimCommand::Skip);
+            } else if chosen == Some(0) {
+                send(&mut ui, SimCommand::Choose(0));
+            }
         }
         SimPhase::Evolve if ui.age > 2.1 || (ui.age > 0.5 && (actions.confirm || clicked.is_some())) => {
             send(&mut ui, SimCommand::Ack);
@@ -408,6 +466,143 @@ fn spawn_level_up(
     });
 }
 
+/// 点灯奖励、货郎用的简单卡片。
+#[allow(clippy::too_many_arguments)]
+fn plain_card(
+    row: &mut ChildSpawnerCommands,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    i: usize,
+    icon: Option<&str>,
+    glyph: &str,
+    color: Color,
+    name: &str,
+    desc: &str,
+    enabled: bool,
+) {
+    let mut card = row.spawn((
+        Card,
+        Node {
+            width: px(220),
+            min_height: px(260),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(px(22), px(22)),
+            row_gap: px(10),
+            ..default()
+        },
+        skin.image(if enabled { "card_ling" } else { "card_fan" }),
+    ));
+    card.with_children(|card| {
+        card.spawn((
+            CardFocus(i),
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(-6),
+                right: px(-6),
+                top: px(-6),
+                bottom: px(-6),
+                ..default()
+            },
+            skin.image("card_focus"),
+        ));
+        let c = if enabled { on_paper(color) } else { INK_DIM };
+        spawn_icon(card, db, fonts, icon, glyph, c, 80.0);
+        card.spawn(text(&fonts.title, 32.0, c, name));
+        card.spawn((
+            text(&fonts.body, 15.0, if enabled { INK } else { INK_DIM }, desc),
+            Node { max_width: px(176), ..default() },
+        ));
+        card.spawn(Node { flex_grow: 1.0, ..default() });
+        card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
+    });
+    card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
+    card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
+}
+
+/// 点亮石灯笼后的三选一。
+fn spawn_lamp(
+    commands: &mut Commands,
+    c: &Content,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    rewards: &[LampReward],
+) {
+    let l = &c.run.lanterns;
+    commands.spawn(overlay(skin)).with_children(|root| {
+        root.spawn(text(&fonts.title, 64.0, hex("#FFD98A"), "灯亮了"));
+        root.spawn(text(&fonts.body, 18.0, DIM, "石灯笼照亮一方：区里的妖物减速、易伤"));
+        root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+            for (i, r) in rewards.iter().enumerate() {
+                let (icon, glyph, color, name, desc) = match r {
+                    LampReward::Heal => (
+                        Some("ui/icon_lotus"),
+                        "愈",
+                        hex("#FFB0C0"),
+                        "回复",
+                        format!("回复 {}% 生命", (l.heal * 100.0).round()),
+                    ),
+                    LampReward::Level => {
+                        (Some("ui/icon_level"), "升", hex("#9FE3FF"), "升级", "立即获得一次升级".to_string())
+                    }
+                    LampReward::Gold => (None, "金", hex("#E8C27A"), "金币", format!("获得 {} 金币", l.gold)),
+                };
+                plain_card(row, fonts, db, skin, i, icon, glyph, color, name, &desc, true);
+            }
+        });
+        root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择"));
+    });
+}
+
+/// 货郎的摊子。
+fn spawn_shop(
+    commands: &mut Commands,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    chest: u32,
+    charm: u32,
+    gold: u32,
+) {
+    commands.spawn(overlay(skin)).with_children(|root| {
+        root.spawn(text(&fonts.title, 64.0, hex("#E8C27A"), "货郎"));
+        root.spawn(text(&fonts.body, 18.0, DIM, &format!("身上的金币 {gold}　·　花掉的就带不出这一夜了")));
+        root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+            plain_card(
+                row,
+                fonts,
+                db,
+                skin,
+                0,
+                None,
+                "箱",
+                hex("#FFD98A"),
+                "宝箱",
+                &format!("{chest} 金币"),
+                gold >= chest,
+            );
+            plain_card(
+                row,
+                fonts,
+                db,
+                skin,
+                1,
+                None,
+                "坠",
+                hex("#B07CF0"),
+                "灯坠",
+                &format!("{charm} 金币　三选一（还没开放）"),
+                false,
+            );
+            plain_card(row, fonts, db, skin, 2, None, "走", PAPER, "离开", "不买了", true);
+        });
+        root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择　　Esc / X　离开"));
+    });
+}
+
 fn spawn_chest(
     commands: &mut Commands,
     c: &Content,
@@ -420,6 +615,8 @@ fn spawn_chest(
 ) {
     let title = match (chest.source, chest.items.len()) {
         (ChestSource::Altar, _) => "血祭 · 以血换力".to_string(),
+        (ChestSource::MiniBoss, n) => format!("小头目的宝箱 · {n} 连"),
+        (ChestSource::Merchant, _) => "货郎的宝箱".to_string(),
         (_, 1) => "宝箱".to_string(),
         (_, 3) => "宝箱 · 三连".to_string(),
         (_, 5) => "宝箱 · 五连".to_string(),

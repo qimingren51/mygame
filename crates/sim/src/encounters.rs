@@ -187,6 +187,13 @@ pub(crate) fn update_encounters(
                     done = true;
                 }
             }
+            EventKind::Merchant { radius, chest_cost, charm_cost } => {
+                // 货郎：碰到就摆摊（本步结束时打开），逛完就走
+                if !done && near(radius) {
+                    flow.shop = Some(crate::flow::Shop { chest_cost, charm_cost });
+                    done = true;
+                }
+            }
             EventKind::Rift { .. } => {}
         }
         if done {

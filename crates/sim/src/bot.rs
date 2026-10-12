@@ -47,6 +47,23 @@ pub fn respond(sim: &SimHarness) -> Vec<SimCommand> {
             vec![SimCommand::Choose(best as u8)]
         }
         SimPhase::Chest | SimPhase::Evolve => vec![SimCommand::Ack],
+        // 点灯奖励：血少回血，否则要一次升级
+        SimPhase::Lantern => {
+            let Some(rewards) = &sim.flow().lamp else { return Vec::new() };
+            let low = sim
+                .world()
+                .iter_entities()
+                .find_map(|e| e.get::<crate::Health>().map(|h| h.hp < h.max * 0.5))
+                .unwrap_or(false);
+            let want = if low { crate::flow::LampReward::Heal } else { crate::flow::LampReward::Level };
+            let i = rewards.iter().position(|&r| r == want).unwrap_or(0);
+            vec![SimCommand::Choose(i as u8)]
+        }
+        // 货郎：钱够就买宝箱，否则走开
+        SimPhase::Shop => {
+            let afford = sim.flow().shop.is_some_and(|s| sim.progress().gold >= s.chest_cost as f32);
+            vec![if afford { SimCommand::Choose(0) } else { SimCommand::Skip }]
+        }
         _ => Vec::new(),
     }
 }

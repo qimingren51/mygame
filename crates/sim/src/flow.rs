@@ -56,6 +56,10 @@ pub enum SimPhase {
     Chest,
     /// 进化演出
     Evolve,
+    /// 点亮石灯笼后的三选一奖励
+    Lantern,
+    /// 货郎的摊子
+    Shop,
     Over,
 }
 
@@ -77,6 +81,28 @@ pub enum ChestSource {
     Elite,
     /// 血祭坛
     Altar,
+    /// 小头目：至少几连，优先升级最接近进化的法器
+    MiniBoss,
+    /// 货郎卖的
+    Merchant,
+}
+
+/// 点灯奖励的一项。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LampReward {
+    /// 回复生命
+    Heal,
+    /// 一次升级
+    Level,
+    /// 金币
+    Gold,
+}
+
+/// 货郎的摊子：宝箱、灯坠三选一的价钱。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shop {
+    pub chest_cost: u32,
+    pub charm_cost: u32,
 }
 
 /// 升级时给出的选项。
@@ -111,9 +137,14 @@ pub struct RunResult {
     pub level: u32,
     pub best_combo: u32,
     pub evolutions: u32,
-    /// 灯油：合计与各项（存活、击杀、天明、额外）
+    /// 灯油：合计与各项（存活、击杀、天明、石灯笼、额外）
     pub oil: u32,
-    pub oil_parts: [u32; 4],
+    pub oil_parts: [u32; 5],
+    /// 带出这一夜的金币
+    pub gold: u32,
+    /// 点亮的石灯笼、灯阵是否完整
+    pub lanterns: u32,
+    pub lamps_complete: bool,
 }
 
 /// 一局之内的流程状态。
@@ -128,6 +159,11 @@ pub struct Flow {
     pub rerolls: u32,
     /// 剩余封印次数
     pub banishes: u32,
+    /// 排队的点灯奖励与当前的三选一
+    pub lamp_queue: u32,
+    pub lamp: Option<Vec<LampReward>>,
+    /// 正在逛的货郎
+    pub shop: Option<Shop>,
     /// 击败夜主后进入结算的时刻
     pub won_at: Option<f32>,
     /// 局内额外得到的灯油（跳过升级、补给、金蟾）
@@ -153,6 +189,8 @@ pub(crate) struct FlowParams<'w, 's> {
     rng: ResMut<'w, SimRng>,
     dirty: ResMut<'w, StatsDirty>,
     outbox: ResMut<'w, SimOutbox>,
+    lanterns: Res<'w, crate::lanterns::Lanterns>,
+    coins: ResMut<'w, crate::gold::Coins>,
     player: Query<'w, 's, &'static mut Health, With<Player>>,
 }
 
@@ -235,15 +273,29 @@ impl FlowParams<'_, '_> {
         let c = &*content;
         let r = self.rng.0.get(Stream::Chest).next_f32() + self.stats.get(Stat::ChestLuck);
         let by_odds = c.run.choices.chest_odds.iter().find(|(t, _)| r > *t).map_or(1, |&(_, n)| n);
-        let n = by_odds.max(self.stats.get(Stat::ChestMin).round() as u32);
+        let mut n = by_odds.max(self.stats.get(Stat::ChestMin).round() as u32);
+        if source == ChestSource::MiniBoss {
+            n = n.max(miniboss_chest_min(c));
+        }
+        // 每个宝箱附带金币
+        let (lo, hi) = c.run.gold.chest;
+        let gold = self.rng.0.get(Stream::Chest).range_f32(lo as f32, hi as f32 + 0.999).floor();
+        self.progress.gold += gold * self.stats.get(Stat::GoldGain);
         let mut items = Vec::with_capacity(n as usize);
-        for _ in 0..n {
+        for k in 0..n {
             // 宝箱只给升级和进化；都满了才放开新法器、新心法
             let all = offers(c, &self.arsenal, &self.build, self.secs());
             let ups: Vec<_> = all.iter().copied().filter(|(o, _)| o.is_upgrade()).collect();
             let pool = if ups.is_empty() { &all } else { &ups };
-            let offer =
-                pick_weighted(self.rng.0.get(Stream::Chest), pool, 1).first().copied().unwrap_or(Offer::Oil);
+            // 小头目的宝箱：第一项优先升级最接近进化的法器
+            let priority = if source == ChestSource::MiniBoss && k == 0 {
+                closest_to_evolution(&self.arsenal, pool)
+            } else {
+                None
+            };
+            let offer = priority.unwrap_or_else(|| {
+                pick_weighted(self.rng.0.get(Stream::Chest), pool, 1).first().copied().unwrap_or(Offer::Oil)
+            });
             self.apply(offer);
             let level = match offer {
                 Offer::Evolve(k) | Offer::WeaponUp(k) => self.arsenal.0[k].level,
@@ -258,21 +310,66 @@ impl FlowParams<'_, '_> {
         *self.phase = SimPhase::Chest;
     }
 
-    /// 一个选择结束：先演出待进化，再处理剩余升级，再开排队的宝箱，最后回到 Play。
+    /// 一个选择结束：先演出待进化，再处理剩余升级，再开排队的宝箱、点灯奖励，最后回到 Play。
     fn after_choice(&mut self) {
         self.flow.choice = None;
         self.flow.chest = None;
         self.flow.evolving = None;
+        self.flow.lamp = None;
+        self.flow.shop = None;
         if let Some(k) = self.flow.pending_evos.pop_front() {
             self.flow.evolving = Some(k);
             *self.phase = SimPhase::Evolve;
             self.outbox.0.push(SimEvent::Evolve { weapon: self.arsenal.0[k].def as u16 });
-        } else if self.progress.pending_levels > 0 {
+        } else {
+            self.next_pending();
+        }
+    }
+
+    /// 打开排队中的下一个选择；都没有就回到 Play。
+    fn next_pending(&mut self) {
+        if self.progress.pending_levels > 0 {
             self.open_level_up();
         } else if !self.flow.chest_queue.is_empty() {
             self.open_chest();
+        } else if self.flow.lamp_queue > 0 {
+            self.open_lamp();
         } else {
             *self.phase = SimPhase::Play;
+        }
+    }
+
+    /// 点灯奖励：回复生命 / 一次升级 / 金币（无法回复生命时不给回复）。
+    fn open_lamp(&mut self) {
+        self.flow.lamp_queue -= 1;
+        let mut v = Vec::with_capacity(3);
+        if self.stats.can_heal() {
+            v.push(LampReward::Heal);
+        }
+        v.push(LampReward::Level);
+        v.push(LampReward::Gold);
+        self.flow.lamp = Some(v);
+        *self.phase = SimPhase::Lantern;
+    }
+
+    fn apply_lamp(&mut self, r: LampReward) {
+        let c = &self.content.0;
+        match r {
+            LampReward::Heal => {
+                let amount = self.stats.max_hp() * c.run.lanterns.heal * self.stats.get(Stat::Healing);
+                for mut h in &mut self.player {
+                    heal(&mut h, amount, &mut self.outbox);
+                }
+            }
+            LampReward::Level => {
+                self.progress.level += 1;
+                self.progress.pending_levels += 1;
+                self.dirty.0 = true;
+                self.outbox.0.push(SimEvent::LevelUp { level: self.progress.level });
+            }
+            LampReward::Gold => {
+                self.progress.gold += c.run.lanterns.gold as f32 * self.stats.get(Stat::GoldGain);
+            }
         }
     }
 
@@ -280,13 +377,21 @@ impl FlowParams<'_, '_> {
         let c = &self.content.0;
         let o = &c.run.oil;
         let secs = self.secs();
+        let lit = self.lanterns.lit();
         let parts = [
             (secs.min(o.max_seconds) * o.per_second).floor() as u32,
             (self.progress.kills as f32 * o.per_kill).floor() as u32,
             if won { o.win } else { 0 },
+            lit * c.run.lanterns.oil,
             self.flow.oil_bonus,
         ];
         let oil = (parts.iter().sum::<u32>() as f32 * self.stats.get(Stat::OilGain)).round() as u32;
+        // 天明时地上剩下的金币全部飞来；倒下时已经捡到的全部保留
+        if won {
+            self.progress.gold += self.coins.total();
+            self.coins.0.clear();
+        }
+        let gold = self.progress.gold.floor() as u32;
         self.flow.result = Some(RunResult {
             won,
             seconds: secs,
@@ -296,6 +401,9 @@ impl FlowParams<'_, '_> {
             evolutions: self.build.evolutions,
             oil,
             oil_parts: parts,
+            gold,
+            lanterns: lit,
+            lamps_complete: self.lanterns.complete(),
         });
         self.flow.choice = None;
         *self.phase = SimPhase::Over;
@@ -443,6 +551,24 @@ pub(crate) fn handle_commands(
                 fp.after_choice();
             }
             (SimPhase::Chest | SimPhase::Evolve, SimCommand::Ack) => fp.after_choice(),
+            (SimPhase::Lantern, SimCommand::Choose(i)) => {
+                let Some(r) = fp.flow.lamp.as_ref().and_then(|v| v.get(i as usize)).copied() else {
+                    continue;
+                };
+                fp.apply_lamp(r);
+                fp.after_choice();
+            }
+            (SimPhase::Shop, SimCommand::Choose(0)) => {
+                let Some(shop) = fp.flow.shop else { continue };
+                if fp.progress.gold < shop.chest_cost as f32 {
+                    continue;
+                }
+                fp.progress.gold -= shop.chest_cost as f32;
+                fp.flow.chest_queue.push_back(ChestSource::Merchant);
+                fp.outbox.0.push(SimEvent::Bought);
+                fp.after_choice();
+            }
+            (SimPhase::Shop, SimCommand::Skip) => fp.after_choice(),
             _ => {}
         }
     }
@@ -466,9 +592,37 @@ pub(crate) fn check_flow(mut fp: FlowParams) {
     }
     if fp.flow.won_at.is_some_and(|t| fp.secs() >= t) {
         fp.end(true);
-    } else if fp.progress.pending_levels > 0 {
-        fp.open_level_up();
-    } else if !fp.flow.chest_queue.is_empty() {
-        fp.open_chest();
+    } else if fp.flow.shop.is_some() {
+        *fp.phase = SimPhase::Shop;
+        fp.outbox.0.push(SimEvent::ShopOpened);
+    } else {
+        fp.next_pending();
     }
+}
+
+/// 小头目宝箱至少几连（时间表里写的）。
+fn miniboss_chest_min(c: &lantern_content::Content) -> u32 {
+    c.run
+        .schedule
+        .iter()
+        .find_map(|s| match s.event {
+            lantern_content::PlanEvent::MiniBoss { chest_min, .. } => Some(chest_min),
+            _ => None,
+        })
+        .unwrap_or(1)
+}
+
+/// 宝箱里优先给的一项：能进化的直接进化；否则升级等级最高、还没满级的法器。
+fn closest_to_evolution(arsenal: &Arsenal, pool: &[(Offer, f32)]) -> Option<Offer> {
+    if let Some(&(o, _)) = pool.iter().find(|(o, _)| matches!(o, Offer::Evolve(_))) {
+        return Some(o);
+    }
+    // 等级最高的；一样高时取先拿到的
+    pool.iter()
+        .filter_map(|&(o, _)| match o {
+            Offer::WeaponUp(k) => Some((arsenal.0[k].level, std::cmp::Reverse(k))),
+            _ => None,
+        })
+        .max()
+        .map(|(_, std::cmp::Reverse(k))| Offer::WeaponUp(k))
 }

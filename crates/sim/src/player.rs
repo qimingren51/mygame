@@ -19,7 +19,13 @@ use crate::{GameContent, Health, InputFrame, Player, Pos, SimEvent, SimOutbox, S
 #[derive(Resource, Default, Debug)]
 pub struct DashHits(pub Vec<EnemyHandle>);
 
-pub(crate) fn move_player(stats: Res<Stats>, input: Res<InputFrame>, mut q: Query<(&mut Pos, &mut Player)>) {
+pub(crate) fn move_player(
+    content: Res<GameContent>,
+    stats: Res<Stats>,
+    director: Res<crate::run::Director>,
+    input: Res<InputFrame>,
+    mut q: Query<(&mut Pos, &mut Player)>,
+) {
     let speed = stats.get(Stat::Speed);
     let charges = stats.get(Stat::DashCharges).round().max(1.0) as u32;
     let dir = input.dir();
@@ -30,6 +36,14 @@ pub(crate) fn move_player(stats: Res<Stats>, input: Res<InputFrame>, mut q: Quer
             pos.0 += p.dash_vel * DT;
         } else {
             pos.0 += dir * speed * DT;
+        }
+        // 夜主的结界：出不去
+        if let Some((c, r)) = director.barrier {
+            let lim = (r - content.0.player.radius).max(0.0);
+            let d = pos.0 - c;
+            if d.length_squared() > lim * lim {
+                pos.0 = c + d.normalize_or_zero() * lim;
+            }
         }
         if dir.length_squared() > 1e-6 {
             p.facing = dir.normalize();

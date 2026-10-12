@@ -95,6 +95,7 @@ impl Checker<'_> {
                         return self.fail(file, format!("\"{owner}\" 的护盾值必须是正数"));
                     }
                 }
+                Effect::Rule(_) => {}
                 Effect::Points(_) | Effect::Favor => {
                     if !element_context {
                         return self.fail(
@@ -275,8 +276,7 @@ impl Content {
                 ("radius", p.radius),
                 ("dash.duration", p.dash.duration),
                 ("dash.speed", p.dash.speed),
-                ("ult.charge_normal", p.ult.charge_normal),
-                ("ult.charge_elite", p.ult.charge_elite),
+                ("ult.clear_seconds", p.ult.clear_seconds),
             ],
         )?;
         c.non_negative(
@@ -284,6 +284,7 @@ impl Content {
             &[
                 ("hurt_iframe", p.hurt_iframe),
                 ("dash.iframe", p.dash.iframe),
+                ("ult.charge_elite", p.ult.charge_elite),
                 ("ult.knockback", p.ult.knockback),
                 ("ult.boss_fraction", p.ult.boss_fraction),
             ],
@@ -316,6 +317,17 @@ impl Content {
         }
         let s = &r.spawn;
         c.non_negative("run.ron", &[("spawn.ring_extra", s.ring_extra), ("spawn.relocate", s.relocate)])?;
+        c.positive("run.ron", &[("spawn.scale", s.scale)])?;
+        if s.soft_cap.is_empty()
+            || s.soft_cap[0].0 > 0.0
+            || s.soft_cap.windows(2).any(|w| w[0].0 >= w[1].0)
+            || s.soft_cap.iter().any(|&(_, n)| n > s.hard_cap)
+        {
+            return c.fail(
+                "run.ron",
+                "spawn.soft_cap 要从第 0 分钟写起、按分钟递增，而且都不超过 hard_cap".into(),
+            );
+        }
         c.range("run.ron", "spawn.speed_jitter", s.speed_jitter)?;
         enemy_ref("run.ron", "spawn.base", &s.base)?;
         for m in &s.mix {
@@ -345,8 +357,32 @@ impl Content {
                     c.positive("run.ron", &[("Surge.duration", *duration), ("Surge.rate_mult", *rate_mult)])?;
                     elites
                 }
-                crate::PlanEvent::Boss { enemy, spawn_mult } => {
-                    c.non_negative("run.ron", &[("Boss.spawn_mult", *spawn_mult)])?;
+                crate::PlanEvent::Boss { enemy, spawn_mult, barrier } => {
+                    c.non_negative(
+                        "run.ron",
+                        &[("Boss.spawn_mult", *spawn_mult), ("Boss.barrier", *barrier)],
+                    )?;
+                    std::slice::from_ref(enemy)
+                }
+                crate::PlanEvent::MiniBoss { enemy, chest_min, .. } => {
+                    if *chest_min == 0 {
+                        return c.fail("run.ron", "MiniBoss.chest_min 至少为 1".into());
+                    }
+                    std::slice::from_ref(enemy)
+                }
+                crate::PlanEvent::Encircle { count, extra, speed_mult, release, warn, enemy } => {
+                    c.positive(
+                        "run.ron",
+                        &[("Encircle.count", count.at(0.0)), ("Encircle.speed_mult", *speed_mult)],
+                    )?;
+                    c.non_negative(
+                        "run.ron",
+                        &[
+                            ("Encircle.extra", *extra),
+                            ("Encircle.release", *release),
+                            ("Encircle.warn", *warn),
+                        ],
+                    )?;
                     std::slice::from_ref(enemy)
                 }
             };
@@ -363,6 +399,24 @@ impl Content {
         if g.cap == 0 || g.elite_split == 0 {
             return c.fail("run.ron", "gems.cap 和 gems.elite_split 至少为 1".into());
         }
+        let gd = &r.gold;
+        c.fraction("run.ron", "gold.normal_chance", gd.normal_chance)?;
+        if gd.coin_value == 0 || gd.cap == 0 || gd.chest.0 > gd.chest.1 {
+            return c.fail("run.ron", "gold.coin_value、gold.cap 至少为 1，chest 要写成 (小, 大)".into());
+        }
+        let l = &r.lanterns;
+        c.range("run.ron", "lanterns.distance", l.distance)?;
+        c.positive(
+            "run.ron",
+            &[
+                ("lanterns.light_radius", l.light_radius),
+                ("lanterns.light_time", l.light_time),
+                ("lanterns.zone_radius", l.zone_radius),
+                ("lanterns.boss_hp", l.boss_hp),
+            ],
+        )?;
+        c.fraction("run.ron", "lanterns.zone_slow", l.zone_slow)?;
+        c.fraction("run.ron", "lanterns.heal", l.heal)?;
         let d = &r.drops;
         c.non_negative("run.ron", &[("drops.reach", d.reach)])?;
         c.fraction("run.ron", "drops.bell_chance", d.bell_chance)?;
@@ -417,9 +471,31 @@ impl Content {
                         ("boss.summon_every", b.summon_every),
                         ("boss.shot_speed", b.shot_speed),
                         ("boss.shot_life", b.shot_life),
+                        ("boss.enrage_mult", b.enrage_mult),
                     ],
                 )?;
                 enemy_ref("enemies.ron", "boss.summon", &b.summon)?;
+                if let Some(i) = &b.illusions {
+                    c.fraction("enemies.ron", "illusions.at", i.at)?;
+                    c.positive(
+                        "enemies.ron",
+                        &[("illusions.volley_every", i.volley_every), ("illusions.refill", i.refill)],
+                    )?;
+                }
+                if let Some(sw) = &b.sweep {
+                    c.fraction("enemies.ron", "sweep.at", sw.at)?;
+                    c.positive(
+                        "enemies.ron",
+                        &[
+                            ("sweep.every", sw.every),
+                            ("sweep.radius", sw.radius),
+                            ("sweep.volley_every", sw.volley_every),
+                        ],
+                    )?;
+                }
+                if let Some(rn) = &b.rain {
+                    c.positive("enemies.ron", &[("rain.every", rn.every), ("rain.radius", rn.radius)])?;
+                }
             }
             if let Some(l) = &e.loot {
                 if l.gems == 0 {
@@ -588,6 +664,9 @@ impl Content {
                 crate::EventKind::Shrine { radius, duration } => {
                     c.positive("events.ron", &[("Shrine.radius", *radius), ("Shrine.duration", *duration)])?
                 }
+                crate::EventKind::Merchant { radius, .. } => {
+                    c.positive("events.ron", &[("Merchant.radius", *radius)])?
+                }
                 crate::EventKind::Altar { radius, cost, .. } => {
                     c.positive("events.ron", &[("Altar.radius", *radius)])?;
                     c.fraction("events.ron", "Altar.cost", *cost)?;
@@ -608,6 +687,44 @@ impl Content {
         for b in &ev.buffs {
             c.color("events.ron", &b.id, &b.color)?;
             c.effects("events.ron", &b.id, &b.effects, false)?;
+        }
+
+        // ---- affixes.ron ----
+        c.unique("affixes.ron", "词缀", self.affixes.iter().map(|a| a.id.as_str()))?;
+        if self.affixes.len() > 16 {
+            return c.fail("affixes.ron", "词缀最多 16 个".into());
+        }
+        for a in &self.affixes {
+            match &a.kind {
+                crate::AffixKind::Swift { speed } => c.positive("affixes.ron", &[("Swift.speed", *speed)])?,
+                crate::AffixKind::Tough { above, reduction } => {
+                    c.fraction("affixes.ron", "Tough.above", *above)?;
+                    c.fraction("affixes.ron", "Tough.reduction", *reduction)?;
+                }
+                crate::AffixKind::Split { count, hp, radius, .. } => {
+                    if *count == 0 {
+                        return c.fail("affixes.ron", "Split.count 至少为 1".into());
+                    }
+                    c.positive("affixes.ron", &[("Split.hp", *hp), ("Split.radius", *radius)])?;
+                }
+                crate::AffixKind::Summon { every, enemy, .. } => {
+                    c.positive("affixes.ron", &[("Summon.every", *every)])?;
+                    enemy_ref("affixes.ron", "Summon.enemy", enemy)?;
+                }
+                crate::AffixKind::Cloak => {}
+                crate::AffixKind::Frenzy { below, boost } => {
+                    c.fraction("affixes.ron", "Frenzy.below", *below)?;
+                    c.non_negative("affixes.ron", &[("Frenzy.boost", *boost)])?;
+                }
+            }
+        }
+
+        // ---- difficulty.ron ----
+        if self.difficulty.is_empty() {
+            return c.fail("difficulty.ron", "至少要有一更".into());
+        }
+        for d in &self.difficulty {
+            c.effects("difficulty.ron", &d.name, &d.effects, false)?;
         }
 
         // ---- meta.ron ----

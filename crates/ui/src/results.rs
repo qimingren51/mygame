@@ -206,10 +206,13 @@ fn results_body(
                 },
             );
             if counts {
-                let [time, kills, win, bonus] = r.oil_parts;
+                let [time, kills, win, lamps, bonus] = r.oil_parts;
                 let mut detail = format!("存活 {time} · 击杀 {kills}");
                 if win > 0 {
                     detail.push_str(&format!(" · 天明 {win}"));
+                }
+                if lamps > 0 {
+                    detail.push_str(&format!(" · 石灯笼 {lamps}"));
                 }
                 if bonus > 0 {
                     detail.push_str(&format!(" · 额外 {bonus}"));
@@ -231,6 +234,17 @@ fn results_body(
                         ));
                     });
                 p.spawn(text(&fonts.body, 15.0, INK_DIM, &detail));
+                p.spawn(text(
+                    &fonts.body,
+                    18.0,
+                    on_paper(hex("#E8C27A")),
+                    &format!(
+                        "带出金币 {}　·　点亮石灯笼 {} / 5{}",
+                        r.gold,
+                        r.lanterns,
+                        if r.lamps_complete { "　灯阵完整" } else { "" }
+                    ),
+                ));
                 // 离下一盏心灯还差多少
                 let next = c
                     .meta

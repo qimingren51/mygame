@@ -22,6 +22,9 @@
     SlowTime: (base: 1.0, min: 0.1),
     FreezeTime: (base: 1.0, min: 0.1),
     ReactionDamage: (base: 1.0, min: 0.0),
+    ShengReaction: (base: 1.0, min: 0.0),
+    KeReaction: (base: 1.0, min: 0.0),
+    DarkDamage: (base: 0.0, min: 0.0),
     SummonMult: (base: 1.0, min: 0.5, max: 3.0),
     // 生存
     MaxHp: (base: 100.0, min: 1.0),
@@ -66,7 +69,11 @@
     SpawnRate: (base: 1.0, min: 0.0),
     EnemyHp: (base: 1.0, min: 0.1),
     EnemySpeed: (base: 1.0, min: 0.1),
+    EnemyDamage: (base: 1.0, min: 0.1),
+    BossHp: (base: 1.0, min: 0.1),
+    Affixes: (base: 0.0, min: 0.0, max: 3.0),
     EliteCount: (base: 1.0, min: 0.0, max: 4.0),
     EventRate: (base: 1.0, min: 0.1),
     OilGain: (base: 1.0, min: 0.0),
+    GoldGain: (base: 1.0, min: 0.0),
 }

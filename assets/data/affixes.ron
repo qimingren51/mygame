@@ -1,0 +1,10 @@
+// 精英词缀（docs/GAMEPLAY.md 第 9.2 节）。二更起精英带词缀（个数是属性 Affixes，见 difficulty.ron）；
+// 一只精英身上的词缀不重复，小头目和夜主不带。P0 做这 6 个。
+[
+    (id: "ji", name: "疾", desc: "移速 +40%", kind: Swift(speed: 0.4)),
+    (id: "jian", name: "坚", desc: "生命高于一半时，受到的伤害 -50%", kind: Tough(above: 0.5, reduction: 0.5)),
+    (id: "fen", name: "分", desc: "死后分成 4 只小号", kind: Split(count: 4, hp: 0.2, radius: 0.7, xp: 1.0)),
+    (id: "zhao", name: "召", desc: "每 5 秒召出一圈影妖", kind: Summon(every: 5.0, count: 6, enemy: "shade", radius: 60.0)),
+    (id: "yin", name: "隐", desc: "在照见圈外隐身", kind: Cloak),
+    (id: "kuang", name: "狂", desc: "生命低于一半后移速和接触伤害 +50%", kind: Frenzy(below: 0.5, boost: 0.5)),
+]

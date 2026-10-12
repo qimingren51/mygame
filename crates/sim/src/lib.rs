@@ -23,8 +23,10 @@ pub mod encounters;
 pub mod enemies;
 pub mod flow;
 pub mod gems;
+pub mod gold;
 pub mod harness;
 pub mod io;
+pub mod lanterns;
 mod movement;
 pub mod omens;
 pub mod pickups;
@@ -79,11 +81,18 @@ pub struct RunSetup {
     /// 主角无敌（测试、机器人用）
     #[serde(default)]
     pub god: bool,
+    /// 难度：第几更（从 1 起，`difficulty.ron` 的下标 + 1）
+    #[serde(default = "first_tier")]
+    pub tier: u8,
+}
+
+fn first_tier() -> u8 {
+    1
 }
 
 impl RunSetup {
     pub fn new(seed: u64, mode: RunMode) -> Self {
-        RunSetup { seed, mode, omen: None, meta: BTreeMap::new(), god: false }
+        RunSetup { seed, mode, omen: None, meta: BTreeMap::new(), god: false, tier: 1 }
     }
 }
 
@@ -202,7 +211,7 @@ impl Plugin for SimPlugin {
                         .in_set(SimSet::Player),
                     (spawn::update_spawns, encounters::spawn_encounters).chain().in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
-                    boss::boss_attacks.in_set(SimSet::Ai),
+                    (boss::boss_attacks, boss::elite_summons).chain().in_set(SimSet::Ai),
                     (movement::update_enemies, crowd::separate).chain().in_set(SimSet::Move),
                     (
                         combat::run_actions,
@@ -221,7 +230,9 @@ impl Plugin for SimPlugin {
                     combat::process_deaths.in_set(SimSet::Death),
                     (
                         gems::update_gems,
+                        gold::update_coins,
                         pickups::update_pickups,
+                        lanterns::update_lanterns,
                         reactions::update_herbs,
                         encounters::update_encounters,
                         stats::refresh_stats,

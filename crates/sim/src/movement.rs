@@ -9,7 +9,8 @@ use lantern_core::step::DT;
 
 use crate::combat::{ActionQueue, HurtCtx, hurt_player};
 use crate::enemies::Enemies;
-use crate::run::{RunPlan, SimView};
+use crate::reveal::Reveal;
+use crate::run::{Director, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{Effects, Stats};
 use crate::{GameContent, Health, Player, Pos, SimOutbox, SimRng, Tick};
@@ -33,6 +34,8 @@ pub(crate) fn update_enemies(
     tick: Res<Tick>,
     stats: Res<Stats>,
     effects: Res<Effects>,
+    reveal: Res<Reveal>,
+    director: Res<Director>,
     mut rng: ResMut<SimRng>,
     mut en: ResMut<Enemies>,
     mut queue: ResMut<ActionQueue>,
@@ -49,6 +52,14 @@ pub(crate) fn update_enemies(
     let spread = content.run.spawn.relocate_spread;
     let face_angle = ops::atan2(player.facing.y, player.facing.x);
     let en = &mut *en;
+    let release2 = director.rush_release * director.rush_release;
+    let zone_slow = content.run.lanterns.zone_slow;
+    // “隐”的词缀位
+    let cloak_bit = content
+        .affixes
+        .iter()
+        .position(|a| matches!(a.kind, lantern_content::AffixKind::Cloak))
+        .map_or(0u16, |k| 1 << k);
     let (relocate_rng, combat_rng) = rng.0.pair(Stream::Spawn, Stream::Combat);
     let mut ctx = HurtCtx {
         content,
@@ -102,6 +113,20 @@ pub(crate) fn update_enemies(
                     en.slow_amount[i] = 0.0;
                 }
             }
+            // 合围：加速合拢，进入一定距离以内恢复原速
+            if en.rush[i] > 0.0 {
+                if dx * dx + dy * dy < release2 {
+                    en.rush[i] = 0.0;
+                } else {
+                    sp *= en.rush[i];
+                }
+            }
+            // 点亮的石灯笼光区里减速
+            if !reveal.zones.is_empty()
+                && reveal.zones.iter().any(|&(c, r)| (x - c.x) * (x - c.x) + (y - c.y) * (y - c.y) <= r * r)
+            {
+                sp *= 1.0 - zone_slow;
+            }
             if en.confuse[i] > 0.0 {
                 // 晕头：朝随机方向乱走
                 en.confuse[i] -= DT;
@@ -137,6 +162,9 @@ pub(crate) fn update_enemies(
         }
         en.x[i] = x;
         en.y[i] = y;
+        if en.affix[i] & cloak_bit != 0 {
+            en.cloaked[i] = !reveal.covers(bevy_math::Vec2::new(x, y));
+        }
 
         if d < en.r[i] + pr && en.damage[i] > 0.0 {
             hurt_player(&mut player, &mut health, pos.0, en.damage[i], &mut ctx);

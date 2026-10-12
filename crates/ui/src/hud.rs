@@ -256,6 +256,7 @@ pub(crate) struct HudState<'w> {
     director: Option<Res<'w, Director>>,
     enemies: Option<Res<'w, Enemies>>,
     encounters: Option<Res<'w, Encounters>>,
+    lanterns: Option<Res<'w, lantern_sim::lanterns::Lanterns>>,
 }
 
 pub(crate) fn update_hud(
@@ -291,8 +292,18 @@ pub(crate) fn update_hud(
     for mut t in &mut texts.p0() {
         set(&mut t, format!("{:02}:{:02}", secs / 60, secs % 60));
     }
+    let lamps = s.lanterns.as_ref().map_or((0, 0), |l| (l.lit(), l.0.len()));
     for mut t in &mut texts.p1() {
-        set(&mut t, format!("击杀 {}", progress.kills));
+        set(
+            &mut t,
+            format!(
+                "击杀 {}　金币 {}　石灯笼 {}/{}",
+                progress.kills,
+                progress.gold.floor(),
+                lamps.0,
+                lamps.1
+            ),
+        );
     }
     for mut t in &mut texts.p2() {
         set(&mut t, format!("等级 {}", progress.level));

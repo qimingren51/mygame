@@ -128,7 +128,16 @@ impl RunPlan {
     }
 }
 
-/// 刷怪计时、妖潮、夜主。
+/// 已经预警、即将合拢的合围。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PendingEncircle {
+    /// 出现的时刻（秒）
+    pub at: f32,
+    /// `run.ron` 里 schedule 的下标
+    pub index: usize,
+}
+
+/// 刷怪计时、妖潮、合围、夜主与结界。
 #[derive(Resource, Clone, Debug)]
 pub struct Director {
     /// 常规刷怪的累积量，满 1 刷一只
@@ -142,11 +151,29 @@ pub struct Director {
     pub boss: Option<crate::enemies::EnemyHandle>,
     /// 夜主在场时的刷怪倍率
     pub boss_mult: f32,
+    /// 夜主登场的时刻（秒）
+    pub boss_since: f32,
+    /// 夜主的结界：(圆心, 半径)，主角出不去
+    pub barrier: Option<(bevy_math::Vec2, f32)>,
+    pub encircle: Vec<PendingEncircle>,
+    /// 合围的妖物进入这个距离以内恢复原速
+    pub rush_release: f32,
 }
 
 impl Default for Director {
     fn default() -> Self {
-        Director { spawn_acc: 0.0, next_pack: 0.0, surge_t: 0.0, surge_mult: 1.0, boss: None, boss_mult: 1.0 }
+        Director {
+            spawn_acc: 0.0,
+            next_pack: 0.0,
+            surge_t: 0.0,
+            surge_mult: 1.0,
+            boss: None,
+            boss_mult: 1.0,
+            boss_since: 0.0,
+            barrier: None,
+            encircle: Vec::new(),
+            rush_release: 0.0,
+        }
     }
 }
 
@@ -164,6 +191,8 @@ pub struct Progress {
     pub best_combo: u32,
     /// 燃灯充能 0..=1
     pub ult: f32,
+    /// 本局捡到的金币
+    pub gold: f32,
 }
 
 impl Default for Progress {
@@ -177,6 +206,7 @@ impl Default for Progress {
             combo_t: 0.0,
             best_combo: 0,
             ult: 0.0,
+            gold: 0.0,
         }
     }
 }

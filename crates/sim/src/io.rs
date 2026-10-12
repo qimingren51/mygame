@@ -135,6 +135,50 @@ pub enum SimEvent {
     },
     /// 封印了一个选项
     Banished,
+    /// 合围预警：warn 秒后四面合拢
+    EncircleWarn {
+        warn: f32,
+    },
+    Encircle {
+        count: u16,
+    },
+    /// 夜主进入新阶段、狂暴
+    BossPhase {
+        phase: u8,
+    },
+    BossEnraged,
+    /// 幻身在照见圈里散了
+    IllusionDispelled {
+        pos: Vec2,
+    },
+    /// 九尾扫：预警开始、落下（dir 是扇形朝向的角度，世界坐标）
+    SweepWarn {
+        pos: Vec2,
+        dir: f32,
+    },
+    SweepStrike {
+        pos: Vec2,
+        dir: f32,
+    },
+    /// 狐火雨：预警、落下
+    RainWarn {
+        count: u8,
+    },
+    RainStrike {
+        pos: Vec2,
+    },
+    /// 点亮了一盏石灯笼；all：灯阵完整
+    LanternLit {
+        index: u8,
+        lit: u8,
+        all: bool,
+    },
+    CoinPicked {
+        value: f32,
+    },
+    /// 货郎：打开、买了东西
+    ShopOpened,
+    Bought,
     Taiji,
     /// 进化演出开始
     Evolve {

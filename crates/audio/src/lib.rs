@@ -296,6 +296,26 @@ fn play_sim_events(outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
                 let s = a.sfx.ult.clone();
                 a.play(&s);
             }
+            SimEvent::CoinPicked { .. } if a.can("coin", 0.08) => {
+                let s = a.sfx.coins.clone();
+                a.play_with(&s, 1.0, -8.0);
+            }
+            SimEvent::LanternLit { .. } => {
+                let s = a.sfx.event.clone();
+                a.play(&s);
+            }
+            SimEvent::EncircleWarn { .. } => {
+                let s = a.sfx.warn_big.clone();
+                a.play(&s);
+            }
+            SimEvent::SweepWarn { .. } | SimEvent::RainWarn { .. } if a.can("bwarn", 0.3) => {
+                let s = a.sfx.warn.clone();
+                a.play(&s);
+            }
+            SimEvent::BossPhase { .. } | SimEvent::BossEnraged => {
+                let s = a.sfx.big_bell.clone();
+                a.play(&s);
+            }
             // 五行反应：第一次发生用盖章的声音，之后每种反应换一个音高
             SimEvent::Reaction { kind, first, .. } => {
                 if first {

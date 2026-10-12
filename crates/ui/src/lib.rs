@@ -12,6 +12,7 @@ mod bench;
 mod choice;
 mod describe;
 mod hud;
+mod markers;
 mod pause;
 mod perf;
 mod replay_ui;
@@ -83,6 +84,7 @@ impl Plugin for UiPlugin {
         replay_ui::register(app);
         title::register(app);
         choice::register(app);
+        markers::register(app);
         toasts::register(app);
         results::register(app);
         pause::register(app);

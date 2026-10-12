@@ -12,7 +12,7 @@ use crate::stats::Stats;
 use crate::{GameContent, Player, Pos, SimEvent, SimOutbox};
 
 /// 池子的硬上限；内容数据里的 `gems.cap` 是软上限，必须小于它。
-pub const GEM_CAPACITY: usize = 1024;
+pub const GEM_CAPACITY: usize = 2048;
 
 #[derive(Resource)]
 pub struct Gems {

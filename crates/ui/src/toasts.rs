@@ -76,6 +76,19 @@ fn read_events(
                 msg(format!("{title} · {}", e.name), body, hex(&e.eye), false)
             }
             SimEvent::Surge => msg("妖潮来袭", "妖物大量涌来，撑过去", hex("#B07CF0"), true),
+            SimEvent::EncircleWarn { .. } => msg("合围", "妖物从四面合拢，找缺口突围", hex("#FF6B5A"), true),
+            SimEvent::LanternLit { lit, all, .. } => {
+                if all {
+                    msg("灯阵完整", "五盏石灯笼全部点亮：夜主少两成生命", hex("#FFD98A"), true)
+                } else {
+                    msg(format!("点亮石灯笼 {lit} / 5"), "光区里的妖物减速、易伤", hex("#FFD98A"), false)
+                }
+            }
+            SimEvent::BossPhase { phase: 2 } => {
+                msg("九尾分出幻身", "幻身没有影子；照见圈能让它们散去", hex("#D8C8FF"), true)
+            }
+            SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
+            SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
             SimEvent::BossArrived { kind } => msg(
                 format!("夜主降临 · {}", c.enemies[kind as usize].name),
                 "击败它，迎来天明",

@@ -10,6 +10,7 @@ use lantern_content::Stat;
 
 use crate::combat::{HIT_DOT, HIT_NOCRIT, Hit, HitQueue, Source};
 use crate::enemies::Enemies;
+use crate::lanterns::Lanterns;
 use crate::run::Progress;
 use crate::spatial::Grid;
 use crate::stats::Stats;
@@ -46,10 +47,15 @@ pub(crate) fn update_reveal(
     content: Res<GameContent>,
     stats: Res<Stats>,
     progress: Res<Progress>,
+    lanterns: Res<Lanterns>,
     player: Single<&Pos, With<Player>>,
     mut reveal: ResMut<Reveal>,
 ) {
     let r = &content.0.player.reveal;
+    let lz = &content.0.run.lanterns;
+    reveal.zones.clear();
+    reveal.zones.extend(lanterns.0.iter().filter(|l| l.lit).map(|l| (l.pos, lz.zone_radius)));
+    reveal.zone_vuln = lz.zone_vuln;
     reveal.center = player.0;
     reveal.radius = stats.get(Stat::Reveal);
     reveal.vuln = stats.get(Stat::RevealVuln);

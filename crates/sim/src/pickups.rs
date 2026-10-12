@@ -18,6 +18,8 @@ use crate::{GameContent, Health, Player, Pos, SimEvent, SimOutbox};
 pub enum PickupKind {
     /// 宝箱：碰到后排队打开
     Chest,
+    /// 小头目的宝箱：至少三连，优先升级最接近进化的法器
+    BossChest,
     /// 引魂铃：场上全部魂火飞来
     Bell,
     /// 莲子：回复生命
@@ -56,6 +58,7 @@ pub(crate) fn update_pickups(
     player: Single<(&Pos, &mut Health), With<Player>>,
     mut pickups: ResMut<Pickups>,
     mut gems: ResMut<Gems>,
+    mut coins: ResMut<crate::gold::Coins>,
     mut flow: ResMut<Flow>,
     mut outbox: ResMut<SimOutbox>,
 ) {
@@ -73,12 +76,18 @@ pub(crate) fn update_pickups(
         let it = pickups.0.remove(k);
         match it.kind {
             PickupKind::Chest => flow.chest_queue.push_back(ChestSource::Elite),
+            PickupKind::BossChest => flow.chest_queue.push_back(ChestSource::MiniBoss),
+            // 引魂铃：魂火和金币全部吸来
             PickupKind::Bell => {
                 let n = gems.n;
                 gems.pulled[..n].fill(true);
+                coins.pull_all();
             }
             PickupKind::Lotus => {
-                let amount = stats.max_hp() * c.run.drops.lotus_heal * stats.get(Stat::Healing);
+                let amount = stats.max_hp()
+                    * c.run.drops.lotus_heal
+                    * stats.get(Stat::Healing)
+                    * stats.get(Stat::LotusHeal);
                 heal(&mut health, amount, &mut outbox);
             }
         }

@@ -28,6 +28,10 @@ pub struct Content {
     pub omens: Vec<OmenDef>,
     pub events: EventsDef,
     pub meta: MetaDef,
+    /// 精英词缀
+    pub affixes: Vec<AffixDef>,
+    /// 难度：一更、二更……
+    pub difficulty: Vec<DifficultyDef>,
     /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
     pub hash: u64,
 }
@@ -87,6 +91,8 @@ impl Content {
             omens: read(data_dir, "omens.ron", &mut hash)?,
             events: read(data_dir, "events.ron", &mut hash)?,
             meta: read(data_dir, "meta.ron", &mut hash)?,
+            affixes: read(data_dir, "affixes.ron", &mut hash)?,
+            difficulty: read(data_dir, "difficulty.ron", &mut hash)?,
             hash: 0,
         };
         content.hash = hash;

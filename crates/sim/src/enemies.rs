@@ -14,6 +14,13 @@ const SLOT_BITS: u32 = 13;
 const SLOT_MASK: u32 = (1 << SLOT_BITS) - 1;
 const _: () = assert!(1 << SLOT_BITS == ENEMY_CAP);
 
+/// [`Enemies::tags`] 的标记位：小头目
+pub const TAG_MINIBOSS: u8 = 1;
+/// 精英“分”出来的小号（不算精英，不掉宝箱和金币，不再分裂）
+pub const TAG_CHILD: u8 = 2;
+/// “狂”已经发作
+pub const TAG_FRENZY: u8 = 4;
+
 /// 指向某只妖物的句柄。妖物死后（或槽位被复用后）解析为 `None`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnemyHandle(u32);
@@ -70,6 +77,13 @@ pub struct Enemies {
     pub hit_n: Vec<u8>,
     /// 当前的冰冻来自冰爆（这样冻住的再死不触发冰爆）
     pub blast_frozen: Vec<bool>,
+    /// 精英词缀（`affixes.ron` 的下标作位）与标记（TAG_*）
+    pub affix: Vec<u16>,
+    pub tags: Vec<u8>,
+    /// 合围：大于 0 时移速乘它，直到离主角足够近
+    pub rush: Vec<f32>,
+    /// “隐”：在照见圈外，自动瞄准锁定不到
+    pub cloaked: Vec<bool>,
     /// 控制递减（只对精英）：6 秒内受到的硬控、软控次数与窗口剩余时间
     pub hard_n: Vec<u8>,
     pub hard_t: Vec<f32>,
@@ -125,6 +139,10 @@ impl Default for Enemies {
             mud: f(),
             hit_n: vec![0; ENEMY_CAP],
             blast_frozen: vec![false; ENEMY_CAP],
+            affix: vec![0; ENEMY_CAP],
+            tags: vec![0; ENEMY_CAP],
+            rush: f(),
+            cloaked: vec![false; ENEMY_CAP],
             hard_n: vec![0; ENEMY_CAP],
             hard_t: f(),
             soft_n: vec![0; ENEMY_CAP],
@@ -178,9 +196,13 @@ impl Enemies {
             &mut self.mud,
             &mut self.hard_t,
             &mut self.soft_t,
+            &mut self.rush,
         ] {
             v[i] = 0.0;
         }
+        self.affix[i] = 0;
+        self.tags[i] = 0;
+        self.cloaked[i] = false;
         self.mark[i] = 0;
         self.hit_n[i] = 0;
         self.blast_frozen[i] = false;

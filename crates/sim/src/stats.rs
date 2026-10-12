@@ -5,7 +5,7 @@
 
 use bevy_ecs::prelude::*;
 
-use lantern_content::{Action, Cond, Content, Effect, Quad, Stat, When};
+use lantern_content::{Action, Cond, Content, Effect, Quad, Rule, Stat, When};
 
 use crate::build::Build;
 use crate::{Health, Player, RunSetup};
@@ -14,6 +14,8 @@ use crate::{Health, Player, RunSetup};
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct Stats {
     v: [f32; Stat::COUNT],
+    /// 生效中的规则开关（[`Rule::bit`]）
+    rules: u32,
 }
 
 impl Stats {
@@ -23,11 +25,15 @@ impl Stats {
         for (i, d) in content.stats.iter().enumerate() {
             v[i] = d.base.clamp(d.min, d.max);
         }
-        Stats { v }
+        Stats { v, rules: 0 }
     }
 
     pub fn get(&self, s: Stat) -> f32 {
         self.v[s as usize]
+    }
+
+    pub fn rule(&self, r: Rule) -> bool {
+        self.rules & r.bit() != 0
     }
 
     /// 法器数量加值。
@@ -48,6 +54,7 @@ impl Stats {
         for &x in &self.v {
             h.write_f32(x);
         }
+        h.write_u32(self.rules);
     }
 }
 
@@ -90,11 +97,13 @@ enum Source {
     Sheng,
     Taiji,
     Buff,
+    Difficulty,
 }
 
 struct Acc {
     add: [f32; Stat::COUNT],
     mul: [f32; Stat::COUNT],
+    rules: u32,
     effects: Effects,
 }
 
@@ -123,6 +132,7 @@ impl Acc {
                     }
                 }
                 Effect::Shield { amount } => self.effects.shield = Some(*amount),
+                Effect::Rule(r) => self.rules |= r.bit(),
                 // 共鸣点数和选项偏向在构筑里处理
                 Effect::Points(_) | Effect::Favor => {}
             }
@@ -139,7 +149,8 @@ pub fn collect(
     buff: Option<usize>,
     level: u32,
 ) -> (Stats, Effects) {
-    let mut acc = Acc { add: [0.0; Stat::COUNT], mul: [0.0; Stat::COUNT], effects: Effects::default() };
+    let mut acc =
+        Acc { add: [0.0; Stat::COUNT], mul: [0.0; Stat::COUNT], rules: 0, effects: Effects::default() };
     let grown = level.saturating_sub(1) as f32;
     acc.mul[Stat::Reveal as usize] += content.player.reveal.per_level * grown;
     acc.mul[Stat::Light as usize] += content.player.reveal.light_per_level * grown;
@@ -152,6 +163,9 @@ pub fn collect(
     if let Some(i) = setup.omen.as_ref().and_then(|o| content.omen_index(&o.id)) {
         acc.apply(&content.omens[i].effects, 1.0, Source::Omen, i);
     }
+    // 难度“更”：第 n 更包含前面各更的规则（difficulty.ron 里每一更写的是相对一更的修正）
+    let tier = (setup.tier.max(1) as usize - 1).min(content.difficulty.len() - 1);
+    acc.apply(&content.difficulty[tier].effects, 1.0, Source::Difficulty, tier);
     for slot in &build.passives {
         let def = &content.passives[slot.def];
         acc.apply(&def.per_level, slot.level as f32, Source::Passive, slot.def);
@@ -169,8 +183,9 @@ pub fn collect(
             acc.apply(&tier.effects, 1.0, Source::Tier, e * 8 + k);
         }
     }
+    let no_sheng = acc.rules & Rule::NoSheng.bit() != 0;
     for (i, s) in content.elements.sheng.iter().enumerate() {
-        if build.sheng.get(i).copied().unwrap_or(false) {
+        if !no_sheng && build.sheng.get(i).copied().unwrap_or(false) {
             acc.apply(&s.effects, 1.0, Source::Sheng, i);
         }
     }
@@ -187,7 +202,7 @@ pub fn collect(
     v[Stat::MaxHp as usize] = v[Stat::MaxHp as usize].round();
     // 载物：每点护甲让加成区再加一点
     v[Stat::Damage as usize] += v[Stat::Armor as usize] * v[Stat::ArmorToDamage as usize];
-    (Stats { v }, acc.effects)
+    (Stats { v, rules: acc.rules }, acc.effects)
 }
 
 /// 构筑变化后重算属性。周期触发器保留已经过的时间；生命上限提高时当前生命同时加上差值。

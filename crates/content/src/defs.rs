@@ -51,17 +51,18 @@ pub struct RevealDef {
     pub band_per_rank: f32,
 }
 
-/// 燃灯（大招）：击杀充能，充满后对视野内所有妖物造成伤害并清掉弹幕。
+/// 燃灯（大招）：按清怪量充能，充满后对视野内所有妖物造成伤害并清掉弹幕（docs/BALANCE.md 第 4.5 节）。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct UltDef {
-    /// 击杀一只普通妖物、精英各充多少（满为 1）
-    pub charge_normal: f32,
+    /// 击杀一只妖物充 它的最大生命 ÷（基础刷怪曲线每秒刷出的总血量 × clear_seconds）
+    pub clear_seconds: f32,
+    /// 精英额外充多少（满为 1）
     pub charge_elite: f32,
     /// 伤害（x 为分钟）
     pub damage: Quad,
     pub knockback: f32,
-    /// 对夜主改为最大生命的这个比例
+    /// 对夜主每次不超过它最大生命的这个比例
     pub boss_fraction: f32,
 }
 
@@ -74,8 +75,9 @@ pub struct RunDef {
     pub max_aspect: f32,
     /// 第 n 级升到 n+1 级所需魂火
     pub xp_need: Quad,
-    /// 以下三条的 x 是分钟数
+    /// 以下几条的 x 是分钟数。精英和小头目用单独的生命曲线
     pub enemy_hp_scale: Quad,
+    pub elite_hp_scale: Quad,
     pub enemy_damage_scale: Quad,
     pub gem_value_scale: Quad,
     pub spawn: SpawnDef,
@@ -85,6 +87,8 @@ pub struct RunDef {
     pub win_delay: f32,
     pub gems: GemsDef,
     pub drops: DropsDef,
+    pub gold: GoldDef,
+    pub lanterns: LanternsDef,
     pub choices: ChoicesDef,
     pub combo: ComboDef,
     pub oil: OilDef,
@@ -105,8 +109,55 @@ pub enum PlanEvent {
     Elite(Vec<String>),
     /// 妖潮：持续一段时间，刷怪倍率提高，同时出一只精英
     Surge { duration: f32, rate_mult: f32, elites: Vec<String> },
-    /// 夜主出场，此后刷怪倍率乘以 spawn_mult
-    Boss { enemy: String, spawn_mult: f32 },
+    /// 小头目：固定出场，不带词缀；掉的宝箱至少 chest_min 连，优先升级最接近进化的法器，
+    /// charm 为 true 时再给一次灯坠三选一
+    MiniBoss { enemy: String, chest_min: u32, charm: bool },
+    /// 合围：count 只妖物在视野外围成一圈（半径 = 视野半对角线 + extra），以 speed_mult 倍速合拢，
+    /// 进入 release 以内恢复原速；出现前 warn 秒先预警。不受常规刷怪上限限制
+    Encircle { count: Quad, extra: f32, speed_mult: f32, release: f32, warn: f32, enemy: String },
+    /// 夜主出场，此后刷怪倍率乘以 spawn_mult；以主角为中心生成半径 barrier 的结界
+    Boss { enemy: String, spawn_mult: f32, barrier: f32 },
+}
+
+/// 金币（docs/BALANCE.md 第 10.2 节）：掉在地上要走过去捡，拾取范围会把它吸过来，天明时全部飞来。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GoldDef {
+    /// 普通妖物掉一枚的概率
+    pub normal_chance: f32,
+    pub elite: u32,
+    pub miniboss: u32,
+    pub boss: u32,
+    /// 每个宝箱附带
+    pub chest: (u32, u32),
+    /// 大额掉落拆成每枚这么多
+    pub coin_value: u32,
+    pub scatter: f32,
+    /// 场上金币上限，超过后并入最近的一枚
+    pub cap: u32,
+}
+
+/// 点灯（docs/GAMEPLAY.md 第 8.3 节）：每夜几盏熄灭的石灯笼，站在旁边一会儿就点亮。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LanternsDef {
+    pub count: u32,
+    /// 离出生点的距离范围（每个扇区一盏）
+    pub distance: (f32, f32),
+    /// 站在这个距离以内计时；累计 light_time 秒点亮（中途离开不清零）
+    pub light_radius: f32,
+    pub light_time: f32,
+    /// 点亮后的光区：半径、区里妖物的减速、易伤
+    pub zone_radius: f32,
+    pub zone_slow: f32,
+    pub zone_vuln: f32,
+    /// 每盏结算的灯油
+    pub oil: u32,
+    /// 全部点亮时夜主的生命倍率
+    pub boss_hp: f32,
+    /// 三选一奖励：回复生命上限的比例、金币
+    pub heal: f32,
+    pub gold: u32,
 }
 
 /// 掉落物。
@@ -188,8 +239,12 @@ pub struct OilDef {
 pub struct SpawnDef {
     /// 每秒刷怪数（x 为分钟）
     pub rate: Quad,
-    /// 场上超过这么多只就停止常规刷怪
-    pub soft_cap: u32,
+    /// 过渡系数：常规刷怪、妖群、合围的数量都乘它（P0 是 0.7，docs/BALANCE.md 第 4.1 节）
+    pub scale: f32,
+    /// 常规刷怪的上限：(从第几分钟起, 场上超过这么多只就停刷)
+    pub soft_cap: Vec<(f32, u32)>,
+    /// 硬上限：任何事件都不超过
+    pub hard_cap: u32,
     /// 刷在视野外多远
     pub ring_extra: f32,
     /// 普通妖物离玩家超过“视野半对角线 × relocate”就绕到玩家前方
@@ -224,8 +279,6 @@ pub struct PackDef {
     pub interval: (f32, f32),
     /// 每群只数（x 为分钟）
     pub size: Quad,
-    /// 场上少于这么多只时才来
-    pub max_alive: u32,
     pub spread: f32,
     /// 群里混入的其他妖物：比例是本局常规配比里该妖物的比例 × share_scale
     pub mix: Vec<PackMixDef>,
@@ -313,7 +366,8 @@ pub struct EnemyDef {
     pub loot: Option<CritterLoot>,
 }
 
-/// 夜主的招式：每隔一段时间放一圈弹幕、召唤小妖。
+/// 夜主的招式（docs/BALANCE.md 第 12.2 节）：一阶段放狐火环、召唤小妖；
+/// 生命降到 illusions.at 以下分出幻身，降到 sweep.at 以下开始扫击；登场 enrage_after 秒后狂暴。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BossDef {
@@ -328,16 +382,103 @@ pub struct BossDef {
     pub summon: String,
     pub summon_count: u32,
     pub summon_radius: f32,
+    #[serde(default)]
+    pub illusions: Option<IllusionDef>,
+    #[serde(default)]
+    pub sweep: Option<SweepDef>,
+    /// 狂暴：登场多少秒后，所有攻击间隔乘 enrage_mult
+    pub enrage_after: f32,
+    pub enrage_mult: f32,
+    /// 三更起多的一招（“夜主多一招”）
+    #[serde(default)]
+    pub rain: Option<RainDef>,
 }
 
-/// 金蟾：打死后散落相当于当前等级所需 xp_levels 倍的魂火，另加灯油。
+/// 幻身：没有影子、打不死；在照见圈里待满 dispel 秒就散；每 refill 秒补满。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IllusionDef {
+    /// 生命比例低于它时进入这一阶段
+    pub at: f32,
+    pub count: u32,
+    pub distance: f32,
+    /// 绕主角转的角速度（弧度/秒）
+    pub spin: f32,
+    pub volley_every: f32,
+    pub volley_count: u32,
+    pub dispel: f32,
+    pub refill: f32,
+}
+
+/// 扫击：朝主角方向的扇形，预警后造成伤害；这一阶段狐火环间隔改为 volley_every。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SweepDef {
+    pub at: f32,
+    pub every: f32,
+    /// 扇形角度（弧度）、半径、伤害、预警时间
+    pub angle: f32,
+    pub radius: f32,
+    pub damage: f32,
+    pub warn: f32,
+    pub volley_every: f32,
+}
+
+/// 狐火雨：每隔 every 秒，在主角周围 spread 以内随机落下 count 团，预警 warn 秒。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RainDef {
+    pub every: f32,
+    pub count: u32,
+    pub spread: f32,
+    pub radius: f32,
+    pub damage: f32,
+    pub warn: f32,
+}
+
+/// 精英词缀（`affixes.ron`，docs/GAMEPLAY.md 第 9.2 节）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AffixDef {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub kind: AffixKind,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub enum AffixKind {
+    /// 疾：移速加成
+    Swift { speed: f32 },
+    /// 坚：生命高于 above 时受到的伤害乘 (1 − reduction)
+    Tough { above: f32, reduction: f32 },
+    /// 分：死后分成 count 只小号（生命、半径按比例，不算精英，魂火各 xp）
+    Split { count: u32, hp: f32, radius: f32, xp: f32 },
+    /// 召：每 every 秒在身边召出一圈 count 只 enemy（计入常规刷怪上限）
+    Summon { every: f32, count: u32, enemy: String, radius: f32 },
+    /// 隐：在照见圈外隐身，自动瞄准的法器锁定不到它
+    Cloak,
+    /// 狂：生命低于 below 后移速、接触伤害乘 (1 + boost)
+    Frenzy { below: f32, boost: f32 },
+}
+
+/// 难度“更”（`difficulty.ron`，docs/GAMEPLAY.md 第 12.2 节）：每一更的修正写成效果列表。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DifficultyDef {
+    pub name: String,
+    pub desc: String,
+    pub effects: Vec<Effect>,
+}
+
+/// 金蟾：打死后散落相当于当前等级所需 xp_levels 倍的魂火，另掉金币。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CritterLoot {
     pub xp_levels: f32,
     pub gems: u32,
     pub scatter: (f32, f32),
-    pub oil: u32,
+    pub gold: u32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -738,6 +879,8 @@ pub enum EventKind {
     Shrine { radius: f32, duration: f32 },
     /// 碰到后失去 cost 比例的生命上限（至少留 1），换宝箱
     Altar { radius: f32, cost: f32, chests: u32 },
+    /// 货郎：碰到后用金币买宝箱、灯坠三选一（买完就走）
+    Merchant { radius: f32, chest_cost: u32, charm_cost: u32 },
     /// 一群妖物加一个守卫精英（守卫掉宝箱）
     Rift {
         minions: Quad,

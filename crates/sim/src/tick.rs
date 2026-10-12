@@ -8,7 +8,7 @@ use lantern_content::Stat;
 use lantern_core::step::{DT, HASH_INTERVAL};
 use lantern_core::{StateHasher, Stream, Streams};
 
-use crate::boss::Foes;
+use crate::boss::{BossState, Foes};
 use crate::build::Build;
 use crate::combat::{ActionQueue, DamageLog, Deaths, HitQueue, Strikes, SwordBudget};
 use crate::crowd::Crowd;
@@ -16,6 +16,8 @@ use crate::encounters::Encounters;
 use crate::enemies::Enemies;
 use crate::flow::{Flow, Hold, SimPhase, StepGate};
 use crate::gems::Gems;
+use crate::gold::Coins;
+use crate::lanterns::Lanterns;
 use crate::pickups::Pickups;
 use crate::player::DashHits;
 use crate::reactions::{Discoveries, Herbs, Zones};
@@ -61,6 +63,11 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     let p = &c.player;
     let mut rng = Streams::new(setup.seed);
     let plan = RunPlan::new(c, setup.mode, setup.god, &mut rng);
+    let lanterns = if plan.is_bench() {
+        Lanterns::default()
+    } else {
+        Lanterns::place(&c.run.lanterns, rng.get(Stream::Start))
+    };
     let start_weapon = c.weapon_index(&p.start_weapon).expect("内容校验保证引用存在");
     let arsenal = Arsenal(vec![WeaponSlot::new(start_weapon)]);
     let mut build = Build::new(c, &setup);
@@ -117,6 +124,9 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Fissures::default());
     commands.insert_resource(Foes::default());
     commands.insert_resource(Pickups::default());
+    commands.insert_resource(Coins::default());
+    commands.insert_resource(lanterns);
+    commands.insert_resource(BossState::default());
     commands.insert_resource(Reveal::default());
     commands.insert_resource(Zones::default());
     commands.insert_resource(Herbs::default());
@@ -187,6 +197,9 @@ pub(crate) struct HashParams<'w, 's> {
     encounters: Res<'w, Encounters>,
     zones: Res<'w, Zones>,
     herbs: Res<'w, Herbs>,
+    coins: Res<'w, Coins>,
+    lanterns: Res<'w, Lanterns>,
+    boss: Res<'w, BossState>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -224,6 +237,10 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.pickups.hash_into(&mut h);
     p.encounters.hash_into(&mut h);
     crate::reactions::hash_into(&p.zones, &p.herbs, &mut h);
+    p.coins.hash_into(&mut h);
+    p.lanterns.hash_into(&mut h);
+    p.boss.hash_into(&mut h);
+    h.write_f32(p.progress.gold);
     h.write_f32(p.progress.xp);
     h.write_u32(p.progress.level);
     h.write_u32(p.progress.kills);

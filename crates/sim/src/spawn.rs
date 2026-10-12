@@ -1,22 +1,25 @@
-//! 刷怪（移植自网页版 sim/spawn.ts）：常规刷怪、成群涌来、本局时间表（精英、妖潮、夜主）。
+//! 刷怪（docs/BALANCE.md 第 4.1、4.6 节）：常规刷怪、成群涌来、本局时间表（精英、合围、小头目、妖潮、夜主）。
+//!
+//! 常规刷怪受分段的常规上限限制；妖群、合围、妖潮不受常规上限限制；任何刷怪都不超过硬上限。
 
 use bevy_ecs::prelude::*;
-use bevy_math::ops;
+use bevy_math::{Vec2, ops};
 
-use lantern_content::{PlanEvent, Rank, Stat};
+use lantern_content::{AffixKind, Content, PlanEvent, Rank, SpawnDef, Stat};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
-use crate::enemies::Enemies;
-use crate::run::{Director, RunMode, RunPlan, SimView};
+use crate::enemies::{Enemies, TAG_MINIBOSS};
+use crate::lanterns::Lanterns;
+use crate::run::{Director, PendingEncircle, RunMode, RunPlan, SimView};
 use crate::stats::Stats;
 use crate::{GameContent, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 const TAU: f32 = std::f32::consts::TAU;
 
-/// 在 (x, y) 刷一只 kind 类妖物；池满时返回 `None`。
+/// 在 (x, y) 刷一只 kind 类妖物；池满或到了硬上限时返回 `None`。
 pub fn spawn_enemy(
-    content: &lantern_content::Content,
+    content: &Content,
     stats: &Stats,
     en: &mut Enemies,
     rng: &mut Pcg32,
@@ -25,14 +28,19 @@ pub fn spawn_enemy(
     y: f32,
     minute: f32,
 ) -> Option<usize> {
+    if en.count >= content.run.spawn.hard_cap as usize {
+        return None;
+    }
     let def = &content.enemies[kind as usize];
     let i = en.alloc()?;
+    let run = &content.run;
     let hp_scale = match def.rank {
-        Rank::Boss => 1.0,
-        _ => content.run.enemy_hp_scale.at(minute) * stats.get(Stat::EnemyHp),
+        Rank::Boss => stats.get(Stat::BossHp),
+        Rank::Elite => run.elite_hp_scale.at(minute) * stats.get(Stat::EnemyHp),
+        Rank::Normal | Rank::Critter => run.enemy_hp_scale.at(minute) * stats.get(Stat::EnemyHp),
     };
     let speed_scale = if def.rank == Rank::Critter { 1.0 } else { stats.get(Stat::EnemySpeed) };
-    let (lo, hi) = content.run.spawn.speed_jitter;
+    let (lo, hi) = run.spawn.speed_jitter;
     en.kind[i] = kind;
     en.x[i] = x;
     en.y[i] = y;
@@ -42,13 +50,44 @@ pub fn spawn_enemy(
     en.hp[i] = def.hp * hp_scale;
     en.max_hp[i] = en.hp[i];
     en.speed[i] = def.speed * rng.range_f32(lo, hi) * speed_scale;
-    en.damage[i] = def.damage * content.run.enemy_damage_scale.at(minute);
+    en.damage[i] = def.damage * run.enemy_damage_scale.at(minute) * stats.get(Stat::EnemyDamage);
     en.wob[i] = rng.range_f32(0.0, TAU);
     if let Some(b) = &def.boss {
         en.atk_t[i] = b.volley_first;
         en.summon_t[i] = b.summon_every;
     }
     Some(i)
+}
+
+/// 给精英随机挑 n 个不重复的词缀（二更起）。
+pub(crate) fn give_affixes(content: &Content, en: &mut Enemies, i: usize, n: u32, rng: &mut Pcg32) {
+    let total = content.affixes.len() as u32;
+    let mut picked = 0;
+    while picked < n.min(total) {
+        let k = rng.below(total);
+        if en.affix[i] & (1 << k) != 0 {
+            continue;
+        }
+        en.affix[i] |= 1 << k;
+        picked += 1;
+        match content.affixes[k as usize].kind {
+            AffixKind::Swift { speed } => en.speed[i] *= 1.0 + speed,
+            AffixKind::Summon { every, .. } => en.summon_t[i] = every,
+            _ => {}
+        }
+    }
+}
+
+/// 当前分钟的常规刷怪上限。
+pub(crate) fn soft_cap(s: &SpawnDef, minute: f32) -> usize {
+    s.soft_cap.iter().rev().find(|(m, _)| minute >= *m).map_or(0, |&(_, n)| n as usize)
+}
+
+/// 基础刷怪曲线每秒刷出的总血量（以默认妖物计，不含妖潮和属性倍率）。燃灯按它充能。
+pub fn base_spawn_hp(content: &Content, minute: f32) -> f32 {
+    let s = &content.run.spawn;
+    let base = content.enemy_index(&s.base).map_or(10.0, |k| content.enemies[k].hp);
+    s.rate.at(minute) * s.scale * base * content.run.enemy_hp_scale.at(minute)
 }
 
 /// 视野外一圈上的随机位置。
@@ -65,6 +104,7 @@ pub(crate) fn update_spawns(
     mut plan: ResMut<RunPlan>,
     view: Res<SimView>,
     tick: Res<Tick>,
+    lanterns: Res<Lanterns>,
     player: Single<&Pos, With<Player>>,
     mut director: ResMut<Director>,
     mut rng: ResMut<SimRng>,
@@ -90,7 +130,7 @@ pub(crate) fn update_spawns(
         return;
     }
 
-    let mut rate = s.rate.at(m) * stats.get(Stat::SpawnRate);
+    let mut rate = s.rate.at(m) * s.scale * stats.get(Stat::SpawnRate);
     if director.surge_t > 0.0 {
         director.surge_t -= DT;
         rate *= director.surge_mult;
@@ -98,7 +138,8 @@ pub(crate) fn update_spawns(
     if director.boss.is_some() {
         rate *= director.boss_mult;
     }
-    if en.count as u32 > s.soft_cap {
+    // 妖潮期间不受常规上限限制
+    if en.count >= soft_cap(s, m) && director.surge_t <= 0.0 {
         rate = 0.0;
     }
     director.spawn_acc += rate * DT;
@@ -121,15 +162,15 @@ pub(crate) fn update_spawns(
         spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m);
     }
 
-    // 每隔一段时间从随机方向涌来一群，制造“妖潮”的方向感
+    // 每隔一段时间从随机方向涌来一群，制造“妖潮”的方向感；不受常规上限限制
     let packs = &s.packs;
     if director.next_pack == 0.0 {
         director.next_pack = packs.start;
     }
-    if t >= director.next_pack && (en.count as u32) < packs.max_alive {
+    if t >= director.next_pack {
         director.next_pack = t + rng.range_f32(packs.interval.0, packs.interval.1);
         let (bx, by) = ring_pos(rng, &view, p.x, p.y, s.ring_extra + 20.0);
-        let n = (packs.size.at(m) * stats.get(Stat::SpawnRate)).round() as u32;
+        let n = (packs.size.at(m) * s.scale * stats.get(Stat::SpawnRate)).round() as u32;
         for _ in 0..n {
             let mut kind = plan.base_kind;
             for mix in &plan.pack_mix {
@@ -144,8 +185,38 @@ pub(crate) fn update_spawns(
         }
     }
 
+    // 合围：预警之后在视野外围成一圈，加速合拢
+    let mut k = 0;
+    while k < director.encircle.len() {
+        let pe = director.encircle[k];
+        if t < pe.at {
+            k += 1;
+            continue;
+        }
+        director.encircle.remove(k);
+        if let PlanEvent::Encircle { count, extra, speed_mult, release, enemy, .. } =
+            &content.run.schedule[pe.index].event
+        {
+            let kind = content.enemy_index(enemy).expect("内容校验保证引用存在") as u16;
+            let n = (count.at(m) * s.scale * stats.get(Stat::SpawnRate)).round().max(1.0) as u32;
+            let r = view.radius + extra;
+            let a0 = rng.range_f32(0.0, TAU);
+            director.rush_release = *release;
+            for j in 0..n {
+                let (sn, cs) = ops::sin_cos(a0 + j as f32 * TAU / n as f32);
+                if let Some(i) =
+                    spawn_enemy(content, &stats, &mut en, rng, kind, p.x + cs * r, p.y + sn * r, m)
+                {
+                    en.rush[i] = *speed_mult;
+                }
+            }
+            outbox.0.push(SimEvent::Encircle { count: n as u16 });
+        }
+    }
+
     // 按本局时间表出场
     let elites = stats.get(Stat::EliteCount).round().max(0.0) as u32;
+    let affixes = stats.get(Stat::Affixes).round().max(0.0) as u32;
     for step in &mut plan.schedule {
         if step.done || t < step.at {
             continue;
@@ -156,7 +227,9 @@ pub(crate) fn update_spawns(
             let kind = content.enemy_index(id).expect("内容校验保证引用存在") as u16;
             for _ in 0..elites {
                 let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
-                spawn_enemy(content, &stats, en, rng, kind, x, y, m);
+                if let Some(i) = spawn_enemy(content, &stats, en, rng, kind, x, y, m) {
+                    give_affixes(content, en, i, affixes, rng);
+                }
             }
             outbox.0.push(SimEvent::Elite { kind, count: elites as u8 });
         };
@@ -168,12 +241,33 @@ pub(crate) fn update_spawns(
                 outbox.0.push(SimEvent::Surge);
                 spawn_elite(pool, rng, &mut en, &mut outbox);
             }
-            PlanEvent::Boss { enemy, spawn_mult } => {
+            PlanEvent::MiniBoss { enemy, .. } => {
                 let kind = content.enemy_index(enemy).expect("内容校验保证引用存在") as u16;
                 let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
                 if let Some(i) = spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m) {
+                    en.tags[i] |= TAG_MINIBOSS;
+                }
+                outbox.0.push(SimEvent::Elite { kind, count: 1 });
+            }
+            PlanEvent::Encircle { warn, .. } => {
+                director.encircle.push(PendingEncircle { at: t + warn, index: step.index });
+                outbox.0.push(SimEvent::EncircleWarn { warn: *warn });
+            }
+            PlanEvent::Boss { enemy, spawn_mult, barrier } => {
+                let kind = content.enemy_index(enemy).expect("内容校验保证引用存在") as u16;
+                let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
+                if let Some(i) = spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m) {
+                    // 灯阵完整：夜主少两成生命
+                    if lanterns.complete() {
+                        en.hp[i] *= content.run.lanterns.boss_hp;
+                        en.max_hp[i] = en.hp[i];
+                    }
                     director.boss = Some(en.handle(i));
                     director.boss_mult = *spawn_mult;
+                    director.boss_since = t;
+                    if *barrier > 0.0 {
+                        director.barrier = Some((Vec2::new(p.x, p.y), *barrier));
+                    }
                     outbox.0.push(SimEvent::BossArrived { kind });
                 }
             }

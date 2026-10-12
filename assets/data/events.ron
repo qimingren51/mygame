@@ -12,11 +12,13 @@
          distance: 240.0, life: 35.0, kind: Shrine(radius: 30.0, duration: 30.0)),
         (id: "altar", name: "血祭坛", hint: "以 25% 生命换一次强化", color: "#FF6B5A", weight: 1.5,
          distance: 240.0, life: 35.0, kind: Altar(radius: 30.0, cost: 0.25, chests: 1)),
+        (id: "merchant", name: "货郎", hint: "用金币买宝箱或灯坠", color: "#E8C27A", weight: 1.5,
+         distance: 240.0, life: 30.0, kind: Merchant(radius: 34.0, chest_cost: 40, charm_cost: 80)),
         (id: "rift", name: "妖潮裂隙", hint: "击败守卫获得宝箱", color: "#B07CF0", weight: 1.5,
          distance: 280.0, life: 12.0, kind: Rift(
              minions: (12.0, 3.0, 0.0), spread: (10.0, 70.0),
              base: "shade", alt: "wisp", alt_share: 0.3,
-             guards: ["fox", "stonelord"], late_guards: ["ghoul"], late_minute: 4.0,
+             guards: ["fox", "stonelord"], late_guards: ["stonelord"], late_minute: 4.0,
          )),
     ],
     buffs: [

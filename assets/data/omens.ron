@@ -1,4 +1,4 @@
-// 夜签（移植自网页版 lantern/game.js 的 OMENS）：开局从中随机抽 3 张，选 1 张。
+// 夜签（docs/GAMEPLAY.md 第 10.2 节）：开局从中随机抽 3 张，选 1 张。原有 10 张移植自网页版，P0 新增无月、逆克。
 // 每张都有好处和代价。pick_element 的夜签抽到时随机选定一种五行，good 里的 {el} 换成它的名字。
 [
     (id: "bloodmoon", name: "血月", good: "魂火 +35%", bad: "妖物数量 +35%",
@@ -15,10 +15,15 @@
      effects: [Trigger(on: Periodic(100.0), action: DropChest(distance: 110.0)), Mul(EnemyHp, 0.25)]),
     (id: "element", name: "五行偏重", good: "{el}系开局即得 3 点共鸣", bad: "其他四系选项更少出现",
      pick_element: true, effects: [Points(3), Favor]),
-    (id: "greed", name: "贪婪", good: "灯油收益 +50%", bad: "无法回复生命",
-     effects: [Mul(OilGain, 0.5), Mul(Healing, -1.0)]),
+    (id: "greed", name: "贪婪", good: "灯油和金币 +50%", bad: "无法回复生命",
+     effects: [Mul(OilGain, 0.5), Mul(GoldGain, 0.5), Mul(Healing, -1.0)]),
     (id: "quiet", name: "静夜", good: "妖物数量 -25%", bad: "升级只有两个选项",
      effects: [Mul(SpawnRate, -0.25), Add(Choices, -1.0)]),
     (id: "wonders", name: "奇遇夜", good: "奇遇出现频率翻倍", bad: "妖物血量 +15%",
      effects: [Mul(EventRate, 1.0), Mul(EnemyHp, 0.15)]),
+    // M2.5 新增（docs/GAMEPLAY.md 第 10.2 节）
+    (id: "wuyue", name: "无月", good: "对照见圈外的妖物伤害 +50%", bad: "照见圈外完全看不见",
+     effects: [Add(DarkDamage, 0.5), Rule(NoMoon)]),
+    (id: "nike", name: "逆克", good: "相克反应的伤害翻倍", bad: "相生被动无效",
+     effects: [Mul(KeReaction, 1.0), Rule(NoSheng)]),
 ]

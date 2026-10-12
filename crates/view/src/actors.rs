@@ -85,6 +85,11 @@ pub(crate) struct ActorFrames {
 }
 
 impl ActorFrames {
+    /// 某种妖物的动画帧（幻身等借用妖物的样子时用）。
+    pub(crate) fn enemy_frames(&self, kind: usize) -> &[FrameId] {
+        self.enemies.get(kind).map_or(&[], |f| f.normal.as_slice())
+    }
+
     /// 让 light 贴图（径向渐变）画出半径 r 的光所需的缩放。
     pub(crate) fn light_scale(&self, db: &AtlasDb, r: f32) -> f32 {
         r * 2.0 / db.frame(self.light).size.x
@@ -405,6 +410,13 @@ pub(crate) struct Pools {
     spawned: [usize; 3],
 }
 
+/// 决定哪些妖物看得见的模拟资源（开局前不存在）。
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct Sight<'w> {
+    stats: Option<Res<'w, lantern_sim::Stats>>,
+    reveal: Option<Res<'w, lantern_sim::reveal::Reveal>>,
+}
+
 /// 摄像机看得到的范围（世界坐标，留一点边）。
 fn view_rect(cam: &Transform, proj: &Projection) -> Rect {
     let half = match proj {
@@ -422,6 +434,7 @@ pub(crate) fn collect_draws(
     en: Option<Res<Enemies>>,
     gems: Option<Res<Gems>>,
     arsenal: Option<Res<Arsenal>>,
+    sight: Sight,
     player: Single<(&Pos, &PrevPos), With<Player>>,
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
@@ -439,10 +452,18 @@ pub(crate) fn collect_draws(
     let (ppos, pprev) = *player;
     let player_now = pprev.0.lerp(ppos.0, a);
 
+    // 夜签“无月”：照见圈外完全看不见；“隐”的精英在照见圈外也看不见
+    let no_moon = sight.stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
     for i in en.iter_alive() {
         let p = Vec2::new(en.px[i], en.py[i]).lerp(Vec2::new(en.x[i], en.y[i]), a);
         let s = to_screen(p);
-        if !rect.contains(s) {
+        if !rect.contains(s) || en.cloaked[i] {
+            continue;
+        }
+        if no_moon
+            && let Some(reveal) = &sight.reveal
+            && !reveal.covers(Vec2::new(en.x[i], en.y[i]))
+        {
             continue;
         }
         let f = &frames.enemies[en.kind[i] as usize];

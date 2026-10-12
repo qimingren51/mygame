@@ -140,7 +140,7 @@ fn load_atlas(
 }
 
 /// 模拟坐标 y 向下，画面 y 向上。
-pub(crate) fn to_screen(p: Vec2) -> Vec2 {
+pub fn to_screen(p: Vec2) -> Vec2 {
     Vec2::new(p.x, -p.y)
 }
 

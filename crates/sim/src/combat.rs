@@ -13,13 +13,14 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Action, BlastKind, Cond, Content, Element, Rank, Stat};
+use lantern_content::{Action, AffixKind, BlastKind, Cond, Content, Element, Rank, Stat};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
-use crate::enemies::{Enemies, EnemyHandle};
+use crate::enemies::{Enemies, EnemyHandle, TAG_CHILD, TAG_FRENZY, TAG_MINIBOSS};
 use crate::flow::Flow;
 use crate::gems::Gems;
+use crate::gold::Coins;
 use crate::pickups::{PickupKind, Pickups};
 use crate::reactions::{ReactCtx, ReactRes, mark};
 use crate::reveal::{Reveal, Vuln};
@@ -168,7 +169,7 @@ pub struct Strike {
     pub knockback: f32,
     pub flags: u8,
     pub boss_cap: f32,
-    /// 大于 0 时，对夜主改为最大生命的这个比例（不暴击、不击退）
+    /// 大于 0 时，对夜主每次不超过它最大生命的这个比例（不暴击、不击退）
     pub boss_fraction: f32,
     pub stun: f32,
     pub freeze: f32,
@@ -224,6 +225,11 @@ pub struct Death {
     pub kind: u16,
     /// 死时处于冰冻（水·凝 三阶的冰爆）；被冰爆冻住的不算
     pub frozen: bool,
+    pub max_hp: f32,
+    pub radius: f32,
+    /// 词缀与标记（分裂、小头目……）
+    pub affix: u16,
+    pub tags: u8,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -392,6 +398,8 @@ pub(crate) fn resolve_hits(
     let stun_crit = stats.get(Stat::StunCrit) > 0.0;
     let freeze_time = stats.get(Stat::FreezeTime);
     let zones = &content.elements.zones;
+    let dark = stats.get(Stat::DarkDamage);
+    let affixes = AffixTable::new(content);
     let vuln = Vuln::new(&reveal, &stats, zones.vuln_cap);
     // 反应产生的命中追加在队尾，本步一起结算
     let mut list = std::mem::take(&mut hits.0);
@@ -408,8 +416,10 @@ pub(crate) fn resolve_hits(
             let blast = hit.flags & HIT_BLAST != 0;
             apply_hard(en, i, rank, Hard::Freeze { blast }, hit.freeze * freeze_time);
         }
-        // 加成区
-        let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * dmg_mult };
+        let pos = Vec2::new(en.x[i], en.y[i]);
+        // 加成区；夜签“无月”：照见圈外（也不在光区里）的妖物再加一截
+        let bonus = if dark > 0.0 && !reveal.covers(pos) { dmg_mult + dark } else { dmg_mult };
+        let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * bonus };
         let crit = hit.flags & (HIT_NOCRIT | HIT_TRUE) == 0
             && (rng.next_f32() < crit_chance || (en.stun[i] > 0.0 && stun_crit));
         let mut dmg = base;
@@ -429,6 +439,13 @@ pub(crate) fn resolve_hits(
                 }
             }
         }
+        // 词缀“坚”：生命高于一半时减伤
+        if en.affix[i] != 0
+            && let Some((above, reduction)) = affixes.tough(en.affix[i])
+            && en.hp[i] > en.max_hp[i] * above
+        {
+            dmg *= 1.0 - reduction;
+        }
         if boss && hit.boss_cap > 0.0 {
             dmg = dmg.min(hit.boss_cap);
         }
@@ -436,7 +453,17 @@ pub(crate) fn resolve_hits(
         log.add(hit.source, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
         en.flash[i] = 0.08;
-        let pos = Vec2::new(en.x[i], en.y[i]);
+        // 词缀“狂”：生命低于一半后移速和接触伤害提高
+        if en.affix[i] != 0
+            && en.tags[i] & TAG_FRENZY == 0
+            && let Some((below, boost)) = affixes.frenzy(en.affix[i])
+            && en.hp[i] > 0.0
+            && en.hp[i] < en.max_hp[i] * below
+        {
+            en.tags[i] |= TAG_FRENZY;
+            en.speed[i] *= 1.0 + boost;
+            en.damage[i] *= 1.0 + boost;
+        }
         let kind = if hit.flags & HIT_REACT != 0 {
             HitKind::Reaction
         } else if hit.flags & HIT_DOT != 0 {
@@ -506,7 +533,15 @@ pub(crate) fn resolve_hits(
 pub(crate) fn kill(en: &mut Enemies, i: usize, rank: Rank, deaths: &mut Deaths, outbox: &mut SimOutbox) {
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
-    deaths.0.push(Death { pos, kind, frozen: en.frozen[i] > 0.0 && !en.blast_frozen[i] });
+    deaths.0.push(Death {
+        pos,
+        kind,
+        frozen: en.frozen[i] > 0.0 && !en.blast_frozen[i],
+        max_hp: en.max_hp[i],
+        radius: en.r[i],
+        affix: en.affix[i],
+        tags: en.tags[i],
+    });
     en.kill(i);
     outbox.0.push(SimEvent::Kill { pos, kind, rank });
 }
@@ -693,8 +728,9 @@ pub(crate) fn process_strikes(
                 element: s.element,
                 ignite: s.ignite,
             };
+            // 燃灯对夜主：每次不超过它最大生命的一定比例
             if boss && s.boss_fraction > 0.0 {
-                hit.damage = en.max_hp[i] * s.boss_fraction;
+                hit.boss_cap = en.max_hp[i] * s.boss_fraction;
                 hit.flags |= HIT_NOCRIT;
                 hit.knockback = 0.0;
             }
@@ -747,7 +783,8 @@ pub(crate) fn burn(
     }
 }
 
-/// 处理本步的死亡：掉落、击杀触发器、连斩、燃灯充能、击败夜主。
+/// 处理本步的死亡：掉落、击杀触发器、连斩、燃灯充能、分裂、击败夜主。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_deaths(
     content: Res<GameContent>,
     stats: Res<Stats>,
@@ -755,7 +792,9 @@ pub(crate) fn process_deaths(
     tick: Res<Tick>,
     mut rng: ResMut<SimRng>,
     mut deaths: ResMut<Deaths>,
+    mut en: ResMut<Enemies>,
     mut gems: ResMut<Gems>,
+    mut coins: ResMut<Coins>,
     mut pickups: ResMut<Pickups>,
     mut progress: ResMut<Progress>,
     mut director: ResMut<Director>,
@@ -767,11 +806,16 @@ pub(crate) fn process_deaths(
     let t = tick.secs();
     let minute = t / 60.0;
     let g = &c.run.gems;
+    let gd = &c.run.gold;
     let drops = &c.run.drops;
+    let gold_mult = stats.get(Stat::GoldGain);
+    // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次
+    let clear = crate::spawn::base_spawn_hp(c, minute) * c.player.ult.clear_seconds;
+    let ult_mult = stats.get(Stat::UltCharge);
     for d in deaths.0.drain(..) {
         let def = &c.enemies[d.kind as usize];
         if let Some(loot) = &def.loot {
-            // 金蟾：散落大量魂火和灯油，不计击杀
+            // 金蟾：散落大量魂火和金币，不计击杀
             let total = c.run.xp_need.at(progress.level as f32) * loot.xp_levels;
             let r = rng.0.get(Stream::Drop);
             for _ in 0..loot.gems {
@@ -780,13 +824,17 @@ pub(crate) fn process_deaths(
                 let (s, co) = ops::sin_cos(a);
                 gems.drop(d.pos + Vec2::new(co, s) * dist, total / loot.gems as f32, g.cap);
             }
-            flow.oil_bonus += loot.oil;
+            let amount = loot.gold as f32 * gold_mult;
+            coins.scatter(r, d.pos, amount, gd.coin_value as f32 * gold_mult, gd.scatter * 1.5, gd.cap);
             outbox.0.push(SimEvent::CritterLooted { pos: d.pos });
             continue;
         }
         if def.rank == Rank::Critter {
             continue;
         }
+        let child = d.tags & TAG_CHILD != 0;
+        let miniboss = d.tags & TAG_MINIBOSS != 0;
+        let elite = def.rank == Rank::Elite && !child;
         let p = &mut *progress;
         p.kills += 1;
         p.combo = if p.combo_t > 0.0 { p.combo + 1 } else { 1 };
@@ -795,17 +843,32 @@ pub(crate) fn process_deaths(
         if c.run.combo.milestones.contains(&p.combo) {
             outbox.0.push(SimEvent::Combo { count: p.combo });
         }
-        let elite = def.rank == Rank::Elite;
-        let charge = if elite { c.player.ult.charge_elite } else { c.player.ult.charge_normal };
+        let mut charge = if clear > 0.0 { d.max_hp / clear } else { 0.0 };
+        if elite {
+            charge += c.player.ult.charge_elite;
+        }
         let was_ready = p.ult >= 1.0;
-        p.ult = (p.ult + charge).min(1.0);
+        p.ult = (p.ult + charge * ult_mult).min(1.0);
         if p.ult >= 1.0 && !was_ready {
             outbox.0.push(SimEvent::UltReady);
         }
 
         let loot = rng.0.get(Stream::Drop);
-        if def.xp > 0.0 {
-            let value = def.xp * c.run.gem_value_scale.at(minute) * stats.get(Stat::XpGain);
+        let split = split_affix(c, d.affix);
+        // 分出来的小号魂火固定
+        let xp = if child {
+            c.affixes
+                .iter()
+                .find_map(|a| match a.kind {
+                    AffixKind::Split { xp, .. } => Some(xp),
+                    _ => None,
+                })
+                .unwrap_or(def.xp)
+        } else {
+            def.xp
+        };
+        if xp > 0.0 {
+            let value = xp * c.run.gem_value_scale.at(minute) * stats.get(Stat::XpGain);
             if elite {
                 let n = g.elite_split;
                 for _ in 0..n {
@@ -819,13 +882,43 @@ pub(crate) fn process_deaths(
                 gems.drop(d.pos, value, g.cap);
             }
         }
+        let per_coin = gd.coin_value as f32 * gold_mult;
         if elite {
-            pickups.drop(PickupKind::Chest, d.pos);
+            let kind = if miniboss { PickupKind::BossChest } else { PickupKind::Chest };
+            pickups.drop(kind, d.pos);
             pickups.drop(PickupKind::Bell, d.pos + Vec2::new(24.0, 0.0));
-        } else if loot.chance(drops.bell_chance) {
-            pickups.drop(PickupKind::Bell, d.pos);
-        } else if stats.can_heal() && loot.chance(drops.lotus_chance) {
-            pickups.drop(PickupKind::Lotus, d.pos);
+            let amount = if miniboss { gd.miniboss } else { gd.elite } as f32 * gold_mult;
+            coins.scatter(loot, d.pos, amount, per_coin, gd.scatter, gd.cap);
+        } else if def.rank == Rank::Boss {
+            coins.scatter(loot, d.pos, gd.boss as f32 * gold_mult, per_coin * 2.0, gd.scatter * 2.0, gd.cap);
+        } else if !child {
+            if loot.chance(drops.bell_chance) {
+                pickups.drop(PickupKind::Bell, d.pos);
+            } else if stats.can_heal() && loot.chance(drops.lotus_chance) {
+                pickups.drop(PickupKind::Lotus, d.pos);
+            }
+            if loot.chance(gd.normal_chance) {
+                coins.drop(d.pos, gold_mult, gd.cap);
+            }
+        }
+
+        // 词缀“分”：死后分成几只小号（小号不算精英，不再分裂）
+        if let Some((count, hp, radius)) = split
+            && !child
+        {
+            let sp = rng.0.get(Stream::Spawn);
+            for k in 0..count {
+                let a = k as f32 * TAU / count as f32;
+                let (s, co) = ops::sin_cos(a);
+                let at = d.pos + Vec2::new(co, s) * d.radius * 0.6;
+                if let Some(i) = crate::spawn::spawn_enemy(c, &stats, &mut en, sp, d.kind, at.x, at.y, minute)
+                {
+                    en.tags[i] |= TAG_CHILD;
+                    en.hp[i] = d.max_hp * hp;
+                    en.max_hp[i] = en.hp[i];
+                    en.r[i] = d.radius * radius;
+                }
+            }
         }
 
         let combat = rng.0.get(Stream::Combat);
@@ -837,10 +930,51 @@ pub(crate) fn process_deaths(
 
         if def.rank == Rank::Boss {
             director.boss = None;
+            director.barrier = None;
             flow.won_at = Some(t + c.run.win_delay);
+            coins.pull_all();
             outbox.0.push(SimEvent::BossDefeated { pos: d.pos });
         }
     }
+}
+
+/// 结算命中时要查的词缀（按位）。
+struct AffixTable {
+    tough: Option<(u16, f32, f32)>,
+    frenzy: Option<(u16, f32, f32)>,
+}
+
+impl AffixTable {
+    fn new(c: &Content) -> Self {
+        let mut t = AffixTable { tough: None, frenzy: None };
+        for (k, a) in c.affixes.iter().enumerate() {
+            match a.kind {
+                AffixKind::Tough { above, reduction } => t.tough = Some((1 << k, above, reduction)),
+                AffixKind::Frenzy { below, boost } => t.frenzy = Some((1 << k, below, boost)),
+                _ => {}
+            }
+        }
+        t
+    }
+
+    fn tough(&self, affix: u16) -> Option<(f32, f32)> {
+        self.tough.filter(|&(bit, ..)| affix & bit != 0).map(|(_, a, r)| (a, r))
+    }
+
+    fn frenzy(&self, affix: u16) -> Option<(f32, f32)> {
+        self.frenzy.filter(|&(bit, ..)| affix & bit != 0).map(|(_, b, k)| (b, k))
+    }
+}
+
+/// 带“分”词缀时返回 (只数, 生命比例, 半径比例)。
+fn split_affix(c: &Content, affix: u16) -> Option<(u32, f32, f32)> {
+    if affix == 0 {
+        return None;
+    }
+    c.affixes.iter().enumerate().find_map(|(k, a)| match a.kind {
+        AffixKind::Split { count, hp, radius, .. } if affix & (1 << k) != 0 => Some((count, hp, radius)),
+        _ => None,
+    })
 }
 
 /// 主角受伤需要的东西。
