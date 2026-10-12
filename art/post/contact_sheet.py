@@ -26,8 +26,10 @@ if str(ART) not in sys.path:
     sys.path.insert(0, str(ART))
 from style import style as S  # noqa: E402
 
-LIGHT_RADIUS_PX = 100
-SOCKET_LIGHTS = {"lantern": (LIGHT_RADIUS_PX, S.LANTERN_LIGHT), "flame": (70, S.FLAME_LIGHT)}  # 挂点 → 夜景光源
+D = S.DENSITY  # 下面的像素尺寸都是 1 倍密度的值，乘 D
+LIGHT_RADIUS_PX = 100 * D
+SOCKET_LIGHTS = {"lantern": (LIGHT_RADIUS_PX, S.LANTERN_LIGHT), "flame": (70 * D, S.FLAME_LIGHT),
+                 "glow": (60 * D, S.ACCENT["zhusha"])}  # 挂点 → 夜景光源（血祭坛是暗红光）
 ZOOM = 3
 
 
@@ -72,14 +74,14 @@ def paper(w: int, h: int, seed: int = 0, blotches: int = 0) -> Image.Image:
     rng = np.random.default_rng(seed)
     for _ in range(blotches):
         cx, cy = rng.uniform(0.1, 0.9) * w, rng.uniform(0.15, 0.95) * h
-        rx, ry = rng.uniform(30, 90), rng.uniform(12, 30)
+        rx, ry = rng.uniform(30, 90) * D, rng.uniform(12, 30) * D
         m = Image.new("L", (w, h), 0)
         dr = ImageDraw.Draw(m)
         for _k in range(7):  # 几个叠在一起的椭圆 → 不规则的一团
             ox, oy = rng.normal(0, rx * 0.35), rng.normal(0, ry * 0.35)
             sx, sy = rx * rng.uniform(0.4, 0.8), ry * rng.uniform(0.4, 0.8)
             dr.ellipse([cx + ox - sx, cy + oy - sy, cx + ox + sx, cy + oy + sy], fill=255)
-        m = np.asarray(m.filter(ImageFilter.GaussianBlur(rng.uniform(4, 9))), np.float32) / 255.0
+        m = np.asarray(m.filter(ImageFilter.GaussianBlur(rng.uniform(4, 9) * D)), np.float32) / 255.0
         tone = np.array(rgb(rng.choice([S.INK["qing"], S.INK["dan"], S.PAPER_SHADOW])), np.float32)
         k = (m * rng.uniform(0.25, 0.45))[..., None]
         base = base * (1 - k) + tone * k
@@ -105,10 +107,10 @@ def place(canvas: Image.Image, frame: dict, meta: dict, at: tuple[float, float],
         ax, ay = ax * scale, ay * scale
     x0, y0 = round(at[0] - ax), round(at[1] - ay)
     if shadow:
-        r = meta.get("shadow_radius_px", 14) * scale
+        r = meta.get("shadow_radius_px", 14 * D) * scale
         sh = Image.new("L", canvas.size, 0)
         ImageDraw.Draw(sh).ellipse([at[0] - r, at[1] - r * 0.38, at[0] + r, at[1] + r * 0.38], fill=70)
-        sh = sh.filter(ImageFilter.GaussianBlur(2.0 * scale))
+        sh = sh.filter(ImageFilter.GaussianBlur(2.0 * D * scale))
         ink = Image.new("RGBA", canvas.size, rgb(S.INK["zhong"]) + (255,))
         canvas.paste(ink, (0, 0), sh)
     canvas.alpha_composite(im, (x0, y0))
@@ -146,7 +148,7 @@ def light_map(h: int, w: int, lights: list[tuple[float, float, float, str]]) -> 
     return np.clip(lm, 0, 1)
 
 
-def night_composite(day: Image.Image, emit: np.ndarray, lights, glow_sigma: float = 2.5) -> Image.Image:
+def night_composite(day: Image.Image, emit: np.ndarray, lights, glow_sigma: float = 2.5 * D) -> Image.Image:
     """夜景 = 白天图 × 光照图 + 发光层 + 发光层的辉光。"""
     d = np.asarray(day.convert("RGB"), np.float32) / 255.0
     lm = light_map(d.shape[0], d.shape[1], lights)
@@ -163,7 +165,7 @@ def _label(im: Image.Image, xy, text: str):
     ImageDraw.Draw(im).text(xy, text, fill=rgb(S.INK["dan"]) + (255,))
 
 
-def sheet(assets: list[dict], night: bool = False, pad: int = 6, label: bool = True) -> Image.Image:
+def sheet(assets: list[dict], night: bool = False, pad: int = int(6 * D), label: bool = True) -> Image.Image:
     rows = []
     for A in assets:
         W, H = A["meta"]["size"]
@@ -181,7 +183,7 @@ def sheet(assets: list[dict], night: bool = False, pad: int = 6, label: bool = T
             if night:
                 place_emit(emit, f, A["meta"], at)
                 for sn, (rad, col) in SOCKET_LIGHTS.items():
-                    if sn in f["sockets"]:
+                    if sn in f["sockets"] and f.get("emit") is not None:
                         sx, sy = f["sockets"][sn]
                         lights.append((at[0] + sx, at[1] + sy, rad, col))
         rows.append(night_composite(row, emit, lights) if night else row.convert("RGB"))
@@ -198,7 +200,7 @@ def zoom(im: Image.Image, k: int = ZOOM) -> Image.Image:
     return im.resize((im.width * k, im.height * k), Image.NEAREST)
 
 
-def game_size_row(assets: list[dict], scales=(1.0, 0.75), pad: int = 10) -> Image.Image:
+def game_size_row(assets: list[dict], scales=(1.0, 0.75), pad: int = int(10 * D)) -> Image.Image:
     """每个素材取第一帧，在宣纸地面上按 1 倍、0.75 倍并排（模拟游戏缩放），白天一排、夜里一排。"""
     picks = [(A, A["frames"][0]) for A in assets if A["frames"]]
     blocks = []

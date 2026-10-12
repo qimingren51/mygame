@@ -1,6 +1,6 @@
 """提灯夜行 · 风格样张：用正式管线渲几样素材，检查并拼出审图用的大图。
 
-运行（在仓库的 lantern-next/ 目录下）：
+运行（在仓库根目录下）：
     art/.venv/bin/python art/render/style_frame.py            # 完整：主角 idle 5 向 + walk 8 帧×5 向
     art/.venv/bin/python art/render/style_frame.py --quick    # 快速：walk 只渲第 2 帧
 输出到 art/out/style/：

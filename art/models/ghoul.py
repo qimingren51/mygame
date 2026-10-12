@@ -32,9 +32,9 @@ def build_ghoul():
     ink = B.flat_material("GhoulInk", I["jiao"])
     eye = B.emissive_material("GhoulEye", S.EYE["ghoul"], 1.0)
     root = B.empty("GhoulRoot")
-    yaw = K.yaw_pivot("GhoulYaw", root, -10, loc=(0.28, 0, 0))
+    yaw = K.yaw_pivot("GhoulYaw", root, -10)
     body = B.empty("GhoulBody", yaw)
-    body.scale = (1.12, 1.12, 1.12)  # 比人形高大一圈
+    body.scale = (1.05, 1.05, 1.05)  # 比人形高大一圈（BIG_ENEMY_ANCHOR 下头顶只剩 80% 帧高）
     parts = {"root": root, "body": body}
     obj = B.mesh_object
     pelvis = B.empty("GhoulPelvis", body, loc=(0, 0.10, 1.05))
@@ -56,9 +56,9 @@ def build_ghoul():
     obj("GhoulJaw", K.ellipsoid((0.21, 0.18, 0.12)), face, "outer", head, loc=(0, -0.08, -0.17))
     obj("GhoulBrow", K.ellipsoid((0.22, 0.06, 0.04)), ink, "inner", head, loc=(0, -0.19, 0.10), rot=(math.radians(-10), 0, 0))
     obj("GhoulMouth", K.ellipsoid((0.15, 0.04, 0.025)), ink, "none", head, loc=(0, -0.235, -0.13))
-    for sx in (-1, 1):
-        K.limb(f"GhoulFang{sx:+d}", (0.09 * sx, -0.235, -0.16), (0.10 * sx, -0.25, -0.04), 0.03, 0.0, bone, "inner",
-               head, segs=6)
+    for sx in (-1, 1):  # 獠牙：从下颌向上翻出，又大又弯
+        tusk = K.curve_points((0.10 * sx, -0.21, -0.20), (0.15 * sx, -0.27, 0.02), bend=Vector((0.03 * sx, -0.04, 0)), n=6)
+        obj(f"GhoulTusk{sx:+d}", K.tube_build(tusk, lambda t: 0.048 * (1 - t) ** 0.8 + 0.002, 8), bone, "outer", head)
         horn = K.curve_points((0.12 * sx, -0.05, 0.18), (0.30 * sx, 0.18, 0.52), bend=Vector((0.06 * sx, -0.10, 0.04)), n=8)
         obj(f"GhoulHorn{sx:+d}", K.tube_build(horn, lambda t: 0.065 * (1 - t) + 0.004, 8), bone, "outer", head)
     sock = K.slit_eyes("Ghoul", head, Vector((0, -0.232, 0.03)), 0.16, (0.058, 0.018, 0.024), eye, tilt_deg=-20)
@@ -71,18 +71,24 @@ def build_ghoul():
     # 手臂：粗壮，长到膝下，墨爪
     for sx, nm in ((1, "L"), (-1, "R")):
         sh = B.empty(f"GhoulShoulder{nm}", torso, loc=(0.48 * sx, -0.02, 0.86))
-        obj(f"GhoulDelt{nm}", K.ellipsoid((0.19, 0.19, 0.18)), skin, "outer", sh)
+        obj(f"GhoulDelt{nm}", K.ellipsoid((0.22, 0.22, 0.21)), skin, "outer", sh)
         K.limb(f"GhoulUpper{nm}", (0, 0, 0), (0.12 * sx, -0.15, -0.50), 0.15, 0.12, skin, "outer", sh)
-        K.limb(f"GhoulFore{nm}", (0.12 * sx, -0.15, -0.50), (0.06 * sx, -0.38, -0.95), 0.12, 0.09, skin, "outer", sh)
-        obj(f"GhoulHand{nm}", K.ellipsoid((0.10, 0.12, 0.11)), skin, "outer", sh, loc=(0.06 * sx, -0.42, -1.02))
-        for c in (-1, 0, 1):
-            K.limb(f"GhoulClaw{nm}{c}", (0.06 * sx + 0.04 * c, -0.48, -1.06), (0.06 * sx + 0.05 * c, -0.56, -1.18),
-                   0.022, 0.0, ink, "inner", sh, segs=6)
+        obj(f"GhoulBicep{nm}", K.ellipsoid((0.15, 0.16, 0.22)), skin, "outer", sh, loc=(0.07 * sx, -0.10, -0.26),
+            rot=(math.radians(-15), 0, 0))  # 隆起的二头肌
+        K.limb(f"GhoulFore{nm}", (0.12 * sx, -0.15, -0.50), (0.06 * sx, -0.38, -0.95), 0.13, 0.09, skin, "outer", sh)
+        obj(f"GhoulForeM{nm}", K.ellipsoid((0.13, 0.13, 0.20)), skin, "outer", sh, loc=(0.10 * sx, -0.23, -0.64),
+            rot=(math.radians(-30), 0, 0))  # 前臂肌肉
+        obj(f"GhoulHand{nm}", K.ellipsoid((0.13, 0.14, 0.12)), skin, "outer", sh, loc=(0.06 * sx, -0.43, -1.02))
+        for c in (-1.5, -0.5, 0.5, 1.5):  # 四根弯曲的墨爪
+            a0 = Vector((0.06 * sx + 0.045 * c, -0.50, -1.04))
+            claw = K.curve_points(a0, a0 + Vector((0.02 * c, -0.12, -0.14)), bend=Vector((0, -0.04, 0.02)), n=5)
+            obj(f"GhoulClaw{nm}{c}", K.tube_build(claw, lambda t: 0.026 * (1 - t) + 0.002, 6), ink, "inner", sh)
         parts[f"arm_{nm}"] = sh
         hip = B.empty(f"GhoulHip{nm}", pelvis, loc=(0.24 * sx, 0, -0.05))
-        K.limb(f"GhoulThigh{nm}", (0, 0, 0), (0.03 * sx, -0.18, -0.48), 0.17, 0.13, skin, "outer", hip)
+        K.limb(f"GhoulThigh{nm}", (0, 0, 0), (0.03 * sx, -0.18, -0.48), 0.19, 0.14, skin, "outer", hip)
         knee = B.empty(f"GhoulKnee{nm}", hip, loc=(0.03 * sx, -0.18, -0.48))
-        K.limb(f"GhoulShin{nm}", (0, 0, 0), (0, 0.12, -0.44), 0.12, 0.09, skin, "outer", knee)
+        K.limb(f"GhoulShin{nm}", (0, 0, 0), (0, 0.12, -0.44), 0.13, 0.09, skin, "outer", knee)
+        obj(f"GhoulCalf{nm}", K.ellipsoid((0.12, 0.13, 0.18)), skin, "outer", knee, loc=(0, 0.08, -0.16))  # 小腿肚
         obj(f"GhoulFoot{nm}", K.ellipsoid((0.11, 0.18, 0.06)), skin, "outer", knee, loc=(0, 0.04, -0.49))
         parts[f"hip_{nm}"], parts[f"knee_{nm}"] = hip, knee
     sockets = {"eyes": sock, "feet": B.empty("GhoulFeet", root)}

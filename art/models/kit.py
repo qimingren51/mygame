@@ -3,10 +3,9 @@
 约定同其它模型：脚底/地面点在原点，建模面朝 -Y，单位米。妖物只渲染 "E"：
 yaw_pivot() 让身体整体朝镜头偏一点（3/4 侧面），眼睛和脸在 E 向也读得出来。
 
-帧下方的空间：ANCHOR 是 (0.5, 0.875)，锚点下方只有 12.5% 帧高；30° 俯角下地面上朝镜头 d 米
-在画面上是锚点下方 d×25px。所以身体朝镜头一侧的厚度最多约 帧高×0.125/25 米（石妖 0.56 米、
-精英 0.8 米）。体型宽的妖物用 yaw_pivot(loc=(d,0,0)) 整体往远离镜头的方向挪一点（E 向时建模 +X
-就是远离镜头），锚点落在身体前沿附近，阴影仍在脚下。
+帧下方的空间：30° 俯角下地面上朝镜头 d 米在画面上是锚点下方 d×PX_PER_M/2 像素。
+小妖物用 ANCHOR (0.5, 0.875)，锚点下方只有 12.5% 帧高，朝镜头一侧的厚度有限（金蟾整体略往后挪）；
+大体型妖物（石妖、精英、夜主）用 BIG_ENEMY_ANCHOR (0.5, 0.8)，身体中心就在锚点上，不再后挪。
 """
 
 from __future__ import annotations
@@ -235,3 +234,56 @@ def slit_eyes(prefix, parent, center, sep, size, mat, tilt_deg=18.0, line="none"
 
 def toon(name, base=None, ramp=None, **kw):
     return B.toon_material(name, base, ramp=ramp, **kw)
+
+
+def banded_toon_material(name, bands, attr="fade", noise_amt=0.10, seed=0.0, **toon_kw):
+    """沿顶点属性 attr（0..1）分段换颜色的假卡通材质（九尾的尾巴：根部浓墨 → 淡墨 → 藤黄 → 朱砂尖）。
+    bands = [(起点 t, 基础色 hex), ...]；每段仍是该色的三档 shade_ramp，段与段之间用噪声打散成水墨晕开的边，
+    同一个材质里完成，所以分段处不会被 Freestyle 当成材质分界描线。"""
+    I = S.INK
+    m = B.toon_material(name, ramp=S.shade_ramp(bands[0][1]), **toon_kw)
+    nt = m.node_tree
+    N, L = nt.nodes, nt.links
+    ramp_node = next(n for n in N if n.type == "VALTORGB")  # 原来的三档：亮/中/暗
+    fac_src = ramp_node.inputs["Fac"].links[0].from_socket
+    scale_node = ramp_node.outputs["Color"].links[0].to_node
+    at = N.new("ShaderNodeAttribute"); at.attribute_type = "GEOMETRY"; at.attribute_name = attr
+    tc = N.new("ShaderNodeTexCoord")
+    nz = N.new("ShaderNodeTexNoise"); nz.inputs["Scale"].default_value = 6.0
+    L.new(tc.outputs["Object"], nz.inputs["Vector"])
+    nzs = N.new("ShaderNodeMath"); nzs.operation = "MULTIPLY_ADD"
+    nzs.inputs[1].default_value = noise_amt; nzs.inputs[2].default_value = -0.5 * noise_amt
+    L.new(nz.outputs["Fac"], nzs.inputs[0])
+    tt = N.new("ShaderNodeMath"); tt.operation = "ADD"; tt.use_clamp = True
+    L.new(at.outputs["Fac"], tt.inputs[0]); L.new(nzs.outputs["Value"], tt.inputs[1])
+    outs = []
+    for step in range(3):  # 每一档（亮/中/暗）各一个沿 t 的常量色带
+        cr = N.new("ShaderNodeValToRGB")
+        cr.color_ramp.interpolation = "CONSTANT"
+        els = cr.color_ramp.elements
+        for k, (t0, base) in enumerate(bands):
+            col = B.hex_lin(S.shade_ramp(base)[step])
+            if k < 2:
+                els[k].position, els[k].color = t0, col
+            else:
+                e = els.new(t0); e.color = col
+        if len(bands) == 1:
+            els[1].position, els[1].color = 1.0, B.hex_lin(S.shade_ramp(bands[0][1])[step])
+        L.new(tt.outputs["Value"], cr.inputs["Fac"])
+        outs.append(cr.outputs["Color"])
+    # 用原来的明暗点积选档：>阈值1 亮，>阈值2 中，否则暗
+    t_lit, t_mid = S.SHADE_THRESHOLDS
+    g1 = N.new("ShaderNodeMath"); g1.operation = "GREATER_THAN"; g1.inputs[1].default_value = t_lit
+    g2 = N.new("ShaderNodeMath"); g2.operation = "GREATER_THAN"; g2.inputs[1].default_value = t_mid
+    L.new(fac_src, g1.inputs[0]); L.new(fac_src, g2.inputs[0])
+    mx1 = N.new("ShaderNodeMix"); mx1.data_type = "RGBA"
+    L.new(g2.outputs["Value"], B.sock(mx1.inputs, "Factor_Float"))
+    L.new(outs[2], B.sock(mx1.inputs, "A_Color")); L.new(outs[1], B.sock(mx1.inputs, "B_Color"))
+    mx2 = N.new("ShaderNodeMix"); mx2.data_type = "RGBA"
+    L.new(g1.outputs["Value"], B.sock(mx2.inputs, "Factor_Float"))
+    L.new(B.sock(mx1.outputs, "Result_Color"), B.sock(mx2.inputs, "A_Color")); L.new(outs[0], B.sock(mx2.inputs, "B_Color"))
+    for lk in list(ramp_node.outputs["Color"].links):
+        nt.links.remove(lk)
+    L.new(B.sock(mx2.outputs, "Result_Color"), scale_node.inputs[0])
+    m["toon_ramp"] = [c for _, b in bands for c in S.shade_ramp(b)]
+    return m

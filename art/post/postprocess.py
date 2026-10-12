@@ -113,7 +113,18 @@ def ink_bleed(line_a: np.ndarray, sigma: float = S.INK_BLEED_PX, gain: float = I
 
 
 @lru_cache(maxsize=4)
-def paper_texture(size: int = 512, seed: int = 20240) -> np.ndarray:
+def paper_texture(size: int = 512, seed: int = 20240, density: float = S.DENSITY) -> np.ndarray:
+    """按密度放大的纸纹（2 倍密度时纤维也粗一倍，和模型的比例不变）。"""
+    base = _paper_texture_1x(size, seed)
+    if density == 1:
+        return base
+    n = int(round(size * density))
+    im = Image.fromarray((base * 255).astype(np.uint8)).resize((n, n), Image.BICUBIC)
+    return np.asarray(im, np.float32) / 255.0
+
+
+@lru_cache(maxsize=4)
+def _paper_texture_1x(size: int = 512, seed: int = 20240) -> np.ndarray:
     """宣纸纹理（可平铺性不要求，取块时取模），值域约 0..1，均值约 0.8：亮底 + 暗纤维 + 云状起伏。"""
     rng = np.random.default_rng(seed)
     base = np.zeros((size, size), np.float32)
@@ -141,7 +152,8 @@ def paper_texture(size: int = 512, seed: int = 20240) -> np.ndarray:
 def asset_offset(name: str) -> tuple[int, int]:
     """每个素材固定的纸纹偏移（由名字哈希得到），保证同一素材所有帧纸纹一致、不闪。"""
     h = hashlib.md5(name.encode()).digest()
-    return h[0] * 2 % 512, h[1] * 2 % 512
+    n = paper_texture().shape[0]
+    return int(h[0] * 2 * S.DENSITY) % n, int(h[1] * 2 * S.DENSITY) % n
 
 
 def paper_grain(h: int, w: int, name: str, strength: float = S.PAPER_OVERLAY) -> np.ndarray:

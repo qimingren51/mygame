@@ -24,7 +24,7 @@ import postprocess as P  # noqa: E402
 
 def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_extra: dict | None = None,
                  pose=None, sockets_wanted=(), flash: bool = False, anchor=None, tmp_dir: Path | None = None,
-                 timings: dict | None = None) -> Path:
+                 timings: dict | None = None, merge: bool = False) -> Path:
     """jobs: [(动画, 朝向, 姿态帧号, 该动画总帧数)]，按顺序渲染。
     文件帧号 = 该动画该朝向里第几张（通常与姿态帧号相同）。
     写出 <out_root>/<name>/：<动画>_<朝向>_<NN>.png、_emit.png（有发光部件或 layers 里声明时）、
@@ -33,8 +33,17 @@ def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_ext
     anchor = tuple(anchor or S.ANCHOR)
     out = Path(out_root) / name
     out.mkdir(parents=True, exist_ok=True)
-    for old in list(out.glob("*.png")) + list(out.glob("meta.json")):
-        old.unlink()
+    old_meta = None
+    redo = {j[0] for j in jobs}
+    if merge and (out / "meta.json").exists():
+        # 只重渲 jobs 里的动画：删掉这些动画的旧图，meta 里其它动画和挂点保留
+        old_meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+        for old in out.glob("*.png"):
+            if old.name.split("_")[0] in redo:
+                old.unlink()
+    else:
+        for old in list(out.glob("*.png")) + list(out.glob("meta.json")):
+            old.unlink()
     tmp_dir = Path(tmp_dir or (Path(out_root) / "_tmp"))
     t0 = time.perf_counter()
     B.reset_scene()
@@ -51,9 +60,11 @@ def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_ext
     with B.render_lock():
         for anim, d, i, n in jobs:
             k = seen[(anim, d)] = seen.get((anim, d), -1) + 1
+            if isinstance(parts, dict):
+                parts["dir"] = d  # 有的姿态函数按朝向微调（主角背面的灯杖）
+            B.set_direction(root, d)
             if pose:
                 pose(parts, anim, i, n)
-            B.set_direction(root, d)
             L = B.render_layers(tmp_dir / f"{name}_{anim}_{d}_{k:02d}")
             tp = time.perf_counter()
             R = P.process_layers(L, name)
@@ -73,9 +84,20 @@ def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_ext
     for (anim, d), k in seen.items():
         anims[anim]["frames"] = k + 1
     for an, extra in meta_extra.pop("anim_extra", {}).items():
-        anims[an].update(extra)
-    meta = {"name": name, "size": [frame_px, frame_px], "anchor": list(anchor), "anims": anims, "sockets": sock_out}
+        if an in anims:  # 只重渲部分动画时，其它动画的设置沿用旧 meta
+            anims[an].update(extra)
+    meta = {"name": name, "size": [frame_px, frame_px], "anchor": list(anchor), "px_per_unit": S.PX_PER_UNIT,
+            "anims": anims, "sockets": sock_out}
     meta.update(meta_extra)
+    if old_meta is not None:
+        merged = dict(old_meta)
+        merged.update({k: v for k, v in meta.items() if k not in ("anims", "sockets")})
+        merged["anims"] = {**{k: v for k, v in old_meta.get("anims", {}).items() if k not in redo}, **anims}
+        socks = {s_: dict(v) for s_, v in old_meta.get("sockets", {}).items()}
+        for s_, by_anim in sock_out.items():
+            socks.setdefault(s_, {}).update(by_anim)
+        merged["sockets"] = socks
+        meta = merged
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     r = np.array(times)
     info = {"frames": len(times), "render_px": frame_px * S.RENDER_SCALE, "faces": B.face_count(root),

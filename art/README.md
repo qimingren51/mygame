@@ -8,7 +8,7 @@
 需要 Python 3.13，因为 bpy 5.2.2 只发布了 cp313 的 wheel。
 
 ```bash
-cd lantern-next/art
+cd art
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt   # bpy 5.2.2 + pillow 12.3.0 + numpy 2.5.3
 ```
@@ -21,7 +21,7 @@ wheel 下载约 383 MB，装好后 `.venv` 约 1.1 GB，安装大约 1 分钟。
 ## 运行冒烟测试
 
 ```bash
-art/.venv/bin/python art/render/smoke_test.py     # 在仓库的 lantern-next/ 目录下执行
+art/.venv/bin/python art/render/smoke_test.py     # 在仓库根目录执行
 ```
 
 全程约 7 秒。输出都在 `out/smoke/`：
@@ -89,7 +89,7 @@ art/.venv/bin/python art/render/smoke_test.py     # 在仓库的 lantern-next/ �
 不用 Blender，只用 Pillow + numpy 生成，颜色全部取自 `style/style.py`。固定随机种子，重复运行逐字节相同，约 15 秒。
 
 ```bash
-art/.venv/bin/python art/post/vfx_textures.py        # 在仓库的 lantern-next/ 目录下执行
+art/.venv/bin/python art/post/vfx_textures.py        # 在仓库根目录执行
 art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点、宣纸接缝、光照边界与抖动、体积等）
 ```
 
@@ -107,7 +107,7 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 固定随机种子，重复运行逐字节相同，约 20 秒。
 
 ```bash
-art/.venv/bin/python art/post/weapon_textures.py        # 在仓库的 lantern-next/ 目录下执行
+art/.venv/bin/python art/post/weapon_textures.py        # 在仓库根目录执行
 art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新生成；尺寸、锚点、白色可染色、边框透明、朝向、确定性、体积、只写自己的目录）
 ```
 
@@ -122,31 +122,38 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 ## 正式管线
 
 ```bash
-art/.venv/bin/python art/render/produce.py               # 正式出图 → out/assets/，审图 → out/review/（约 2 分钟）
-art/.venv/bin/python art/render/produce.py --only shade,wisp   # 只重渲部分；--review 只自检 + 重拼审图
-art/.venv/bin/python art/render/style_frame.py           # 风格样张 → out/style/（约 45 秒；--quick 更快）
-art/.venv/bin/python art/post/check_asset.py art/out/style/assets/hero   # 单独自检一个素材
-art/.venv/bin/python art/post/contact_sheet.py <输出目录> <素材文件夹>...  # 单独拼图
+art/.venv/bin/python art/render/produce.py                         # 1 倍（网页版密度）→ out/assets/，审图 → out/review/
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py   # 2 倍（桌面版）→ out/assets@2x/，审图 → out/review@2x/
+art/.venv/bin/python art/render/produce.py --only hero,boss        # 只重渲部分；--review 只自检 + 重拼审图
+art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自检（按素材 meta 里的 px_per_unit 换算阈值）
 ```
+
+出图密度：`style.DENSITY`（环境变量 `LANTERN_ART_DENSITY`，1 或 2）。帧尺寸、线宽、墨晕、透明扩边、配准容差、
+笔触采样、纸纹、审图里的光圈半径等都按密度缩放；模型用米建模，与密度无关。每个 meta.json 写 `px_per_unit`，
+挂点是该密度下的最终像素。`LANTERN_RENDER_SCALE` 可改超采样倍数（默认 4）。2 倍出图约是 1 倍的 4 倍耗时。
 
 | 文件 | 作用 |
 |---|---|
-| `style/style.py` | 风格唯一来源（颜色、尺寸、相机、线条、后期参数、输出约定），只读 |
-| `style/bstyle.py` | Blender 侧：场景/渲染/相机（锚点数值校验）、假卡通材质（晕染+积墨）、发光材质、三档墨线、一次渲染读出填色/墨线/发光遮罩、挂点投影、渲染锁 |
-| `post/postprocess.py` | 4× 缩小、调色板软吸附、墨线叠加与墨晕、纸纹、透明区扩色、闪白剪影 |
-| `post/check_asset.py` | 按输出约定自检（尺寸、边距、脚点漂移、身高、调色板、墨线占比、挂点） |
-| `post/contact_sheet.py` | 白天拼图、3 倍放大、夜景合成、游戏实际大小对比 |
-| `models/hero.py` | 提灯剑修（idle 6 帧、walk 8 帧，8 向；发带/袖/下摆/发尾/灯笼/符纸有滞后摆动） |
-| `models/shade.py` | 影妖、疾影（同一个墨烟幽灵构造器，float 动画；烟缕按顶点属性 fade 渐隐） |
-| `models/rock.py` / `stone_lantern.py` | 山石 a/b/c（卵石/立石/双石，暗示轮廓线作皴笔）、石灯笼（窗口发光，苔壳） |
-| `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（两个出图脚本共用） |
-| `render/produce.py` | 正式出图 + 自检 + 审图（拼图、夜景、游戏大小、8 向动图） |
-| `render/style_frame.py` | 风格样张 |
+| `style/style.py` | 风格唯一来源（颜色、尺寸、相机、线条、后期参数、密度、输出约定），只读 |
+| `style/bstyle.py` | Blender 侧：场景/渲染/相机（锚点数值校验）、假卡通材质（晕染+积墨）、发光材质、烟缕材质、墨线分档、一次渲染读出填色/墨线/发光遮罩、挂点投影、渲染锁 |
+| `post/postprocess.py` | 缩小、调色板软吸附、墨线叠加与墨晕、纸纹、透明区扩色、闪白剪影 |
+| `post/check_asset.py` | 按输出约定自检（尺寸、边距、配准漂移、身高、着地、调色板、墨线占比、挂点） |
+| `post/contact_sheet.py` | 拼图、放大、夜景合成、游戏大小对比、动图 |
+| `models/hero.py` | 白衣墨氅剑仙：idle 6、walk 8、dash 4、hurt 2、death 6（不循环），8 向 |
+| `models/shade.py` | 影妖、疾影（墨烟幽灵，float） |
+| `models/golem.py` `fox.py` `ghoul.py` `stonelord.py` `toad.py` | 石妖、赤面狐与夜主九尾、青面鬼、石将（翁仲）、金蟾（move，只画 E） |
+| `models/kit.py` | 妖物建模公共件（石块、管状尾、毛笔形尾、分段晕染材质、破布片、发光眼） |
+| `models/rock.py` `stone_lantern.py` `event_props.py` | 山石 a/b/c、石灯笼、古灯、血祭坛 |
+| `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（出图脚本共用） |
+| `render/produce.py` | 正式出图 + 自检 + 审图 |
+| `render/style_frame.py` | 风格样张（早期） |
 
 墨线分档（物体放进哪个集合就用哪档，见 `bstyle.LINE_COLLECTIONS`）：
 outer 大形体（外轮廓 2.6px + 形线 1.4px + 折痕），inner 小部件（外轮廓 + 1.1px），
 thin 细长彩色部件（只有 1.1px，不进粗外轮廓，灯杖、符纸），none 不描线（眼、发光芯、烟缕）；
-`cun=True` 另加暗示轮廓线作皴笔。道具用 `setup_camera(..., anchor=PROP_ANCHOR)`。
+`cun=True` 另加暗示轮廓线作皴笔。道具用 `setup_camera(..., anchor=PROP_ANCHOR)`，
+石妖、精英、夜主用 `BIG_ENEMY_ANCHOR`（meta 里 `anchor_kind: "big_enemy"`）。
+meta 里的 `vertical_motion`（整个素材或单个动画）表示动画本身大幅上下（金蟾跳、主角死亡倒地），自检只查水平配准。
 
 实测要点（bpy 5.2.2）：
 - 物体编号通道在 EXR 里叫 `ViewLayer.Object Index.X`；**只开 Object Index 时全是 0，要同时开 Depth 才会写出**。

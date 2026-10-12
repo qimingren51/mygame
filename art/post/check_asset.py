@@ -6,7 +6,9 @@
 
 检查项：
   1. meta.json 结构：name/size/anchor/anims/sockets；每个动画有 frames/fps/dirs，朝向都在 DIRS 里；
-     anchor 必须是 ANCHOR（道具 category=prop 时是 PROP_ANCHOR）
+     anchor：道具（category=prop）用 PROP_ANCHOR，大体型妖物（anchor_kind=big_enemy）用 BIG_ENEMY_ANCHOR，其余 ANCHOR；
+     px_per_unit：素材的出图密度（缺省按 2，即 1 倍）。像素阈值（配准容差、外线宽、帧尺寸）都按
+     素材自己的密度换算，所以 1 倍和 2 倍的文件夹用同一个脚本、任何环境变量下都能检查
   2. 每个 <动画>_<朝向>_<帧号>.png 都存在、是 RGBA、尺寸等于 meta.size；附带的 _emit/_flash 图尺寸一致
   3. 四周至少 1px 完全透明（不能贴边）
   4. 脚底漂移：同一动画同一朝向的各帧，“脚点”离中位数不超过 FOOT_TOLERANCE_PX
@@ -23,6 +25,7 @@
   - y：锚点正上方窄列（±TOP_WINDOW×宽）里最高的不透明像素（冠顶/帽尖），亚像素
   - x：同一窄列里，锚点以上身高 40%~62% 的躯干条带的 alpha 加权重心（同组各帧用同一条带）
   同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）只查 x；
+  只播一次的动画（meta anims.<名>.loop=false，主角死亡）不查配准；
   vertical_motion（跳跃等本来就大幅上下的动画）也只查 x，并且不查逐帧身高。
 “着地”：非悬浮、非道具素材，锚点附近最低的不透明像素要在锚点上方 6% 身高到下方 10% 帧高之间
   （脚没飘起来、没沉下去；跑动时前脚在 S 向画面上会比锚点低几个像素，属正常）。
@@ -50,7 +53,7 @@ from style import style as S  # noqa: E402
 
 LIGHT_COLORS = [S.LANTERN_LIGHT, S.FLAME_LIGHT, S.SOUL_LIGHT, *S.EYE.values()]
 PALETTE_MIN_SHARE = 0.90
-LINE_RATIO_RANGE = (0.05, 0.60)
+LINE_RATIO_RANGE = (0.05, 0.65)  # 主角墨氅背面（W/NW）墨色本来就多，上限 65%
 BODY_WINDOW = 0.15  # 中间列半宽（相对帧宽）：求底线、脚点
 TOP_WINDOW = 0.06  # 求“头顶”时用更窄的列（头顶/冠就在锚点正上方，两侧摆动的灯笼不算）
 BASE_BAND = 0.12
@@ -144,10 +147,22 @@ def check_asset(asset_dir: Path) -> dict:
     if errors:
         return {"ok": False, "errors": errors, "warnings": warns, "info": info}
     W, H = meta["size"]
-    want_anchor = S.PROP_ANCHOR if meta.get("category") == "prop" else S.ANCHOR
+    if meta.get("category") == "prop":
+        want_anchor = S.PROP_ANCHOR
+    elif meta.get("anchor_kind") == "big_enemy":
+        want_anchor = S.BIG_ENEMY_ANCHOR
+    else:
+        want_anchor = S.ANCHOR
     if list(meta["anchor"]) != list(want_anchor):
         errors.append(f"meta.anchor = {meta['anchor']}，应为 {list(want_anchor)}（category={meta.get('category')}）")
-    if W != H or W not in S.FRAME.values():
+    ppu = float(meta.get("px_per_unit", 2.0))
+    if "px_per_unit" not in meta:
+        warns.append("meta 缺少 px_per_unit，按 2（1 倍密度）处理")
+    k = ppu / S.PX_PER_UNIT  # 素材密度 / 当前环境密度
+    foot_tol = S.FOOT_TOLERANCE_PX * k
+    line_outer = S.LINE_OUTER_PX * k
+    info["px_per_unit"] = ppu
+    if W != H or W not in [round(v * k) for v in S.FRAME.values()]:
         warns.append(f"meta.size = {meta['size']}，不在 FRAME 规定的尺寸里")
     expected: list[tuple[str, str, int]] = []
     for an, a in meta["anims"].items():
@@ -220,16 +235,21 @@ def check_asset(asset_dir: Path) -> dict:
             m["reg_x"] = measure(frames[k][..., 3] / 255.0, ax, ay, band)["reg_x"]
         fx = np.array([m["reg_x"] for _, m in lst])
         fy = np.array([m["reg_y"] for _, m in lst])
-        dx = float(np.abs(fx - np.median(fx)).max())
-        dy = 0.0 if floating else float(np.abs(fy - np.median(fy)).max())
+        # 单个动画也可以声明 vertical_motion（主角死亡倒地），该动画同样只查 x
+        g_vm = vmotion or bool(meta["anims"].get(an, {}).get("vertical_motion"))
+        g_float = floating or g_vm
+        one_shot = meta["anims"].get(an, {}).get("loop") is False  # 只播一次的动画（死亡）不要求逐帧配准
+        dx = 0.0 if one_shot else float(np.abs(fx - np.median(fx)).max())
+        dy = 0.0 if (g_float or one_shot) else float(np.abs(fy - np.median(fy)).max())
         drift_max = max(drift_max, dx, dy)
-        if dx > S.FOOT_TOLERANCE_PX or dy > S.FOOT_TOLERANCE_PX:
-            errors.append(f"{an}_{d}：配准漂移 x {dx:.2f}px / y {dy:.2f}px，超过 {S.FOOT_TOLERANCE_PX}px")
+        if dx > foot_tol or dy > foot_tol:
+            errors.append(f"{an}_{d}：配准漂移 x {dx:.2f}px / y {dy:.2f}px，超过 {foot_tol:g}px")
         for k, m in lst:
-            if not vmotion and abs(m["height"] - gh) > S.HEIGHT_TOLERANCE * gh:
+            if not g_vm and abs(m["height"] - gh) > S.HEIGHT_TOLERANCE * gh:
                 errors.append(f"{an}_{d}_{k[2]:02d}.png 身高 {m['height']:.0f}px，离本组中位数 {gh:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
-            if not floating and meta.get("category") != "prop":
-                lo, hi = ay - abs(GROUND_BAND[0]) * gh, ay + GROUND_BAND[1] * H
+            if not g_float and meta.get("category") != "prop":
+                lo = ay - abs(GROUND_BAND[0]) * gh
+                hi = ay + max(GROUND_BAND[1] * H, 0.9 * (H - ay))  # 锚点下方的空间可以用（朝镜头的拳脚），贴边另有检查
                 if not (lo <= m["bottom"] <= hi):
                     errors.append(f"{an}_{d}_{k[2]:02d}.png 着地异常：最低点 y={m['bottom']:.0f}，应在 {lo:.0f}~{hi:.0f}")
         groups[(an, d)] = [m for _, m in lst]
@@ -242,7 +262,7 @@ def check_asset(asset_dir: Path) -> dict:
             warns.append(f"{an}_{d}：剪影高 {gmed:.0f}px，与全素材中位数 {hmed:.0f}px 不同（多半是道具高过头顶，请目检）")
     if "height_px" in meta:
         tgt = float(meta["height_px"])
-        h_model = hmed - S.LINE_OUTER_PX / 2
+        h_model = hmed - line_outer / 2
         if abs(h_model - tgt) > S.HEIGHT_TOLERANCE * tgt:
             errors.append(f"身高中位数 {hmed:.1f}px（减去半个外线宽 {h_model:.1f}px）与目标 {tgt:.1f}px 相差超过 {S.HEIGHT_TOLERANCE:.0%}")
     info.update(foot_drift_max_px=round(drift_max, 2), height_median_px=round(hmed, 1),

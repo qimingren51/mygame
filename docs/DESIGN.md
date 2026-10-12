@@ -341,7 +341,8 @@ assets/data/
 
   | 图集 | 内容 |
   | --- | --- |
-  | `actors` | 主角、妖物、场景道具（含 `_flash`、`_emit` 帧）；放不下一页时自动分页。第一批只有主角和影妖 |
+  | `actors` | 主角、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern、古灯 ancient_lamp、血祭坛 blood_altar），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `boss` | 夜主九尾（640² 帧，单独一张，改模型时不影响 actors；下一批） |
   | `vfx` | 光源渐变、火焰、魂火、光环、墨点，以及法器与拾取物（`weapons/…`） |
   | `ground` | 地面装饰。第一批只有水墨草和晕染，下一批加石子、水洼、落叶、竹、灵泉、裂隙 |
   | `ui` | 法器、进化、心法、五行图标（下一批） |
@@ -356,7 +357,7 @@ assets/data/
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
   - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。
-  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留，包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category` 等。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼和古灯 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
   - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；

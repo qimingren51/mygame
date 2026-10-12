@@ -88,50 +88,66 @@ FOX_TAILS = [(15, 1.15, 0.0, 0.06), (48, 1.30, 1.1, -0.04), (80, 1.10, 2.2, 0.02
 
 
 def build_fox():
+    """赤面狐：半立的狐妖，穿层叠的狩衣（白色内衣 + 淡彩朱砂外袍，浓墨镶边的广袖），
+    细长的趾行腿，三条大尾巴。"""
+    from hero import _sleeve_build  # 主角的广袖构造器（下垂的袖兜 + 浓墨袖口）
     M = _mats("Fox")
+    M["under"] = K.toon("FoxUnder", ramp=[S.PAPER, S.INK["qing"], S.INK["dan"]], seed=57.0)
     eye = B.emissive_material("FoxEye", S.EYE["fox"], 1.0)
     root = B.empty("FoxRoot")
-    yaw = K.yaw_pivot("FoxYaw", root, -18, loc=(0.12, -0.05, 0))
+    yaw = K.yaw_pivot("FoxYaw", root, -18)
     body = B.empty("FoxBody", yaw)
     parts = {"root": root, "body": body, "M": M, "tails": []}
     obj = B.mesh_object
-    # 躯干（前倾 35°）+ 破袍
-    torso = B.empty("FoxTorso", body, loc=(0, 0.18, 0.95), rot=(math.radians(35), 0, 0))
+    # 躯干（前倾 30°，细腰）+ 交领
+    torso = B.empty("FoxTorso", body, loc=(0, 0.14, 1.00), rot=(math.radians(30), 0, 0))
     parts["torso"] = torso
-    obj("FoxChest", K.ellipsoid((0.23, 0.19, 0.42)), M["robe"], "outer", torso, loc=(0, 0, 0.36))
-    obj("FoxCollar", B.lathe([(0.10, 0.0), (0.13, 0.04), (0.10, 0.08)], 16), M["robe_dark"], "inner", torso,
+    obj("FoxChest", B.lathe([(0.16, 0.0), (0.17, 0.20), (0.21, 0.45), (0.25, 0.62), (0.22, 0.70), (0.10, 0.76),
+                             (0.0, 0.78)], 20, scale_y=0.72), M["robe"], "outer", torso, sharp_deg=0)
+    for sx in (-1, 1):  # 白色交领：两道斜线在胸前交叉
+        pts = [Vector((0.08 * sx, -0.10, 0.74)), Vector((0.02 * sx, -0.17, 0.60)), Vector((-0.07 * sx, -0.17, 0.42))]
+        obj(f"FoxCollarV{sx:+d}", K.strip_build(pts, 0.05, 0.012, side_hint=Vector((1, 0, 0)), taper=(1.0, 0.8)),
+            M["under"], "inner", torso)
+    obj("FoxCollar", B.lathe([(0.09, 0.0), (0.12, 0.04), (0.09, 0.08)], 16), M["robe_dark"], "inner", torso,
         loc=(0, -0.02, 0.70))
-    obj("FoxSash", B.lathe([(0.205, 0.0), (0.215, 0.05), (0.205, 0.10)], 20, scale_y=0.85), M["robe_dark"], "inner",
+    obj("FoxSash", B.lathe([(0.175, 0.0), (0.185, 0.05), (0.175, 0.10)], 20, scale_y=0.85), M["robe_dark"], "inner",
         torso, loc=(0, 0, 0.10))
+    # 狩衣下摆：白色内衣长、外袍短，几片层叠飘动
     rags = []
-    for i, (c, w) in enumerate(((-90, 80), (90, 90), (0, 70), (180, 70))):
-        ob = obj(f"FoxRag{i}", K.grid_build(K.rag_panel_rows(c, w, 0.21, 0.95, 0.62, seed=i, tatter=0.35)),
-                 M["robe"], "outer", body, loc=(0, 0.18, 0), sharp_deg=0)
-        rags.append((ob, c, w, i))
+    # 长度只到膝下，露出趾行的小腿和爪
+    for i, (c, w, ln, mat, r, fl) in enumerate(((-90, 90, 0.60, "under", 0.16, 0.20), (90, 100, 0.62, "under", 0.16, 0.20),
+                                                (0, 60, 0.58, "under", 0.16, 0.18), (180, 60, 0.58, "under", 0.16, 0.18),
+                                                (-55, 75, 0.44, "robe", 0.19, 0.16), (-125, 75, 0.44, "robe", 0.19, 0.16),
+                                                (55, 85, 0.47, "robe", 0.19, 0.16), (125, 85, 0.47, "robe", 0.19, 0.16))):
+        ob = obj(f"FoxRag{i}", K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, seed=i, tatter=0.10, flare=fl)),
+                 M[mat], "outer", body, loc=(0, 0.14, 0), sharp_deg=0)
+        rags.append((ob, c, w, i, ln, r, fl))
     parts["rags"] = rags
-    # 头：探在前上方，朝镜头再偏一点
-    head = B.empty("FoxHead", body, loc=(0, -0.64, 1.70), rot=(math.radians(-8), 0, math.radians(-25)))
+    head = B.empty("FoxHead", body, loc=(0, -0.58, 1.70), rot=(math.radians(-8), 0, math.radians(-25)))
     parts["head"] = head
-    sock = _fox_head("FoxH", head, M, eye, s=1.35, ear_h=0.26)
-    # 前肢：破袖 + 墨爪，向前探
+    sock = _fox_head("FoxH", head, M, eye, s=1.35, ear_h=0.30)
+    # 广袖（淡彩朱砂，浓墨袖口）+ 细长墨爪
     for sx, nm in ((1, "L"), (-1, "R")):
-        sh = B.empty(f"FoxShoulder{nm}", body, loc=(0.20 * sx, -0.30, 1.40))
-        K.limb(f"FoxSleeve{nm}", (0, 0, 0), (0.06 * sx, -0.20, -0.30), 0.085, 0.12, M["robe"], "outer", sh)
-        K.limb(f"FoxArm{nm}", (0.06 * sx, -0.20, -0.30), (0.03 * sx, -0.42, -0.42), 0.04, 0.03, M["fur"], "outer", sh)
+        sh = B.empty(f"FoxShoulder{nm}", body, loc=(0.18 * sx, -0.30, 1.42))
+        A_ = Vector((0, 0, 0))
+        cuff = Vector((0.07 * sx, -0.30, -0.30))
+        obj(f"FoxSleeve{nm}", _sleeve_build(A_, cuff, [(0.0, 0.07), (0.4, 0.10), (1.0, 0.17)], 0.32),
+            [M["robe"], M["robe_dark"], M["robe_dark"]], "outer", sh, sharp_deg=0)
+        K.limb(f"FoxArm{nm}", cuff, cuff + Vector((-0.02 * sx, -0.20, -0.08)), 0.03, 0.022, M["fur"], "outer", sh)
+        tipb = cuff + Vector((-0.02 * sx, -0.20, -0.08))
         for c in (-1, 0, 1):
-            K.limb(f"FoxClaw{nm}{c}", (0.03 * sx, -0.42, -0.42), (0.03 * sx + 0.025 * c, -0.52, -0.50), 0.014, 0.0,
-                   M["ink"], "inner", sh, segs=6)
+            K.limb(f"FoxClaw{nm}{c}", tipb, tipb + Vector((0.022 * c, -0.09, -0.06)), 0.011, 0.0, M["ink"], "inner",
+                   sh, segs=6)
         parts[f"arm_{nm}"] = sh
-        # 后腿：趾行（大腿向前、小腿向后、跖向前下）
-        hip = B.empty(f"FoxHip{nm}", body, loc=(0.13 * sx, 0.20, 0.92))
-        K.limb(f"FoxThigh{nm}", (0, 0, 0), (0.02 * sx, -0.20, -0.36), 0.10, 0.07, M["fur"], "outer", hip)
-        knee = B.empty(f"FoxKnee{nm}", hip, loc=(0.02 * sx, -0.20, -0.36))
-        K.limb(f"FoxShin{nm}", (0, 0, 0), (0, 0.26, -0.32), 0.06, 0.045, M["fur"], "outer", knee)
-        K.limb(f"FoxFoot{nm}", (0, 0.26, -0.32), (0, 0.10, -0.52), 0.045, 0.035, M["fur"], "outer", knee)
-        B.mesh_object(f"FoxPaw{nm}", K.ellipsoid((0.05, 0.09, 0.035)), M["fur"], "outer", knee, loc=(0, 0.06, -0.535))
+        # 后腿：趾行（大腿前下、小腿后下、跖骨前下，踮着脚尖）
+        hip = B.empty(f"FoxHip{nm}", body, loc=(0.11 * sx, 0.18, 0.96))
+        K.limb(f"FoxThigh{nm}", (0, 0, 0), (0.02 * sx, -0.22, -0.34), 0.075, 0.05, M["fur"], "outer", hip)
+        knee = B.empty(f"FoxKnee{nm}", hip, loc=(0.02 * sx, -0.22, -0.34))
+        K.limb(f"FoxShin{nm}", (0, 0, 0), (0, 0.24, -0.36), 0.045, 0.032, M["fur"], "outer", knee)
+        K.limb(f"FoxFoot{nm}", (0, 0.24, -0.36), (0, 0.12, -0.58), 0.032, 0.026, M["fur"], "outer", knee)
+        B.mesh_object(f"FoxPaw{nm}", K.ellipsoid((0.04, 0.075, 0.03)), M["fur"], "outer", knee, loc=(0, 0.08, -0.595))
         parts[f"hip_{nm}"], parts[f"knee_{nm}"] = hip, knee
-    # 尾巴
-    troot = Vector((0, 0.42, 0.98))
+    troot = Vector((0, 0.40, 1.00))
     for i, (ang, ln, tph, xo) in enumerate(FOX_TAILS):
         ob = obj(f"FoxTail{i}", K.tube_build(_fox_tail(troot, ang, ln, 0.0, tph, xo), K.bushy(0.12), 12, _tail_zones),
                  [M["fur"], M["gold"], M["red"]], "outer", body, sharp_deg=0)
@@ -152,64 +168,112 @@ def pose_fox(parts, anim, frame, n):
     """move：潜行小跑——两腿交替（髋前后摆、膝随之屈伸），身体轻微起伏，前爪交替探出，尾巴波动，破袍飘。"""
     ph = 2 * math.pi * (frame % n) / n
     parts["body"].location.z = 0.006 * math.cos(2 * ph)
-    parts["torso"].rotation_euler.x = math.radians(35)
+    parts["torso"].rotation_euler.x = math.radians(30)
     for nm, sgn in (("L", 1), ("R", -1)):
         s = sgn * math.sin(ph)
         parts[f"hip_{nm}"].rotation_euler = (math.radians(-16 * s), 0, 0)
-        parts[f"knee_{nm}"].rotation_euler = (math.radians(14 * max(0.0, -s) + 6), 0, 0)
+        parts[f"knee_{nm}"].rotation_euler = (math.radians(16 * max(0.0, -s) + 4), 0, 0)
         parts[f"arm_{nm}"].rotation_euler = (math.radians(9 * s), 0, 0)
     M = parts["M"]
     for ob, troot, ang, ln, tph, xo in parts["tails"]:
         K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))
-    for ob, c, w, i in parts["rags"]:
-        K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, 0.21, 0.95, 0.62, phase=ph, wind=0.35, seed=i,
-                                                         tatter=0.35)))
+    for ob, c, w, i, ln, r, fl in parts["rags"]:
+        K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, phase=ph, wind=0.12, seed=i,
+                                                         tatter=0.10, flare=fl)))
     bpy.context.view_layer.update()
 
 
 # ================================================================ 九尾
 BOSS_TAILS = 9
+TAIL_BANDS = [(0.0, S.INK["nong"]), (0.34, S.INK["dan"]), (0.52, S.INK["qing"]),
+              (0.64, S.ACCENT["tenghuang"]), (0.74, S.ACCENT["zhusha"])]  # 根部浓墨 → 淡墨 → 清墨 → 藤黄 → 朱砂尖
+RUFF_BANDS = [(0.0, S.INK["nong"]), (0.55, S.INK["zhong"]), (0.80, S.INK["qing"])]
+
+
+def _brush(t):
+    """毛笔形尾巴的半径：根部较粗，前三成鼓起，再一路收成尖。"""
+    if t >= 1.0:
+        return 0.0
+    swell = math.sin(math.pi / 2 * min(t / 0.30, 1.0))
+    taper = (1 - max(0.0, t - 0.30) / 0.70) ** 1.15
+    return 0.36 * (0.55 + 0.45 * swell) * taper
+
+
+def _boss_head(prefix, parent, M, eye_mat, s):
+    """细长吻部的狐头：墨色头骨 + 白面具（额、眼、长吻）+ 朱砂纹、藤黄额饰 + 高耸的尖耳。"""
+    obj = B.mesh_object
+    obj(f"{prefix}Skull", K.ellipsoid((0.14 * s, 0.16 * s, 0.13 * s)), M["fur"], "outer", parent)
+    obj(f"{prefix}MaskFace", K.ellipsoid((0.125 * s, 0.10 * s, 0.115 * s)), M["mask"], "outer", parent,
+        loc=(0, -0.08 * s, 0.01 * s))
+    obj(f"{prefix}Snout", K.ellipsoid((0.055 * s, 0.25 * s, 0.055 * s)), M["mask"], "outer", parent,
+        loc=(0, -0.27 * s, -0.05 * s), rot=(math.radians(12), 0, 0))  # 吻尖略向下
+    obj(f"{prefix}Nose", K.ellipsoid((0.022 * s, 0.02 * s, 0.017 * s)), M["ink"], "none", parent,
+        loc=(0, -0.505 * s, -0.10 * s))
+    for sx in (-1, 1):
+        pts = [Vector((0.03 * sx * s, -0.17 * s, 0.03 * s)), Vector((0.075 * sx * s, -0.15 * s, 0.05 * s)),
+               Vector((0.11 * sx * s, -0.10 * s, 0.09 * s))]
+        obj(f"{prefix}Mark{sx:+d}", K.strip_build(pts, 0.020 * s, 0.006 * s, side_hint=Vector((0, 0, 1)),
+                                                  taper=(1.0, 0.3)), M["red"], "none", parent)
+        ear = K.curve_points((0.07 * sx * s, 0.0, 0.09 * s), (0.10 * sx * s, 0.04 * s, 0.50 * s),
+                             bend=Vector((0.02 * sx * s, 0.02 * s, 0)), n=8)
+        obj(f"{prefix}Ear{sx:+d}", K.tube_build(ear, lambda t: 0.06 * s * (1 - t) ** 0.9 + 0.002, 8, flat=0.55),
+            M["fur"], "outer", parent)
+    obj(f"{prefix}Crest", K.ellipsoid((0.018 * s, 0.01 * s, 0.035 * s), 10, 6), M["gold"], "none", parent,
+        loc=(0, -0.172 * s, 0.10 * s))
+    return K.slit_eyes(prefix, parent, Vector((0, -0.175 * s, 0.035 * s)), 0.10 * s,
+                       (0.034 * s, 0.011 * s, 0.010 * s), eye_mat, tilt_deg=24)
 
 
 def build_boss():
     M = _mats("Boss")
     eye = B.emissive_material("BossEye", S.EYE["boss"], 1.0)
+    tail_mat = K.banded_toon_material("BossTailInk", TAIL_BANDS, edge=0.3, seed=58.0)
+    ruff_mat = K.banded_toon_material("BossRuffInk", RUFF_BANDS, edge=0.3, seed=59.0)
     root = B.empty("BossRoot")
-    yaw = K.yaw_pivot("BossYaw", root, -20, loc=(0.10, -0.45, 0))
+    yaw = K.yaw_pivot("BossYaw", root, -20)
     body = B.empty("BossBody", yaw, loc=(0, 0, 0.15))  # 悬浮
-    parts = {"root": root, "body": body, "M": M, "tails": []}
+    parts = {"root": root, "body": body, "M": M, "tails": [], "tail_mat": tail_mat}
     obj = B.mesh_object
-    obj("BossTorso", K.ellipsoid((0.46, 1.05, 0.50), 28, 16), M["fur"], "outer", body, loc=(0, 0.25, 1.52))
-    obj("BossChest", K.ellipsoid((0.56, 0.62, 0.72), 24, 14), M["fur"], "outer", body, loc=(0, -0.62, 1.78))
-    K.limb("BossNeck", (0, -0.80, 2.05), (0, -1.10, 2.75), 0.38, 0.27, M["fur"], "outer", body, segs=16)
-    # 颈部鬃刺：一圈墨色尖刺，向后
-    for i in range(11):
-        a = math.radians(-100 + i * 20)
-        base = Vector((0.40 * math.sin(a), -0.92 + 0.10 * math.cos(a), 2.20 + 0.32 * math.cos(a)))
-        tip = base + Vector((0.26 * math.sin(a), 0.50, 0.22 * math.cos(a) + 0.10))
-        K.limb(f"BossRuff{i}", base, tip, 0.14, 0.0, M["mask"] if i % 2 else M["fur"], "outer", body, segs=6)
-    head = B.empty("BossHead", body, loc=(0, -1.22, 2.95), rot=(math.radians(-10), 0, math.radians(-22)))
+    obj("BossTorso", K.ellipsoid((0.40, 1.08, 0.44), 28, 16), M["fur"], "outer", body, loc=(0, 0.28, 1.66))
+    obj("BossChest", K.ellipsoid((0.44, 0.52, 0.58), 24, 14), M["fur"], "outer", body, loc=(0, -0.58, 1.86))
+    obj("BossBib", K.ellipsoid((0.30, 0.26, 0.46), 20, 12), M["mask"], "outer", body, loc=(0, -0.88, 1.80))  # 白胸毛
+    for sx in (-1, 1):  # 后腿根部的大腿肌肉
+        obj(f"BossHaunch{sx:+d}", K.ellipsoid((0.20, 0.34, 0.34), 16, 10), M["fur"], "outer", body,
+            loc=(0.30 * sx, 0.92, 1.42))
+    K.limb("BossNeck", (0, -0.74, 2.10), (0, -1.00, 2.86), 0.30, 0.19, M["fur"], "outer", body, segs=16)
+    # 颈部鬃毛：一圈向后下方飘的毛束，根部浓墨、尖端清墨
+    for i in range(14):
+        a = math.radians(-120 + i * (240 / 13))
+        base = Vector((0.26 * math.sin(a), -0.92 + 0.08 * math.cos(a), 2.40 + 0.22 * math.cos(a)))
+        tip = base + Vector((0.34 * math.sin(a), 0.85, -0.28 + 0.10 * math.cos(a)))  # 披向肩背的鬃毛
+        fades: list = []
+        ob = obj(f"BossRuff{i}", K.tube_build(K.curve_points(base, tip, bend=Vector((0, 0.05, 0.12)), n=7),
+                                             K.bushy(0.15, peak=0.3), 8, flat=0.7, fades=fades), ruff_mat, "outer", body)
+        B.set_point_attr(ob, "fade", fades)
+    head = B.empty("BossHead", body, loc=(0, -1.06, 3.02), rot=(math.radians(-6), 0, math.radians(-24)))
     parts["head"] = head
-    sock = _fox_head("BossH", head, M, eye, s=2.6, ear_h=0.34)
-    # 额心藤黄纹
-    obj("BossCrest", K.ellipsoid((0.04, 0.02, 0.07), 10, 6), M["gold"], "none", head, loc=(0, -0.385, 0.30))
-    # 四肢（浮空，爪尖离地）
+    sock = _boss_head("BossH", head, M, eye, s=2.2)
+    # 修长的四肢（趾行，后腿有跗关节）
     legs = {}
-    for nm, (x, y, z), knee_off, paw in (("FL", (0.36, -0.70, 1.45), (0.02, -0.08, -0.62), (0.0, -0.18, -1.18)),
-                                          ("FR", (-0.36, -0.70, 1.45), (-0.02, -0.08, -0.62), (0.0, -0.18, -1.18)),
-                                          ("HL", (0.40, 0.95, 1.40), (0.02, -0.30, -0.55), (0.02, 0.10, -1.15)),
-                                          ("HR", (-0.40, 0.95, 1.40), (-0.02, -0.30, -0.55), (-0.02, 0.10, -1.15))):
+    for nm, (x, y, z), pts in (
+            ("FL", (0.28, -0.62, 1.62), [(0.02, -0.02, -0.66), (0.02, -0.10, -1.26), (0.02, -0.18, -1.44)]),
+            ("FR", (-0.28, -0.62, 1.62), [(-0.02, -0.02, -0.66), (-0.02, -0.10, -1.26), (-0.02, -0.18, -1.44)]),
+            ("HL", (0.32, 0.98, 1.56), [(0.02, -0.32, -0.52), (0.02, 0.14, -1.06), (0.02, -0.02, -1.40)]),
+            ("HR", (-0.32, 0.98, 1.56), [(-0.02, -0.32, -0.52), (-0.02, 0.14, -1.06), (-0.02, -0.02, -1.40)])):
         hip = B.empty(f"BossHip{nm}", body, loc=(x, y, z))
-        K.limb(f"BossUpper{nm}", (0, 0, 0), knee_off, 0.30, 0.16, M["fur"], "outer", hip)
-        K.limb(f"BossLower{nm}", knee_off, paw, 0.14, 0.09, M["fur"], "outer", hip)
-        obj(f"BossPaw{nm}", K.ellipsoid((0.14, 0.21, 0.08)), M["fur"], "outer", hip,
-            loc=Vector(paw) + Vector((0, -0.06, -0.02)))
+        prev, r = Vector((0, 0, 0)), (0.17, 0.11, 0.07, 0.055)
+        for k_, pnt in enumerate(pts):
+            K.limb(f"BossLeg{nm}{k_}", prev, pnt, r[k_], r[k_ + 1], M["fur"], "outer", hip)
+            prev = Vector(pnt)
+        obj(f"BossPaw{nm}", K.ellipsoid((0.08, 0.14, 0.05)), M["fur"], "outer", hip, loc=prev + Vector((0, -0.07, -0.02)))
         legs[nm] = hip
     parts["legs"] = legs
-    troot = Vector((0, 1.22, 1.72))
+    troot = Vector((0, 1.28, 1.86))
     for i in range(BOSS_TAILS):
-        ob = obj(f"BossTail{i}", K.tube_build(_boss_tail(troot, i, 0.0), K.bushy(0.20), 12, _tail_zones),
-                 [M["fur"], M["gold"], M["red"]], "outer", body, sharp_deg=0)
+        fades: list = []
+        ob = obj(f"BossTail{i}", K.tube_build(_boss_tail(troot, i, 0.0), _brush, 12, flat=0.62, fades=fades),
+                 tail_mat, "outer", body, sharp_deg=0)
+        B.set_point_attr(ob, "fade", fades)
         parts["tails"].append((ob, troot, i))
     sockets = {"eyes": sock, "feet": B.empty("BossFeet", root)}
     parts["sockets"] = sockets
@@ -218,14 +282,13 @@ def build_boss():
 
 
 def _boss_tail(root, i, phase):
-    """第 i 条尾巴：在身后的竖直面（E 向画面的平面）里扇形展开——仰角从 5°（水平向后）到 105°（略过头顶），
-    左右只错开一点；中间的最长。"""
-    f = i / (BOSS_TAILS - 1)  # 0..1
-    a = math.radians(-8 + 140 * f)  # 从略低于水平向后，一直开到越过头顶向前
+    """第 i 条尾巴：在身后的竖直面里扇形展开（-8°..132°），中间的最长；尖端略回卷。"""
+    f = i / (BOSS_TAILS - 1)
+    a = math.radians(6 + 128 * f)
     xo = 0.12 * math.sin(i * 2.1)
     d = Vector((xo, math.cos(a), math.sin(a)))
-    ln = 2.75 - 0.7 * abs(f - 0.45) * 2
-    return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + i * 0.7, 0.10, curl=0.4)
+    ln = 2.35 - 0.6 * abs(f - 0.45) * 2
+    return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + i * 0.7, 0.10, curl=0.5)
 
 
 def pose_boss(parts, anim, frame, n):
@@ -233,7 +296,10 @@ def pose_boss(parts, anim, frame, n):
     ph = 2 * math.pi * (frame % n) / n
     parts["body"].location.z = 0.15 + 0.03 * math.sin(ph)
     for nm, off in (("FL", 0.0), ("HR", 0.0), ("FR", math.pi), ("HL", math.pi)):
-        parts["legs"][nm].rotation_euler.x = math.radians(-12 * math.sin(ph + off))
+        parts["legs"][nm].rotation_euler.x = math.radians(-10 * math.sin(ph + off))
     for ob, troot, i in parts["tails"]:
-        K.replace_mesh(ob, K.tube_build(_boss_tail(troot, i, ph), K.bushy(0.20), 12, _tail_zones))
+        fades: list = []
+        build = K.tube_build(_boss_tail(troot, i, ph), _brush, 12, flat=0.62, fades=fades)
+        K.replace_mesh(ob, build)
+        B.set_point_attr(ob, "fade", fades)
     bpy.context.view_layer.update()

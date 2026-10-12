@@ -24,7 +24,6 @@ import kit as K  # noqa: E402
 from stone_lantern import moss_material  # noqa: E402
 
 SCALE = 0.92
-DEPTH_SHIFT = 0.30  # 身体整体向后（远离镜头）挪，锚点在身体前沿附近；见 kit 说明
 
 
 def build_golem():
@@ -36,8 +35,8 @@ def build_golem():
     eye = B.emissive_material("GolemEye", S.EYE["golem"], 1.0)
     root = B.empty("GolemRoot")
     # 朝镜头只偏 12°：帧下方只有 14px（ANCHOR 0.875），身体朝镜头一侧的厚度不能超过约 0.55 米
-    # 再整体往远离镜头的方向挪 0.2 米（E 向时建模 +X = 世界 +Y），画面上约上移 5px，不贴下边
-    yaw = K.yaw_pivot("GolemYaw", root, -12, loc=(DEPTH_SHIFT, 0, 0))
+    # 用 BIG_ENEMY_ANCHOR：身体中心就在锚点上（以前为了不贴下边整体后挪过，已去掉）
+    yaw = K.yaw_pivot("GolemYaw", root, -12)
     body = B.empty("GolemBody", yaw)
     parts = {"root": root, "body": body}
 

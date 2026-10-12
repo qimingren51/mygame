@@ -472,6 +472,8 @@ def build_hero():
     obj("LanternTassel", B.cylinder(0.009, 0.028, 0.11, 8), M["tassel"], "none", lp,
         loc=(0.024, 0.03, c_z - sh_h - 0.07))
     sock_lantern = B.empty("SocketLantern", lp, loc=(0, 0, c_z))
+    parts["lantern_loc0"] = lp.location.copy()
+    parts["lantern_cz"] = c_z
 
     # ---- 头：脸（下巴收尖）、发、冠、马尾、鬓发、发带
     head = B.empty("HeadPivot", chest, loc=rel((0, 0, 1.84)))
@@ -625,6 +627,8 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
     ph = 2 * math.pi * (frame % n_frames) / n_frames
     pel, chest = parts["pelvis"], parts["chest"]
     sL, sR, armR, lp = parts["sleeve_L"], parts["sleeve_R"], parts["arm_R"], parts["lantern"]
+    lp.location = parts["lantern_loc0"]
+    _set_core_strength(parts, 1.0)
     if anim == "walk":
         p = (frame % n_frames) / n_frames
         wind, rib_phase = WALK_WIND, 2 * ph
@@ -645,6 +649,8 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
         parts["pendant"].rotation_euler = (math.radians(16 + 10 * math.sin(2 * ph - 1)), 0, 0)
         parts["sword_tassel"].rotation_euler = (math.radians(30 + 10 * math.sin(2 * ph - 1.4)), 0, 0)
         sleeve_back = 0.10
+    elif anim in ("dash", "hurt", "death"):
+        wind, rib_phase, sleeve_back = _pose_action(parts, anim, frame, n_frames)
     else:  # idle：重心在右腿，左腿放松；微风；呼吸
         wind, rib_phase = IDLE_WIND, ph
         breath = math.sin(ph)
@@ -662,12 +668,16 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
         parts["pendant"].rotation_euler = (math.radians(3 * math.sin(ph - 1.0)), 0, 0)
         parts["sword_tassel"].rotation_euler = (math.radians(8 + 4 * math.sin(ph - 1.4)), 0, 0)
         sleeve_back = 0.02
-    parts["head"].rotation_euler = (math.radians(-6 if anim != "walk" else -2), 0, 0)  # 抬下巴
-    if anim != "walk":
-        parts["hip_R"].rotation_euler.z = 0.0
-    else:
+    if anim in ("idle", "walk"):
+        parts["head"].rotation_euler = (math.radians(-6 if anim != "walk" else -2), 0, 0)  # 抬下巴
+    if anim != "idle":
         parts["hip_L"].rotation_euler.z = 0.0
-        parts["hip_R"].rotation_euler.z = 0.0
+    parts["hip_R"].rotation_euler.z = 0.0
+    if anim != "death":
+        _back_view_staff(parts)
+    wind_hair = min(wind, 1.15)  # 发带/马尾的方向插值不外推太多
+    if anim == "dash":
+        wind_hair = 0.9  # 冲刺时 S 向发带/马尾正好在头顶后方，飘得太高会被当成冠顶漂移
 
     # 飘动部件：每帧重建
     slv_l, slv_r = parts["sleeve_mesh"]
@@ -675,19 +685,134 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
                                        swing_back=sleeve_back))
     _replace_mesh(slv_r, _sleeve_build(SH_R, CUFF_R, SLEEVE_RADII, SLEEVE_DROOP[1], rib_phase + 0.7, wind,
                                        swing_back=sleeve_back))
+    # 跪下/倒地时长摆按骨盆高度收短，不穿到地面以下（N 向会伸出帧底）
+    top_h = pel.location.z + (COAT_TOP - PELVIS_Z)
     for ob, a0, a1, ln, front in parts["coat_panels"]:
-        _replace_mesh(ob, _grid_build(_coat_panel_rows(a0, a1, ln, front, rib_phase, wind)))
+        ln_k = min(ln, max(0.25, top_h - 0.04))
+        _replace_mesh(ob, _grid_build(_coat_panel_rows(a0, a1, ln_k, front, rib_phase, wind)))
     for ob, thc, w in parts["tunic"]:
         _replace_mesh(ob, _grid_build(_tunic_rows(thc, w, rib_phase, wind * 0.5)))
-    _replace_mesh(parts["ponytail"], _strip_build(_ponytail_points(rib_phase, wind), 0.10, 0.05, taper=(1.0, 0.3)))
+    _replace_mesh(parts["ponytail"], _strip_build(_ponytail_points(rib_phase, wind_hair), 0.10, 0.05, taper=(1.0, 0.3)))
     rib_a, rib_b = parts["ribbon"]
-    _replace_mesh(rib_a, _strip_build(_ribbon_points(0.95, rib_phase, wind, 1.0), 0.066, 0.008, twist=2.4,
+    _replace_mesh(rib_a, _strip_build(_ribbon_points(0.95, rib_phase, wind_hair, 1.0), 0.066, 0.008, twist=2.4,
                                       taper=(0.8, 1.0)))
-    _replace_mesh(rib_b, _strip_build(_ribbon_points(0.80, rib_phase + 1.3, wind, -0.6), 0.060, 0.008, twist=-2.0,
+    _replace_mesh(rib_b, _strip_build(_ribbon_points(0.80, rib_phase + 1.3, wind_hair, -0.6), 0.060, 0.008, twist=-2.0,
                                       taper=(0.8, 1.0)))
     for sx, ob in zip((-1, 1), parts["sidelocks"]):
-        _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind), 0.026, 0.012, taper=(1.0, 0.4)))
+        _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind_hair), 0.026, 0.012, taper=(1.0, 0.4)))
     tal, mark, ttop = parts["talisman"]
     _replace_mesh(tal, _talisman_build(ttop, rib_phase + 0.6, wind))
     _replace_mesh(mark, _talisman_mark_build(ttop, rib_phase + 0.6, wind))
     bpy.context.view_layer.update()
+    if anim == "death":
+        _drop_lantern(parts, frame)
+        bpy.context.view_layer.update()
+
+
+# ---------------------------------------------------------------- 背面朝向的灯杖、动作动画
+# 背对镜头时（N/NE/NW）杖向前伸就是往画面上方伸，灯笼会悬在头顶；这几个朝向把持杖手臂往外侧摆、
+# 压低仰角，让灯笼落在肩旁。朝向由出图流水线在 pose 前写进 parts["dir"]。
+# NW 向时右手一侧本身就背离镜头，外摆还会抬高，所以要摆到外后方（-75°）才落在肩旁
+BACK_STAFF = {"N": (-22, -48), "NE": (-16, -32), "NW": (-12, -75)}  # (绕前后轴压低, 绕竖轴外摆) 度
+
+
+def _back_view_staff(parts):
+    d = parts.get("dir")
+    if d not in BACK_STAFF:
+        return
+    roll, yaw = BACK_STAFF[d]
+    armR = parts["arm_R"]
+    armR.rotation_euler = (armR.rotation_euler.x, math.radians(roll), math.radians(yaw))
+
+
+def _set_core_strength(parts, k):
+    """灯笼芯的自发光强度（死亡动画里灯灭）。"""
+    m = parts["mats"]["core"]
+    emi = next(n for n in m.node_tree.nodes if n.type == "EMISSION")
+    emi.inputs["Strength"].default_value = k
+
+
+# 死亡：踉跄 → 单膝跪地 → 前俯 → 灯笼落地 → 伏倒 → 静止；灯芯在最后三帧熄灭
+# 第 3 帧起灯笼脱手落在身侧；人跪着拄杖（右臂把杖扶直，杖不会戳出帧底）。
+# 帧下方只有 12.5% 帧高（约 0.8 米地面进深），所以前俯幅度、灯笼落点都收在锚点 0.5 米以内。
+DEATH = [  # (骨盆 y, 骨盆 z, 胸前俯°, 头°, 左脚(y,z), 右脚(y,z), 右臂俯°, 左袖°, 灯芯亮度)
+    (0.03, PELVIS_Z - 0.02, -10, -16, (-0.12, 0.0), (0.02, 0.0), 6, -10, 1.0),
+    (0.06, 0.66, 14, 8, (-0.30, 0.0), (0.32, 0.0), 20, 6, 1.0),
+    (0.08, 0.58, 30, 22, (-0.30, 0.0), (0.33, 0.0), 0, 14, 0.9),
+    (0.10, 0.50, 46, 30, (-0.22, 0.0), (0.34, 0.0), -60, 20, 0.6),
+    (0.12, 0.44, 60, 34, (0.04, 0.0), (0.34, 0.0), -78, 26, 0.3),
+    (0.12, 0.42, 64, 38, (0.06, 0.0), (0.34, 0.0), -84, 28, 0.08),
+]
+
+
+def _pose_action(parts, anim, frame, n):
+    """dash / hurt / death 的姿态。返回 (wind, 飘动相位, 袖后摆)。"""
+    pel, chest, head = parts["pelvis"], parts["chest"], parts["head"]
+    sL, sR, armR, lp = parts["sleeve_L"], parts["sleeve_R"], parts["arm_R"], parts["lantern"]
+    ph = 2 * math.pi * (frame % n) / n
+    if anim == "dash":  # 轻功冲刺：前倾 20°，双腿前后大劈，衣摆发带全展
+        p = (frame % n) / n
+        pel.location = (0, 0.02, PELVIS_Z - 0.06 + 0.012 * math.cos(2 * ph))
+        pel.rotation_euler = (0, 0, math.radians(5) * math.sin(ph))
+        chest.location = (0, 0, 0)
+        chest.rotation_euler = (math.radians(20), 0, math.radians(-4) * math.sin(ph))
+        head.rotation_euler = (math.radians(-14), 0, 0)  # 抬头看前方
+        for side, off, sx in (("L", 0.0, 1), ("R", math.pi, -1)):
+            c = math.cos(2 * math.pi * p + off)
+            y = -0.44 * c
+            z = 0.04 + 0.16 * max(0.0, c) ** 1.5 * 0 + 0.20 * max(0.0, -math.sin(2 * math.pi * p + off)) * 0.6
+            z = 0.03 + (0.16 if c < 0 else 0.0) * (-c)  # 后蹬的脚抬起，前脚贴地
+            _leg_ik(parts, side, Vector((HIP_X * sx * 0.9, y, ANKLE_Z + z)), math.radians(30) * max(0.0, -c))
+        sL.rotation_euler = (math.radians(38), 0, math.radians(-8))  # 左袖甩向后
+        sR.rotation_euler = (math.radians(14), 0, 0)
+        armR.rotation_euler = (math.radians(-6), 0, 0)
+        lp.rotation_euler = (math.radians(38 + 4 * math.sin(ph)), 0, 0)  # 灯笼被甩向后
+        parts["pendant"].rotation_euler = (math.radians(45), 0, 0)
+        parts["sword_tassel"].rotation_euler = (math.radians(60), 0, 0)
+        return 1.12, 2 * ph, 0.30  # 再大衣摆/发带就飘出 E/W 帧边
+    if anim == "hurt":  # 受击：头和上身向后一挫，灯笼往前甩
+        k = (1.0, 0.72)[frame % 2]  # 两帧幅度接近：冠顶前后差不超过配准容差
+        pel.location = (-0.02, 0.03 * k, PELVIS_Z - 0.02)
+        pel.rotation_euler = (0, 0, 0)
+        chest.location = (0, 0, 0)
+        chest.rotation_euler = (math.radians(-8 * k), 0, math.radians(4 * k))
+        head.rotation_euler = (math.radians(-14 * k), 0, math.radians(5 * k))
+        _leg_ik(parts, "R", Vector((-HIP_X - 0.03, 0.03, ANKLE_Z)))
+        _leg_ik(parts, "L", Vector((HIP_X + 0.07, -0.13, ANKLE_Z)))
+        sL.rotation_euler = (math.radians(-18 * k), 0, 0)
+        sR.rotation_euler = (math.radians(-10 * k), 0, 0)
+        armR.rotation_euler = (math.radians(-6 * k), 0, 0)
+        lp.rotation_euler = (math.radians(-24 * k + 8 * (1 - k)), math.radians(6 * k), 0)
+        parts["pendant"].rotation_euler = (math.radians(-12 * k), 0, 0)
+        parts["sword_tassel"].rotation_euler = (math.radians(-10 * k), 0, 0)
+        return 0.6, 1.5 + frame, 0.0
+    # death
+    py, pz, lean, hd, fl, fr, arm, sl, core = DEATH[min(frame, len(DEATH) - 1)]
+    pel.location = (0, py, pz)
+    pel.rotation_euler = (0, 0, 0)
+    chest.location = (0, 0, 0)
+    chest.rotation_euler = (math.radians(lean), 0, math.radians(4))
+    head.rotation_euler = (math.radians(hd), 0, math.radians(-6))
+    _leg_ik(parts, "L", Vector((HIP_X + 0.03, fl[0], ANKLE_Z + fl[1])))
+    _leg_ik(parts, "R", Vector((-HIP_X - 0.02, fr[0], ANKLE_Z + fr[1])), math.radians(60) if fr[0] > 0.3 else 0.0)
+    sL.rotation_euler = (math.radians(sl), 0, math.radians(-6))
+    sR.rotation_euler = (math.radians(sl * 0.6), 0, 0)
+    armR.rotation_euler = (math.radians(arm), 0, 0)
+    lp.rotation_euler = (math.radians(-10 + 12 * math.sin(frame)), 0, 0)
+    parts["pendant"].rotation_euler = (math.radians(lean * 0.8), 0, 0)
+    parts["sword_tassel"].rotation_euler = (math.radians(lean), 0, 0)
+    _set_core_strength(parts, core)
+    return 0.15, 0.4 * frame, 0.0
+
+
+def _drop_lantern(parts, frame):
+    """死亡第 3 帧起，灯笼脱手，侧躺在右前方的地上（直接设世界矩阵）。"""
+    if frame < 3:
+        return
+    lp, root = parts["lantern"], parts["root"]
+    c_z = parts["lantern_cz"]
+    roll = math.radians(80 + 6 * (frame - 3))
+    center = Vector((-0.30, 0.16 + 0.02 * (frame - 3), 0.118))  # root 坐标：落在右侧身旁，离锚点 0.35 米以内
+    rot = Matrix.Rotation(roll, 4, "Y")
+    pivot = center - (rot.to_3x3() @ Vector((0, 0, c_z)))
+    lp.matrix_world = root.matrix_world @ (Matrix.Translation(pivot) @ rot)

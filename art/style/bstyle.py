@@ -51,7 +51,7 @@ WASH_VALUE = 0.04  # 晕染造成的明度起伏（±2%，后期吸附调色板�
 EDGE_AMOUNT = 0.55  # 积墨：越靠近轮廓越暗，对点积的最大压低量
 EDGE_POWER = 3.0  # 积墨只集中在轮廓附近
 CREASE_ANGLE_DEG = 128.0  # Freestyle 折痕角：两面法线夹角大于 180-此值 才算折痕
-SAMPLING_PX = 1.5  # 线条重采样间距（最终像素）
+SAMPLING_PX = 1.5  # 线条重采样间距（1 倍密度的最终像素；以下带 _PX 的笔触参数都再乘 S.DENSITY）
 SPLIT_ANGLE_DEG = 115.0  # 笔画在小于这个 2D 角度的拐角处断开，每段单独收笔
 CUN_MIN_LENGTH_PX = 3.0  # 皴笔（暗示轮廓线）最短长度（最终像素），去掉碎点
 
@@ -529,16 +529,16 @@ def _linestyle(name: str, width_px: float, seed: int):
     st.use_angle_min = True  # 在急转角处断笔，每段各自收笔，更像一笔一笔画出来的
     st.angle_min = math.radians(SPLIT_ANGLE_DEG)
     st.use_length_min = True  # 太短的碎线不画
-    st.length_min = 1.2 * rs
+    st.length_min = 1.2 * S.DENSITY * rs
     for mods in (st.thickness_modifiers, st.geometry_modifiers, st.color_modifiers, st.alpha_modifiers):
         for mo in list(mods):
             mods.remove(mo)
 
     g = st.geometry_modifiers
     samp = g.new(name="Sampling", type="SAMPLING")
-    samp.sampling = SAMPLING_PX * rs
+    samp.sampling = SAMPLING_PX * S.DENSITY * rs
     stretch = g.new(name="Overshoot", type="BACKBONE_STRETCHER")  # 起笔/收笔略出头
-    stretch.backbone_length = 0.6 * rs
+    stretch.backbone_length = 0.6 * S.DENSITY * rs
     pn = g.new(name="Wobble", type="PERLIN_NOISE_1D")
     pn.frequency = 1.0 / (S.LINE_NOISE_PERIOD_PX * rs)
     pn.amplitude = S.LINE_NOISE_AMPLITUDE_PX * rs
@@ -598,7 +598,7 @@ def setup_freestyle(view_layer=None):
     form_style = _linestyle("InkForm", S.LINE_FORM_PX, 5)
     inner_style = _linestyle("InkInner", S.LINE_INNER_PX, 3)
     cun_style = _linestyle("InkCun", S.LINE_INNER_PX, 9)
-    cun_style.length_min = CUN_MIN_LENGTH_PX * S.RENDER_SCALE
+    cun_style.length_min = CUN_MIN_LENGTH_PX * S.DENSITY * S.RENDER_SCALE
     colls = {k: bpy.data.collections[v] for k, v in LINE_COLLECTIONS.items()}
     colls["contour"] = bpy.data.collections[CONTOUR_COLLECTION]
     colls["cun"] = bpy.data.collections[CUN_COLLECTION]
