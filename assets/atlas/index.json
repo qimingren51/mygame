@@ -1,6 +1,7 @@
 {
  "atlases": [
   "actors",
+  "boss",
   "ground",
   "ui",
   "vfx"
@@ -18,6 +19,9 @@
   ],
   "ui": [
    "ui.json"
+  ],
+  "boss": [
+   "boss.json"
   ]
  }
 }

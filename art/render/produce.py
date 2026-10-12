@@ -44,7 +44,9 @@ BATCH2 = {
     "fox": ("fox", "fox", "elite", 8, 12, 24, {"category": "elite", "anchor_kind": "big_enemy"}),
     "ghoul": ("ghoul", "ghoul", "elite", 8, 8, 30, {"category": "elite", "anchor_kind": "big_enemy"}),
     "stonelord": ("stonelord", "stonelord", "elite", 8, 6, 28, {"category": "elite", "anchor_kind": "big_enemy"}),
-    "boss": ("fox", "boss", "boss", 8, 8, 44, {"category": "boss", "floating": True, "anchor_kind": "big_enemy"}),
+    # 九尾着地，但锚点正上方最高处是摆动的尾扇，“头顶”y 配准没有意义，所以自检只查 x（身高仍逐帧查）。
+    # 不能写 floating：游戏会给 floating 的妖物加悬浮起伏。
+    "boss": ("fox", "boss", "boss", 8, 8, 44, {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy"}),
     "toad": ("toad", "toad", "small", 6, 10, 14, {"category": "enemy", "vertical_motion": True}),
 }
 ALL += list(BATCH2)

@@ -342,7 +342,7 @@ assets/data/
   | 图集 | 内容 |
   | --- | --- |
   | `actors` | 主角、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern、古灯 ancient_lamp、血祭坛 blood_altar），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
-  | `boss` | 夜主九尾（640² 帧，单独一张，改模型时不影响 actors；下一批） |
+  | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
   | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2` |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光） |
   | `ui` | 界面图标 `ui/icon_<法器或心法 id>`、`ui/icon_<法器 id>_evo`（进化）、`ui/icon_el_<metal\|wood\|water\|fire\|earth>`。屏幕空间用，2 倍下 128²，`pxPerUnit` 对它没有意义 |
@@ -357,7 +357,7 @@ assets/data/
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
   - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。
-  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼和古灯 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼和古灯 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
   - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；

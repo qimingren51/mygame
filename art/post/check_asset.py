@@ -24,7 +24,7 @@
   现在量的是身体的配准点：
   - y：锚点正上方窄列（±TOP_WINDOW×宽）里最高的不透明像素（冠顶/帽尖），亚像素
   - x：同一窄列里，锚点以上身高 40%~62% 的躯干条带的 alpha 加权重心（同组各帧用同一条带）
-  同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）只查 x；
+  同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）和 register_x_only 只查 x；
   只播一次的动画（meta anims.<名>.loop=false，主角死亡）不查配准；
   vertical_motion（跳跃等本来就大幅上下的动画）也只查 x，并且不查逐帧身高。
 “着地”：非悬浮、非道具素材，锚点附近最低的不透明像素要在锚点上方 6% 身高到下方 10% 帧高之间
@@ -183,6 +183,8 @@ def check_asset(asset_dir: Path) -> dict:
     ax, ay = meta["anchor"][0] * W, meta["anchor"][1] * H
     pal = _pal(LIGHT_COLORS + list(meta.get("palette_extra", [])))
     floating = bool(meta.get("floating", False))
+    # register_x_only：只给自检用，按悬浮素材的规则查（只查 x 配准、不查着地），但游戏里不悬浮（九尾的尾扇最高）
+    floating = floating or bool(meta.get("register_x_only", False))
     # vertical_motion：动画本身就上下大幅移动（金蟾跳跃），只查 x 配准，不查逐帧身高和着地
     vmotion = bool(meta.get("vertical_motion", False))
     floating = floating or vmotion
