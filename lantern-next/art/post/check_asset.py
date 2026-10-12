@@ -16,14 +16,17 @@
   7. 墨线占比：在合理范围 LINE_RATIO_RANGE 内
   8. 挂点：meta.sockets 里每个挂点都覆盖每个动画、每个朝向、每一帧
 
-“脚点”的定义（对走路时一只脚前后移动不敏感）：
-  - 只看锚点左右 BODY_WINDOW×宽 的中间列（排除灯笼、飘带等伸到两侧的部件）
-  - 底线 y：自下而上第一行“宽度 ≥ 下半身最宽行的 35%”的行（取到的是下摆/双脚这一整排，
-    不会被单个脚尖拉低）
-  - 脚点 x：底线往上 BASE_BAND×身高 这一条带里，按 alpha 加权的水平重心
-  悬浮的素材（meta.floating=true）只检查 x。
-“身高”：锚点正上方窄列（±TOP_WINDOW×宽）里最上面一个不透明像素到底线的距离；与目标比较时减去一个外线宽
-  （外轮廓线在顶部和底部各有约半个线宽伸出模型之外）。
+“配准漂移”（检查项 4，沿用 FOOT_TOLERANCE_PX）：
+  原先按“脚底”测，但真正迈步的腿（主角跑动每轮前进 3.2 米，着地脚相对身体前后各约 0.3 米，S 向画面上
+  就是上下约 ±7px）和飘动的衣摆会让任何“按脚”量出来的点本身就在动，量不出贴图有没有错位。
+  现在量的是身体的配准点：
+  - y：锚点正上方窄列（±TOP_WINDOW×宽）里最高的不透明像素（冠顶/帽尖），亚像素
+  - x：同一窄列里，锚点以上身高 40%~62% 的躯干条带的 alpha 加权重心（同组各帧用同一条带）
+  同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）只查 x。
+“着地”：非悬浮、非道具素材，锚点附近最低的不透明像素要在锚点上方 6% 身高到下方 10% 帧高之间
+  （脚没飘起来、没沉下去；跑动时前脚在 S 向画面上会比锚点低几个像素，属正常）。
+“身高”：锚点（地面）到冠顶的距离。逐帧和同组中位数比（HEIGHT_TOLERANCE）；全素材中位数减半个外线宽后
+  和 meta.height_px 比；某个朝向整体偏离只给警告（道具可能高过头顶）。
 “墨线像素”：离墨线色 LINE_NEAR 以内的纯墨，或不在调色板容差内、但能解释为“某个调色板色与墨线色的混合、
   墨的比例 ≥ 20%”的过渡像素。焦墨填色（头发、靴子暗面）也算在墨里，所以墨线占比其实是“墨的覆盖率”。
   底线 y 和顶 y 都取亚像素（行宽/行 alpha 总量插值），否则整数行跳动本身就有 1px。
@@ -52,7 +55,8 @@ TOP_WINDOW = 0.06  # 求“头顶”时用更窄的列（头顶/冠就在锚点�
 BASE_BAND = 0.12
 ALPHA_OPAQUE = 0.5
 LINE_NEAR = 10.0  # 离墨线色这么近就算纯墨
-FOOT_EXCLUDE_PX = 2  # 求脚点 x 时去掉最底下几行（单个脚尖），只看下摆/双脚这一排
+BAND = (0.40, 0.62)  # 躯干条带：锚点以上身高的 40%~62%（腰到胸），求配准点 x
+GROUND_BAND = (-0.06, 0.10)  # 着地检查：最低的不透明像素应在锚点上方 6% 身高到下方 10% 帧高之间
 FRAME_RE = re.compile(r"^(?P<anim>[a-z0-9]+)_(?P<dir>[A-Z]{1,2})_(?P<idx>\d{2})(?P<suffix>_[a-z]+)?\.png$")
 
 
@@ -88,9 +92,9 @@ def palette_distance(rgb: np.ndarray, pal: np.ndarray) -> np.ndarray:
     return best.reshape(rgb.shape[:2])
 
 
-def measure(alpha: np.ndarray, anchor_x: float, band_rows: tuple[float, float] | None = None) -> dict | None:
-    """脚点与身高（像素，可为小数），定义见文件头。band_rows 给定时用这几行求脚点 x
-    （同一动画同一朝向的各帧用同一条带，避免条带本身跳动）。"""
+def measure(alpha: np.ndarray, anchor_x: float, anchor_y: float, band_rows: tuple[float, float] | None = None) -> dict | None:
+    """一帧的“配准点”和身高（像素，可为小数），定义见文件头。
+    band_rows 给定时用这几行求躯干重心 x（同一动画同一朝向的各帧用同一条带）。"""
     H, W = alpha.shape
     x0 = max(0, int(round(anchor_x - BODY_WINDOW * W)))
     x1 = min(W, int(round(anchor_x + BODY_WINDOW * W)) + 1)
@@ -98,30 +102,24 @@ def measure(alpha: np.ndarray, anchor_x: float, band_rows: tuple[float, float] |
     rows = np.where((win >= ALPHA_OPAQUE).any(1))[0]
     if rows.size == 0:
         return None
-    top, bottom = int(rows[0]), int(rows[-1])
-    widths = win.sum(1)
-    thr = 0.35 * widths[(top + bottom) // 2: bottom + 1].max()
-    y = bottom
-    while y > top and widths[y] < thr:
-        y -= 1
-    nxt = widths[y + 1] if y + 1 < H else 0.0
-    base = y + 0.5 + (widths[y] - thr) / max(widths[y] - nxt, 1e-6)  # 宽度降到阈值的位置（亚像素）
-    # 顶：窄列里第一个不透明行，按该行 alpha 总量取亚像素位置
+    bottom = int(rows[-1])
+    # 顶：锚点正上方窄列里第一个不透明行，按该行 alpha 总量取亚像素位置
     t0 = max(0, int(round(anchor_x - TOP_WINDOW * W)))
     t1 = min(W, int(round(anchor_x + TOP_WINDOW * W)) + 1)
     tw = alpha[:, t0:t1].astype(np.float64)
     trows = np.where((tw >= ALPHA_OPAQUE).any(1))[0]
-    top = int(trows[0]) if trows.size else top
+    top = int(trows[0]) if trows.size else int(rows[0])
     tops = tw[top].sum() / max(tw[top + 1].sum(), 1e-6) if top + 1 < H else 1.0
     top_f = top + 1 - min(1.0, tops)
+    height = anchor_y - top_f
     if band_rows is None:
-        band_rows = (base - BASE_BAND * (base - top_f), base - FOOT_EXCLUDE_PX)
+        band_rows = (anchor_y - BAND[1] * height, anchor_y - BAND[0] * height)
     r0, r1 = int(np.floor(band_rows[0])), int(np.ceil(band_rows[1]))
-    band = win[max(r0, 0): max(r1, r0 + 1)]
-    xs = np.arange(x0, x1) + 0.5
+    band = tw[max(r0, 0): max(r1, r0 + 1)]
+    xs = np.arange(t0, t1) + 0.5
     wsum = band.sum()
-    foot_x = float((band.sum(0) * xs).sum() / wsum) if wsum > 0 else float("nan")
-    return {"foot_x": foot_x, "foot_y": float(base), "top": float(top_f), "height": float(base - top_f)}
+    reg_x = float((band.sum(0) * xs).sum() / wsum) if wsum > 0 else float("nan")
+    return {"reg_x": reg_x, "reg_y": float(top_f), "height": float(height), "bottom": float(bottom + 1)}
 
 
 def check_asset(asset_dir: Path) -> dict:
@@ -201,55 +199,48 @@ def check_asset(asset_dir: Path) -> dict:
         errors.append("没有可检查的帧")
         return {"ok": False, "errors": errors, "warnings": warns, "info": info}
 
-    # ---- 4/5. 脚点、身高
-    ms = {k: measure(v[..., 3] / 255.0, ax) for k, v in frames.items()}
-    # 第二遍：同一动画同一朝向用同一条带求脚点 x
-    bases: dict = {}
-    for (an, d, i), m in ms.items():
-        if m:
-            bases.setdefault((an, d), []).append((m["foot_y"], m["height"]))
-    for k in list(ms):
-        if ms[k] is None:
-            continue
-        b = np.array(bases[(k[0], k[1])])
-        mb, mh = float(np.median(b[:, 0])), float(np.median(b[:, 1]))
-        ms[k]["foot_x"] = measure(frames[k][..., 3] / 255.0, ax, (mb - BASE_BAND * mh, mb - FOOT_EXCLUDE_PX))["foot_x"]
+    # ---- 4/5. 配准漂移、身高、着地
+    ms = {k: measure(v[..., 3] / 255.0, ax, ay) for k, v in frames.items()}
     for k, m in ms.items():
         if m is None:
             errors.append(f"{k[0]}_{k[1]}_{k[2]:02d}.png 是空图")
     groups: dict = {}
     for (an, d, i), m in ms.items():
         if m:
-            groups.setdefault((an, d), []).append(m)
+            groups.setdefault((an, d), []).append(((an, d, i), m))
     drift_max = 0.0
     for (an, d), lst in groups.items():
-        fx = np.array([m["foot_x"] for m in lst])
-        fy = np.array([m["foot_y"] for m in lst])
+        gh = float(np.median([m["height"] for _, m in lst]))
+        band = (ay - BAND[1] * gh, ay - BAND[0] * gh)  # 同组用同一条带
+        for k, m in lst:
+            m["reg_x"] = measure(frames[k][..., 3] / 255.0, ax, ay, band)["reg_x"]
+        fx = np.array([m["reg_x"] for _, m in lst])
+        fy = np.array([m["reg_y"] for _, m in lst])
         dx = float(np.abs(fx - np.median(fx)).max())
         dy = 0.0 if floating else float(np.abs(fy - np.median(fy)).max())
         drift_max = max(drift_max, dx, dy)
         if dx > S.FOOT_TOLERANCE_PX or dy > S.FOOT_TOLERANCE_PX:
-            errors.append(f"{an}_{d}：脚点漂移 x {dx:.2f}px / y {dy:.2f}px，超过 {S.FOOT_TOLERANCE_PX}px")
-        if abs(float(np.median(fx)) - ax) > 3.0:
-            warns.append(f"{an}_{d}：脚点 x 中位数 {np.median(fx):.1f}，离锚点 {ax:.1f} 超过 3px")
-        if not floating and meta.get("category") != "prop" and abs(float(np.median(fy)) - ay) > 6.0:
-            warns.append(f"{an}_{d}：底线 y 中位数 {np.median(fy):.1f}，离锚点 {ay:.1f} 超过 6px")
+            errors.append(f"{an}_{d}：配准漂移 x {dx:.2f}px / y {dy:.2f}px，超过 {S.FOOT_TOLERANCE_PX}px")
+        for k, m in lst:
+            if abs(m["height"] - gh) > S.HEIGHT_TOLERANCE * gh:
+                errors.append(f"{an}_{d}_{k[2]:02d}.png 身高 {m['height']:.0f}px，离本组中位数 {gh:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
+            if not floating and meta.get("category") != "prop":
+                lo, hi = ay - abs(GROUND_BAND[0]) * gh, ay + GROUND_BAND[1] * H
+                if not (lo <= m["bottom"] <= hi):
+                    errors.append(f"{an}_{d}_{k[2]:02d}.png 着地异常：最低点 y={m['bottom']:.0f}，应在 {lo:.0f}~{hi:.0f}")
+        groups[(an, d)] = [m for _, m in lst]
     heights = np.array([m["height"] for m in ms.values() if m])
     hmed = float(np.median(heights))
-    # 逐帧和“同一动画同一朝向”的中位数比（抓缩放跳变）；各朝向的中位数和全素材中位数比只给警告——
-    # 有些朝向里灯杖、灯笼正好在头顶后方，剪影最高点不是头顶（例如主角 NW 向杖头比冠顶高约 19px）
+    # 各朝向的中位数和全素材中位数比只给警告——有些朝向里灯杖、灯笼正好在头顶后方
     for (an, d), lst in groups.items():
         gmed = float(np.median([m["height"] for m in lst]))
-        for (an2, d2, i), m in ms.items():
-            if m and (an2, d2) == (an, d) and abs(m["height"] - gmed) > S.HEIGHT_TOLERANCE * gmed:
-                errors.append(f"{an}_{d}_{i:02d}.png 身高 {m['height']:.0f}px，离本组中位数 {gmed:.0f}px 超过 {S.HEIGHT_TOLERANCE:.0%}")
         if abs(gmed - hmed) > S.HEIGHT_TOLERANCE * hmed:
             warns.append(f"{an}_{d}：剪影高 {gmed:.0f}px，与全素材中位数 {hmed:.0f}px 不同（多半是道具高过头顶，请目检）")
     if "height_px" in meta:
         tgt = float(meta["height_px"])
-        h_model = hmed - S.LINE_OUTER_PX
+        h_model = hmed - S.LINE_OUTER_PX / 2
         if abs(h_model - tgt) > S.HEIGHT_TOLERANCE * tgt:
-            errors.append(f"身高中位数 {hmed:.1f}px（减去外线 {h_model:.1f}px）与目标 {tgt:.1f}px 相差超过 {S.HEIGHT_TOLERANCE:.0%}")
+            errors.append(f"身高中位数 {hmed:.1f}px（减去半个外线宽 {h_model:.1f}px）与目标 {tgt:.1f}px 相差超过 {S.HEIGHT_TOLERANCE:.0%}")
     info.update(foot_drift_max_px=round(drift_max, 2), height_median_px=round(hmed, 1),
                 height_range_px=[round(float(heights.min()), 1), round(float(heights.max()), 1)])
 

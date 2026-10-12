@@ -6,7 +6,7 @@
     art/.venv/bin/python art/render/produce.py --review           # 不渲染，只自检 + 重拼审图
 输出：
     art/out/assets/<素材>/    按 style.py 输出约定（PNG、_emit、_flash、meta.json、逐帧挂点）
-    art/out/review/           审图：sheet_day / sheet_zoom / sheet_night / game_size / night_scene，
+    art/out/review/           审图：hero_sheet_day / hero_sheet_zoom（主角专页）、sheet_day / sheet_zoom / sheet_night / game_size / night_scene，
                               动图 hero_walk_8dir.gif、hero_idle_8dir.gif、shade_float.gif、wisp_float.gif，
                               check_report.json、timings.json
 不打图集（图集由主代理打）。
@@ -149,6 +149,13 @@ def build_review(timings: dict):
     gs.paste(d2.convert("RGB"), (d1.width + 10, 0))
     gs.paste(CS.night_composite(d2, e2, l2), (d1.width + 10, d1.height + 10))
     gs.save(REVIEW / "game_size.png")
+    hero_rows = [view(A["hero"], [f"idle_{d}_00" for d in S.DIRS]),
+                 view(A["hero"], [f"walk_{d}_02" for d in S.DIRS]),
+                 view(A["hero"], [f"walk_E_{i:02d}" for i in range(HERO_WALK)]),
+                 view(A["hero"], [f"walk_S_{i:02d}" for i in range(HERO_WALK)])]
+    hs = CS.sheet(hero_rows)
+    hs.save(REVIEW / "hero_sheet_day.png")
+    CS.zoom(hs).save(REVIEW / "hero_sheet_zoom.png")
     compass = ["NW", "N", "NE", "W", None, "E", "SW", "S", "SE"]  # 按屏幕方位排的 3×3
     CS.gif(CS.grid_frames(A["hero"], "walk", compass, cols=3), REVIEW / "hero_walk_8dir.gif", 12)
     CS.gif(CS.grid_frames(A["hero"], "idle", compass, cols=3), REVIEW / "hero_idle_8dir.gif", 6)
