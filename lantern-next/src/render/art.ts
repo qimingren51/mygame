@@ -2,6 +2,7 @@
 // 现在由 placeholders.ts 用代码生成占位图；Blender 图集就绪后由 atlas.ts 加载，帧命名一致。
 
 import type { Texture } from 'pixi.js';
+import type { EnemyType } from '../data/enemies';
 
 /** 8 个朝向，屏幕坐标 y 向下：0=东 1=东南 2=南 3=西南 4=西 5=西北 6=北 7=东北 */
 export const DIRS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] as const;
@@ -21,6 +22,12 @@ export interface ActorAnim {
   flash: Texture[];
 }
 
+export interface EnemyArt extends ActorAnim {
+  eyes: Socket[];
+  /** 是否是这种妖物自己的美术 */
+  own: boolean;
+}
+
 export interface ArtSet {
   /** 贴图像素 / 世界单位 */
   pxPerUnit: number;
@@ -33,8 +40,11 @@ export interface ArtSet {
     strideUnits: number;
     idleFps: number;
   };
-  /** eyes：每帧的眼睛挂点（与 frames 一一对应），妖眼的光点画在这里 */
-  enemies: Record<'shade' | 'wisp', ActorAnim & { eyes: Socket[] }>;
+  /**
+   * 每种妖物的动画。eyes：每帧的眼睛挂点（与 frames 一一对应），妖眼的光点画在这里。
+   * 还没有专属美术的妖物借用影妖的图（own = false），画面层按体型缩放并染色。
+   */
+  enemies: Record<EnemyType, EnemyArt>;
   vfx: {
     light: Texture;
     glow: Texture;

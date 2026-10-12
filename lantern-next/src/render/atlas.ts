@@ -2,7 +2,8 @@
 // 某张图集还没有时，对应部分沿用代码生成的占位图，游戏照常运行。
 
 import { Assets, type Spritesheet, type Texture } from 'pixi.js';
-import { DIRS, type ArtSet, type Socket } from './art';
+import { ENEMY_TYPES } from '../data/enemies';
+import { DIRS, type ArtSet, type EnemyArt, type Socket } from './art';
 import { createPlaceholderArt } from './placeholders';
 
 /** pack_atlas.py 写在 meta.lantern.assets 里的角色信息 */
@@ -58,20 +59,27 @@ function applyActors(art: ArtSet, sheet: Spritesheet): void {
     strideUnits: walk.stride_units ?? 64,
     idleFps: idle.fps ?? 6,
   };
-  const enemies = {} as ArtSet['enemies'];
-  for (const name of ['shade', 'wisp'] as const) {
+  const loadEnemy = (name: string): EnemyArt | null => {
     const m = assets[name];
     const animName = m?.anims ? Object.keys(m.anims)[0] : undefined;
     const a = animName ? m?.anims?.[animName] : undefined;
-    if (!m || !animName || !a) throw new Error(`角色图集缺少 ${name}`);
+    if (!m || !animName || !a) return null;
     const prefix = `${name}/${animName}_E`;
     const frames = seq(sheet, prefix, a.frames);
-    enemies[name] = {
+    return {
       frames,
       flash: frames.map((_, i) => frame(sheet, `${prefix}_${String(i).padStart(2, '0')}_flash`)),
       eyes: frames.map((_, i) => sock(m.sockets?.eyes?.[animName]?.E?.[i])),
+      own: true,
     };
-  }
+  };
+  const shade = loadEnemy('shade');
+  const wisp = loadEnemy('wisp');
+  if (!shade || !wisp) throw new Error('角色图集缺少 shade 或 wisp');
+  // 第二批妖物有图就用，没有就借用影妖
+  const enemies = Object.fromEntries(
+    ENEMY_TYPES.map((t) => [t, loadEnemy(t) ?? { ...(t === 'toad' ? wisp : shade), own: false }]),
+  ) as ArtSet['enemies'];
   // 石块：rock_a、rock_b……各取第一帧
   const rocks = Object.keys(assets)
     .filter((k) => k.startsWith('rock'))

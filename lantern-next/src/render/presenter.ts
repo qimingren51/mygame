@@ -114,16 +114,14 @@ export class Presenter {
     this.screenFlash.alpha = 0;
 
     // 每种妖物用哪套贴图；没有专属美术的先借用影妖，按体型缩放
-    const shade = art.enemies.shade;
-    const wisp = art.enemies.wisp;
-    this.anims = ENEMY_TYPES.map((t) => (t === 'wisp' ? wisp : shade));
-    this.eyes = ENEMY_TYPES.map((t) => (t === 'wisp' ? wisp.eyes : shade.eyes));
+    this.anims = ENEMY_TYPES.map((t) => art.enemies[t]);
+    this.eyes = ENEMY_TYPES.map((t) => art.enemies[t].eyes);
     this.eyeColor = ENEMY_TYPES.map((t) => ENEMY[t].eye);
-    this.typeScale = ENEMY_TYPES.map((t) => (t === 'wisp' || t === 'shade' ? 1 : ENEMY[t].r / ENEMY.shade.r));
+    this.typeScale = ENEMY_TYPES.map((t) => (art.enemies[t].own ? 1 : ENEMY[t].r / (t === 'toad' ? ENEMY.wisp.r : ENEMY.shade.r)));
     this.fxp = new FxParticles(art);
     this.weaponViews = new WeaponViews(art);
     // 还没有专属美术的妖物：借用影妖的图，按轮廓色染色
-    this.typeTint = ENEMY_TYPES.map((t) => (t === 'shade' || t === 'wisp' ? 0xffffff : lighten(ENEMY[t].rim)));
+    this.typeTint = ENEMY_TYPES.map((t) => (art.enemies[t].own ? 0xffffff : lighten(ENEMY[t].rim)));
   }
 
   private makeActors(mode: ActorMode): ActorBatch {

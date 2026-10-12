@@ -585,7 +585,8 @@ export function createPlaceholderArt(): ArtSet {
   const paper = Texture.from(drawPaper());
   paper.source.addressMode = 'repeat';
 
-  const anim = (e: ReturnType<typeof enemy>) => ({ frames: e.frames.map(tex), flash: e.flash.map(tex), eyes: e.eyes });
+  const anim = (e: ReturnType<typeof enemy>) => ({ frames: e.frames.map(tex), flash: e.flash.map(tex), eyes: e.eyes, own: true });
+  const borrowed = (e: ReturnType<typeof enemy>) => ({ ...anim(e), own: false });
   return {
     pxPerUnit: PX,
     hero: {
@@ -595,7 +596,16 @@ export function createPlaceholderArt(): ArtSet {
       strideUnits: 64,
       idleFps: 6,
     },
-    enemies: { shade: anim(shade), wisp: anim(wisp) },
+    enemies: {
+      shade: anim(shade),
+      wisp: anim(wisp),
+      golem: borrowed(shade),
+      fox: borrowed(shade),
+      ghoul: borrowed(shade),
+      boss: borrowed(shade),
+      stonelord: borrowed(shade),
+      toad: borrowed(wisp),
+    },
     vfx: {
       light: tex(light),
       glow: tex(glow),
