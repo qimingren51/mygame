@@ -14,6 +14,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: pages
@@ -43,5 +44,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Pages 来源还是“从分支部署”时，GitHub 会对同一个提交另跑一次根目录的 Jekyll 部署，
+      # 后完成的会覆盖先完成的。等它结束再部署，保证线上是 web/ 的站点。来源改成
+      # “GitHub Actions”后不会再有那次部署，这一步会立刻通过。
+      - name: 等 GitHub 自带的分支部署结束
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 36); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=50" \
+              --jq '[.workflow_runs[] | select(.name == "pages build and deployment" and .status != "completed")] | length')
+            if [ "$n" = "0" ]; then exit 0; fi
+            echo "分支部署还在运行（$n 个），10 秒后再看"
+            sleep 10
+          done
+          echo "等了 6 分钟仍未结束，直接部署"
       - id: deployment
         uses: actions/deploy-pages@v4
