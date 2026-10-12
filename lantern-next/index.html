@@ -14,12 +14,11 @@
   <title>提灯夜行 · 新版预览</title>
 </head>
 <body>
-  <main id="placeholder" style="font-family: system-ui, sans-serif; color: #EDE6D6; background: #0B0F1C; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin: 0;">
-    <h1 style="margin: 0; font-size: 28px;">提灯夜行 · 新版预览</h1>
-    <p style="margin: 0; color: #A9AEC2;">重构进行中，技术验证小样稍后上线。</p>
-    <p id="build" style="margin: 0; color: #8C92A8; font-size: 12px;"></p>
-    <a href="../" style="color: #FFD98A;">← 全部游戏</a>
-  </main>
+  <div id="game"></div>
+  <div id="perf"></div>
+  <a id="home" href="../">← 全部游戏</a>
+  <p id="build"></p>
+  <div id="fatal" hidden></div>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

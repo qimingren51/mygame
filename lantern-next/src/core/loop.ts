@@ -14,7 +14,7 @@ export class FixedStep {
 
   /** 推进真实时间，返回插值系数（0~1）。 */
   advance(realDt: number, step: (dt: number) => void): number {
-    this.acc += Math.min(realDt, 0.1) * this.timeScale * this.speed;
+    this.acc += Math.min(Math.max(realDt, 0), 0.1) * this.timeScale * this.speed;
     const max = this.maxSteps * this.speed;
     let n = 0;
     while (this.acc >= SIM_DT && n < max) {
