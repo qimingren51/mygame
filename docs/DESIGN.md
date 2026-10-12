@@ -329,7 +329,7 @@ assets/data/
 - 两个包都上传到 GitHub Releases。
 - 以后再加 AppImage、Windows 安装程序、Steam 上传。
 
-**网页站点**：`pages.yml` 每次推送都会重新部署 `web/`。仓库的 Pages 来源改为“GitHub Actions”之后，可以改成只在 `web/` 有改动时运行。
+**网页站点**：`pages.yml` 只在 `web/` 有改动时运行，桌面版的提交不会触发网页部署。仓库的 Pages 来源是“GitHub Actions”。
 
 ## 15. 美术管线对接
 

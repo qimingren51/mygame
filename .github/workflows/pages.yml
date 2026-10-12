@@ -1,20 +1,19 @@
-# 推送到 master 后，构建网页小游戏站点（web/）并发布到 GitHub Pages。
-# 每次推送都运行、不按路径过滤：如果仓库的 Pages 来源还是“从分支部署”，GitHub 会对仓库根目录
-# 另跑一次 Jekyll 部署（根目录现在不是网站），需要这里的部署覆盖它。Pages 来源改成
-# “GitHub Actions”之后，可以加回 paths: ['web/**'] 过滤。
+# 推送到 master 且 web/ 有改动时，构建网页小游戏站点并发布到 GitHub Pages。
 # 需要在仓库 Settings → Pages → Source 选择 “GitHub Actions”。
 name: Pages
 
 on:
   push:
     branches: [master]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
-  actions: read
 
 concurrency:
   group: pages
@@ -44,20 +43,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # Pages 来源还是“从分支部署”时，GitHub 会对同一个提交另跑一次根目录的 Jekyll 部署，
-      # 后完成的会覆盖先完成的。等它结束再部署，保证线上是 web/ 的站点。来源改成
-      # “GitHub Actions”后不会再有那次部署，这一步会立刻通过。
-      - name: 等 GitHub 自带的分支部署结束
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 36); do
-            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=50" \
-              --jq '[.workflow_runs[] | select(.name == "pages build and deployment" and .status != "completed")] | length')
-            if [ "$n" = "0" ]; then exit 0; fi
-            echo "分支部署还在运行（$n 个），10 秒后再看"
-            sleep 10
-          done
-          echo "等了 6 分钟仍未结束，直接部署"
       - id: deployment
         uses: actions/deploy-pages@v4
