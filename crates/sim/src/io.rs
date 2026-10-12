@@ -2,6 +2,7 @@
 
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
+use lantern_content::Rank;
 
 /// 每一步的移动输入。方向先量化成 i8，实际游玩和回放看到的数值完全一样。
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40,7 +41,31 @@ pub struct SimCommands(pub Vec<SimCommand>);
 /// 模拟发出的事件。保持小而且可复制，预热之后不再分配内存。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SimEvent {
-    Dash { pos: Vec2 },
+    Dash {
+        pos: Vec2,
+    },
+    /// 命中妖物；pos 是伤害数字的位置
+    Hit {
+        pos: Vec2,
+        damage: f32,
+        crit: bool,
+    },
+    /// 击杀；kind 是 `enemies.ron` 里的下标
+    Kill {
+        pos: Vec2,
+        kind: u16,
+        rank: Rank,
+    },
+    GemPicked {
+        value: f32,
+    },
+    PlayerHurt {
+        amount: f32,
+    },
+    PlayerDied,
+    LevelUp {
+        level: u32,
+    },
 }
 
 /// 一帧内累积的事件。画面、音频、界面在 `Update` 里读取，`Last` 阶段统一清空。

@@ -4,6 +4,7 @@ use bevy_ecs::prelude::*;
 
 use lantern_core::step::DT;
 
+use crate::run::Stats;
 use crate::{GameContent, InputFrame, Player, Pos, SimCommand, SimCommands, SimEvent, SimOutbox};
 
 pub(crate) fn apply_commands(
@@ -31,12 +32,8 @@ pub(crate) fn apply_commands(
     }
 }
 
-pub(crate) fn move_player(
-    content: Res<GameContent>,
-    input: Res<InputFrame>,
-    mut q: Query<(&mut Pos, &mut Player)>,
-) {
-    let speed = content.0.player.speed;
+pub(crate) fn move_player(stats: Res<Stats>, input: Res<InputFrame>, mut q: Query<(&mut Pos, &mut Player)>) {
+    let speed = stats.speed;
     let dir = input.dir();
     for (mut pos, mut p) in &mut q {
         let before = pos.0;

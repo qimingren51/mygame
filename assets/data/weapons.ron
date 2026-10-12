@@ -1,0 +1,21 @@
+// 法器（移植自网页版 data/weapons.ts）。levels 从第 1 级到满级（8 级）。
+// M1 只有灯火；符剑、霜铃、纸鹤、山印与进化在 M2 加入。
+[
+    (
+        id: "lamp",
+        name: "灯火",
+        element: Fire,
+        // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
+        behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
+        levels: [
+            (count: 3, radius: 54.0, damage: 15.0),
+            (count: 3, radius: 58.0, damage: 18.0),
+            (count: 4, radius: 62.0, damage: 21.0),
+            (count: 4, radius: 66.0, damage: 24.0),
+            (count: 5, radius: 70.0, damage: 27.0),
+            (count: 5, radius: 74.0, damage: 30.0),
+            (count: 6, radius: 78.0, damage: 33.0),
+            (count: 6, radius: 82.0, damage: 36.0),
+        ],
+    ),
+]

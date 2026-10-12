@@ -1,0 +1,20 @@
+// 妖物（移植自网页版 data/enemies.ts）。sprite 是图集里的素材名，eye 是妖眼颜色。
+// rank：Normal 普通 / Elite 精英 / Boss 夜主 / Critter 奇遇小动物（不计击杀）。
+[
+    (id: "shade", name: "影妖", rank: Normal, movement: Chase,
+     radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FF8A5B"),
+    (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
+     radius: 10.0, hp: 6.0, speed: 84.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+    (id: "golem", name: "石妖", rank: Normal, movement: Chase,
+     radius: 19.0, hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+    (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
+     radius: 24.0, hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A"),
+    (id: "ghoul", name: "青面鬼", rank: Elite, movement: Chase,
+     radius: 30.0, hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#C8FF6B"),
+    (id: "stonelord", name: "石将", rank: Elite, movement: Chase,
+     radius: 28.0, hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
+    (id: "boss", name: "夜主 · 九尾", rank: Boss, movement: Chase,
+     radius: 44.0, hp: 36000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A"),
+    (id: "toad", name: "金蟾", rank: Critter, movement: Flee,
+     radius: 14.0, hp: 70.0, speed: 80.0, damage: 0.0, xp: 0.0, sprite: "toad", eye: "#FFF1C2"),
+]

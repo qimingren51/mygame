@@ -46,7 +46,7 @@ jobs:
       - name: 测试
         run: cargo test --workspace --locked
       - name: 模拟跑分（只记录，不作为失败条件）
-        run: cargo run --release --locked -p lantern-tools -- bench --seconds 60
+        run: cargo run --release --locked -p lantern-tools -- bench --enemies 5000 --seconds 20
 
   windows:
     runs-on: windows-latest

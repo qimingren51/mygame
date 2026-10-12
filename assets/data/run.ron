@@ -1,8 +1,55 @@
-// 单局节奏。M2 会在这里加入刷怪曲线、精英与首领时间表、奇遇间隔等（docs/DESIGN.md 第 6.8 节）。
+// 单局节奏（docs/DESIGN.md 第 6.8 节）。曲线写成 (a, b, c)，表示 a + b·x + c·x²。
+// 数值与网页版一致（docs/PORTING-NOTES.md 第 3 节）。精英、妖潮、夜主的时间表在 M2 加入。
 (
     // 一局总时长（秒）：撑过 10 分钟并击败夜主即为天明。
     duration: 600.0,
-    // 视野高度（世界单位），宽度随窗口宽高比变化，最宽 21:9。
+    // 视野高度（世界单位）。模拟按最宽的 max_aspect（21:9）计算视野，结果与窗口大小无关。
     view_height: 420.0,
     max_aspect: 2.3334,
+
+    // 升级所需魂火，x 为当前等级
+    xp_need: (4.0, 5.0, 0.6),
+    // 以下 x 为分钟数
+    enemy_hp_scale: (1.0, 0.3, 0.07),
+    enemy_damage_scale: (1.0, 0.1, 0.0),
+    gem_value_scale: (1.0, 0.25, 0.0),
+
+    spawn: (
+        rate: (1.6, 1.1, 0.1),
+        soft_cap: 360,
+        ring_extra: 40.0,
+        relocate: 1.7,
+        relocate_spread: 0.8,
+        speed_jitter: (0.9, 1.1),
+        base: "shade",
+        mix: [
+            (enemy: "wisp", from_minute: 1.0, share: (0.08, 0.3), late_minute: 5.0, late_mult: 1.5),
+            (enemy: "golem", from_minute: 2.5, share: (0.05, 0.2), late_minute: 5.0, late_mult: 1.6),
+        ],
+        packs: (
+            start: 40.0,
+            interval: (18.0, 32.0),
+            size: (8.0, 3.0, 0.0),
+            max_alive: 300,
+            spread: 40.0,
+            mix: [(enemy: "wisp", from_minute: 4.0, share_scale: 2.0)],
+        ),
+    ),
+
+    gems: (
+        cap: 380,
+        return_after: 8.0,
+        accel: 900.0,
+        max_speed: 520.0,
+        reach: 8.0,
+        elite_split: 8,
+        elite_scatter: 20.0,
+    ),
+
+    bench: (
+        refill_per_tick: 60,
+        enemy: "shade",
+        alt_enemy: "wisp",
+        alt_share: 0.2,
+    ),
 )

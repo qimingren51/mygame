@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use lantern_core::step::TICK_HZ;
 use lantern_platform::Actions;
-use lantern_sim::{AppState, RunSetup, RunState, Tick};
+use lantern_sim::{AppState, Progress, RunMode, RunSetup, RunState, Tick};
 
 /// 命令行指定的种子（`--seed`）。没有指定时每局随机。
 #[derive(Resource, Default, Clone, Copy, Debug)]
@@ -35,12 +35,14 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::Title), spawn_title)
             .add_systems(OnEnter(AppState::Run), spawn_hud)
             .add_systems(OnEnter(RunState::Paused), spawn_pause)
+            .add_systems(OnEnter(RunState::Over), spawn_over)
             .add_systems(
                 Update,
                 (
                     title_input.run_if(in_state(AppState::Title)),
                     playing_input.run_if(in_state(RunState::Playing)),
                     paused_input.run_if(in_state(RunState::Paused)),
+                    over_input.run_if(in_state(RunState::Over)),
                     update_clock.run_if(in_state(AppState::Run)),
                 ),
             );
@@ -92,7 +94,7 @@ fn title_input(
     if actions.confirm {
         let seed = seed.0.unwrap_or_else(random_seed);
         info!("出发，种子 {seed}");
-        commands.insert_resource(RunSetup { seed });
+        commands.insert_resource(RunSetup { seed, mode: RunMode::Normal });
         next.set(AppState::Run);
     } else if actions.back {
         exit.write(AppExit::Success);
@@ -181,5 +183,45 @@ fn paused_input(
         next_app.set(AppState::Title);
     } else if actions.confirm || actions.pause || actions.back {
         next_run.set(RunState::Playing);
+    }
+}
+
+/// 主角倒下。M1-5 换成完整的结算界面。
+fn spawn_over(mut commands: Commands, fonts: Res<Fonts>, progress: Res<Progress>, tick: Res<Tick>) {
+    let secs = tick.0 / u64::from(TICK_HZ);
+    commands.spawn((
+        DespawnOnExit(RunState::Over),
+        Node {
+            width: percent(100),
+            height: percent(100),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            row_gap: px(16),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.06, 0.1, 0.75)),
+        children![
+            text(&fonts.title, 72.0, PAPER, "灯灭"),
+            text(
+                &fonts.body,
+                22.0,
+                PAPER,
+                &format!(
+                    "坚持 {:02}:{:02}　　击杀 {}　　等级 {}",
+                    secs / 60,
+                    secs % 60,
+                    progress.kills,
+                    progress.level
+                )
+            ),
+            text(&fonts.body, 20.0, DIM, "Enter / 手柄 A　回到标题"),
+        ],
+    ));
+}
+
+fn over_input(actions: Res<Actions>, mut next_app: ResMut<NextState<AppState>>) {
+    if actions.confirm || actions.back {
+        next_app.set(AppState::Title);
     }
 }

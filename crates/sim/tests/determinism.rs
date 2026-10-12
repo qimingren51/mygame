@@ -26,13 +26,17 @@ fn scripted(tick: u64) -> (InputFrame, Vec<SimCommand>) {
     (InputFrame::quantize(dir), cmds)
 }
 
+/// 跑到指定步数或主角倒下为止，返回每秒的状态哈希。
 fn run(seed: u64, ticks: u64) -> Vec<(u64, u64)> {
     let mut sim = SimHarness::new(content(), seed);
     for tick in 0..ticks {
+        if sim.is_over() {
+            break;
+        }
         let (input, cmds) = scripted(tick);
         sim.step(input, &cmds);
     }
-    assert_eq!(sim.tick(), ticks);
+    assert!(sim.tick() == ticks || sim.is_over());
     sim.hashes().iter().map(|c| (c.tick, c.hash)).collect()
 }
 
@@ -43,7 +47,7 @@ const TICKS: u64 = 3 * 60 * 60;
 fn same_seed_same_result() {
     let a = run(SEEDS[1], TICKS);
     let b = run(SEEDS[1], TICKS);
-    assert_eq!(a.len(), (TICKS / 60) as usize);
+    assert!(!a.is_empty());
     assert_eq!(a, b);
 }
 

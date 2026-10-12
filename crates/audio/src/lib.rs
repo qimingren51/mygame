@@ -67,8 +67,9 @@ fn init_audio(world: &mut World) {
 
 fn play_sim_events(outbox: Res<SimOutbox>, mut audio: NonSendMut<Audio>) {
     for ev in &outbox.0 {
-        match ev {
-            SimEvent::Dash { .. } => audio.play(Note::A4),
+        // 其他事件的音效在 M1 后半移植（命中、击杀、拾取、受伤）
+        if let SimEvent::Dash { .. } = ev {
+            audio.play(Note::A4);
         }
     }
 }

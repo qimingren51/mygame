@@ -1,48 +1,23 @@
 //! 内容数据：结构定义、从 `assets/data/` 加载、校验。
 //!
 //! 游戏和命令行工具共用这一套结构。数据文件是 RON，错误信息会指出文件名和行列号。
+//! 文件里用字符串 ID 互相引用，加载时检查引用是否存在；模拟开局时再换成数字下标。
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+mod defs;
+mod validate;
 
-/// 主角基础数值（`player.ron`）。
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct PlayerDef {
-    pub radius: f32,
-    pub speed: f32,
-    pub max_hp: f32,
-    pub magnet: f32,
-    /// 受伤后的无敌时间
-    pub hurt_iframe: f32,
-    pub dash: DashDef,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct DashDef {
-    pub duration: f32,
-    pub speed: f32,
-    pub cooldown: f32,
-    pub iframe: f32,
-}
-
-/// 单局节奏（`run.ron`）。
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RunDef {
-    pub duration: f32,
-    pub view_height: f32,
-    pub max_aspect: f32,
-}
+pub use defs::*;
 
 /// 全部内容数据。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Content {
     pub player: PlayerDef,
     pub run: RunDef,
+    pub enemies: Vec<EnemyDef>,
+    pub weapons: Vec<WeaponDef>,
 }
 
 #[derive(Debug)]
@@ -73,40 +48,24 @@ fn read<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<T, Con
 impl Content {
     /// 从数据目录（通常是 `assets/data`）加载并校验全部内容。
     pub fn load(data_dir: &Path) -> Result<Content, ContentError> {
-        let content = Content { player: read(data_dir, "player.ron")?, run: read(data_dir, "run.ron")? };
+        let content = Content {
+            player: read(data_dir, "player.ron")?,
+            run: read(data_dir, "run.ron")?,
+            enemies: read(data_dir, "enemies.ron")?,
+            weapons: read(data_dir, "weapons.ron")?,
+        };
         content.validate(data_dir)?;
         Ok(content)
     }
 
-    fn validate(&self, dir: &Path) -> Result<(), ContentError> {
-        let fail = |name: &str, msg: String| Err(ContentError::Invalid { file: dir.join(name), msg });
-        let p = &self.player;
-        for (field, v) in [
-            ("radius", p.radius),
-            ("speed", p.speed),
-            ("max_hp", p.max_hp),
-            ("dash.duration", p.dash.duration),
-            ("dash.speed", p.dash.speed),
-        ] {
-            if !(v.is_finite() && v > 0.0) {
-                return fail("player.ron", format!("{field} 必须是正数，现在是 {v}"));
-            }
-        }
-        for (field, v) in [
-            ("magnet", p.magnet),
-            ("hurt_iframe", p.hurt_iframe),
-            ("dash.cooldown", p.dash.cooldown),
-            ("dash.iframe", p.dash.iframe),
-        ] {
-            if !(v.is_finite() && v >= 0.0) {
-                return fail("player.ron", format!("{field} 不能为负数，现在是 {v}"));
-            }
-        }
-        let r = &self.run;
-        if !(r.duration > 0.0 && r.view_height > 0.0 && r.max_aspect >= 1.0) {
-            return fail("run.ron", "duration、view_height 必须为正，max_aspect 不能小于 1".into());
-        }
-        Ok(())
+    /// 妖物 ID 对应的下标。
+    pub fn enemy_index(&self, id: &str) -> Option<usize> {
+        self.enemies.iter().position(|e| e.id == id)
+    }
+
+    /// 法器 ID 对应的下标。
+    pub fn weapon_index(&self, id: &str) -> Option<usize> {
+        self.weapons.iter().position(|w| w.id == id)
     }
 }
 
@@ -123,6 +82,8 @@ mod tests {
     fn repo_content_is_valid() {
         let c = Content::load(&repo_data_dir()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(c.run.duration, 600.0);
+        assert!(c.enemy_index(&c.run.spawn.base).is_some());
+        assert!(c.weapon_index(&c.player.start_weapon).is_some());
     }
 
     #[test]
@@ -134,9 +95,28 @@ mod tests {
     }
 
     #[test]
+    fn dangling_references_are_reported() {
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        c.run.spawn.mix[0].enemy = "no_such_enemy".into();
+        let err = c.validate(Path::new("data")).unwrap_err().to_string();
+        assert!(err.contains("run.ron") && err.contains("no_such_enemy"), "{err}");
+
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        let dup = c.enemies[0].clone();
+        c.enemies.push(dup);
+        let err = c.validate(Path::new("data")).unwrap_err().to_string();
+        assert!(err.contains("enemies.ron") && err.contains("重复"), "{err}");
+    }
+
+    #[test]
     fn unknown_fields_are_rejected() {
-        let r: Result<RunDef, _> =
-            ron::from_str("(duration: 1.0, view_height: 1.0, max_aspect: 2.0, typo: 3)");
+        let r: Result<PlayerDef, _> = ron::from_str("(radius: 1.0, typo: 3)");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn quad_curve() {
+        let q = Quad(1.6, 1.1, 0.1);
+        assert!((q.at(2.0) - (1.6 + 2.2 + 0.4)).abs() < 1e-6);
     }
 }

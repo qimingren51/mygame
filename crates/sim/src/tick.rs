@@ -2,18 +2,33 @@
 
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
+use bevy_state::prelude::*;
 
-use lantern_core::step::HASH_INTERVAL;
+use lantern_core::step::{DT, HASH_INTERVAL};
 use lantern_core::{StateHasher, Streams};
 
+use crate::combat::HitQueue;
+use crate::crowd::Crowd;
+use crate::enemies::Enemies;
+use crate::gems::Gems;
+use crate::run::{Director, Progress, RunPlan, SimView, Stats};
+use crate::spatial::Grid;
+use crate::weapons::{Arsenal, WeaponSlot};
 use crate::{
-    Body, GameContent, Health, InputFrame, NextSimId, Player, Pos, PrevPos, RunEntity, RunSetup, SimCommands,
-    SimId,
+    Body, GameContent, Health, InputFrame, NextSimId, Player, Pos, PrevPos, RunEntity, RunSetup, RunState,
+    SimCommands, SimId,
 };
 
 /// 已经完成的步数。
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tick(pub u64);
+
+impl Tick {
+    /// 本局已经过的时间（秒）。
+    pub fn secs(self) -> f32 {
+        self.0 as f32 * DT
+    }
+}
 
 /// 本局的全部随机流。
 #[derive(Resource, Clone, Debug)]
@@ -30,13 +45,11 @@ pub struct HashCheckpoint {
 pub struct HashLog(pub Vec<HashCheckpoint>);
 
 pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup: Res<RunSetup>) {
-    let p = &content.0.player;
+    let c = &content.0;
+    let p = &c.player;
+    let mut rng = Streams::new(setup.seed);
+    let plan = RunPlan::new(c, setup.mode, &mut rng);
     let mut ids = NextSimId::default();
-    commands.insert_resource(Tick(0));
-    commands.insert_resource(SimRng(Streams::new(setup.seed)));
-    commands.insert_resource(HashLog::default());
-    commands.insert_resource(InputFrame::default());
-    commands.insert_resource(SimCommands::default());
     commands.spawn((
         ids.alloc(),
         RunEntity,
@@ -46,7 +59,24 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
         Health { hp: p.max_hp, max: p.max_hp },
         Player::default(),
     ));
+    let start_weapon = c.weapon_index(&p.start_weapon).expect("内容校验保证引用存在");
     commands.insert_resource(ids);
+    commands.insert_resource(Tick(0));
+    commands.insert_resource(SimRng(rng));
+    commands.insert_resource(plan);
+    commands.insert_resource(SimView::new(c));
+    commands.insert_resource(Stats::base(p));
+    commands.insert_resource(Progress::default());
+    commands.insert_resource(Director::default());
+    commands.insert_resource(Arsenal(vec![WeaponSlot::new(start_weapon)]));
+    commands.insert_resource(Enemies::default());
+    commands.insert_resource(Gems::default());
+    commands.insert_resource(Grid::default());
+    commands.insert_resource(Crowd::default());
+    commands.insert_resource(HitQueue::default());
+    commands.insert_resource(HashLog::default());
+    commands.insert_resource(InputFrame::default());
+    commands.insert_resource(SimCommands::default());
 }
 
 pub(crate) fn end_run(mut commands: Commands, q: Query<Entity, With<RunEntity>>) {
@@ -56,11 +86,36 @@ pub(crate) fn end_run(mut commands: Commands, q: Query<Entity, With<RunEntity>>)
     commands.remove_resource::<Tick>();
     commands.remove_resource::<SimRng>();
     commands.remove_resource::<NextSimId>();
+    commands.remove_resource::<RunPlan>();
+    commands.remove_resource::<Enemies>();
+    commands.remove_resource::<Gems>();
+    commands.remove_resource::<Grid>();
+    commands.remove_resource::<Crowd>();
 }
 
-pub(crate) fn save_prev_pos(mut q: Query<(&Pos, &mut PrevPos)>) {
-    // 每个实体只写自己，可以并行。
-    q.par_iter_mut().for_each(|(pos, mut prev)| prev.0 = pos.0);
+pub(crate) fn save_prev_pos(
+    mut q: Query<(&Pos, &mut PrevPos)>,
+    mut en: ResMut<Enemies>,
+    mut gems: ResMut<Gems>,
+) {
+    for (pos, mut prev) in &mut q {
+        prev.0 = pos.0;
+    }
+    let en = &mut *en;
+    let hi = en.hi;
+    en.px[..hi].copy_from_slice(&en.x[..hi]);
+    en.py[..hi].copy_from_slice(&en.y[..hi]);
+    let n = gems.n;
+    let gems = &mut *gems;
+    gems.px[..n].copy_from_slice(&gems.x[..n]);
+    gems.py[..n].copy_from_slice(&gems.y[..n]);
+}
+
+/// 主角倒下后进入结束状态，模拟停下。
+pub(crate) fn check_over(player: Single<&Health, With<Player>>, mut next: ResMut<NextState<RunState>>) {
+    if player.hp <= 0.0 {
+        next.set(RunState::Over);
+    }
 }
 
 pub(crate) fn advance_tick(mut tick: ResMut<Tick>) {
@@ -70,6 +125,10 @@ pub(crate) fn advance_tick(mut tick: ResMut<Tick>) {
 pub(crate) fn record_hash(
     tick: Res<Tick>,
     rng: Res<SimRng>,
+    en: Res<Enemies>,
+    gems: Res<Gems>,
+    arsenal: Res<Arsenal>,
+    progress: Res<Progress>,
     mut log: ResMut<HashLog>,
     q: Query<(&SimId, &Pos, Option<&Health>, Option<&Player>)>,
 ) {
@@ -94,5 +153,11 @@ pub(crate) fn record_hash(
             }
         }
     }
+    en.hash_into(&mut h);
+    gems.hash_into(&mut h);
+    arsenal.hash_into(&mut h);
+    h.write_f32(progress.xp);
+    h.write_u32(progress.level);
+    h.write_u32(progress.kills);
     log.0.push(HashCheckpoint { tick: tick.0, hash: h.finish() });
 }

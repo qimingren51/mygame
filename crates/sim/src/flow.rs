@@ -19,4 +19,6 @@ pub enum RunState {
     #[default]
     Playing,
     Paused,
+    /// 主角倒下（M2 加上胜利），等待界面进入结算
+    Over,
 }
