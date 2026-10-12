@@ -86,7 +86,13 @@ fn main() -> AppExit {
     .insert_resource(Time::<Fixed>::from_hz(f64::from(TICK_HZ)))
     .insert_resource(GameContent(Arc::new(content)))
     .insert_resource(SeedOverride(args.seed))
-    .add_plugins((SimPlugin, PlatformPlugin { settings }, ViewPlugin, AudioPlugin, UiPlugin));
+    .add_plugins((
+        SimPlugin,
+        PlatformPlugin { settings },
+        ViewPlugin { asset_root: assets.clone() },
+        AudioPlugin,
+        UiPlugin,
+    ));
 
     // 一帧最多补 4 步：卡顿时宁可变慢，也不让模拟连续追赶。
     app.world_mut()

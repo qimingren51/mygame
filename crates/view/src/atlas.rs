@@ -1,0 +1,265 @@
+//! 图集读取（格式见 docs/DESIGN.md 第 15 节）。
+//!
+//! 启动时同步读 `assets/atlas/index.json` 和各页 JSON，建好帧表、动画序列和素材元数据；
+//! PNG 交给 AssetServer 异步加载。帧经过裁边，JSON 里的锚点相对原始帧尺寸，
+//! 这里换算成 Bevy 精灵的锚点（相对裁边后的矩形，原点在中心，y 向上）。
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use bevy::math::URect;
+use bevy::prelude::*;
+use bevy::sprite::Anchor;
+use serde::Deserialize;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FrameId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blend {
+    Normal,
+    Add,
+}
+
+#[derive(Clone, Debug)]
+pub struct Frame {
+    page: usize,
+    index: usize,
+    /// 裁边后的尺寸（世界单位）
+    pub size: Vec2,
+    pub anchor: Anchor,
+    pub blend: Blend,
+    /// 纯白贴图，用时乘以颜色
+    pub tint: bool,
+}
+
+/// 一个素材的一个动作。
+#[derive(Clone, Debug, Deserialize)]
+pub struct AnimMeta {
+    pub frames: u32,
+    pub fps: f32,
+    pub dirs: Vec<String>,
+    /// 走完一整轮动画对应的移动距离（世界单位）
+    #[serde(default)]
+    pub stride_units: Option<f32>,
+}
+
+/// 一个素材（角色、道具）的元数据。
+#[derive(Clone, Debug, Deserialize)]
+pub struct AssetMeta {
+    pub anims: HashMap<String, AnimMeta>,
+    /// 挂点：名字 → 动作 → 方向 → 逐帧坐标（图集像素，相对锚点，y 向下）
+    #[serde(default)]
+    pub sockets: HashMap<String, HashMap<String, HashMap<String, Vec<[f32; 2]>>>>,
+    #[serde(default)]
+    pub floating: bool,
+    #[serde(default)]
+    pub shadow_radius_px: f32,
+}
+
+struct Page {
+    image: Handle<Image>,
+    layout: Handle<TextureAtlasLayout>,
+}
+
+/// 全部图集。
+#[derive(Resource)]
+pub struct AtlasDb {
+    pages: Vec<Page>,
+    frames: Vec<Frame>,
+    by_name: HashMap<String, FrameId>,
+    anims: HashMap<String, Vec<FrameId>>,
+    pub assets: HashMap<String, AssetMeta>,
+    /// 图集像素 / 世界单位
+    pub px_per_unit: f32,
+}
+
+#[derive(Deserialize)]
+struct IndexJson {
+    pages: HashMap<String, Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct Rect4 {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+#[derive(Deserialize)]
+struct Size2 {
+    w: f32,
+    h: f32,
+}
+
+#[derive(Deserialize)]
+struct Xy {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameJson {
+    frame: Rect4,
+    sprite_source_size: Rect4,
+    source_size: Size2,
+    anchor: Xy,
+}
+
+#[derive(Deserialize)]
+struct FrameMetaJson {
+    blend: String,
+    tint: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LanternMeta {
+    px_per_unit: f32,
+    #[serde(default)]
+    frames: HashMap<String, FrameMetaJson>,
+    #[serde(default)]
+    assets: HashMap<String, AssetMeta>,
+}
+
+#[derive(Deserialize)]
+struct MetaJson {
+    image: String,
+    size: Size2,
+    lantern: LanternMeta,
+}
+
+#[derive(Deserialize)]
+struct PageJson {
+    frames: HashMap<String, FrameJson>,
+    #[serde(default)]
+    animations: HashMap<String, Vec<String>>,
+    meta: MetaJson,
+}
+
+impl AtlasDb {
+    /// 从 `<assets>/atlas/` 读取全部图集。失败时返回人能看懂的错误。
+    pub fn load(
+        asset_root: &Path,
+        assets: &AssetServer,
+        layouts: &mut Assets<TextureAtlasLayout>,
+    ) -> Result<AtlasDb, String> {
+        let dir = asset_root.join("atlas");
+        let read = |name: &str| -> Result<String, String> {
+            std::fs::read_to_string(dir.join(name)).map_err(|e| format!("读取 atlas/{name} 失败：{e}"))
+        };
+        let index: IndexJson = serde_json::from_str(&read("index.json")?)
+            .map_err(|e| format!("atlas/index.json 格式错误：{e}"))?;
+        let mut db = AtlasDb {
+            pages: Vec::new(),
+            frames: Vec::new(),
+            by_name: HashMap::new(),
+            anims: HashMap::new(),
+            assets: HashMap::new(),
+            px_per_unit: 0.0,
+        };
+        let mut animations: Vec<(String, Vec<String>)> = Vec::new();
+        // 按名字排序，帧编号与加载顺序无关
+        let mut files: Vec<&String> = index.pages.values().flatten().collect();
+        files.sort();
+        for file in files {
+            let page: PageJson =
+                serde_json::from_str(&read(file)?).map_err(|e| format!("atlas/{file} 格式错误：{e}"))?;
+            let ppu = page.meta.lantern.px_per_unit;
+            if db.px_per_unit == 0.0 {
+                db.px_per_unit = ppu;
+            } else if (db.px_per_unit - ppu).abs() > 1e-3 {
+                return Err(format!("atlas/{file} 的出图密度 {ppu} 与其他图集 {} 不一致", db.px_per_unit));
+            }
+            let mut layout =
+                TextureAtlasLayout::new_empty(UVec2::new(page.meta.size.w as u32, page.meta.size.h as u32));
+            let page_idx = db.pages.len();
+            let mut names: Vec<&String> = page.frames.keys().collect();
+            names.sort();
+            for name in names {
+                let f = &page.frames[name];
+                let r = &f.frame;
+                let index = layout.add_texture(URect::new(r.x, r.y, r.x + r.w, r.y + r.h));
+                // 锚点：先算出在原始帧里的像素位置，再换算到裁边后的矩形
+                let s = &f.sprite_source_size;
+                let ax = f.anchor.x * f.source_size.w - s.x as f32;
+                let ay = f.anchor.y * f.source_size.h - s.y as f32;
+                let anchor = Anchor(Vec2::new(ax / r.w as f32 - 0.5, 0.5 - ay / r.h as f32));
+                let meta = page.meta.lantern.frames.get(name);
+                let frame = Frame {
+                    page: page_idx,
+                    index,
+                    size: Vec2::new(r.w as f32, r.h as f32) / ppu,
+                    anchor,
+                    blend: if meta.is_some_and(|m| m.blend == "add") { Blend::Add } else { Blend::Normal },
+                    tint: meta.is_some_and(|m| m.tint),
+                };
+                db.by_name.insert(name.clone(), FrameId(db.frames.len() as u32));
+                db.frames.push(frame);
+            }
+            animations.extend(page.animations);
+            db.assets.extend(page.meta.lantern.assets);
+            db.pages.push(Page {
+                image: assets.load(format!("atlas/{}", page.meta.image)),
+                layout: layouts.add(layout),
+            });
+        }
+        // 动画可能引用其他页的帧，所有页都读完再解析
+        for (name, frames) in animations {
+            let ids = frames
+                .iter()
+                .map(|f| {
+                    db.by_name.get(f).copied().ok_or_else(|| format!("动画 {name} 引用了不存在的帧 {f}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            db.anims.insert(name, ids);
+        }
+        if db.frames.is_empty() {
+            return Err("atlas/index.json 里没有任何图集".into());
+        }
+        Ok(db)
+    }
+
+    pub fn frame(&self, id: FrameId) -> &Frame {
+        &self.frames[id.0 as usize]
+    }
+
+    pub fn find(&self, name: &str) -> Option<FrameId> {
+        self.by_name.get(name).copied()
+    }
+
+    /// 动画序列，例如 `hero/walk_SE`。
+    pub fn anim(&self, name: &str) -> Option<&[FrameId]> {
+        self.anims.get(name).map(Vec::as_slice)
+    }
+
+    /// 做一个显示这一帧的精灵。
+    pub fn sprite(&self, id: FrameId) -> (Sprite, Anchor) {
+        let f = self.frame(id);
+        let page = &self.pages[f.page];
+        let sprite = Sprite {
+            image: page.image.clone(),
+            texture_atlas: Some(TextureAtlas { layout: page.layout.clone(), index: f.index }),
+            custom_size: Some(f.size),
+            ..default()
+        };
+        (sprite, f.anchor)
+    }
+
+    /// 把已有精灵换成这一帧（同一页时只改下标，不克隆句柄）。
+    pub fn set(&self, id: FrameId, sprite: &mut Sprite, anchor: &mut Anchor) {
+        let f = self.frame(id);
+        let page = &self.pages[f.page];
+        match &mut sprite.texture_atlas {
+            Some(ta) if ta.layout == page.layout => ta.index = f.index,
+            _ => {
+                sprite.image = page.image.clone();
+                sprite.texture_atlas = Some(TextureAtlas { layout: page.layout.clone(), index: f.index });
+            }
+        }
+        sprite.custom_size = Some(f.size);
+        *anchor = f.anchor;
+    }
+}
