@@ -1,0 +1,371 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index a35f06a..cfc2031 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3445,6 +3445,7 @@ dependencies = [
+ name = "lantern-tools"
+ version = "0.1.0"
+ dependencies = [
++ "bevy_ecs",
+  "bevy_math",
+  "lantern_content",
+  "lantern_core",
+diff --git a/crates/sim/src/combat.rs b/crates/sim/src/combat.rs
+index 23bbb79..e4e708b 100644
+--- a/crates/sim/src/combat.rs
++++ b/crates/sim/src/combat.rs
+@@ -822,7 +822,10 @@ pub(crate) fn process_deaths(
+     let drops = &c.run.drops;
+     let gold_mult = stats.get(Stat::GoldGain);
+     // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次
+-    let clear = crate::spawn::base_spawn_hp(c, minute) * c.player.ult.clear_seconds;
++    let clear = crate::spawn::base_spawn_hp(c, minute)
++        * stats.get(Stat::EnemyHp)
++        * stats.get(Stat::SpawnRate)
++        * c.player.ult.clear_seconds;
+     let ult_mult = stats.get(Stat::UltCharge);
+     for d in deaths.0.drain(..) {
+         let def = &c.enemies[d.kind as usize];
+diff --git a/crates/tools/Cargo.toml b/crates/tools/Cargo.toml
+index 9109ad7..9dd823a 100644
+--- a/crates/tools/Cargo.toml
++++ b/crates/tools/Cargo.toml
+@@ -12,6 +12,7 @@ lantern_core.workspace = true
+ lantern_content.workspace = true
+ lantern_sim.workspace = true
+ bevy_math.workspace = true
++bevy_ecs.workspace = true
+ 
+ [lints]
+ workspace = true
+diff --git a/crates/tools/src/kite.rs b/crates/tools/src/kite.rs
+new file mode 100644
+index 0000000..cea9be3
+--- /dev/null
++++ b/crates/tools/src/kite.rs
+@@ -0,0 +1,147 @@
++//! 临时实验：会躲的风筝机器人（玩法与数值会话测平衡用，不提交）。
++//!
++//! 走位：每步在 16 个方向里挑威胁最小的一个。威胁 = 前方几个采样点附近的妖物、弹幕（按速度外推）、
++//! 夜主的扇形和落点预警、结界边缘。安全时去点石灯笼。快被碰到时闪避。
++
++use bevy_math::{Vec2, ops};
++use lantern_sim::boss::{BossState, Foes};
++use lantern_sim::lanterns::Lanterns;
++use lantern_sim::run::Director;
++use lantern_sim::{Health, InputFrame, Player, Pos, SimCommand, SimHarness};
++
++const DIRS: usize = 16;
++const PLAYER_R: f32 = 11.0;
++
++#[derive(Default)]
++pub struct Kite {
++    last: Vec2,
++}
++
++pub fn decide(sim: &mut SimHarness, k: &mut Kite) -> (InputFrame, Vec<SimCommand>) {
++    let (p, dash_ready, hp, hp_max) = {
++        let world = sim.world_mut();
++        let mut q = world.query::<(&Pos, &Player, &Health)>();
++        let Ok((pos, pl, h)) = q.single(world) else {
++            return (InputFrame::quantize(Vec2::ZERO), Vec::new());
++        };
++        (pos.0, pl.dash_ready, h.hp, h.max)
++    };
++    let speed = sim.stats().get(lantern_content::Stat::Speed).max(30.0);
++    let w = sim.world();
++    let en = sim.enemies();
++    let mut near: Vec<(Vec2, f32, f32)> = Vec::new();
++    let mut nearest = f32::MAX;
++    for i in 0..en.count {
++        if !en.alive[i] {
++            continue;
++        }
++        let q = Vec2::new(en.x[i], en.y[i]);
++        let d = q.distance(p);
++        if d < 340.0 {
++            let gap = d - en.r[i] - PLAYER_R;
++            nearest = nearest.min(gap);
++            let wgt = if en.max_hp[i] > 2000.0 {
++                6.0
++            } else if en.max_hp[i] > 150.0 {
++                3.0
++            } else {
++                1.0
++            };
++            near.push((q, en.r[i], wgt));
++        }
++    }
++    let shots: Vec<(Vec2, Vec2, f32)> =
++        w.resource::<Foes>().0.iter().filter(|f| f.pos.distance(p) < 320.0).map(|f| (f.pos, f.vel, f.radius)).collect();
++    let mut bullet_close = false;
++    for &(s, v, r) in &shots {
++        for t in [0.0f32, 0.1, 0.2] {
++            if (s + v * t).distance(p) - r - PLAYER_R < 6.0 {
++                bullet_close = true;
++            }
++        }
++    }
++    let boss = w.resource::<BossState>();
++    let sweeps: Vec<_> = boss.sweeps.clone();
++    let drops: Vec<_> = boss.drops.clone();
++    let barrier = w.resource::<Director>().barrier;
++    let lamps = w.resource::<Lanterns>();
++    let safe = nearest > 90.0 && shots.iter().all(|&(s, _, _)| s.distance(p) > 120.0);
++    let low = hp < hp_max * 0.35;
++    // 最近的一盏没点亮的灯
++    let lamp = lamps
++        .0
++        .iter()
++        .filter(|l| !l.lit)
++        .map(|l| l.pos)
++        .min_by(|a, b| a.distance_squared(p).total_cmp(&b.distance_squared(p)));
++    let in_hazard = |q: Vec2| -> bool {
++        sweeps.iter().any(|sw| {
++            let d = q - sw.origin;
++            let a = ops::atan2(d.y, d.x);
++            let mut diff = a - sw.dir;
++            while diff > std::f32::consts::PI {
++                diff -= std::f32::consts::TAU;
++            }
++            while diff < -std::f32::consts::PI {
++                diff += std::f32::consts::TAU;
++            }
++            d.length() <= sw.radius + PLAYER_R + 10.0 && diff.abs() <= sw.angle * 0.5 + 0.15
++        }) || drops.iter().any(|r| q.distance(r.pos) <= r.radius + PLAYER_R + 10.0)
++    };
++    // 点灯：安全、站在灯旁就不动
++    if let Some(l) = lamp
++        && safe
++        && !low
++        && l.distance(p) < 40.0
++        && !in_hazard(p)
++    {
++        return (InputFrame::quantize(Vec2::ZERO), Vec::new());
++    }
++    let lamp_dir = lamp.filter(|l| l.distance(p) < 1500.0).map(|l| (l - p).normalize_or_zero());
++    let mut best = (f32::MAX, Vec2::X);
++    for j in 0..DIRS {
++        let a = j as f32 / DIRS as f32 * std::f32::consts::TAU;
++        let d = Vec2::new(ops::cos(a), ops::sin(a));
++        let mut threat = 0.0f32;
++        for step in [20.0f32, 48.0, 90.0] {
++            let q = p + d * step;
++            let t = step / speed;
++            let reach = if low { 150.0 } else { 115.0 };
++            for &(e, r, wgt) in &near {
++                let dist = (q.distance(e) - r - PLAYER_R).max(0.0);
++                if dist < reach {
++                    let x = 1.0 - dist / reach;
++                    threat += wgt * x * x * x;
++                }
++            }
++            for &(s, v, r) in &shots {
++                let dist = ((s + v * t).distance(q) - r - PLAYER_R).max(0.0);
++                if dist < 40.0 {
++                    threat += 4.0 * (1.0 - dist / 40.0);
++                }
++            }
++            if in_hazard(q) {
++                threat += 25.0;
++            }
++            if let Some((c, rad)) = barrier {
++                let out = q.distance(c) - (rad - 60.0);
++                if out > 0.0 {
++                    threat += out * 0.15;
++                }
++            }
++        }
++        threat -= 0.25 * d.dot(k.last);
++        if let Some(ld) = lamp_dir {
++            threat -= if safe { 1.2 } else { 0.25 } * d.dot(ld);
++        }
++        if threat < best.0 {
++            best = (threat, d);
++        }
++    }
++    k.last = best.1;
++    let mut cmds = Vec::new();
++    if dash_ready > 0 && (nearest < 3.0 || bullet_close || in_hazard(p)) {
++        cmds.push(SimCommand::Dash);
++    }
++    (InputFrame::quantize(best.1), cmds)
++}
+diff --git a/crates/tools/src/main.rs b/crates/tools/src/main.rs
+index 4b403f4..c8e2b09 100644
+--- a/crates/tools/src/main.rs
++++ b/crates/tools/src/main.rs
+@@ -13,7 +13,9 @@ use bevy_math::{Vec2, ops};
+ use lantern_content::Content;
+ use lantern_core::step::TICK_HZ;
+ use lantern_sim::combat::Source;
+-use lantern_sim::{InputFrame, Replay, RunMode, RunSetup, SimCommand, SimEvent, SimHarness, bot};
++use lantern_sim::{InputFrame, Replay, RunMode, RunSetup, SimCommand, SimEvent, SimHarness, SimPhase, bot};
++
++mod kite;
+ 
+ const USAGE: &str = "用法：
+   lantern-tools bench [--enemies <数量>] [--seconds <秒>] [--seed <种子>]
+@@ -27,7 +29,7 @@ const USAGE: &str = "用法：
+       （--god：主角无敌，看成长曲线和夜主战）";
+ 
+ fn data_dir() -> PathBuf {
+-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")
++    std::env::var("LANTERN_DATA").map_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"), PathBuf::from)
+ }
+ 
+ fn flag(args: &[String], name: &str, default: u64) -> Result<u64, String> {
+@@ -258,6 +260,7 @@ fn main() -> ExitCode {
+         Some("bench") => bench(&args[1..]),
+         Some("replay") => replay(&args[1..]),
+         Some("balance") => balance(&args[1..]),
++        Some("kite") => kite_cmd(&args[1..]),
+         Some("check-content") => {
+             Content::load(&data_dir()).map(|_| println!("内容数据校验通过")).map_err(|e| e.to_string())
+         }
+@@ -271,3 +274,145 @@ fn main() -> ExitCode {
+         }
+     }
+ }
++
++
++struct KiteRun {
++    won: bool,
++    secs: f32,
++    kills: u32,
++    levels: Vec<u32>,
++    evolutions: Vec<f32>,
++    boss_time: Option<f32>,
++    alive7: Option<u32>,
++    surge_peak: u32,
++    ults: u32,
++    lamps: u32,
++    damage: Vec<(Source, f64)>,
++}
++
++fn meta_setup(setup: &mut RunSetup, tier: &str) {
++    let initial = ["wind_wheel", "pillar", "longevity", "ice_soul"];
++    setup.charm_pool = initial.iter().map(|s| s.to_string()).collect();
++    let set = |v: &[(&str, u32)]| v.iter().map(|&(k, n)| (k.to_string(), n)).collect::<std::collections::BTreeMap<_, _>>();
++    match tier {
++        "none" => {}
++        "half" => {
++            setup.attributes = set(&[("damage", 5), ("health", 5), ("armor", 2), ("speed", 2), ("magnet", 3), ("crit", 2), ("cooldown", 2), ("xp", 3)]);
++            setup.meta = set(&[("luck", 3), ("seal", 1), ("wick", 2), ("afterglow", 1), ("ember", 1), ("oil", 1)]);
++            setup.charms = vec!["longevity".into()];
++            setup.charm_pool.extend(["night_pearl", "elixir", "five_coins"].iter().map(|s| s.to_string()));
++        }
++        _ => {
++            setup.attributes = set(&[("damage", 10), ("health", 10), ("armor", 5), ("speed", 5), ("magnet", 5), ("crit", 5), ("cooldown", 5), ("xp", 5)]);
++            setup.meta = set(&[("luck", 5), ("seal", 3), ("wick", 3), ("afterglow", 2), ("ember", 3), ("slot", 1), ("oil", 3)]);
++            setup.charms = vec!["longevity".into()];
++            setup.charm_pool.extend(["night_pearl", "elixir", "five_coins", "broken_sword"].iter().map(|s| s.to_string()));
++        }
++    }
++}
++
++fn kite_one(content: &Content, seed: u64, tier: u8, meta: &str, lamp: Option<&str>) -> KiteRun {
++    let mut setup = RunSetup::new(seed, RunMode::Normal);
++    setup.tier = tier;
++    setup.lamp = lamp.map(str::to_string);
++    meta_setup(&mut setup, meta);
++    let mut sim = SimHarness::with_setup(content.clone(), setup);
++    let mut k = kite::Kite::default();
++    let (mut levels, mut evolutions, mut alive7, mut surge_peak, mut ults) = (Vec::new(), Vec::new(), None, 0u32, 0u32);
++    let hz = u64::from(TICK_HZ);
++    while !sim.is_over() && sim.tick() < 15 * 60 * hz {
++        let tick = sim.tick();
++        let (input, cmds) = if sim.phase() == SimPhase::Play { kite::decide(&mut sim, &mut k) } else { (InputFrame::quantize(Vec2::ZERO), Vec::new()) };
++        bot::step(&mut sim, input, &cmds);
++        let t = sim.tick();
++        if t != tick {
++            if t.is_multiple_of(30 * hz) {
++                levels.push(sim.progress().level);
++            }
++            let alive = || { let e = sim.enemies(); (0..e.count).filter(|&i| e.alive[i]).count() as u32 };
++            if t == 420 * hz {
++                alive7 = Some(alive());
++            }
++            if (480 * hz..=515 * hz).contains(&t) && t.is_multiple_of(hz / 4) {
++                surge_peak = surge_peak.max(alive());
++            }
++        }
++        for ev in sim.take_events() {
++            match ev {
++                SimEvent::Evolve { .. } => evolutions.push(sim.tick() as f32 / TICK_HZ as f32),
++                SimEvent::Ult if sim.tick() < 570 * u64::from(TICK_HZ) => ults += 1,
++                _ => {}
++            }
++        }
++    }
++    let won = sim.flow().result.as_ref().is_some_and(|r| r.won);
++    let secs = sim.tick() as f32 / TICK_HZ as f32;
++    let since = sim.world().resource::<lantern_sim::run::Director>().boss_since;
++    let lamps = sim.world().resource::<lantern_sim::lanterns::Lanterns>().0.iter().filter(|l| l.lit).count() as u32;
++    KiteRun {
++        won,
++        secs,
++        kills: sim.progress().kills,
++        levels,
++        evolutions,
++        boss_time: won.then_some(secs - since),
++        alive7,
++        surge_peak,
++        ults,
++        lamps,
++        damage: sim.damage_log().0.clone(),
++    }
++}
++
++fn kite_cmd(args: &[String]) -> Result<(), String> {
++    let runs = flag(args, "--runs", 40)?;
++    let seed0 = flag(args, "--seed", 1)?;
++    let tier = flag(args, "--tier", 1)? as u8;
++    let meta = args.iter().position(|a| a == "--meta").and_then(|i| args.get(i + 1)).map_or("none", String::as_str).to_string();
++    let lamp = args.iter().position(|a| a == "--lamp").and_then(|i| args.get(i + 1)).cloned();
++    let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
++    let start = Instant::now();
++    let all: Vec<KiteRun> = (0..runs).map(|k| kite_one(&content, seed0 + k, tier, &meta, lamp.as_deref())).collect();
++    let n = runs as f32;
++    let wins = all.iter().filter(|r| r.won).count();
++    let early = all.iter().filter(|r| !r.won && r.secs < 180.0).count();
++    let mmss = |s: f32| format!("{}:{:02}", (s / 60.0) as u32, (s % 60.0) as u32);
++    println!("风筝机器人 {runs} 局，{tier} 更，局外成长 {meta}，灯 {}，用时 {:.1} 秒", lamp.as_deref().unwrap_or("默认"), start.elapsed().as_secs_f64());
++    println!("胜率 {:.0}%；3 分钟前倒下 {:.0}%；存活中位 {}；击杀中位 {:.0}", 100.0 * wins as f32 / n, 100.0 * early as f32 / n,
++        mmss(median(all.iter().map(|r| r.secs).collect())), median(all.iter().map(|r| r.kills as f32).collect()));
++    let lv = |i: usize| { let v: Vec<f32> = all.iter().filter_map(|r| r.levels.get(i).map(|&l| l as f32)).collect(); (median(v.clone()), v.len()) };
++    let (l3, n3) = lv(5);
++    let (l6, n6) = lv(11);
++    let (l9, n9) = lv(17);
++    println!("等级中位（活着的局）：3 分 {l3:.0}（{n3} 局），6 分 {l6:.0}（{n6} 局），9 分 {l9:.0}（{n9} 局）");
++    let evo: Vec<f32> = all.iter().filter_map(|r| r.evolutions.first().copied()).collect();
++    let alive_at = |s: f32| all.iter().filter(|r| r.secs >= s).count();
++    println!("第一次进化：活过 6:15 的 {} 局里 {} 局有进化，进化中位 {}", alive_at(375.0), evo.len(), mmss(median(evo)));
++    let bt: Vec<f32> = all.iter().filter_map(|r| r.boss_time).collect();
++    println!("夜主击杀时间中位 {:.0} 秒（{} 局）", median(bt.clone()), bt.len());
++    let a7: Vec<f32> = all.iter().filter_map(|r| r.alive7.map(|a| a as f32)).collect();
++    let sp: Vec<f32> = all.iter().filter(|r| r.secs > 515.0).map(|r| r.surge_peak as f32).collect();
++    println!("7 分钟场上妖物中位 {:.0}；妖潮峰值中位 {:.0}", median(a7), median(sp));
++    let ult_int: Vec<f32> = all.iter().filter(|r| r.ults > 0).map(|r| r.secs.min(570.0) / r.ults as f32).collect();
++    println!("燃灯平均间隔中位 {:.0} 秒；石灯笼平均点亮 {:.1} 盏", median(ult_int), all.iter().map(|r| r.lamps as f32).sum::<f32>() / n);
++    let deaths: Vec<f32> = all.iter().filter(|r| !r.won).map(|r| r.secs).collect();
++    let bucket = |a: f32, b: f32| deaths.iter().filter(|&&s| s >= a && s < b).count();
++    let mut ds = deaths.clone();
++    ds.sort_by(f32::total_cmp);
++    println!("倒下时刻：{}", ds.iter().map(|&d| mmss(d)).collect::<Vec<_>>().join(" "));
++    println!("倒下时间分布：0–3 分 {}，3–5 分 {}，5–8 分 {}，8–9:30 分 {}，夜主战 {}", bucket(0.0, 180.0), bucket(180.0, 300.0), bucket(300.0, 480.0), bucket(480.0, 570.0), bucket(570.0, 2000.0));
++    let mut total: Vec<(Source, f64)> = Vec::new();
++    for r in &all {
++        for &(s, d) in &r.damage {
++            match total.iter_mut().find(|(t, _)| *t == s) {
++                Some((_, v)) => *v += d,
++                None => total.push((s, d)),
++            }
++        }
++    }
++    let sum: f64 = total.iter().map(|(_, d)| d).sum::<f64>().max(1.0);
++    total.sort_by(|a, b| b.1.total_cmp(&a.1));
++    let shares: Vec<String> = total.iter().take(12).map(|&(s, d)| format!("{} {:.1}%", source_name(&content, s), d / sum * 100.0)).collect();
++    println!("伤害来源：{}", shares.join("，"));
++    Ok(())
++}

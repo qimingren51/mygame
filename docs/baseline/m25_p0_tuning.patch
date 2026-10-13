@@ -1,0 +1,55 @@
+diff --git a/assets/data/difficulty.ron b/assets/data/difficulty.ron
+index bf22b8d..fc4824b 100644
+--- a/assets/data/difficulty.ron
++++ b/assets/data/difficulty.ron
+@@ -2,12 +2,12 @@
+ // P0 只做一更到三更。灯油和金币的倍率乘在结算上。
+ [
+     (name: "一更", desc: "标准", effects: []),
+-    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.3", effects: [
+-        Mul(EnemyHp, 0.3), Mul(SpawnRate, 0.05), Mul(EnemyDamage, 0.1), Add(Affixes, 1.0), Mul(BossHp, 0.3),
++    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.4、伤害 ×1.45", effects: [
++        Mul(EnemyHp, 0.4), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.45), Add(Affixes, 1.0), Mul(BossHp, 0.2),
+         Mul(OilGain, 0.25), Mul(GoldGain, 0.25),
+     ]),
+-    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×1.7、伤害 ×1.25", effects: [
+-        Mul(EnemyHp, 0.7), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.25), Add(Affixes, 1.0), Mul(BossHp, 0.7),
++    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×1.8、伤害 ×1.7", effects: [
++        Mul(EnemyHp, 0.8), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 0.7), Add(Affixes, 1.0), Mul(BossHp, 0.4),
+         Mul(Healing, -0.25), Rule(BossExtra),
+         Mul(OilGain, 0.5), Mul(GoldGain, 0.5),
+     ]),
+diff --git a/assets/data/enemies.ron b/assets/data/enemies.ron
+index 159f822..245f7c4 100644
+--- a/assets/data/enemies.ron
++++ b/assets/data/enemies.ron
+@@ -22,7 +22,7 @@
+     // 三阶段（25%）：每 4 秒九尾扫（120° 扇形，半径 220，伤害 25，预警 0.8 秒），狐火环间隔缩到 1.7 秒。
+     // 登场 120 秒后狂暴：所有攻击间隔 ×0.6。三更起全程多一招狐火雨。
+     (id: "boss", name: "夜主 · 九尾", rank: Boss, movement: Chase,
+-     radius: 44.0, hp: 48000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
++     radius: 44.0, hp: 40000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
+      boss: Some((volley_every: 2.6, volley_first: 2.0, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
+                  shot_damage: 14.0, shot_life: 6.0, summon_every: 7.0, summon: "shade", summon_count: 6,
+                  summon_radius: 70.0,
+diff --git a/assets/data/run.ron b/assets/data/run.ron
+index 225c3d2..84cc407 100644
+--- a/assets/data/run.ron
++++ b/assets/data/run.ron
+@@ -12,13 +12,13 @@
+     // 以下 x 为分钟数（docs/BALANCE.md 第 4.1 节）。杂兵生命增长放缓；精英和小头目沿用原曲线；魂火价值不随时间增长
+     enemy_hp_scale: (1.0, 0.2, 0.04),
+     elite_hp_scale: (1.0, 0.3, 0.07),
+-    enemy_damage_scale: (1.0, 0.1, 0.0),
++    enemy_damage_scale: (1.4, 0.14, 0.0),
+     gem_value_scale: (1.0, 0.0, 0.0),
+ 
+     spawn: (
+         rate: (2.0, 1.6, 0.45),
+-        // P0 的内容只有 1.0 的三分之一左右，常规刷怪、妖群、合围的数量先乘过渡系数 0.7
+-        scale: 0.7,
++        // 常规刷怪、妖群、合围的数量倍率。P0 原先先乘 0.7，实测跟得上完整曲线，改回 1（docs/BALANCE.md 第 2.6 节）
++        scale: 1.0,
+         // 常规刷怪的上限按分钟分段；硬上限 2000，任何事件都不超过
+         soft_cap: [(0.0, 300), (3.0, 600), (6.0, 1000)],
+         hard_cap: 2000,
