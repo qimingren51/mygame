@@ -191,7 +191,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
             // 缺图时借用影妖（美术管线还没交付的素材）
             let asset = if db.assets.contains_key(&e.sprite) { e.sprite.as_str() } else { fallback };
             let meta = &db.assets[asset];
-            let (anim, am) = meta.anims.iter().min_by_key(|(k, _)| k.as_str()).expect("素材至少有一个动作");
+            let (anim, am) = meta.default_anim().expect("素材至少有一个动作");
             let seq = |suffix: &str| {
                 db.anim(&format!("{asset}/{anim}_E{suffix}")).map(<[FrameId]>::to_vec).unwrap_or_default()
             };

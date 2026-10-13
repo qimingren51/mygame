@@ -476,6 +476,7 @@ assets/data/
 - **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
 - **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
 - **扇形预警**：`weapons/sector` 是 120° 扇形，锚点在扇形顶点（`(0.0625, 0.5)`），开口朝 +X，2 倍下半径 128 像素，按需要的半径缩放、按方向旋转；`sector_fill` 是同形的填充层，蓄力时从顶点向外放大。
+- **平时的动作**：有好几个动作的素材在 `meta.lantern.assets.<素材>.default_anim` 写平时循环的动作名；没写时用 `move`，再没有取名字排在最前的（`AssetMeta::default_anim`）。
 - **冲锋预警**：`weapons/charge_line` 是车道，锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − `head_len_px`”再旋转；沿 X 透明度一致，拉多长都不走样，宽 `width_px`（2 倍下 28 像素）。`weapons/charge_line_head` 是箭头，锚点在箭头底边正中，放在车道末端、同样旋转、不拉伸，箭尖离锚点 `head_len_px`（2 倍下 51 像素）。两张都是白色、叠加、可染色，建议染 `#FF4A3A`。
 - **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。

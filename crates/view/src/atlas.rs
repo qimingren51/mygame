@@ -62,6 +62,21 @@ pub struct AssetMeta {
     pub floating: bool,
     #[serde(default)]
     pub shadow_radius_px: f32,
+    /// 平时循环的动作（有好几个动作的素材才写，DESIGN 第 15 节）
+    #[serde(default)]
+    pub default_anim: Option<String>,
+}
+
+impl AssetMeta {
+    /// 平时循环的动作：meta 写了 default_anim 就用它，否则用 move，再没有就取名字排在最前的那个。
+    pub fn default_anim(&self) -> Option<(&str, &AnimMeta)> {
+        let named = |name: &str| self.anims.get_key_value(name).map(|(k, v)| (k.as_str(), v));
+        self.default_anim
+            .as_deref()
+            .and_then(named)
+            .or_else(|| named("move"))
+            .or_else(|| self.anims.iter().min_by_key(|(k, _)| k.as_str()).map(|(k, v)| (k.as_str(), v)))
+    }
 }
 
 struct Page {
@@ -340,5 +355,31 @@ impl AtlasDb {
         }
         sprite.custom_size = Some(f.size);
         *anchor = f.anchor;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta(json: &str) -> AssetMeta {
+        serde_json::from_str(json).unwrap()
+    }
+
+    /// 平时的动作：写了 default_anim 用它，没写用 move，再没有取名字最前的。
+    #[test]
+    fn default_anim_prefers_meta_then_move() {
+        let anim = r#"{"frames": 4, "fps": 8, "dirs": ["E"]}"#;
+        let ghoul = meta(&format!(r#"{{"anims": {{"charge": {anim}, "move": {anim}}}}}"#));
+        assert_eq!(ghoul.default_anim().unwrap().0, "move", "不能拿冲锋当走路");
+        let wraith = meta(&format!(
+            r#"{{"anims": {{"idle": {anim}, "move": {anim}, "shoot": {anim}}}, "default_anim": "move"}}"#
+        ));
+        assert_eq!(wraith.default_anim().unwrap().0, "move");
+        let wisp =
+            meta(&format!(r#"{{"anims": {{"float": {anim}, "pounce": {anim}}}, "default_anim": "float"}}"#));
+        assert_eq!(wisp.default_anim().unwrap().0, "float");
+        let single = meta(&format!(r#"{{"anims": {{"walk": {anim}}}}}"#));
+        assert_eq!(single.default_anim().unwrap().0, "walk");
     }
 }
