@@ -60,9 +60,12 @@ EXPECTED = {
     "soulbell.png": (sz(20, 26), (0.5, 0.85)),
     "lotus.png": (sz(22, 20), (0.5, 0.8)),
     **{f"foxfire_{i}.png": (sz(24, 24), (0.6, 0.5)) for i in range(3)},
+    # M2.5：扇形预警（锚点在扇顶）
+    "sector.png": (sz(76, 124), (0.0625, 0.5)),
+    "sector_fill.png": (sz(76, 124), (0.0625, 0.5)),
 }
 # 白色、可染色、叠加混合的贴图
-WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3))}
+WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3)), "sector.png", "sector_fill.png"}
 REVIEW = ["weapons_sheet.png", "weapons_ingame.png"]
 
 WRITTEN: list[Path] = []
@@ -240,6 +243,35 @@ def test_ground_anchor():
         assert rows.max() <= ay + 4.0 * D, f"{name} 锚点以下内容太多（底 {rows.max()}，锚点 {ay:.1f}）"
 
 
+def test_sector_shape():
+    """扇形预警：扇顶在锚点、开口朝 +X、张角约 120°、外沿最亮处的半径与 meta 的 radius_px 一致；外沿比扇面里面亮（读得出是预警）；
+    蓄力层同尺寸，外沿一道亮带。"""
+    meta = meta_files()
+    for name in ("sector.png", "sector_fill.png"):
+        a = rgba(name)[..., 3].astype(np.float64) / 255.0
+        h, w = a.shape
+        ax, ay = EXPECTED[name][1][0] * w, EXPECTED[name][1][1] * h
+        yy, xx = np.mgrid[0:h, 0:w] + 0.5
+        r = np.hypot(xx - ax, yy - ay)
+        ang = np.degrees(np.arctan2(yy - ay, xx - ax))
+        vis = a > 0.15
+        assert (xx[vis] > ax - 2 * D).all(), f"{name} 应全在扇顶右边（开口朝 +X）"
+        span = ang[vis & (r > 0.4 * r.max())]
+        assert 112 <= span.max() - span.min() <= 128, f"{name} 张角 {span.max() - span.min():.0f}° 应约 120°"
+        assert abs(span.max() + span.min()) < 6, f"{name} 应以 +X 为中线上下对称"
+        rad = meta[name]["radius_px"]
+        assert meta[name]["angle_deg"] == 120
+        ks = range(int(4 * D), int(r.max()) - 1)  # 扇顶附近像素太少，跳过
+        prof = np.zeros(int(r.max()))
+        for k in ks:
+            sel = (np.abs(ang) < 40) & (r >= k) & (r < k + 1)
+            prof[k] = a[sel].mean() if sel.any() else 0.0
+        peak = int(np.argmax(prof))
+        assert abs(peak - rad) <= 5 * D, f"{name} 最亮处的半径 {peak} 与 radius_px {rad} 不符"
+        assert prof[peak] > 1.5 * prof[int(rad * 0.4)], f"{name} 外沿应比扇面里面亮"
+        assert a[(r > rad + 4 * D)].max() < 0.05, f"{name} 半径外应透明"
+
+
 def test_crane_flap():
     frames = [rgba(f"crane_{i}.png")[..., 3].astype(np.float64) for i in range(4)]
     area = [f.sum() for f in frames]
@@ -313,6 +345,13 @@ def test_meta_px_per_unit():
     for name, e in meta["files"].items():
         if "radius_px" in e:
             assert isinstance(e["radius_px"], int), f"{name} radius_px 应为整数像素"
+
+
+def test_pre_m25_unchanged():
+    """M2.5 之前的 weapons/ 产物逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
+    testkit.check_snapshot(V.ASSETS, ("weapons",), D)
+    files = list(meta_files())
+    assert files[-2:] == ["sector.png", "sector_fill.png"], "M2.5 的条目应追加在最后"
 
 
 def test_density_1x_unchanged():

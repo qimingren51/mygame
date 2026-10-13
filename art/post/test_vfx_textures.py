@@ -52,6 +52,9 @@ EXPECTED_VFX = {
     **{f"flame_{i}.png": (sz(32, 48), (0.5, 0.6)) for i in range(4)},
     **{f"ink_{i}.png": (sz(20, 20), (0.5, 0.5)) for i in range(3)},
     "lantern.png": (sz(20, 24), (0.5, 0.5)),
+    # M2.5
+    "coin.png": (sz(32, 26), (0.5, 0.5)),
+    "coin_emit.png": (sz(32, 26), (0.5, 0.5)),
 }
 EXPECTED_GROUND = {
     "paper.png": (sz(512, 512), (0.0, 0.0)),
@@ -66,10 +69,18 @@ EXPECTED_GROUND = {
     **{f"pebbles_{i}.png": (sz(48, 28), (0.5, 0.5)) for i in range(2)},
     "puddle_0.png": (sz(72, 36), (0.5, 0.5)),
     **{f"bamboo_{i}.png": (sz(40, 56), (0.5, 1.0)) for i in range(2)},
+    # M2.5：五行反应留下的区域
+    "zone_lava.png": (sz(224, 144), (0.5, 0.5)),
+    "zone_lava_glow.png": (sz(224, 144), (0.5, 0.5)),
+    "zone_mud.png": (sz(240, 152), (0.5, 0.5)),
+    "zone_herb.png": (sz(208, 132), (0.5, 0.5)),
+    "zone_herb_glow.png": (sz(208, 132), (0.5, 0.5)),
 }
 BOTTOM_ANCHORED = ("grass", "reed", "bamboo")  # 锚点在底边，底边允许有根
 WHITE_TEXTURES = ["light.png", "glow.png", "eyes.png", "spark.png", "gem_0.png", "gem_1.png", "gem_2.png"]
-WHITE_GROUND = ["rift_glow.png"]
+WHITE_GROUND = ["rift_glow.png", "zone_lava_glow.png", "zone_herb_glow.png"]
+M25_VFX = ["coin.png", "coin_emit.png"]
+M25_GROUND = ["zone_lava.png", "zone_lava_glow.png", "zone_mud.png", "zone_herb.png", "zone_herb_glow.png"]
 REVIEW = ["vfx_sheet.png", "paper_tile_2x2.png", "light_test.png"]
 
 
@@ -165,8 +176,12 @@ def test_meta_density_and_blend():
     for name, e in gm.items():
         if name in WHITE_GROUND:
             assert e["blend"] == "add" and e["tint"] is True, f"{name} 应为白色、染色、叠加"
-        elif name.split("_")[0] in ("spring", "rift", "reed", "leaves", "pebbles", "puddle", "bamboo"):
+        elif name.split("_")[0] in ("spring", "rift", "reed", "leaves", "pebbles", "puddle", "bamboo", "zone"):
             assert e["blend"] == "normal" and e["tint"] is False, f"{name} 应为正常混合、不染色"
+    assert vm["coin.png"]["blend"] == "normal" and vm["coin.png"]["tint"] is False and vm["coin.png"]["color"] == "full", "金币应全彩、正常混合"
+    assert vm["coin_emit.png"]["blend"] == "add" and vm["coin_emit.png"]["tint"] is False, "金币的自发光应叠加、不染色（自带暖金色）"
+    for name in ("zone_lava.png", "zone_mud.png", "zone_herb.png"):
+        assert isinstance(gm[name]["radius_px"], int) and gm[name]["radius_px"] > 0, f"{name} meta 应有 radius_px"
 
 
 def test_ground_decor_content():
@@ -185,6 +200,56 @@ def test_ground_decor_content():
     pd = rgba(V.GROUND_DIR, "puddle_0.png").astype(np.float64)
     vis = pd[pd[..., 3] > 150]
     assert vis[:, :3].mean() < 110, "水洼应偏暗"
+
+
+def test_m25_coin():
+    """金币：钱面是金色（R>G>B）、宽约 11 世界单位；方孔透明；自发光与金币同尺寸、亮处在钱面上，暖金色；四周透明。"""
+    c = rgba(V.VFX_DIR, "coin.png").astype(np.float64)
+    al = c[..., 3]
+    h, w = al.shape
+    cols = np.nonzero((al > 128).any(0))[0]
+    width_units = (cols.max() - cols.min() + 1) / S.PX_PER_UNIT
+    assert 10.0 <= width_units <= 12.5, f"金币宽 {width_units:.1f} 世界单位，应约 11"
+    face = c[al > 230][:, :3]
+    assert (face[:, 0] > face[:, 1]).mean() > 0.9 and (face[:, 1] > face[:, 2] + 20).mean() > 0.8, "钱面应是金色"
+    cx, cy = int(round(V.COIN_C[0] * D)), int(round(V.COIN_C[1] * D))
+    assert al[cy : cy + 1, cx - 1 : cx + 1].max() < 30, "方孔应透明"  # 孔的上沿露出一线孔壁，取中间偏下
+    assert al[cy, cx + int(6 * D)] > 200, "方孔旁边是钱面"
+    rows = np.nonzero((al > 128).any(1))[0]
+    assert (rows.max() - rows.min() + 1) < 0.85 * (cols.max() - cols.min() + 1), "金币应是稍俯看的扁圆"
+    e = rgba(V.VFX_DIR, "coin_emit.png").astype(np.float64)
+    ea = e[..., 3] / 255.0
+    hot = e[..., :3] * ea[..., None]
+    assert hot.sum() > 0 and (hot[..., 0].sum() > hot[..., 1].sum() > hot[..., 2].sum()), "自发光应是暖金色"
+    assert ea[al > 230].mean() > ea[al < 10].mean(), "自发光主要在钱面上"
+    assert ea[al < 10].max() > 0.1, "钱外应有一圈金晕"
+
+
+def test_m25_zones():
+    """反应区域：熔岩有暗的壳和橙红的裂缝、光贴图亮在裂缝上；淤泥偏暗偏褐；灵草偏绿、光贴图亮在草尖。四周柔和地淡出。"""
+    lv = rgba(V.GROUND_DIR, "zone_lava.png").astype(np.float64)
+    vis = lv[lv[..., 3] > 200][:, :3]
+    assert (vis.sum(1) < 200).mean() > 0.3, "熔岩应有焦墨的壳"
+    hot = (vis[:, 0] > 180) & (vis[:, 0] > vis[:, 2] + 100)
+    assert hot.mean() > 0.04, f"熔岩应有橙红的裂缝（占 {hot.mean():.3f}）"
+    gl = rgba(V.GROUND_DIR, "zone_lava_glow.png").astype(np.float64)[..., 3]
+    lv_hot = (lv[..., 0] > 180) & (lv[..., 0] > lv[..., 2] + 100) & (lv[..., 3] > 200)
+    assert gl[lv_hot].mean() > 1.5 * gl[lv[..., 3] > 200].mean() and gl.max() >= 230, "熔岩的光应亮在裂缝上"
+    md = rgba(V.GROUND_DIR, "zone_mud.png").astype(np.float64)
+    vis = md[md[..., 3] > 200][:, :3]
+    assert vis.mean() < 100 and (vis[:, 0] >= vis[:, 2] - 5).mean() > 0.5, "淤泥应偏暗、偏褐"
+    hb = rgba(V.GROUND_DIR, "zone_herb.png").astype(np.float64)
+    vis = hb[hb[..., 3] > 150][:, :3]
+    assert (vis[:, 1] > vis[:, 0]).mean() > 0.7, "灵草应偏绿"
+    hg = rgba(V.GROUND_DIR, "zone_herb_glow.png").astype(np.float64)[..., 3]
+    assert hg.max() >= 230 and (hg > 200).mean() < 0.05, "灵草的光应是零星的亮点"
+    for n in ("zone_lava.png", "zone_mud.png", "zone_herb.png"):
+        al = rgba(V.GROUND_DIR, n)[..., 3].astype(np.float64)
+        h, w = al.shape
+        yy, xx = np.mgrid[0:h, 0:w]
+        q = np.hypot((xx - w / 2) / (w / 2), (yy - h / 2) / (h / 2))
+        assert al[q > 0.97].max() < 40, f"{n} 边缘应淡到纸里（外圈最大 alpha {al[q > 0.97].max():.0f}）"
+        assert al[q < 0.3].mean() > 60, f"{n} 中间应有内容"
 
 
 def test_alpha_caps():
@@ -323,6 +388,14 @@ def test_review_images():
         assert p.exists() and p.stat().st_size > 10_000, f"检查图 {name} 缺失或为空"
     t = Image.open(V.REVIEW_DIR / "paper_tile_2x2.png")
     assert t.size == sz(1024, 1024)
+
+
+def test_pre_m25_unchanged():
+    """M2.5 之前的 vfx/、ground/ 产物逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
+    testkit.check_snapshot(V.ASSETS, ("vfx", "ground"), D)
+    for folder, new in (("vfx", M25_VFX), ("ground", M25_GROUND)):
+        files = list(json.loads((V.ASSETS / folder / "meta.json").read_text(encoding="utf-8"))["files"])
+        assert files[-len(new) :] == new, f"{folder}/meta.json 的 M2.5 条目应追加在最后：{files[-len(new):]}"
 
 
 def test_density_1x_unchanged():

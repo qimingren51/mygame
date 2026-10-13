@@ -7,6 +7,9 @@
   稀有度（天 玄 灵 凡）：方印、白文（红底上刻出白字），印里一道细边栏染该稀有度的卡片色，作为次要的点缀；
   五行共鸣（锐 生 凝 焚 固）：圆印、朱文（红字红边），共鸣触发时盖在屏幕上；
   标记（进化、新纪录、精英、夜主）：竖长方印，进化 / 新纪录 / 精英是朱文，夜主是白文（整块红，压得住）。
+  五行反应（M2.5，十种，seal_react_<id>）：圆角方印、朱白相间、双边栏——外一道粗边、里一道细边栏，
+    两个字上下排（从上往下读，不会读反）：上面第一个字是白文（一整块红刻出白字），下面第二个字是朱文（红字），
+    字随格子压扁一些。和共鸣的圆形朱文印一眼分得开：方的、上半是实的红、边是两道。反应第一次发生时盖在屏幕中间。
 
 印文用完整版思源宋体的最粗一档（900）：笔画粗细匀、横平竖直，缩小后比毛笔楷书更像刻出来的字，
 小尺寸下也认得清；字按印面格子略拉伸填满（篆刻的章法），再做圆角、刀口的毛糙和崩口。字体来自 ui_fonts。
@@ -53,16 +56,29 @@ SEALS = [
     ("seal_elite", "精英", "朱文", "rect", (96, 160), {"group": "mark", "id": "elite"}),
     ("seal_boss", "夜主", "白文", "rect", (96, 160), {"group": "mark", "id": "boss"}),
 ]
+# M2.5：五行反应，与 assets/data/elements.ron 的 reactions 同序（前五种相生、后五种相克）；只往后追加，前面的印章逐字节不变
+REACTIONS = [
+    ("liaoyuan", "燎原", "wood", "fire"), ("rongyan", "熔岩", "fire", "earth"), ("zhubing", "铸兵", "earth", "metal"),
+    ("ningshuang", "凝霜", "metal", "water"), ("zisheng", "滋生", "water", "wood"),
+    ("zhengteng", "蒸腾", "water", "fire"), ("rongjin", "熔金", "fire", "metal"), ("duanmu", "断木", "metal", "wood"),
+    ("lietu", "裂土", "wood", "earth"), ("yuni", "淤泥", "earth", "water"),
+]
+SEALS += [
+    (f"seal_react_{rid}", name, "朱白", "rsquare", (128, 128), {"group": "reaction", "id": rid, "els": [a, b], "cycle": "sheng" if k < 5 else "ke"})
+    for k, (rid, name, a, b) in enumerate(REACTIONS)
+]
 
 MARGIN = 1.6  # 印边离画布边（1 倍像素），留出透明边和残边的余地
 BORDER = 2.7  # 朱文印的边宽
 GLYPH_PX = 440  # 字形掩码的渲染字号（与密度无关，两种密度采样同一张掩码）
+# 朱白相间印（五行反应）：圆角、外边宽、边与细边栏之间的空、细边栏半宽、细边栏到白文块的空、上下两格之间的空、字的横向拉伸
+ZB_RC, ZB_BORDER, ZB_GAP, ZB_LINE, ZB_PAD, ZB_COLGAP, ZB_STRETCH = 5.0, 2.2, 1.4, 0.45, 1.2, 1.8, 1.45
 
 
 def seal_specs() -> list[dict]:
     out = []
     for i, (fname, text, style, shape_, size2, extra) in enumerate(SEALS):
-        meta = {"kind": "seal", **extra, "name": text, "style": style, "shape": shape_, "font": f"{GLYPH_FONT[0]}:{GLYPH_FONT[1]}"}
+        meta = {"kind": "seal", **extra, "name": text, "style": style if style != "朱白" else "朱白相间", "shape": shape_, "font": f"{GLYPH_FONT[0]}:{GLYPH_FONT[1]}"}
         out.append({"fname": fname, "text": text, "style": style, "shape": shape_, "size1": (size2[0] / 2, size2[1] / 2), "seed": 8000 + 41 * i, "meta": meta})
     return out
 
@@ -121,15 +137,38 @@ def body_sdf(P: W.Painter, shape_: str, w1: float, h1: float) -> np.ndarray:
     cx, cy = w1 / 2, h1 / 2
     if shape_ == "round":
         return np.hypot(P.X - cx, P.Y - cy) - (min(w1, h1) / 2 - MARGIN)
-    rc = 2.2
+    rc = ZB_RC if shape_ == "rsquare" else 2.2
     qx = np.abs(P.X - cx) - (w1 / 2 - MARGIN - rc)
     qy = np.abs(P.Y - cy) - (h1 / 2 - MARGIN - rc)
     return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - rc
 
 
+def zb_geometry(spec):
+    """朱白相间印的版面（1 倍像素）：上半白文块的矩形、两个字的格子（按印文顺序：先上后下）、细边栏中心的 d 值。"""
+    w1, h1 = spec["size1"]
+    line_at = -(ZB_BORDER + ZB_GAP + ZB_LINE)
+    inset = MARGIN - line_at + ZB_LINE + ZB_PAD
+    x0, x1, y0, y1 = inset, w1 - inset, inset, h1 - inset
+    mid = h1 / 2
+    block = (x0, y0, x1, mid - ZB_COLGAP / 2)
+    top = (x0 + 1.8, y0 + 1.6, x1 - 1.8, block[3] - 1.6)
+    bottom = (x0 + 1.0, mid + ZB_COLGAP / 2 + 1.0, x1 - 1.0, y1 - 1.0)
+    return block, [top, bottom], line_at
+
+
+def glyph_layout(spec) -> list[tuple[str, tuple[float, float, float, float], float, str]]:
+    """[(字, 格子, 拉伸, 白文/朱文)]，按印文顺序。测试用它重新排字。"""
+    if spec["style"] == "朱白":
+        _, cells, _ = zb_geometry(spec)
+        return [(spec["text"][0], cells[0], ZB_STRETCH, "白文"), (spec["text"][1], cells[1], ZB_STRETCH, "朱文")]
+    return [(ch, cell, 1.2, spec["style"]) for ch, cell in zip(spec["text"], cells_for(spec))]
+
+
 def cells_for(spec) -> list[tuple[float, float, float, float]]:
     w1, h1 = spec["size1"]
     n = len(spec["text"])
+    if spec["style"] == "朱白":
+        return zb_geometry(spec)[1]
     if spec["shape"] == "round":
         r = min(w1, h1) / 2 - MARGIN - BORDER - 3.4
         k = r * 0.8
@@ -162,25 +201,28 @@ def make_seal(index: int) -> Image.Image:
         r = rng.uniform(1.0, 2.0)
         d = np.maximum(d, r - np.hypot(P.X - px, P.Y - py))
     body = smoothstep(P.aa, -P.aa, d)
-    # ---- 印文
-    glyph = np.zeros(P.X.shape)
-    for ch, cell in zip(spec["text"], cells_for(spec)):
-        glyph = np.maximum(glyph, glyph_field(P, ch, cell))
-    gnoise = 0.12 * V.noise1(rng, P.X.shape, 0.5 * P.ss)
-    th = 0.42 if spec["style"] == "白文" else 0.38  # 白文字口略放开，朱文字略加粗
-    g = smoothstep(th - 0.06, th + 0.06, glyph + gnoise)
-    # ---- 印泥：朱文是边框 + 字，白文是整块减去字
-    if spec["style"] == "朱文":
-        bw = BORDER * np.clip(1.0 + 0.18 * V.noise1(rng, P.X.shape, 3.0 * P.ss), 0.6, 1.4)
-        frame = body * smoothstep(-bw - P.aa, -bw + P.aa, d)
-        ink = np.maximum(frame, g * body)
+    if spec["style"] == "朱白":
+        ink = zhubai_ink(P, spec, d, body)
     else:
-        ink = body * (1.0 - g)
-        if spec["meta"].get("group") == "rarity":
-            # 细边栏：印面里一圈细线，染稀有度的卡片色（次要点缀）
-            line = smoothstep(0.42 + P.aa, 0.42 - P.aa, np.abs(d + 3.0))
-            acc = col(spec["meta"]["accent"])
-            ink_line = line * body
+        # ---- 印文
+        glyph = np.zeros(P.X.shape)
+        for ch, cell in zip(spec["text"], cells_for(spec)):
+            glyph = np.maximum(glyph, glyph_field(P, ch, cell))
+        gnoise = 0.12 * V.noise1(rng, P.X.shape, 0.5 * P.ss)
+        th = 0.42 if spec["style"] == "白文" else 0.38  # 白文字口略放开，朱文字略加粗
+        g = smoothstep(th - 0.06, th + 0.06, glyph + gnoise)
+        # ---- 印泥：朱文是边框 + 字，白文是整块减去字
+        if spec["style"] == "朱文":
+            bw = BORDER * np.clip(1.0 + 0.18 * V.noise1(rng, P.X.shape, 3.0 * P.ss), 0.6, 1.4)
+            frame = body * smoothstep(-bw - P.aa, -bw + P.aa, d)
+            ink = np.maximum(frame, g * body)
+        else:
+            ink = body * (1.0 - g)
+            if spec["meta"].get("group") == "rarity":
+                # 细边栏：印面里一圈细线，染稀有度的卡片色（次要点缀）
+                line = smoothstep(0.42 + P.aa, 0.42 - P.aa, np.abs(d + 3.0))
+                acc = col(spec["meta"]["accent"])
+                ink_line = line * body
     # ---- 压力起伏、砂眼、边上积色
     press = V.noise1(rng, P.X.shape, 6.0 * P.ss)
     press = press + 0.6 * V.noise1(rng, P.X.shape, 2.0 * P.ss)
@@ -200,6 +242,28 @@ def make_seal(index: int) -> Image.Image:
     if spec["style"] == "白文" and spec["meta"].get("group") == "rarity":
         P.lay.over(mixc(mixc(acc, ZHUSHA, 0.25), PAPER, 0.15), ink_line * (1.0 - 0.6 * holes))
     return P.image()
+
+
+def zhubai_ink(P: W.Painter, spec, d: np.ndarray, body: np.ndarray) -> np.ndarray:
+    """朱白相间印的印泥覆盖度：外边 + 细边栏 + 上半白文块（刻掉第一个字）+ 下半朱文（第二个字）。"""
+    rng = P.rng
+    block, _, line_at = zb_geometry(spec)
+    lay = glyph_layout(spec)
+    gnoise = 0.12 * V.noise1(rng, P.X.shape, 0.5 * P.ss)
+    g_white = smoothstep(0.36, 0.48, glyph_field(P, lay[0][0], lay[0][1], stretch=lay[0][2]) + gnoise)  # 白文字口略放开
+    g_red = smoothstep(0.32, 0.44, glyph_field(P, lay[1][0], lay[1][1], stretch=lay[1][2]) + gnoise)  # 朱文字略加粗
+    bw = ZB_BORDER * np.clip(1.0 + 0.18 * V.noise1(rng, P.X.shape, 3.0 * P.ss), 0.6, 1.4)
+    frame = body * smoothstep(-bw - P.aa, -bw + P.aa, d)
+    lw = ZB_LINE * np.clip(1.0 + 0.25 * V.noise1(rng, P.X.shape, 2.0 * P.ss), 0.6, 1.4)
+    line = body * smoothstep(lw + P.aa, lw - P.aa, np.abs(d - line_at))
+    bx0, by0, bx1, by1 = block
+    rc = 1.2
+    qx = np.abs(P.X - (bx0 + bx1) / 2) - ((bx1 - bx0) / 2 - rc)
+    qy = np.abs(P.Y - (by0 + by1) / 2) - ((by1 - by0) / 2 - rc)
+    db = np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - rc
+    db = db + 0.25 * V.noise1(rng, P.X.shape, 1.2 * P.ss)
+    solid = smoothstep(P.aa, -P.aa, db)
+    return np.maximum.reduce([frame, line, solid * (1.0 - g_white) * body, g_red * body])
 
 
 def main() -> None:

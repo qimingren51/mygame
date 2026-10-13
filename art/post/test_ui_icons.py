@@ -5,6 +5,7 @@
 不设 LANTERN_ART_DENSITY 时自动在 1 倍、2 倍各跑一遍（子进程）；设了就只测那一种密度。
 
 前 25 个图标（第一批）必须逐字节不变（OLD_MD5），meta 里它们的条目也不变；第二批与印章追加在后面。
+M2.5（第三批，ui_icons_m25.py 与五行反应印）追加在最后；M2.5 之前的全部图标、印章与 meta 条目按 post/golden_m25.json 核对。
 
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/test_ui_icons.py
@@ -15,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -32,6 +34,7 @@ if __name__ == "__main__":
         sys.exit(_rc)
 
 import ui_icons as U  # noqa: E402
+import ui_icons_m25 as M  # noqa: E402
 import ui_seals as Z  # noqa: E402
 
 V = U.V
@@ -76,8 +79,38 @@ SEAL_SIZES_2X = {
 }
 SEALS = [f"{s}.png" for s in SEAL_SIZES_2X]
 ICONS = EXPECTED + NEW_ICONS
-ALL = ICONS + SEALS
+
+# ---- M2.5（第三批）：id 与 assets/data/*.ron 一致（测试里直接读 RON 核对）
+DATA = HERE.parents[1] / "assets" / "data"
+M25_PASSIVES = ["xunfeng", "huichun", "hanyi", "dengxin", "zaiwu", "qinggong", "juhun"]
+M25_OMENS = ["wuyue", "nike"]
+AFFIX_IDS = ["ji", "jian", "fen", "zhao", "yin", "kuang"]
+HUB_ROLES = ["lampsmith", "peddler", "lampboy", "storyteller"]
+CHARM_IDS = ["wind_wheel", "pillar", "night_pearl", "elixir", "five_coins", "longevity", "ice_soul", "broken_sword"]
+REACTION_IDS = ["liaoyuan", "rongyan", "zhubing", "ningshuang", "zisheng", "zhengteng", "rongjin", "duanmu", "lietu", "yuni"]
+M25_ICONS = (
+    [f"icon_{p}.png" for p in M25_PASSIVES] + [f"icon_omen_{o}.png" for o in M25_OMENS] + ["icon_gold.png", "icon_enc_merchant.png"]
+    + [f"icon_affix_{a}.png" for a in AFFIX_IDS] + [f"icon_hub_{k}.png" for k in range(4)] + [f"icon_charm_{c}.png" for c in CHARM_IDS]
+)
+AFFIX = [f"icon_affix_{a}.png" for a in AFFIX_IDS]
+FULL_M25 = [n for n in M25_ICONS if n not in AFFIX]  # 128² 的
+REACT_SEALS = [f"seal_react_{r}.png" for r in REACTION_IDS]
+ALL = ICONS + SEALS + M25_ICONS + REACT_SEALS
+ALL_SEALS = SEALS + REACT_SEALS
+SEAL_SIZES_2X.update({n[:-4]: (128, 128) for n in REACT_SEALS})
 SMALL_24 = ["icon_lotus.png", "icon_oil.png"] + [f"icon_buff_{b}.png" for b in BUFF_IDS] + [f"icon_{h}.png" for h in HUD_IDS if h != "level"]
+SMALL_24 += ["icon_gold.png"] + AFFIX
+NA = N // 2  # 小图标（精英词缀）的边长
+
+
+def ron_entries(name: str) -> list[dict]:
+    """从 assets/data/<name>.ron 里粗读 (id: "...", name: "...", ...) 条目的 id、name、element。"""
+    text = (DATA / name).read_text(encoding="utf-8")
+    out = []
+    for m in re.finditer(r'\(id: "([a-z_]+)", name: "([^"]+)"(.*?)(?=\n\s*\(id: |\n\])', text, re.S):
+        el = re.search(r"element: (\w+)", m.group(3))
+        out.append({"id": m.group(1), "name": m.group(2), "el": el.group(1).lower() if el else None})
+    return out
 
 OLD_MD5 = {  # 前 25 个图标在第二批加入之前的 md5（1 倍、2 倍），必须逐字节不变
     "1": {
@@ -173,27 +206,69 @@ def test_meta_and_sizes():
         assert e["blend"] == "normal" and e["tint"] is False and e["color"] == "full", f"{name} 应为全彩、正常混合"
         for k in ("kind", "id", "name", "note"):
             assert k in e, f"{name} meta 缺少 {k}"
-        if e["kind"] in OLD_KINDS:
+        if e["kind"] in OLD_KINDS and name not in M25_ICONS:
             assert "el" in e, f"{name} meta 缺少 el"
         im = Image.open(U.UI_DIR / name)
         assert im.mode == "RGBA" and list(im.size) == e["size"], f"{name} 实际 {im.size} {im.mode}，meta {e['size']}"
-        if name in ICONS:
+        if name in ICONS or name in FULL_M25:
             assert im.size == (N, N), f"{name} 应为 {N}×{N}"
-        if e["kind"] == "passive":
+        if name in AFFIX:
+            assert im.size == (NA, NA), f"{name} 应为 {NA}×{NA}（小图标）"
+        if e["kind"] == "passive" and name not in M25_ICONS:
             assert U.PASSIVES[e["id"]][1] == e["el"], f"{name} 五行与 src/data/passives.ts 不符"
-        if e["kind"] in ("encounter", "buff"):
+        if e["kind"] in ("encounter", "buff") and e["id"] in WEB_ACCENT:  # 货郎（M2.5）的颜色取自 events.ron，另测
             assert e["accent"] == WEB_ACCENT[e["id"]], f"{name} accent 与网页版颜色不符"
     for n in NEW_ICONS:
         e, stem = files[n], n[:-4]
         assert stem.endswith((e["id"], e["id"] + "_off")), f"{n} 的 id {e['id']} 与文件名不符"
         if e["kind"] == "meta":
             assert e["lit"] is (not stem.endswith("_off")), f"{n} 的 lit 字段不对"
-    for n in SEALS:
+    for n in ALL_SEALS:
         w2, h2 = SEAL_SIZES_2X[n[:-4]]
         assert w2 % 32 == 0 and h2 % 32 == 0
         want = [int(round(w2 * D / 2)), int(round(h2 * D / 2))]
         assert files[n]["size"] == want, f"{n} 尺寸 {files[n]['size']} != {want}"
-        assert files[n]["kind"] == "seal" and files[n]["style"] in ("白文", "朱文") and files[n]["group"] in ("rarity", "resonance", "mark")
+        assert files[n]["kind"] == "seal" and files[n]["style"] in ("白文", "朱文", "朱白相间") and files[n]["group"] in ("rarity", "resonance", "mark", "reaction")
+
+
+def test_m25_meta_matches_data():
+    """M2.5 图标、反应印的 id / 名字 / 五行与 assets/data 的 RON 一致。"""
+    files = meta()["files"]
+    passives = {e["id"]: e for e in ron_entries("passives.ron")}
+    for pid in M25_PASSIVES:
+        e = files[f"icon_{pid}.png"]
+        assert e["kind"] == "passive" and e["id"] == pid and e["name"] == passives[pid]["name"], f"icon_{pid} 与 passives.ron 不符"
+        assert e.get("el") == passives[pid]["el"], f"icon_{pid} 五行 {e.get('el')} 与 passives.ron 的 {passives[pid]['el']} 不符"
+    for fname, data, kind, ids in (("omens.ron", "icon_omen_{}", "omen", M25_OMENS), ("affixes.ron", "icon_affix_{}", "affix", AFFIX_IDS),
+                                   ("charms.ron", "icon_charm_{}", "charm", CHARM_IDS)):
+        names = {e["id"]: e["name"] for e in ron_entries(fname)}
+        if kind != "omen":
+            assert list(names) == ids, f"{fname} 的条目 {list(names)} 与测试的 {ids} 不一致"
+        for i in ids:
+            e = files[data.format(i) + ".png"]
+            assert e["kind"] == kind and e["id"] == i and e["name"] == names[i], f"{data.format(i)} 与 {fname} 不符"
+    ev = (DATA / "events.ron").read_text(encoding="utf-8")
+    mm = re.search(r'\(id: "merchant", name: "([^"]+)".*?color: "(#[0-9A-Fa-f]{6})"', ev, re.S)
+    e = files["icon_enc_merchant.png"]
+    assert e["kind"] == "encounter" and e["name"] == mm.group(1) and e["accent"] == mm.group(2), "icon_enc_merchant 与 events.ron 不符"
+    assert files["icon_gold.png"]["kind"] == "currency" and files["icon_gold.png"]["id"] == "gold"
+    for k, role in enumerate(HUB_ROLES):
+        e = files[f"icon_hub_{k}.png"]
+        assert e["kind"] == "hub" and e["id"] == str(k) and e["role"] == role, f"icon_hub_{k} meta 不对"
+    el = (DATA / "elements.ron").read_text(encoding="utf-8")
+    reactions = re.findall(r'\(a: (\w+), b: (\w+), id: "(\w+)", name: "([^"]+)"', el)
+    assert [r[2] for r in reactions] == REACTION_IDS, "elements.ron 的反应顺序变了"
+    for a, b, rid, name in reactions:
+        e = files[f"seal_react_{rid}.png"]
+        assert e["group"] == "reaction" and e["id"] == rid and e["name"] == name and e["els"] == [a.lower(), b.lower()], f"seal_react_{rid} 与 elements.ron 不符"
+        assert e["style"] == "朱白相间" and e["shape"] == "rsquare"
+
+
+def test_pre_m25_unchanged():
+    """M2.5 之前的全部图标、印章逐字节不变，meta.json 已有条目与顶层字段不变、新条目只追加在后面（post/golden_m25.json）。"""
+    n = testkit.check_snapshot(V.ASSETS, ("ui",), D)
+    assert n == len(ICONS) + len(SEALS), f"快照里应有 {len(ICONS) + len(SEALS)} 个原有的 PNG，实际核对了 {n} 个"
+    assert list(meta()["files"])[: n] == ICONS + SEALS
 
 
 def test_old_unchanged():
@@ -214,18 +289,27 @@ def test_old_unchanged():
 # ============================================================== 图标的框
 
 
+def design_radius(n: int) -> np.ndarray:
+    """以 64×64 设计坐标计的半径：普通图标就是 1 倍像素，小图标（32 像素画布）再乘 2。"""
+    return radial(n) * (64 * D / n)
+
+
 def test_borders_and_disc():
-    r = radial(N)
     m = meta()["files"]
-    ring = (r > 26.5) & (r < 29.5)
     lit_ring = []
-    for name in ICONS:
+    for name in ICONS + M25_ICONS:
         a = rgba(name)
         al = a[..., 3]
+        r = design_radius(al.shape[0])
+        ring = (r > 26.5) & (r < 29.5)
         border = np.concatenate([al[0], al[-1], al[:, 0], al[:, -1]])
         assert border.max() == 0, f"{name} 最外一圈应全透明"
         assert al[r < 20].min() > 250, f"{name} 圆底内部应不透明"
-        assert al[r > 31.5].max() <= 10, f"{name} 圆外应透明"
+        outside = r > 31.5
+        if m[name]["kind"] == "charm":  # 灯坠顶上的中国结和提环伸出圆外，只许在正上方
+            xx = (np.mgrid[0 : al.shape[0], 0 : al.shape[1]][1] + 0.5) / D
+            outside &= np.abs(xx - 32.0) > 5.0
+        assert al[outside].max() <= 10, f"{name} 圆外应透明"
         L = lum(a[..., :3][ring] / 255.0)
         e = m[name]
         if e["kind"] == "omen":
@@ -262,6 +346,47 @@ def test_readable_at_32px():
         for b_ in EXPECTED:
             worst = min(worst, (np.abs(smalls[a_] - smalls[b_])[inner].mean(), f"{a_} / {b_}"))
     assert worst[0] > 0.05, f"32 像素下新图标与原有图标太像：{worst[1]}（差 {worst[0]:.3f}）"
+
+
+def test_m25_readable_and_distinct():
+    """M2.5 图标缩到 32 像素：物件区域有足够的明暗对比；与原有的全部图标、M2.5 的其他图标都不太像
+    （小图标先放到同样的 32 像素再比）。"""
+    inner = inner_disc(32, 10.5)
+    sm = {n: at32(n) for n in ICONS + M25_ICONS if n != "icon_level.png"}
+    for name in M25_ICONS:
+        L = lum(sm[name])[inner]
+        assert L.std() > 0.1, f"{name} 在 32 像素下物件对比太低（std {L.std():.3f}）"
+        assert np.percentile(L, 95) - np.percentile(L, 5) > 0.3, f"{name} 在 32 像素下缺少深浅层次"
+    worst = (1.0, "")
+    for a_ in M25_ICONS:
+        for b_ in sm:
+            if b_ != a_ and not (b_ in M25_ICONS and M25_ICONS.index(b_) < M25_ICONS.index(a_)):
+                worst = min(worst, (np.abs(sm[a_] - sm[b_])[inner].mean(), f"{a_} / {b_}"))
+    assert worst[0] > 0.05, f"32 像素下两个图标太像：{worst[1]}（差 {worst[0]:.3f}）"
+
+
+def m25_categories() -> dict[str, list[str]]:
+    """M2.5 图标按类别归到原有的同类里（心法和原有 10 门心法比，夜签和原有 10 张比……），新的类别自成一组。"""
+    m = meta()["files"]
+    cats: dict[str, list[str]] = {}
+    for n in EXPECTED + NEW_ICONS + M25_ICONS:
+        k = {"currency": "supply"}.get(m[n]["kind"], m[n]["kind"])
+        cats.setdefault(k, []).append(n)
+    return {k: v for k, v in cats.items() if any(n in M25_ICONS for n in v)}
+
+
+def test_m25_distinct_within_category():
+    """同一类里（含原有的同类）任意两个图标在 32 像素下不能太像。"""
+    inner = inner_disc(32, 10.5)
+    cats = m25_categories()
+    assert set(cats) == {"passive", "omen", "supply", "encounter", "affix", "hub", "charm"}, set(cats)
+    for k, ns in cats.items():
+        sm = {n: at32(n) for n in ns}
+        for a_, b_ in itertools.combinations(ns, 2):
+            if a_ not in M25_ICONS and b_ not in M25_ICONS:
+                continue
+            dv = np.abs(sm[a_] - sm[b_])[inner].mean()
+            assert dv > 0.06, f"{k} 类里 {a_} 与 {b_} 在 32 像素下太像（差 {dv:.3f}）"
 
 
 def test_readable_at_24px():
@@ -362,6 +487,35 @@ def test_new_frames():
             assert frac > need, f"icon_omen_{o} 在 r={rad} 处应是朱砂圈（朱色占 {frac:.2f}）"
         ink = lum(a[..., :3][(r > 26.5) & (r < 29.5) & (a[..., 3] > 0.5)]) < 0.25
         assert ink.mean() < 0.1, f"icon_omen_{o} 不应有墨圈"
+    for name in M25_ICONS:
+        e = m[name]
+        a = rgba(name) / 255.0
+        if e["kind"] == "omen":
+            for rad, tol, need in ((27.2, 0.6, 0.6), (24.3, 0.22, 0.5)):
+                band = (np.abs(r - rad) < tol) & (a[..., 3] > 0.5)
+                frac = is_vermilion(a[..., :3][band]).mean()
+                assert frac > need, f"{name} 在 r={rad} 处应是朱砂圈（朱色占 {frac:.2f}）"
+            continue
+        if e["kind"] == "affix":
+            rs, th = design_radius(NA), np.mod(np.degrees(np.arctan2(*(np.mgrid[0:NA, 0:NA] + 0.5 - NA / 2))), 360)
+            band = (np.abs(rs - 23.6) < 0.8) & (th > 70) & (th < 220)
+            got = a[..., :3][band].mean(0)
+            assert np.abs(got - M.AFFIX_ARC).max() < 0.2, f"{name} 色弧颜色 {np.round(got * 255)} 应是朱砂"
+            continue
+        if e["kind"] == "charm":
+            band = (np.abs(r - 24.2) < 0.5) & (a[..., 3] > 0.5)
+            frac = is_vermilion(a[..., :3][band]).mean()
+            assert frac > 0.6, f"{name} 墨圈内侧应绕一圈红绳（朱色占 {frac:.2f}）"
+            yy, xx = (np.mgrid[0:N, 0:N] + 0.5) / D
+            knot = (np.abs(xx - 32.0) < 2.0) & (np.abs(yy - 5.2) < 2.0)
+            assert is_vermilion(a[..., :3][knot]).mean() > 0.5, f"{name} 顶上应有一个红色的中国结"
+            continue
+        if e["kind"] == "passive":
+            want = U.EL_INK[e["el"]] if e.get("el") else U.NEUTRAL_ARC
+        else:
+            want = {"currency": U.NEUTRAL_ARC, "encounter": M.MERCHANT_INK, "hub": M.HUB_ARC}[e["kind"]]
+        got = arc_color(a)
+        assert np.abs(got - want).max() < 0.2, f"{name} 色弧颜色 {np.round(got * 255)} 与 {np.round(np.asarray(want) * 255)} 不符"
     a = rgba("icon_level.png") / 255.0
     rim = (np.abs(r - U.F_LEVEL["gold_rim"][0]) < 1.0)
     g = a[..., :3][rim]
@@ -378,21 +532,26 @@ def seal_spec(n: str) -> dict:
     return next(s for s in Z.seal_specs() if s["fname"] == n[:-4])
 
 
-def expected_glyph(spec) -> np.ndarray:
-    """按印章的章法在像素分辨率上重新排一遍字（不带刀口毛糙），得到期望的字形覆盖度。"""
+def expected_glyph(spec):
+    """按印章的章法在像素分辨率上重新排一遍字（不带刀口毛糙），得到期望的印泥（白文格子里是 1 - 字，朱文格子里是字）。"""
     w1, h1 = spec["size1"]
     P = U.W.Painter(int(w1), int(h1), 0, ss=1)
-    g = np.zeros(P.X.shape)
-    for ch, cell in zip(spec["text"], Z.cells_for(spec)):
-        g = np.maximum(g, Z.glyph_field(P, ch, cell))
-    return g, Z.cells_for(spec), P
+    want = np.zeros(P.X.shape)
+    zone = np.zeros(P.X.shape, dtype=bool)
+    for ch, cell, stretch, style in Z.glyph_layout(spec):
+        g = Z.glyph_field(P, ch, cell, stretch=stretch)
+        x0, y0, x1, y1 = cell
+        z = (P.X >= x0) & (P.X <= x1) & (P.Y >= y0) & (P.Y <= y1)
+        want = np.where(z, (1.0 - g) if style == "白文" else np.maximum(want, g), want)
+        zone |= z
+    return want, zone
 
 
 def test_seals():
     """印章：外圈透明、圆印四角透明；印泥是朱砂（不透明像素里朱色占绝大多数）；覆盖面积合理；
     印文确实在（与重新排的字形高度相关）；稀有度印里有一道稀有度色的细边栏。"""
     m = meta()["files"]
-    for n in SEALS:
+    for n in ALL_SEALS:
         e, spec = m[n], seal_spec(n)
         a = rgba(n) / 255.0
         al = a[..., 3]
@@ -407,13 +566,9 @@ def test_seals():
         verm = is_vermilion(a[..., :3][opaque]).mean()
         assert verm > 0.85, f"{n} 不透明处朱色只占 {verm:.2f}"
         cover = opaque.mean()
-        lo, hi = (0.45, 0.85) if e["style"] == "白文" else (0.15, 0.6)
+        lo, hi = {"白文": (0.45, 0.85), "朱文": (0.15, 0.6), "朱白相间": (0.3, 0.7)}[e["style"]]
         assert lo < cover < hi, f"{n}（{e['style']}）印泥覆盖 {cover:.2f} 不在 {lo}..{hi}"
-        g, cells, P = expected_glyph(spec)
-        zone = np.zeros(al.shape, dtype=bool)
-        for x0, y0, x1, y1 in cells:
-            zone |= (P.X >= x0) & (P.X <= x1) & (P.Y >= y0) & (P.Y <= y1)
-        want = (1.0 - g) if e["style"] == "白文" else g
+        want, zone = expected_glyph(spec)
         corr = np.corrcoef(al[zone], want[zone])[0, 1]
         assert corr > 0.7, f"{n} 的印文与“{spec['text']}”对不上（相关 {corr:.2f}）"
         if e["group"] == "rarity":
@@ -424,10 +579,35 @@ def test_seals():
             assert frac > 0.01, f"{n} 应有稀有度色 {e['accent']} 的细边栏（占 {frac:.3f}）"
 
 
+def test_reaction_seals_family():
+    """五行反应印与共鸣印一眼分得开：方的（四角有印泥，共鸣印是圆的、四角透明），上半是实的红（白文块），下半主要是纸（朱文）；
+    外边与细边栏之间有一道空（双边栏）。"""
+    for n in REACT_SEALS:
+        al = rgba(n)[..., 3] / 255.0
+        h, w = al.shape
+        yy, xx = (np.mgrid[0:h, 0:w] + 0.5) / D
+        corner = np.hypot(np.abs(xx - 32.0) - 28.2, np.abs(yy - 32.0) - 28.2) < 0.8  # 圆角外边上（圆印在这里早已出了印面）
+        assert al[corner].mean() > 0.3, f"{n} 应是方印（四角有印泥，{al[corner].mean():.2f}）"
+        block, cells, line_at = Z.zb_geometry(seal_spec(n))
+        bx0, by0, bx1, by1 = block
+        top = (xx > bx0 + 1) & (xx < bx1 - 1) & (yy > by0 + 1) & (yy < by1 - 1)
+        bottom = (xx > bx0 + 1) & (xx < bx1 - 1) & (yy > by1 + 4) & (yy < 64 - by0 - 1)
+        t_, b_ = al[top].mean(), al[bottom].mean()
+        assert t_ > 0.45 and b_ < 0.42 and t_ - b_ > 0.15, f"{n} 上半应是白文块（{t_:.2f}）、下半是朱文（{b_:.2f}）"
+        cols = np.abs(xx[0] - 32.0) < 10.0
+        prof = np.array([al[i, cols].mean() for i in range(int(10 * D))])  # 正中上方一行一行往下
+        assert prof.max() > 0.6 and prof[np.argmax(prof > 0.6) :].min() < 0.5, f"{n} 上边应是两道（外边 + 细边栏，中间有空）"
+    for n in ("seal_rui.png", "seal_fen.png"):
+        al = rgba(n)[..., 3] / 255.0
+        yy, xx = (np.mgrid[0 : al.shape[0], 0 : al.shape[1]] + 0.5) / D
+        corner = np.hypot(np.abs(xx - 32.0) - 28.2, np.abs(yy - 32.0) - 28.2) < 0.8
+        assert al[corner].mean() < 0.05, "共鸣印应是圆的"
+
+
 def test_seals_distinct():
     """同尺寸的印章缩到 32 像素宽后彼此不同（不是同一枚印换了个字看不出来）。"""
     groups: dict[tuple, list[str]] = {}
-    for n in SEALS:
+    for n in ALL_SEALS:
         groups.setdefault(SEAL_SIZES_2X[n[:-4]], []).append(n)
     for size, ns in groups.items():
         sm = {}
@@ -452,7 +632,7 @@ def test_deterministic():
 
 def test_total_size():
     total = sum(p.stat().st_size for p in U.UI_DIR.glob("*.png"))
-    budget = {1: 800, 2: 2200}[int(D)]
+    budget = {1: 1150, 2: 3200}[int(D)]  # M2.5 加了 38 个图标与印章（原来 800 / 2200）
     assert total < budget * 1024, f"图标总体积 {total / 1024:.1f} KB 超过 {budget} KB"
 
 

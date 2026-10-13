@@ -10,9 +10,11 @@
 1 倍的结果与密度改造前逐字节相同（post/golden_1x.json 记录了基准 md5，测试会核对）。
 
 输出（直通 alpha 的 RGBA PNG；宣纸是不透明平铺图，存为 RGB）。<A> = style.ASSETS_DIR_NAME（assets / assets@2x）：
-  art/out/<A>/vfx/         light glow eyes shadow spark gem_0..2 flame_0..3 ink_0..2 lantern + meta.json
+  art/out/<A>/vfx/         light glow eyes shadow spark gem_0..2 flame_0..3 ink_0..2 lantern
+                           + M2.5：coin（金币）coin_emit（金币的自发光）+ meta.json
   art/out/<A>/ground/      paper wash_0..2 grass_0..3 + 第二批（ground_decor.py）：spring rift rift_glow reed_0..2
-                           leaves_0..1 pebbles_0..1 puddle_0 bamboo_0..1 + meta.json
+                           leaves_0..1 pebbles_0..1 puddle_0 bamboo_0..1
+                           + M2.5：zone_lava zone_lava_glow zone_mud zone_herb zone_herb_glow（五行反应留下的区域）+ meta.json
   art/out/review/（2 倍：review@2x/）  vfx_sheet.png  paper_tile_2x2.png  light_test.png
 
 用法（在仓库根目录下）：
@@ -643,6 +645,99 @@ def make_lantern() -> Image.Image:
     return to_rgba8(rgb_s, a)
 
 
+# ============================================================== 金币（M2.5）
+
+COIN_W, COIN_H = 32, 26  # 画布（1 倍像素）
+COIN_C = (16.0, 12.4)  # 钱面中心
+COIN_RX, COIN_RY, COIN_TH = 11.0, 7.0, 1.5  # 钱面半径（宽 22 像素 = 11 世界单位）、俯看压扁后的竖半径、钱的厚度
+
+
+def coin_masks(X, Y):
+    """钱面（不含方孔）、方孔、外侧厚度三个覆盖度。坐标是 1 倍像素。"""
+    cx, cy = COIN_C
+    aa = 0.6 / (8 * D)
+    face = smoothstep(1.0 + aa / COIN_RY, 1.0 - aa / COIN_RY, np.hypot((X - cx) / COIN_RX, (Y - cy) / COIN_RY))
+    edge = smoothstep(1.0 + aa / COIN_RY, 1.0 - aa / COIN_RY, np.hypot((X - cx) / COIN_RX, (Y - cy - COIN_TH) / COIN_RY))
+    hx, hy = 0.25 * COIN_RX, 0.25 * COIN_RX * COIN_RY / COIN_RX
+    hole = smoothstep(aa, -aa, np.maximum(np.abs(X - cx) - hx, np.abs(Y - cy) - hy))
+    return face, hole, edge
+
+
+def make_coin() -> Image.Image:
+    """金币：落在地上的一枚方孔金钱，稍微俯看（竖向压扁），露出一点钱边的厚度；方孔透明（看得见地面），
+    孔的里壁在上沿露出一线暗；内外两圈凸起的郭，四个字的位置各一笔凸起，左上一道高光。墨线勾边，与界面图标同一画法。"""
+    import weapon_textures as W  # noqa: PLC0415  函数内导入，避免循环引用
+
+    P = W.Painter(COIN_W, COIN_H, 6100, ss=8)
+    cx, cy = COIN_C
+    rx, ry, th = COIN_RX, COIN_RY, COIN_TH
+    gold_hi, gold_dk, teng = W.GOLD_HI, W.GOLD_DK, W.TENG
+    ink = W.mixc(gold_dk, W.JIAO, 0.55)
+    # 钱边（厚度）：下面一圈暗金
+    edge = W.ellipse_pts(cx, cy + th, rx, ry, 96)
+    d, t = P.sdf(edge)
+    P.fill(d, W.mixc(gold_dk, W.ZHESHI, 0.3), pool=0.3, pool_rgb=W.JIAO, pool_w=0.5)
+    P.outline(d, t, 0.55, ink, jitter=0.15)
+    # 钱面
+    face = W.ellipse_pts(cx, cy, rx, ry, 96)
+    d, t = P.sdf(W.wobble(face, P.rng, 0.03, spacing=0.3))
+    k = smoothstep(-0.8, 1.0, ((P.X - cx) / rx * 0.6 + (P.Y - cy) / ry * 0.8))
+    rgb = W.mixc(W.mixc(teng, gold_hi, 0.45), W.mixc(teng, gold_dk, 0.5), k)
+    P.fill(d, rgb, pool=0.3, pool_rgb=gold_dk, pool_w=0.6, mottle=0.06, mottle_rgb=W.ZHESHI)
+    m = P.cover(d)
+    # 外郭、内郭（方孔四周一圈方框）
+    rim = W.ellipse_pts(cx, cy, 0.8 * rx, 0.8 * ry, 96)
+    P.line(arc_resample(np.vstack([rim, rim[:1]]), 120), 0.32, gold_dk, 0.75, clip=m)
+    P.line(arc_resample(np.vstack([rim, rim[:1]]), 120)[8:52] + [-0.25, -0.25], 0.22, gold_hi, 0.7, clip=m)
+    hx, hy = 0.25 * rx, 0.25 * ry
+    sq = np.array([(cx - 1.55 * hx, cy - 1.55 * hy), (cx + 1.55 * hx, cy - 1.55 * hy), (cx + 1.55 * hx, cy + 1.55 * hy), (cx - 1.55 * hx, cy + 1.55 * hy)])
+    P.line(arc_resample(np.vstack([sq, sq[:1]]), 60), 0.3, gold_dk, 0.75, clip=m)
+    # 四个字的位置：上下各一横、左右各一竖
+    for (dx, dy, horiz) in ((0.0, -1.0, True), (0.0, 1.0, True), (-1.0, 0.0, False), (1.0, 0.0, False)):
+        x, y = cx + dx * 0.55 * rx, cy + dy * 0.55 * ry
+        L = 0.11 * rx
+        p0, p1 = ((x - L, y), (x + L, y)) if horiz else ((x, y - L * 0.7), (x, y + L * 0.7))
+        P.line(np.array([p0, p1]), 0.3, gold_dk, 0.85, clip=m)
+    P.outline(d, t, 0.6, ink, jitter=0.15)
+    # 高光：左上一道
+    P.line(bezier([(cx - 0.75 * rx, cy + 0.1 * ry), (cx - 0.7 * rx, cy - 0.55 * ry), (cx - 0.25 * rx, cy - 0.85 * ry)], 30), 0.45 * W.brush_profile(30, 0.4, 0.3), W.WHITE, 0.85, clip=m)
+    # 方孔：挖空，上沿露出一线孔壁
+    _, hole, _ = coin_masks(P.X, P.Y)
+    P.lay.p *= (1.0 - hole)[..., None]
+    P.lay.a *= 1.0 - hole
+    wall = hole * smoothstep(cy - hy + 0.9, cy - hy + 0.5, P.Y)
+    P.lay.over(W.mixc(gold_dk, W.JIAO, 0.4), wall)
+    return P.image()
+
+
+def make_coin_emit() -> Image.Image:
+    """金币的自发光（叠加）：钱面一层暖金的微光、四周一圈金晕、左上一点十字闪光。与 coin 同尺寸同锚点，夜里也看得见金币。"""
+    ss = 8
+    X, Y = grid1(COIN_H, COIN_W, ss)
+    cx, cy = COIN_C
+    face, hole, edge = coin_masks(X, Y)
+    body = np.maximum(face, edge) * (1.0 - hole)
+    rr = np.hypot((X - cx) / COIN_RX, (Y - cy - 0.5 * COIN_TH) / COIN_RY)
+    halo = 0.55 * np.exp(-((np.maximum(rr - 0.85, 0) / 0.32) ** 2)) * (1.0 - body) * (1.0 - hole)
+    gx, gy = cx - 0.55 * COIN_RX, cy - 0.62 * COIN_RY
+    star = (np.exp(-((X - gx) ** 2) / 0.06 - ((Y - gy) ** 2) / 2.2) + np.exp(-((Y - gy) ** 2) / 0.06 - ((X - gx) ** 2) / 4.0)) * 0.9
+    star = np.clip(star + 0.9 * np.exp(-(((X - gx) ** 2 + (Y - gy) ** 2) / 0.5)), 0, 1)
+    lay = Layer(*X.shape)
+    lay.over(col(S.mix(S.ACCENT["tenghuang"], S.LANTERN_LIGHT, 0.4)), halo)
+    lay.over(col(S.mix(S.ACCENT["tenghuang"], "#FFFFFF", 0.25)), 0.6 * body)
+    # 左上一道亮边（和 coin 的高光同一处）
+    th = np.arctan2((Y - cy) / COIN_RY, (X - cx) / COIN_RX)
+    edge_hi = np.exp(-(((rr - 0.86) / 0.07) ** 2)) * np.clip(np.cos(th + 2.3), 0, 1) ** 2 * face * (1.0 - hole)
+    lay.over(col(S.mix(S.ACCENT["tenghuang"], "#FFFFFF", 0.6)), 0.7 * edge_hi)
+    lay.over(col(S.mix(S.ACCENT["tenghuang"], "#FFFFFF", 0.7)), star)
+    lay.a *= bump_window(np.hypot((X - COIN_W / 2) / (COIN_W / 2 - 0.5), (Y - COIN_H / 2) / (COIN_H / 2 - 0.5))) ** 0.2
+    lay.p *= (bump_window(np.hypot((X - COIN_W / 2) / (COIN_W / 2 - 0.5), (Y - COIN_H / 2) / (COIN_H / 2 - 0.5))) ** 0.2)[..., None]
+    lay = lay.down(ss)
+    rgb_s, a = lay.straight()
+    a[0, :] = a[-1, :] = a[:, 0] = a[:, -1] = 0
+    return to_rgba8(rgb_s, a)
+
+
 # ============================================================== 地面：宣纸
 
 
@@ -1021,6 +1116,11 @@ def main() -> dict:
     for i in range(3):
         vfx[f"ink_{i}"] = (make_ink(np.random.default_rng(1300 + i * 17)), (0.5, 0.5), {"color": "jiao", "blend": "normal"})
     vfx["lantern"] = (make_lantern(), (0.5, 0.5), {"color": "full", "blend": "add", "tint": False, "note": "灯笼芯，暖光 LANTERN_LIGHT"})
+    # ---- M2.5 追加（只往后加，前面的条目与文件逐字节不变）
+    vfx["coin"] = (make_coin(), (0.5, 0.5), {"color": "full", "blend": "normal", "tint": False, "kind": "pickup", "width_units": COIN_RX,
+                                             "note": "金币：地上的方孔金钱（稍俯看），钱面宽约 11 世界单位，锚点在钱心；方孔透明；不带影子，可另叠 vfx/shadow"})
+    vfx["coin_emit"] = (make_coin_emit(), (0.5, 0.5), {"color": "full", "blend": "add", "tint": False, "kind": "pickup",
+                                                       "note": "金币的自发光：与 coin 同尺寸同锚点、叠加画在暗层之上（钱面微光、一圈金晕、左上闪光），夜里也看得见"})
 
     ground: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
     paper = make_paper()

@@ -14,7 +14,8 @@
 
 输出：
   art/out/<A>/weapons/      sword sword_evo sword_trail crane_0..3 crane_evo_0..3 ring ring_ink seal seal_evo
-                            seal_mark crack warn taiji blast shield chest soulbell lotus foxfire_0..2 + meta.json
+                            seal_mark crack warn taiji blast shield chest soulbell lotus foxfire_0..2
+                            + M2.5：sector sector_fill（扇形预警）+ meta.json
                             （<A> = style.ASSETS_DIR_NAME：assets / assets@2x）
   art/out/review/（2 倍：review@2x/）  weapons_sheet.png（纸色底 / 夜色底）  weapons_ingame.png（游戏比例的模拟场景）
 
@@ -1261,6 +1262,73 @@ def make_foxfire(frame: int) -> Image.Image:
     return white_image(a, ss)
 
 
+# ============================================================== 扇形预警（M2.5）
+
+SECTOR_W, SECTOR_H = 76, 124  # 画布（1 倍像素）
+SECTOR_APEX = (4.75, 62.0)  # 扇顶 = 锚点 (0.0625, 0.5)
+SECTOR_R = 64.0  # 半径（1 倍像素；2 倍 128）
+SECTOR_HALF = math.radians(60.0)  # 半角：整扇 120°
+
+
+def sector_fields(ss: int):
+    """以扇顶为原点的极坐标：X, Y, 半径 r（1 倍像素）、角 a（弧度，0 = +X）、到扇形边界的近似距离 d（内负外正）。"""
+    X, Y = V.grid1(SECTOR_H, SECTOR_W, ss)
+    dx, dy = X - SECTOR_APEX[0], Y - SECTOR_APEX[1]
+    r = np.hypot(dx, dy)
+    a = np.arctan2(dy, dx)
+    d_arc = r - SECTOR_R
+    d_side = (np.abs(a) - SECTOR_HALF) * np.maximum(r, 1e-6)  # 到两条边的弧长近似距离
+    return X, Y, r, a, np.maximum(d_arc, d_side), d_arc, d_side
+
+
+def make_sector() -> Image.Image:
+    """扇形预警：120° 的扇面，扇顶在锚点、开口朝 +X。扇面一层由里往外渐浓的淡光（水墨的不匀）、两条边是干笔的细线
+    （近扇顶收尖）、外沿一笔更重的弧（飞白），里面一道淡的同心弧，读得出“这一片要挨打”。白色，染色叠加（游戏里染红）。"""
+    ss = 6
+    X, Y, r, a, d, d_arc, d_side = sector_fields(ss)
+    rng = np.random.default_rng(3100)
+    u = np.clip(r / SECTOR_R, 0, 1.2)
+    t = np.clip((a + SECTOR_HALF) / (2 * SECTOR_HALF), 0, 1)  # 沿弧 0..1
+    # 扇面：由里往外渐浓，带一点晕染的不匀
+    wash = 0.08 + 0.26 * u**1.6 + 0.04 * V.noise1(rng, X.shape, 5.0 * ss)
+    fill = np.clip(wash, 0, 1) * smoothstep(0.6, -0.6, d)
+    # 外沿的弧：一笔，两头收细，飞白
+    tex = ptex(rng, ns=16, nt=512, along=8.0, across=0.6)
+    hw = 2.3 * np.interp(t, [0.0, 0.08, 0.5, 0.92, 1.0], [0.35, 1.0, 1.1, 1.0, 0.35])
+    pc = d_arc + 2.0
+    b = sample_ptex(tex, np.clip(pc / np.maximum(hw, 0.3), -1, 1), t * 0.999)
+    rim = smoothstep(hw + 0.4, hw - 0.4, np.abs(pc)) * (np.abs(a) <= SECTOR_HALF + 0.02)
+    rim = rim * (0.55 + 0.45 * smoothstep(0.25, 0.45, b)) * (1.0 - 0.5 * smoothstep(0.85, 1.0, np.abs(2 * t - 1)) * (b < 0.5))
+    # 两条边：干笔细线，近扇顶收尖
+    sides = np.zeros_like(r)
+    for sgn in (-1.0, 1.0):
+        ang = sgn * SECTOR_HALF
+        ux, uy = math.cos(ang), math.sin(ang)
+        along = (X - SECTOR_APEX[0]) * ux + (Y - SECTOR_APEX[1]) * uy
+        perp = -(X - SECTOR_APEX[0]) * uy + (Y - SECTOR_APEX[1]) * ux + sgn * 1.1
+        ta = np.clip(along / SECTOR_R, 0, 1)
+        shw = 1.25 * (0.2 + 0.8 * smoothstep(0.0, 0.35, ta))
+        bs = sample_ptex(tex, np.clip(perp / np.maximum(shw, 0.3), -1, 1), np.mod(ta * 0.7 + 0.15 * (sgn + 1), 1.0))
+        line = smoothstep(shw + 0.35, shw - 0.35, np.abs(perp)) * (along > 0) * (along < SECTOR_R - 1.0)
+        sides = np.maximum(sides, line * (0.55 + 0.25 * smoothstep(0.3, 0.6, bs)))
+    # 里面一道淡的同心弧（断续）
+    echo = 0.28 * smoothstep(0.9, 0.2, np.abs(r - 0.62 * SECTOR_R)) * smoothstep(0.35, 0.6, sample_ptex(tex, 0.0, t * 0.6)) * smoothstep(0.5, -1.5, d_side)
+    a_ss = np.clip(np.maximum.reduce([fill, rim, sides, fill + echo]), 0, 1)
+    return white_image(a_ss, ss, dither_seed=3101)
+
+
+def make_sector_fill() -> Image.Image:
+    """扇形预警的“蓄力”层：同尺寸同锚点，匀净的扇面 + 外沿一道亮带。游戏里按蓄力进度从扇顶往外缩放（0→1），
+    亮带就是往外推的那道“浪头”；叠在 sector 上一起染色叠加。"""
+    ss = 6
+    X, Y, r, a, d, d_arc, d_side = sector_fields(ss)
+    u = np.clip(r / SECTOR_R, 0, 1)
+    body = (0.22 + 0.18 * u) * smoothstep(0.8, -0.8, d)
+    front = 0.75 * np.exp(-(((d_arc + 2.2) / 1.6) ** 2)) * smoothstep(0.8, -0.8, d_side)
+    a_ss = np.clip(body + front, 0, 1)
+    return white_image(a_ss, ss, dither_seed=3102)
+
+
 # ============================================================== 汇总
 
 WHITE_ADD = {"color": "white", "blend": "add", "tint": True}
@@ -1294,6 +1362,12 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     for i in range(3):
         out[f"foxfire_{i}"] = (make_foxfire(i), (0.6, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "anim": "foxfire", "frame": i, "frames": 3, "fps": 12,
                                                             "note": "夜主的狐火弹：锚点在火球中心，火舌向后拖；建议染 #FF6B5A（style.EYE.fox）"})
+    # ---- M2.5 追加
+    sector_anchor = (SECTOR_APEX[0] / SECTOR_W, SECTOR_APEX[1] / SECTOR_H)
+    out["sector"] = (make_sector(), sector_anchor, {**WHITE_ADD, "kind": "fx", "points": "+x", "radius_px": V.dpx(SECTOR_R), "angle_deg": 120,
+                                                    "note": "扇形预警：120°，锚点在扇顶、开口朝 +X；radius_px 是半径，按需要的半径缩放；建议染红 #FF4A3A"})
+    out["sector_fill"] = (make_sector_fill(), sector_anchor, {**WHITE_ADD, "kind": "fx", "points": "+x", "radius_px": V.dpx(SECTOR_R), "angle_deg": 120,
+                                                              "note": "扇形预警的蓄力层：与 sector 同尺寸同锚点，按蓄力进度从扇顶往外缩放（0→1），外沿一道亮带"})
     return out
 
 
@@ -1308,6 +1382,8 @@ TINTS = {
     "warn": "#C9925A",
     "blast": "#FF8A3D",
     "shield": "#C9925A",
+    "sector": "#FF4A3A",
+    "sector_fill": "#FF4A3A",
 }
 
 

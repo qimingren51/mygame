@@ -55,6 +55,14 @@ def meta(folder: str) -> dict:
     return {k[:-4] if k.endswith(".png") else k: v for k, v in files.items()}
 
 
+def ui_meta_pre_m25() -> dict:
+    """ui/meta.json 里 M2.5 之前的条目（M2.5 的图标与反应印另有 review_m25.py 的 m25_additions.png）。"""
+    import ui_icons_m25  # noqa: PLC0415
+
+    new = {f for f, *_ in ui_icons_m25.specs()}
+    return {k: v for k, v in meta("ui").items() if k not in new and not k.startswith("seal_react_")}
+
+
 def paste(canvas: np.ndarray, img: Image.Image, x: int, y: int, mode="over", tint=None, scale: float = 1.0):
     """整数倍用最近邻放大（看真实像素），其他倍数用 LANCZOS（看显示效果）。"""
     if scale != 1.0:
@@ -72,7 +80,7 @@ OLD_KINDS = ("weapon", "weapon_evo", "passive", "element")  # 第一批 25 个�
 
 
 def additions_sheet(path: Path) -> None:
-    ui_meta = {k: v for k, v in meta("ui").items() if v["kind"] in OLD_KINDS}
+    ui_meta = {k: v for k, v in ui_meta_pre_m25().items() if v["kind"] in OLD_KINDS}
     icons = list(ui_meta)
     k = 2 / D  # 图标放大到 128 像素看细节（1 倍 2×，2 倍 1×）
     cell = int(64 * D * k) + 70
@@ -150,7 +158,7 @@ def ui_icons_more(path: Path) -> None:
     左半纸色底、右半夜色底；最上一行是原有的几个图标作对照，最下是放进界面里的样子（信息栏、增益签、卡片上的印）。"""
     from ui_fonts import font  # noqa: PLC0415
 
-    um = meta("ui")
+    um = ui_meta_pre_m25()
     names = list(um)
 
     def kind(*ks):

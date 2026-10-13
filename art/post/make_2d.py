@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """一次生成全部 2D 贴图（两种密度）与检查图：
   vfx_textures.py（vfx/ + ground/，含 ground_decor.py）→ weapon_textures.py（weapons/）
-  → ui_icons.py（ui/：界面图标，并调用 ui_seals.py 画朱砂印章）→ review_additions.py（检查图，含 ui_icons_more.png）
+  → ui_icons.py（ui/：界面图标，并调用 ui_seals.py 画朱砂印章、ui_icons_m25.py 画 M2.5 图标）
+  → review_additions.py（检查图，含 ui_icons_more.png）→ review_m25.py（M2.5 检查图 m25_additions.png）
 
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/make_2d.py            # 1 倍 + 2 倍
@@ -18,7 +19,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STEPS = ["vfx_textures.py", "weapon_textures.py", "ui_icons.py", "review_additions.py"]
+STEPS = ["vfx_textures.py", "weapon_textures.py", "ui_icons.py", "review_additions.py", "review_m25.py"]
 
 
 def main() -> int:

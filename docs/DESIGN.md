@@ -426,8 +426,8 @@ assets/data/
   | --- | --- |
   | `actors` | 主角、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern、古灯 ancient_lamp、血祭坛 blood_altar），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2` |
-  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill` |
+  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow` |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
   | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底） |
@@ -453,24 +453,31 @@ assets/data/
 - **自发光层**：`_emit` 帧和对应的普通帧尺寸、锚点完全相同，叠加画在暗层之上，所以暗处也能看到灯笼窗、妖眼。没有自发光部件的素材没有 `_emit` 帧。
 - **主角动画**：`idle`（6 帧）、`walk`（8 帧，按移动距离推进，`stride_units` 是一个循环走过的世界距离）、`dash`（4 帧 @16 fps）、`hurt`（2 帧 @10 fps）、`death`（6 帧 @8 fps，不循环），各 8 个方向。
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
-- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
+- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
 - **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
+- **扇形预警**：`weapons/sector` 是 120° 扇形，锚点在扇形顶点（`(0.0625, 0.5)`），开口朝 +X，2 倍下半径 128 像素，按需要的半径缩放、按方向旋转；`sector_fill` 是同形的填充层，蓄力时从顶点向外放大。
+- **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
+- **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。
 - **界面图集 `ui`**：用 `pack_atlas.py --no-trim` 打包，每帧的 `frame` 矩形就是整张原图（`spriteSourceSize` 恒为 `(0, 0, 原图宽, 原图高)`），界面代码直接按矩形取图。全部普通混合、不染色，按 1080p 逻辑像素的 2 倍绘制（128² 的图标在 1080p 下显示 64 像素最清楚）。帧名里的 id 和网页版数据一致：
 
   | 类别 | 帧 | 尺寸 |
   | --- | --- | --- |
   | 法器、进化 | `ui/icon_{lamp,sword,bell,crane,seal}`、加 `_evo` | 128² |
-  | 心法 | `ui/icon_{changming,luxin,jianyi,ruimu,jingxin,yinhun,zhezhi,jixing,houde,panshi}` | 128² |
+  | 心法 | `ui/icon_{changming,luxin,jianyi,ruimu,jingxin,yinhun,zhezhi,jixing,houde,panshi}`；M2.5 新增 `ui/icon_{xunfeng,huichun,hanyi,dengxin,zaiwu,qinggong,juhun}` | 128² |
   | 五行 | `ui/icon_el_{metal,wood,water,fire,earth}` | 128² |
-  | 补给、货币 | `ui/icon_lotus`（莲子）、`ui/icon_oil`（灯油） | 128² |
+  | 补给、货币 | `ui/icon_lotus`（莲子）、`ui/icon_oil`（灯油）、`ui/icon_gold`（金币） | 128² |
   | 心灯 | `ui/icon_meta_{dmg,hp,agi,luck}`（点亮）、加 `_off`（未点亮） | 128² |
-  | 奇遇 | `ui/icon_enc_{toad,spring,shrine,altar,rift}`，屏幕边缘的奇遇指示也用它 | 128² |
+  | 奇遇 | `ui/icon_enc_{toad,spring,shrine,altar,rift,merchant}`，屏幕边缘的奇遇指示也用它 | 128² |
   | 古灯增益 | `ui/icon_buff_{fury,swift,soul,iron}` | 128² |
-  | 夜签 | `ui/icon_omen_{bloodmoon,fog,glass,foxes,gale,chestrain,element,greed,quiet,wonders}`（朱砂双圈框） | 128² |
+  | 夜签 | `ui/icon_omen_{bloodmoon,fog,glass,foxes,gale,chestrain,element,greed,quiet,wonders,wuyue,nike}`（朱砂双圈框） | 128² |
+  | 灯驿人物 | `ui/icon_hub_{0,1,2,3}`：老灯匠、货郎、灯童、说书人（按行当画的徽记） | 128² |
+  | 灯坠 | `ui/icon_charm_{wind_wheel,pillar,night_pearl,elixir,five_coins,longevity,ice_soul,broken_sword}`（红绳圈 + 顶上中国结的框） | 128² |
+  | 精英词缀 | `ui/icon_affix_{ji,jian,fen,zhao,yin,kuang}`（ui 图集里唯一的小图标） | 64² |
   | 信息栏 | `ui/icon_{kills,pause,dash,ult,level}`；`icon_level` 是等级徽章底，中间留空写数字 | 128² |
   | 品级印 | `ui/seal_{tian,xuan,ling,fan}`（白文方印） | 128² |
   | 共鸣印 | `ui/seal_{rui,sheng,ning,fen,gu}`（朱文圆印，五行共鸣激活时盖章） | 128² |
   | 标记印 | `ui/seal_{evo,elite,boss}` 96×160；`ui/seal_record`（新纪录）96×224 | 竖长 |
+  | 五行反应印 | `ui/seal_react_{liaoyuan,rongyan,zhubing,ningshuang,zisheng,zhengteng,rongjin,duanmu,lietu,yuni}`（朱白相间的圆角方印、双边栏，两字从上往下读；第一次发生反应时盖在屏幕中间） | 128² |
   | 头像 | `ui/portrait_hero`（主角胸像，装在同款圆框里） | 256² |
 
   印章周围和刻掉的笔画是透明的，直接盖在夜色上对比偏低，最好盖在宣纸卡片上或者垫一层浅色底。

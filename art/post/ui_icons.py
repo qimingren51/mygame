@@ -18,6 +18,10 @@
   朱砂印章 seal_*（ui_seals.py 画，尺寸各异，见 meta 的 size）。
 各类的色弧见下面“第二批”一节；meta 里每项都有 kind、id、name。
 
+第三批（M2.5，ui_icons_m25.py 画，追加在全部原有图标与印章之后，原有的逐字节不变）：
+  心法 7 门、夜签 无月 / 逆克、金币、奇遇 货郎、精英词缀 icon_affix_*（小图标 32 / 64 像素）、灯驿人物 icon_hub_0..3、灯坠 icon_charm_*；
+  五行反应印 seal_react_*（ui_seals.py，朱白相间的圆角方印）。
+
 出图按图标并行（多进程，LANTERN_JOBS 控制进程数，默认 min(4, CPU 数)；每个图标自带种子，结果与串行一致）。
 
 输出：art/out/<ASSETS_DIR_NAME>/ui/  icon_*.png、seal_*.png + meta.json
@@ -1797,6 +1801,10 @@ def _render(task):
         return make_icon(i, key, el, evo, element)
     if kind == "new":
         return make_icon2(i)
+    if kind == "m25":
+        import ui_icons_m25  # noqa: PLC0415
+
+        return ui_icons_m25.make(i)
     import ui_seals  # noqa: PLC0415
 
     return ui_seals.make_seal(i)
@@ -1812,11 +1820,13 @@ def render_all(tasks) -> list[Image.Image]:
 
 
 def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
+    import ui_icons_m25  # noqa: PLC0415
     import ui_seals  # noqa: PLC0415
 
     base = {"color": "full", "blend": "normal", "tint": False}
-    old, new, seals = icon_specs(), new_specs(), ui_seals.seal_specs()
+    old, new, seals, m25 = icon_specs(), new_specs(), ui_seals.seal_specs(), ui_icons_m25.specs()
     tasks = [("old", i) for i in range(len(old))] + [("new", i) for i in range(len(new))] + [("seal", i) for i in range(len(seals))]
+    tasks += [("m25", i) for i in range(len(m25))]
     imgs = iter(render_all(tasks))
     out = {}
     for fname, key, el, evo, element, extra in old:
@@ -1826,7 +1836,12 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     for spec in seals:
         extra = spec["meta"]
         out[spec["fname"]] = (next(imgs), (0.5, 0.5), {**base, **extra, "note": note_for(extra)})
-    return out
+    for fname, _fn, _frame, _seed, extra in m25:
+        out[fname] = (next(imgs), (0.5, 0.5), {**base, **extra, "note": ui_icons_m25.note_for(extra)})
+    # 印章在 seal_specs 里按序号排（新的反应印追加在原有 13 枚之后），meta 里把 M2.5 的印章挪到最后，原有条目的顺序不变
+    keys = list(out)
+    first = [k for k in keys if not k.startswith("seal_react_") and k not in {f for f, *_ in m25}]
+    return {k: out[k] for k in first + [f for f, *_ in m25] + [k for k in keys if k.startswith("seal_react_")]}
 
 
 def main() -> dict:
@@ -1848,6 +1863,8 @@ def main() -> dict:
         "el_colors": {k: S.rgb_to_hex(tuple(int(round(c * 255)) for c in v)) for k, v in EL_INK.items()},
         "accent_colors": {k: S.rgb_to_hex(tuple(int(round(c * 255)) for c in v)) for k, v in ACC_INK.items()},
         "seal_generator": "art/post/ui_seals.py（由 ui_icons.py 调用，写进同一个 ui/ 与 meta.json）",
+        "m25_generator": "art/post/ui_icons_m25.py（M2.5 的图标，由 ui_icons.py 调用；五行反应印仍由 ui_seals.py 画）",
+        "small_icons": "kind=affix 的精英词缀图标是小图标：1 倍 32×32、2 倍 64×64，其余图标 64 / 128",
         "files": files,
     }
     (UI_DIR / "meta.json").write_text(V.dump_json(meta), encoding="utf-8")

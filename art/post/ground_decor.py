@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""提灯夜行 · 第二批地面贴图：灵泉、妖潮裂隙（含叠加用的光）、芦苇、落叶、卵石、水洼、竹子。
+"""提灯夜行 · 第二批地面贴图：灵泉、妖潮裂隙（含叠加用的光）、芦苇、落叶、卵石、水洼、竹子；
+M2.5 追加五行反应留下的区域：zone_lava（+ zone_lava_glow）熔岩、zone_mud 淤泥、zone_herb（+ zone_herb_glow）灵草。
 
 不单独写盘：vfx_textures.py 的 main() 调用这里的 build()，和宣纸、晕染、草一起写进
 art/out/<ASSETS_DIR_NAME>/ground/ 与同一份 meta.json（一个文件夹只有一个写 meta 的脚本）。
@@ -424,6 +425,214 @@ def make_puddle() -> Image.Image:
     return P.image()
 
 
+# ============================================================== 五行反应留下的地面区域（M2.5）
+#
+# 都按俯角压扁成横的扁圆（高 ≈ 宽 × 0.62，同 spring 和游戏里地上圆圈的 FLAT），游戏里等比缩放到反应的半径；
+# 边缘柔和地化进纸里，没有硬边。radius_px 是扁圆横向的“有效半径”（区域的边大约在这里）。
+
+ZONE_FLAT = 0.62
+
+
+def zone_q(P: W.Painter, cx, cy, rx, ry, rng, amp=0.07):
+    """到扁圆中心的归一化距离（1 = 边），边上带一点不规则的起伏。"""
+    th = np.arctan2((P.Y - cy) / ry, (P.X - cx) / rx)
+    wob = V.angular_noise(rng, th, harmonics=(2, 3, 4, 5, 7, 9), amp=amp)
+    return np.hypot((P.X - cx) / rx, (P.Y - cy) / ry) * (1.0 + wob)
+
+
+def voronoi(P: W.Painter, pts: np.ndarray, warp: tuple[np.ndarray, np.ndarray]):
+    """各向同性的（按世界坐标，竖向先除以 FLAT 还原）沃罗诺伊：返回 (F1, F2, 最近点序号)，单位 1 倍像素。"""
+    X = P.X + warp[0]
+    Y = (P.Y + warp[1]) / ZONE_FLAT
+    f1 = np.full(P.X.shape, 1e9)
+    f2 = np.full(P.X.shape, 1e9)
+    idx = np.zeros(P.X.shape, dtype=np.int64)
+    for i, (px, py) in enumerate(pts):
+        dd = np.hypot(X - px, Y - py / ZONE_FLAT)
+        closer = dd < f1
+        f2 = np.where(closer, f1, np.minimum(f2, dd))
+        idx = np.where(closer, i, idx)
+        f1 = np.where(closer, dd, f1)
+    return f1, f2, idx
+
+
+def make_zone_lava() -> tuple[Image.Image, Image.Image]:
+    """熔岩：一摊冷了表皮的熔岩。焦墨兑赭的硬壳裂成一块块（沃罗诺伊），裂缝里是朱砂到藤黄的岩浆，
+    当中两三处还没结壳的熔池；壳的外缘碎成小块，再往外一圈烤焦的淡赭，柔和地化进纸里。
+    另出一张白色的 zone_lava_glow（叠加，染橙）：裂缝与熔池的光。"""
+    Wd, Hd = 224, 144
+    cx, cy, rx, ry = 112.0, 72.0, 100.0, 62.0
+    P = W.Painter(Wd, Hd, 4800, ss=3)
+    rng = P.rng
+    q = zone_q(P, cx, cy, rx * 0.86, ry * 0.86, rng, amp=0.06)
+    # 裂缝网
+    pts = []
+    while len(pts) < 46:
+        x, y = rng.uniform(cx - rx, cx + rx), rng.uniform(cy - ry, cy + ry)
+        if np.hypot((x - cx) / rx, (y - cy) / ry) < 0.95:
+            pts.append((x, y))
+    pts = np.array(pts)
+    warp = (2.2 * V.noise1(rng, P.X.shape, 6.0 * P.ss), 2.2 * V.noise1(rng, P.X.shape, 6.0 * P.ss))
+    f1, f2, idx = voronoi(P, pts, warp)
+    gap = f2 - f1
+    cw = 0.9 + 0.7 * smoothstep(-1.0, 1.0, V.noise1(rng, P.X.shape, 4.0 * P.ss))  # 裂缝宽窄不一
+    crack = smoothstep(cw + 0.6, cw - 0.4, gap)
+    heat_edge = np.exp(-gap / 2.6)  # 壳靠近裂缝的地方被烤红
+    # 熔池：几团没结壳的
+    pool = np.zeros(P.X.shape)
+    for (px, py, pr) in ((cx - 18.0, cy + 4.0, 15.0), (cx + 24.0, cy - 8.0, 10.0), (cx + 6.0, cy + 20.0, 7.0)):
+        dpq = np.hypot((P.X - px) / pr, (P.Y - py) / (pr * ZONE_FLAT)) + 0.18 * V.noise1(rng, P.X.shape, 2.5 * P.ss)
+        pool = np.maximum(pool, smoothstep(1.0, 0.75, dpq))
+    crust_in = smoothstep(1.0, 0.92, q)  # 壳的范围
+    # 外缘碎块：壳的边上有的块缺掉
+    tone = rng.uniform(0.0, 1.0, len(pts))[idx]
+    frag = smoothstep(0.84, 0.97, q) * (tone > 0.45)
+    plate = crust_in * (1.0 - frag) * (1.0 - crack) * (1.0 - pool)
+    # 颜色
+    n = V.noise1(rng, P.X.shape, 1.2 * P.ss)
+    crust_rgb = mixc(mixc(JIAO, ZHESHI, 0.25), mixc(NONG, ZHESHI, 0.35), np.clip(0.35 + 0.25 * n + 0.3 * tone, 0, 1))
+    crust_rgb = mixc(crust_rgb, mixc(ZHUSHA, JIAO, 0.45), np.clip(heat_edge * 0.8, 0, 1))
+    molten = V.ramp(np.clip(0.55 + 0.45 * np.exp(-gap / 0.8), 0, 1), V.FLAME_STOPS)
+    pool_rgb = V.ramp(np.clip(0.42 + 0.3 * pool + 0.1 * V.noise1(rng, P.X.shape, 1.5 * P.ss), 0, 1), V.FLAME_STOPS)
+    # 烤焦的外圈：淡赭兑淡墨，往外渐淡
+    scorch = 0.55 * smoothstep(1.22, 0.95, q) * (0.8 + 0.2 * V.noise1(rng, P.X.shape, 3.0 * P.ss))
+    P.lay.over(mixc(mixc(ZHESHI, ZHONG, 0.45), PAPER, 0.15), np.clip(scorch, 0, 1))
+    P.lay.over(mixc(ZHUSHA, JIAO, 0.4), 0.85 * crust_in * np.maximum(crack, frag * 0.4))
+    P.lay.over(molten, crust_in * crack * (1.0 - frag))
+    P.lay.over(pool_rgb, pool * crust_in)
+    P.lay.over(crust_rgb, 0.97 * plate)
+    # 壳面：几道干笔皴（只在壳上）
+    for _ in range(26):
+        x0, y0 = rng.uniform(cx - rx * 0.8, cx + rx * 0.8), rng.uniform(cy - ry * 0.7, cy + ry * 0.7)
+        L = rng.uniform(5.0, 11.0)
+        ang = rng.uniform(-0.4, 0.4)
+        p1 = (x0 + L * math.cos(ang), y0 + L * math.sin(ang) * ZONE_FLAT)
+        P.line(V.bezier([(x0, y0), ((x0 + p1[0]) / 2, (y0 + p1[1]) / 2 - 0.6), p1], 20), 0.45 * W.brush_profile(20, 0.6, 0.3), mixc(NONG, QING, 0.3), 0.5, clip=plate, dry=0.5, dry_start=0.2)
+    # 熔池里一两道暗的流纹、零星火星
+    for (px, py, pr) in ((cx - 18.0, cy + 4.0, 15.0), (cx + 24.0, cy - 8.0, 10.0)):
+        a = np.linspace(0.3, 2.6, 30)
+        P.line(np.stack([px + 0.55 * pr * np.cos(a), py + 0.55 * pr * ZONE_FLAT * np.sin(a)], -1), 0.5, mixc(ZHUSHA, JIAO, 0.2), 0.6, clip=pool)
+    for _ in range(16):
+        a = rng.uniform(0, 2 * math.pi)
+        rr = rng.uniform(0.9, 1.08)
+        P.dot(cx + rx * 0.86 * rr * math.cos(a), cy + ry * 0.86 * rr * math.sin(a), rng.uniform(0.4, 0.9), mixc(ZHUSHA, TENG, rng.uniform(0.2, 0.7)), 0.85)
+    lava = P.image()
+    # 叠加的光：裂缝、熔池，外加一圈柔光
+    hot = crust_in * np.maximum(crack * (1.0 - frag) * (0.65 + 0.35 * np.exp(-gap / 0.8)), pool)
+    soft = V.fft_blur(hot, V.sig(2.5 * P.ss))
+    a = np.clip(np.maximum(hot, 0.55 * soft / max(soft.max(), 1e-6)), 0, 1)
+    glow = W.white_image(a, P.ss, dither_seed=4801)
+    return lava, glow
+
+
+def make_zone_mud() -> Image.Image:
+    """淤泥：一大摊湿泥。焦墨兑赭的泥面（中间稀、积着一层泛青的水光），边上积得更深、往外渗出一圈湿痕；
+    面上几圈涟漪（亮的湿光压一道暗），冒几个泥泡，几笔留白的水光，边外溅几点泥。"""
+    Wd, Hd = 240, 152
+    cx, cy, rx, ry = 120.0, 76.0, 106.0, 66.0
+    P = W.Painter(Wd, Hd, 4900, ss=3)
+    rng = P.rng
+    q = zone_q(P, cx, cy, rx * 0.86, ry * 0.86, rng, amp=0.08)
+    n1 = V.noise1(rng, P.X.shape, 8.0 * P.ss)
+    n2 = V.noise1(rng, P.X.shape, 2.5 * P.ss)
+    # 湿痕：泥外一圈淡赭墨，往外淡出
+    P.lay.over(mixc(mixc(ZHESHI, ZHONG, 0.55), PAPER, 0.15), 0.34 * smoothstep(1.22, 0.97, q) * (0.85 + 0.15 * n2))
+    body = smoothstep(1.0, 0.9, q + 0.015 * n2)
+    mud = mixc(mixc(ZHESHI, JIAO, 0.62), mixc(ZHESHI, JIAO, 0.8), np.clip(0.5 + 0.3 * n1 + 0.1 * n2, 0, 1))
+    mud = mixc(mud, mixc(ZHESHI, JIAO, 0.9), smoothstep(0.78, 1.0, q) * 0.8)  # 边上积得深
+    # 中间几片积水：泛青的水光，边上柔
+    water = smoothstep(0.45, 1.3, n1 + 0.4 * smoothstep(0.7, 0.2, q)) * smoothstep(0.85, 0.6, q)
+    mud = mixc(mud, mixc(mixc(HUAQING, ZHONG, 0.55), JIAO, 0.25), np.clip(water * 0.75, 0, 1))
+    P.lay.over(mud, 0.96 * body)
+    # 涟漪：两处，各三圈断续的弧，亮的湿光下面压一道暗
+    for (ox, oy, rad0) in ((cx - 26.0, cy - 6.0, 8.0), (cx + 32.0, cy + 12.0, 6.5), (cx - 2.0, cy + 26.0, 5.0)):
+        for k in range(3):
+            rr = rad0 * (1.0 + 0.85 * k)
+            a0 = rng.uniform(0, 2 * math.pi)
+            for seg in range(3):
+                a = np.linspace(a0 + seg * 2.1, a0 + seg * 2.1 + rng.uniform(1.1, 1.7), 40)
+                pts = np.stack([ox + rr * np.cos(a), oy + rr * ZONE_FLAT * np.sin(a)], -1)
+                P.line(pts + [0.0, 0.7], 0.6 * W.brush_profile(40, 0.3, 0.3), JIAO, 0.55, clip=body)
+                P.line(pts, 0.5 * W.brush_profile(40, 0.3, 0.3), mixc(mixc(W_ZHESHI, PAPER, 0.4), W_HUAQING, 0.35), 0.8 - 0.15 * k, clip=body)
+    # 泥泡
+    for _ in range(11):
+        a = rng.uniform(0, 2 * math.pi)
+        rr = rng.uniform(0.1, 0.78)
+        bx, by = cx + rx * 0.86 * rr * math.cos(a), cy + ry * 0.86 * rr * math.sin(a)
+        br = rng.uniform(1.0, 2.6)
+        P.dot(bx, by, br, mixc(ZHESHI, JIAO, 0.55), 0.95, ry=br * 0.75)
+        e = W.ellipse_pts(bx, by, br, br * 0.75, 30)
+        P.line(V.arc_resample(np.vstack([e, e[:1]]), 40), 0.25, JIAO, 0.85)
+        P.dot(bx - 0.35 * br, by - 0.3 * br, 0.3 * br, mixc(PAPER, W_HUAQING, 0.3), 0.95)
+    # 水光：几笔横向的留白干笔
+    for (x0, y0, L) in ((cx - 62.0, cy - 30.0, 32.0), (cx + 6.0, cy - 38.0, 24.0), (cx + 48.0, cy - 16.0, 20.0), (cx - 44.0, cy + 18.0, 18.0), (cx + 20.0, cy + 34.0, 14.0)):
+        pts = V.bezier([(x0, y0), (x0 + L / 2, y0 - 1.0), (x0 + L, y0 + 0.3)], 40)
+        P.line(pts, 1.0 * W.brush_profile(40, 0.6, 0.15), mixc(mixc(PAPER, WHITE, 0.3), W_HUAQING, 0.35), 0.55, clip=body, dry=0.5, dry_start=0.15)
+    # 溅出的泥点
+    for _ in range(24):
+        a = rng.uniform(0, 2 * math.pi)
+        rr = rng.uniform(1.0, 1.2)
+        P.dot(cx + rx * 0.86 * rr * math.cos(a), cy + ry * 0.86 * rr * math.sin(a), rng.uniform(0.4, 1.3), mixc(ZHESHI, JIAO, 0.7), 0.85)
+    return P.image()
+
+
+def make_zone_herb() -> tuple[Image.Image, Image.Image]:
+    """灵草：地上冒出一片灵草。底下一层石绿的淡彩，上面一丛丛短草（石绿兑墨、钉头鼠尾），几根卷须盘着（缠住妖物），
+    不少草尖亮着一点青白的灵光。另出一张白色的 zone_herb_glow（叠加，染青绿）：草尖的光和一层淡淡的地光。"""
+    Wd, Hd = 208, 132
+    cx, cy, rx, ry = 104.0, 70.0, 92.0, 57.0
+    P = W.Painter(Wd, Hd, 5000, ss=3)
+    rng = P.rng
+    q = zone_q(P, cx, cy, rx * 0.86, ry * 0.86, rng, amp=0.08)
+    n = V.noise1(rng, P.X.shape, 5.0 * P.ss)
+    patch = smoothstep(1.2, 0.7, q) * (0.75 + 0.25 * n)
+    P.lay.over(mixc(W_SHILV, PAPER, 0.15), 0.5 * np.clip(patch, 0, 1))
+    P.lay.over(mixc(SHILV, ZHONG, 0.3), 0.18 * smoothstep(0.9, 0.3, q) * smoothstep(0.2, 1.2, n))
+    tufts = []
+    while len(tufts) < 34:
+        x, y = rng.uniform(cx - rx, cx + rx), rng.uniform(cy - ry, cy + ry)
+        if np.hypot((x - cx) / (rx * 0.86), (y - cy) / (ry * 0.86)) < 0.92:
+            tufts.append((y, x))
+    tips = []
+    greens = (mixc(SHILV, JIAO, 0.35), mixc(SHILV, NONG, 0.5), mixc(mixc(SHILV, W_SHILV, 0.5), ZHONG, 0.2), mixc(NONG, SHILV, 0.3))
+    for y, x in sorted(tufts):
+        k = int(rng.integers(3, 6))
+        P.dot(x, y + 0.3, 4.5, mixc(SHILV, JIAO, 0.5), 0.3, ry=1.3)
+        for j in range(k):
+            ang = (j - (k - 1) / 2) * 0.38 + rng.normal(0, 0.12)
+            L = rng.uniform(10.0, 17.0) * (1.0 - 0.15 * abs(ang))
+            bend = rng.uniform(-0.35, 0.35)
+            root = np.array([x + rng.uniform(-1.2, 1.2), y])
+            d = np.array([math.sin(ang), -math.cos(ang)])
+            side = np.array([-d[1], d[0]])
+            tip = root + d * L + side * bend * L * 0.4
+            pts = V.bezier([root, root + d * L * 0.5, tip], 30)
+            P.line(pts, 0.9 * W.brush_profile(30, 1.0, 0.1, 0.0), greens[int(rng.integers(len(greens)))], 0.95, dry=0.3, dry_start=0.6)
+            if rng.random() < 0.35:
+                tips.append(tip)
+    # 卷须：几根盘起来的藤
+    for _ in range(5):
+        a = rng.uniform(0, 2 * math.pi)
+        rr = rng.uniform(0.2, 0.7)
+        sx, sy = cx + rx * 0.86 * rr * math.cos(a), cy + ry * 0.86 * rr * math.sin(a)
+        th = np.linspace(0, 2.2 * math.pi, 60)
+        r_ = 7.0 * (1 - th / th[-1]) + 0.8
+        sgn = rng.choice([-1.0, 1.0])
+        spiral = np.stack([sx + sgn * r_ * np.cos(th), sy - 4.0 + r_ * np.sin(th) * 0.8], -1)
+        P.line(np.vstack([[(sx, sy + 3.0)], spiral]), 0.6 * np.linspace(1.0, 0.45, 61), mixc(SHILV, JIAO, 0.45), 0.95)
+        tips.append(spiral[-1])
+    glow_pts = np.array(tips)
+    for (x, y) in glow_pts:
+        P.dot(x, y, 1.25, mixc(mixc(W_SHILV, WHITE, 0.6), col(S.SOUL_LIGHT), 0.25), 0.95)
+    herb = P.image()
+    # 叠加的光：草尖一点、地上一层很淡的光
+    a = 0.16 * smoothstep(1.05, 0.5, q)
+    for (x, y) in glow_pts:
+        a = np.maximum(a, np.exp(-(((P.X - x) ** 2 + (P.Y - y) ** 2) / 3.5)))
+    glow = W.white_image(np.clip(a, 0, 1), P.ss, dither_seed=5001)
+    return herb, glow
+
+
 # ============================================================== 汇总
 
 
@@ -445,6 +654,20 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     out["puddle_0"] = (make_puddle(), (0.5, 0.5), {**normal, "kind": "decor", "note": "小水洼"})
     out["bamboo_0"] = (make_bamboo(4700, 2, True), (0.5, 1.0), {**normal, "kind": "decor", "note": "两竿短竹 + 竹笋，锚点在根部（底边）"})
     out["bamboo_1"] = (make_bamboo(4701, 3, False), (0.5, 1.0), {**normal, "kind": "decor", "note": "三竿短竹，锚点在根部（底边）"})
+    # ---- M2.5：五行反应留下的区域（只往后追加）
+    white_add = {"color": "white", "blend": "add", "tint": True}
+    lava, lava_glow = make_zone_lava()
+    out["zone_lava"] = (lava, (0.5, 0.5), {**normal, "kind": "zone", "radius_px": V.dpx(86), "flat": ZONE_FLAT,
+                                           "note": "熔岩（熔岩反应）：已按俯角压扁，等比缩放到区域半径（radius_px 是横向半径）；上面叠 zone_lava_glow"})
+    out["zone_lava_glow"] = (lava_glow, (0.5, 0.5), {**white_add, "kind": "zone", "radius_px": V.dpx(86),
+                                                      "note": "熔岩裂缝与熔池的光：与 zone_lava 同尺寸同锚点叠加，建议染 #FF7A2A，可慢慢明暗起伏"})
+    out["zone_mud"] = (make_zone_mud(), (0.5, 0.5), {**normal, "kind": "zone", "radius_px": V.dpx(91), "flat": ZONE_FLAT,
+                                                      "note": "淤泥（淤泥反应）：已按俯角压扁，等比缩放到区域半径（radius_px 是横向半径）"})
+    herb, herb_glow = make_zone_herb()
+    out["zone_herb"] = (herb, (0.5, 0.5), {**normal, "kind": "zone", "radius_px": V.dpx(79), "flat": ZONE_FLAT,
+                                           "note": "灵草（滋生反应）：已按俯角压扁，等比缩放到区域半径（radius_px 是横向半径）；上面叠 zone_herb_glow"})
+    out["zone_herb_glow"] = (herb_glow, (0.5, 0.5), {**white_add, "kind": "zone", "radius_px": V.dpx(79),
+                                                      "note": "灵草草尖的光：与 zone_herb 同尺寸同锚点叠加，建议染 #9CF0B8"})
     return out
 
 

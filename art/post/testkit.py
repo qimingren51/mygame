@@ -58,6 +58,35 @@ def check_golden(assets_dir: Path, folders) -> None:
             assert new["files"][name] == want, f"{folder}/meta.json 的 {name} 条目变了"
 
 
+SNAPSHOT_M25 = HERE / "golden_m25.json"
+
+
+def check_snapshot(assets_dir: Path, folders, density: float) -> int:
+    """M2.5 新素材加入之前的快照（post/golden_m25.json，两种密度）：已有 PNG 逐字节（md5）相同；
+    meta.json 已有条目的内容与顺序、已有的顶层字段都不变，新条目、新顶层字段只能追加。返回核对过的 PNG 数。"""
+    g = json.loads(SNAPSHOT_M25.read_text(encoding="utf-8"))
+    dkey = f"{density:g}"
+    n = 0
+    for key, want in g["png_md5"][dkey].items():
+        folder, name = key.split("/")
+        if folder not in folders:
+            continue
+        got = hashlib.md5((assets_dir / folder / name).read_bytes()).hexdigest()
+        assert got == want, f"{dkey} 倍 {key} 与 M2.5 之前不同（md5 {got} != {want}）"
+        n += 1
+    for folder in folders:
+        meta = json.loads((assets_dir / folder / "meta.json").read_text(encoding="utf-8"))
+        old_order = g["meta_order"][dkey][folder]
+        assert list(meta["files"])[: len(old_order)] == old_order, f"{folder}/meta.json 已有条目的顺序变了（新条目只能追加在后面）"
+        for name in old_order:
+            got = hashlib.md5(json.dumps(meta["files"][name], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            assert got == g["meta_entry_md5"][dkey][f"{folder}/{name}"], f"{folder}/meta.json 的 {name} 条目变了"
+        for k, v in g["meta_top"][dkey][folder].items():
+            assert meta.get(k) == v, f"{folder}/meta.json 顶层字段 {k} 变了"
+    assert n > 0, "快照里没有这些文件夹"
+    return n
+
+
 def density_consistency(dir_2x: Path, dir_1x: Path, names, *, max_alpha_diff: float = 6.0, max_rgb_diff: float = 6.0) -> dict:
     """2 倍贴图按 2×2 平均缩回 1 倍后应与 1 倍贴图基本一致（同一张画，只是更细）。
     比较 alpha 的平均差，以及两边都不透明处的颜色平均差（0..255）。返回 {名字: (alpha 差, 颜色差)}。"""
