@@ -1,12 +1,14 @@
 //! 高光时刻的演出（docs/FEEL.md 第 5 节，对应 docs/GAMEPLAY.md 第 14 节）：
-//! 共鸣跨阶盖朱砂印、反应初见盖章、连斩题字、夜主登场（上下黑边 + 题字）、天明题字。
+//! 共鸣跨阶盖朱砂印、反应初见盖章、连斩题字、夜主登场（上下黑边 + 题字 + 台词）、
+//! 夜主伏诛（黑边 + 台词）、天明题字。台词照 docs/LORE.md 第 7 节，写在 enemies.ron 里。
 //!
 //! 只读模拟事件和画面层的天明进度，不改模拟。动画用现实时间，顿帧和慢镜时照常播放。
 
 use bevy::prelude::*;
 use bevy::ui::Val2;
 
-use lantern_sim::{AppState, GameContent, RunMode, RunSetup, SimEvent, SimOutbox};
+use lantern_content::{BossLines, Content, PlanEvent};
+use lantern_sim::{AppState, Director, GameContent, SimEvent, SimOutbox};
 use lantern_view::Dawn;
 use lantern_view::atlas::AtlasDb;
 
@@ -14,7 +16,7 @@ use crate::describe::{element_color, hex};
 use crate::{CINNABAR, Fonts, PAPER, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.init_resource::<BossVisits>()
+    app.init_resource::<LastBoss>()
         .add_systems(OnEnter(AppState::Run), reset)
         .add_systems(Update, (read_events, dawn_title, animate).chain().run_if(in_state(AppState::Run)));
 }
@@ -33,6 +35,10 @@ enum Anim {
     Fade,
     /// 上下黑边：伸出、停住、收回
     Bar,
+    /// 台词的一个字：t 从负数（等前面的字）开始，到 0 时淡入，最后一起淡出
+    Ink,
+    /// 只是个容器，到时一起消失，不改透明度
+    Hold,
 }
 
 #[derive(Component)]
@@ -46,20 +52,113 @@ struct Moment {
 #[derive(Component)]
 struct DawnTitle;
 
-/// 这一局夜主来过几次（无尽夜里会反复来）。
+/// 最近登场的夜主（伏诛时说哪一句）。
 #[derive(Resource, Default)]
-struct BossVisits(u32);
+struct LastBoss(Option<u16>);
 
-fn reset(mut commands: Commands, q: Query<Entity, With<Moment>>, mut visits: ResMut<BossVisits>) {
+fn reset(
+    mut commands: Commands,
+    q: Query<Entity, (With<Moment>, Without<ChildOf>)>,
+    mut last: ResMut<LastBoss>,
+) {
     for e in &q {
         commands.entity(e).despawn();
     }
-    visits.0 = 0;
+    last.0 = None;
+}
+
+/// 夜主的台词。kind 不知道时（回放从中途看起）用时间表里的那一个夜主。
+fn boss_lines(c: &Content, kind: Option<u16>) -> Option<&BossLines> {
+    let kind = kind.map(usize::from).or_else(|| {
+        c.run.schedule.iter().find_map(|s| match &s.event {
+            PlanEvent::Boss { enemy, .. } => c.enemy_index(enemy),
+            _ => None,
+        })
+    })?;
+    c.enemies.get(kind)?.boss.as_ref()?.lines.as_ref()
+}
+
+/// 上下黑边，电影那样。
+fn spawn_bars(commands: &mut Commands, life: f32) {
+    for top in [true, false] {
+        let mut node = Node { left: px(0), right: px(0), height: percent(0), ..absolute() };
+        if top {
+            node.top = px(0);
+        } else {
+            node.bottom = px(0);
+        }
+        commands.spawn((
+            Moment { t: 0.0, life, anim: Anim::Bar },
+            DespawnOnExit(AppState::Run),
+            GlobalZIndex(5),
+            node,
+            BackgroundColor(Color::srgba(0.01, 0.01, 0.02, 0.94)),
+            BaseAlpha(0.94),
+        ));
+    }
+}
+
+/// 台词写在下边的黑边里，像字幕：start 秒起一个字一个字地出来，逗号句号处顿一下，end 秒淡完。
+fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, end: f32) {
+    let mut delays = Vec::new();
+    let mut d = start;
+    for ch in line.chars() {
+        delays.push((ch, d));
+        d += match ch {
+            '，' | '、' => 0.16,
+            '。' | '！' | '？' | '…' => 0.34,
+            _ => 0.07,
+        };
+    }
+    commands
+        .spawn((
+            // 字先淡完，容器再走
+            Moment { t: 0.0, life: end + 0.2, anim: Anim::Hold },
+            DespawnOnExit(AppState::Run),
+            GlobalZIndex(6),
+            Node {
+                left: px(0),
+                right: px(0),
+                bottom: px(0),
+                height: percent(10),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..absolute()
+            },
+        ))
+        .with_children(|p| {
+            for (ch, d) in delays {
+                p.spawn((
+                    Moment { t: -d, life: end - d, anim: Anim::Ink },
+                    text(&fonts.title, 30.0, PAPER.with_alpha(0.0), &ch.to_string()),
+                    UiTransform::default(),
+                ));
+            }
+        });
 }
 
 /// 底色原本的不透明度（淡入淡出时按它的比例算）。
 #[derive(Component)]
 struct BaseAlpha(f32);
+
+/// 墨晕：题字后面一团淡墨（粒子的烟团拉大、染黑），背后是一片火光时字也看得清。数是浓度。
+#[derive(Component)]
+struct Wash(f32);
+
+/// 演出里会跟着淡入淡出的颜色。
+type Paint<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static mut TextColor>,
+        Option<&'static mut ImageNode>,
+        Option<&'static mut BackgroundColor>,
+        Option<&'static mut BorderColor>,
+        Option<&'static mut TextShadow>,
+        Option<&'static BaseAlpha>,
+        Option<&'static Wash>,
+    ),
+>;
 
 /// 盖章：印章盖在一张宣纸方笺上（印章周围是透明的，直接盖在夜色上看不清），
 /// 从大到小砸下来。at 是屏幕百分比位置。
@@ -117,8 +216,8 @@ fn read_events(
     fonts: Res<Fonts>,
     db: Res<AtlasDb>,
     outbox: Res<SimOutbox>,
-    setup: Option<Res<RunSetup>>,
-    mut visits: ResMut<BossVisits>,
+    director: Option<Res<Director>>,
+    mut last: ResMut<LastBoss>,
 ) {
     let c = &content.0;
     for ev in &outbox.0 {
@@ -189,32 +288,23 @@ fn read_events(
                         }
                     });
             }
-            // 夜主登场：上下黑边，正中题字
+            // 夜主登场：上下黑边，正中题字，下边黑边里说一句话
             SimEvent::BossArrived { kind } => {
                 let e = &c.enemies[kind as usize];
-                visits.0 += 1;
-                // 无尽夜不天明，夜主一次次回来；题字照 docs/LORE.md 第 7 节
-                let endless = setup.as_ref().is_some_and(|s| s.mode == RunMode::Endless);
-                let sub = match (endless, visits.0) {
-                    (false, _) => "击败它，迎来天明",
-                    (true, 1) => "击败它，往深处走",
-                    (true, _) => "它回来了，梦又深了一层",
+                last.0 = Some(kind);
+                // 无尽夜不天明，夜主一次次回来；题字照 docs/LORE.md 第 7 节。
+                // arrivals 在夜主生成那一刻已经加过 1
+                let endless = director.as_ref().and_then(|d| d.endless);
+                let again = endless.is_some_and(|n| n.arrivals > 1);
+                let sub = match endless {
+                    None => "击败它，迎来天明",
+                    Some(_) if again => "它回来了，梦又深了一层",
+                    Some(_) => "击败它，往深处走",
                 };
-                for top in [true, false] {
-                    let mut node = Node { left: px(0), right: px(0), height: percent(0), ..absolute() };
-                    if top {
-                        node.top = px(0);
-                    } else {
-                        node.bottom = px(0);
-                    }
-                    commands.spawn((
-                        Moment { t: 0.0, life: 3.8, anim: Anim::Bar },
-                        DespawnOnExit(AppState::Run),
-                        GlobalZIndex(5),
-                        node,
-                        BackgroundColor(Color::srgba(0.01, 0.01, 0.02, 0.94)),
-                        BaseAlpha(0.94),
-                    ));
+                let line = boss_lines(c, Some(kind)).map(|l| if again { &l.again } else { &l.arrive });
+                spawn_bars(&mut commands, if line.is_some() { 4.3 } else { 3.8 });
+                if let Some(line) = line {
+                    spawn_line(&mut commands, &fonts, line, 0.7, 3.9);
                 }
                 // 名字写成“夜主 · 九尾”：前半是称号，后半写成大字
                 let (title, name) = match e.name.split_once('·') {
@@ -237,12 +327,33 @@ fn read_events(
                         UiTransform::default(),
                     ))
                     .with_children(|p| {
+                        if let Some(smoke) = db.find("fx/smoke") {
+                            let mut img = db.ui_image(smoke);
+                            img.color = INK.with_alpha(0.0);
+                            p.spawn((
+                                Node {
+                                    left: percent(22),
+                                    right: percent(22),
+                                    top: px(-50),
+                                    bottom: px(-44),
+                                    ..absolute()
+                                },
+                                Wash(0.8),
+                                img,
+                            ));
+                        }
                         let shadow =
                             TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.85) };
                         p.spawn((text(&fonts.title, 36.0, hex(&e.eye), &title), shadow));
                         p.spawn((text(&fonts.title, 112.0, PAPER, &name), shadow));
                         p.spawn((text(&fonts.body, 22.0, PAPER, sub), shadow));
                     });
+            }
+            // 夜主伏诛：慢镜里黑边再合上，它说最后一句；天明在黑边之间亮起来，结算浮现前收走
+            SimEvent::BossDefeated { dawn: true, .. } => {
+                let Some(lines) = boss_lines(c, last.0) else { continue };
+                spawn_bars(&mut commands, 4.4);
+                spawn_line(&mut commands, &fonts, &lines.defeat, 0.45, 4.0);
             }
             _ => {}
         }
@@ -301,14 +412,7 @@ fn animate(
     time: Res<Time<Real>>,
     mut q: Query<(Entity, &mut Moment, &mut Node, Option<&mut UiTransform>)>,
     children: Query<&Children>,
-    mut colors: Query<(
-        Option<&mut TextColor>,
-        Option<&mut ImageNode>,
-        Option<&mut BackgroundColor>,
-        Option<&mut BorderColor>,
-        Option<&mut TextShadow>,
-        Option<&BaseAlpha>,
-    )>,
+    mut colors: Paint,
 ) {
     let dt = time.delta_secs().min(0.1);
     for (e, mut m, mut node, tf) in &mut q {
@@ -319,6 +423,14 @@ fn animate(
         }
         let left = m.life - m.t;
         let alpha = match m.anim {
+            Anim::Hold => continue,
+            Anim::Ink => {
+                let k = (m.t / 0.22).clamp(0.0, 1.0);
+                if let Some(mut tf) = tf {
+                    tf.translation = Val2::px(0.0, 6.0 * (1.0 - k) * (1.0 - k));
+                }
+                k * (left / 0.6).min(1.0)
+            }
             Anim::Stamp { rot } => {
                 // 0.12 秒砸下，回弹，停住，最后 0.4 秒淡出
                 let k = (m.t / 0.12).min(1.0);
@@ -355,32 +467,23 @@ fn animate(
 }
 
 /// 把整棵子树的颜色都乘上同一个透明度（按各自的原色比例保存在 alpha 里不现实，直接覆盖）。
-fn set_alpha(
-    e: Entity,
-    a: f32,
-    children: &Query<&Children>,
-    colors: &mut Query<(
-        Option<&mut TextColor>,
-        Option<&mut ImageNode>,
-        Option<&mut BackgroundColor>,
-        Option<&mut BorderColor>,
-        Option<&mut TextShadow>,
-        Option<&BaseAlpha>,
-    )>,
-) {
-    if let Ok((tc, img, bg, border, shadow, base)) = colors.get_mut(e) {
+fn set_alpha(e: Entity, a: f32, children: &Query<&Children>, colors: &mut Paint) {
+    if let Ok((tc, img, bg, border, shadow, base, wash)) = colors.get_mut(e) {
         if let Some(mut tc) = tc {
             tc.0.set_alpha(a);
         }
         if let Some(mut img) = img {
-            img.color.set_alpha(a);
+            img.color.set_alpha(wash.map_or(1.0, |w| w.0) * a);
         }
-        if let Some(mut bg) = bg {
-            // 底色本来就半透明：按原来的比例
-            bg.0.set_alpha(base.map_or(1.0, |b| b.0) * a);
-        }
-        if let Some(mut border) = border {
-            border.set_all(CINNABAR.with_alpha(a));
+        // 每个节点都自带透明的底色和边框，只改有底子（标了 BaseAlpha）的，否则会变成黑块
+        if let Some(base) = base {
+            if let Some(mut bg) = bg {
+                // 底色本来就半透明：按原来的比例
+                bg.0.set_alpha(base.0 * a);
+            }
+            if let Some(mut border) = border {
+                border.set_all(CINNABAR.with_alpha(a));
+            }
         }
         if let Some(mut shadow) = shadow {
             shadow.color.set_alpha(0.85 * a);
