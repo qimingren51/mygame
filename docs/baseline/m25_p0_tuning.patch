@@ -1,9 +1,9 @@
 diff --git a/assets/data/difficulty.ron b/assets/data/difficulty.ron
-index bf22b8d..fc4824b 100644
+index 54ba046..c402f83 100644
 --- a/assets/data/difficulty.ron
 +++ b/assets/data/difficulty.ron
 @@ -2,12 +2,12 @@
- // P0 只做一更到三更。灯油和金币的倍率乘在结算上。
+ // P0 只做一更到三更。灯油和铜钱的倍率乘在结算上。
  [
      (name: "一更", desc: "标准", effects: []),
 -    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.3", effects: [
@@ -20,20 +20,20 @@ index bf22b8d..fc4824b 100644
          Mul(OilGain, 0.5), Mul(GoldGain, 0.5),
      ]),
 diff --git a/assets/data/enemies.ron b/assets/data/enemies.ron
-index 159f822..245f7c4 100644
+index 55268e1..b692844 100644
 --- a/assets/data/enemies.ron
 +++ b/assets/data/enemies.ron
 @@ -22,7 +22,7 @@
      // 三阶段（25%）：每 4 秒九尾扫（120° 扇形，半径 220，伤害 25，预警 0.8 秒），狐火环间隔缩到 1.7 秒。
      // 登场 120 秒后狂暴：所有攻击间隔 ×0.6。三更起全程多一招狐火雨。
-     (id: "boss", name: "夜主 · 九尾", rank: Boss, movement: Chase,
+     (id: "jiuwei", name: "夜主 · 九尾", rank: Boss, movement: Chase,
 -     radius: 44.0, hp: 48000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
 +     radius: 44.0, hp: 40000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
       boss: Some((volley_every: 2.6, volley_first: 2.0, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
                   shot_damage: 14.0, shot_life: 6.0, summon_every: 7.0, summon: "shade", summon_count: 6,
                   summon_radius: 70.0,
 diff --git a/assets/data/run.ron b/assets/data/run.ron
-index 225c3d2..84cc407 100644
+index 0822d37..498eb5f 100644
 --- a/assets/data/run.ron
 +++ b/assets/data/run.ron
 @@ -12,13 +12,13 @@

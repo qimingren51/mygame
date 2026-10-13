@@ -39,7 +39,7 @@ python3 docs/baseline/analyze.py /tmp
 
 ## 复现 M2.5 的 P0 实测（第 2.6 节）
 
-在 M2.5 局外层（提交 2eaa1f5）上测的。两个补丁都只是实验用，不提交到 `crates/` 和 `assets/data/`：
+现状在 M2.5 局外层（提交 2eaa1f5）上测，调整后在提交 72c9dd2 上测。两个补丁都只是实验用，不提交到 `crates/` 和 `assets/data/`：
 
 ```bash
 git worktree add --detach /tmp/kite HEAD
