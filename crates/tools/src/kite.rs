@@ -7,8 +7,8 @@
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
 //!       [--skill novice|regular|expert|circle] [--lamp <id>] [--school <流派>|all] [--combo <反应>|all]
 //!       [--csv <目录>]（每 30 秒一行的 timeline.csv、每局一行的 runs.csv）[--jobs <线程数>]
-//!       [--endless]（无尽夜，最多打 40 分钟）
-//!       [--record <文件>]（把第一局存成回放，可以用 `lantern --replay <文件>` 在游戏里看）
+//!       [--endless]（无尽夜，最多打 40 分钟）[--god]（主角无敌）
+//!       [--record <文件>]（把第一局存成回放并打印关键时刻，可以用 `lantern --replay <文件> --from <秒>` 在游戏里看）
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -312,6 +312,26 @@ fn meta_setup(setup: &mut RunSetup, meta: &str) {
     }
 }
 
+/// 回放时间线上要标出的关键时刻。
+fn moment(ev: &SimEvent) -> Option<&'static str> {
+    Some(match ev {
+        SimEvent::Evolve { .. } => "进化",
+        SimEvent::Resonance { tier, .. } if *tier >= 2 => "共鸣跨阶",
+        SimEvent::Reaction { first: true, .. } => "反应初见",
+        SimEvent::Elite { .. } => "精英",
+        SimEvent::EncircleWarn { .. } => "合围",
+        SimEvent::Surge => "妖潮",
+        SimEvent::Ult => "燃灯",
+        SimEvent::Combo { .. } => "连斩",
+        SimEvent::BossArrived { .. } => "夜主登场",
+        SimEvent::BossPhase { .. } => "夜主换阶段",
+        SimEvent::BossDefeated { dawn: true, .. } => "夜主伏诛",
+        SimEvent::BossDefeated { dawn: false, .. } => "夜主退去",
+        SimEvent::PlayerDied => "倒下",
+        _ => return None,
+    })
+}
+
 /// 一组局的设置。
 #[derive(Clone, Copy)]
 struct Cfg<'a> {
@@ -323,6 +343,8 @@ struct Cfg<'a> {
     plan: Option<&'a Plan>,
     /// 无尽夜
     endless: bool,
+    /// 主角无敌（看完整一局的画面用）
+    god: bool,
 }
 
 /// 每 30 秒一行（docs/BALANCE.md 第 11 节）。
@@ -461,6 +483,7 @@ fn screen_hp(sim: &SimHarness) -> f64 {
 fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> KiteRun {
     let mut setup = RunSetup::new(seed, if cfg.endless { RunMode::Endless } else { RunMode::Normal });
     setup.tier = cfg.tier;
+    setup.god = cfg.god;
     setup.lamp = cfg.lamp.map(str::to_string);
     meta_setup(&mut setup, cfg.meta);
     if let Some(plan) = cfg.plan {
@@ -481,6 +504,8 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
     // 第一个夜主：登场时刻、从登场到倒下用了多久
     let (mut boss_at, mut boss_time) = (None, None);
     let mut tiers = [[None; 4]; 5];
+    // 录回放时顺带记下关键时刻，方便用 --from 跳过去看
+    let mut marks: Vec<String> = Vec::new();
     let mut reactions = vec![0u32; content.elements.reactions.len()];
     let (mut last_dmg, mut last_spawned, mut taken) = (by_column(content, sim.damage_log()), 0.0, 0.0);
     // 一夜最多打 15 分钟；无尽夜最多 40 分钟（再长就算撑满）
@@ -496,6 +521,15 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         let t = sim.tick();
         let now = t as f32 / TICK_HZ as f32;
         for ev in sim.take_events() {
+            if record.is_some()
+                && let Some(what) = moment(&ev)
+            {
+                let s = t / hz;
+                let line = format!("{:02}:{:02} {what}", s / 60, s % 60);
+                if marks.last() != Some(&line) {
+                    marks.push(line);
+                }
+            }
             match ev {
                 SimEvent::Evolve { weapon } => evolutions.push((now, weapon)),
                 SimEvent::Ult => {
@@ -556,6 +590,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         }
     }
     if let (Some(path), Some(replay)) = (record, sim.replay()) {
+        eprintln!("{}", marks.join("\n"));
         match std::fs::write(path, replay.to_ron()) {
             Ok(()) => eprintln!("回放已保存：{}", path.display()),
             Err(e) => eprintln!("保存回放失败：{e}"),
@@ -950,8 +985,17 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
         if endless { "无尽夜" } else { "夜行" },
         lamp.as_deref().unwrap_or("默认")
     );
-    let base =
-        Cfg { tier, meta: &meta, lamp: lamp.as_deref(), skill, skill_name: &skill_name, plan: None, endless };
+    let god = args.iter().any(|a| a == "--god");
+    let base = Cfg {
+        tier,
+        meta: &meta,
+        lamp: lamp.as_deref(),
+        skill,
+        skill_name: &skill_name,
+        plan: None,
+        endless,
+        god,
+    };
     let todo: Vec<Option<&Plan>> =
         if plans.is_empty() { vec![None] } else { plans.iter().map(Some).collect() };
     let mut table = Vec::new();

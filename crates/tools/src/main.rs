@@ -6,7 +6,6 @@
 //!   cargo run --release -p lantern-tools -- balance [--runs 20] [--seed 1] [--god]
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--tier 1] [--meta none|half|full] [--lamp <id>]
 //!       [--skill novice|regular|expert|circle] [--school <流派>|all] [--combo <反应>|all] [--csv <目录>]
-//!   cargo run --release -p lantern-tools -- record [--seed 1] [--god] [--out bot.ron]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -30,14 +29,14 @@ const USAGE: &str = "用法：
       （--god：主角无敌，看成长曲线和夜主战）
   lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full]
       [--skill novice|regular|expert|circle] [--lamp <灯>] [--school <流派>|all] [--combo <反应>|all]
-      [--csv <目录>] [--jobs <线程数>] [--endless] [--record <文件>]
+      [--csv <目录>] [--jobs <线程数>] [--endless] [--god] [--record <文件>]
       会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、共鸣、夜主战、
       清场时间、场上妖物数、燃灯间隔、死因、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
       --skill circle：不躲，绕圈走；--school：流派机器人（剑修、百鸟、寒川、星火、不动、身法、照夜、太极）；
       --combo：组合机器人，凑某个反应（反应的 ID 或名字）；all 表示全部跑一遍，最后打一张对照表
       --csv：写出 timeline.csv（每 30 秒一行）和 runs.csv（每局一行）；--endless：打无尽夜（最多 40 分钟）
-  lantern-tools record [--seed <种子>] [--god] [--out <文件>]
-      机器人打一局，存成回放；用 lantern --replay <文件> --from <秒> 在游戏里看任意时刻的画面
+      --record：第一局存成回放并打印关键时刻（进化、反应初见、夜主……），用 lantern --replay <文件> --from <秒>
+      在游戏里看任意时刻的画面；--god：主角无敌，看完整一局
 环境变量 LANTERN_DATA 可以换一份数据目录（比较两套数值时用）";
 
 mod kite;
@@ -271,60 +270,6 @@ fn balance(args: &[String]) -> Result<(), String> {
 }
 
 /// 机器人打一局并存成回放，用来在游戏里看后期的画面（`lantern --replay <文件> --from <秒>`）。
-fn record(args: &[String]) -> Result<(), String> {
-    let seed = flag(args, "--seed", 1)?;
-    let god = args.iter().any(|a| a == "--god");
-    let out = args
-        .iter()
-        .position(|a| a == "--out")
-        .and_then(|i| args.get(i + 1))
-        .map_or_else(|| PathBuf::from(format!("bot-{seed}.ron")), PathBuf::from);
-    let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
-    let mut setup = RunSetup::new(seed, RunMode::Normal);
-    setup.god = god;
-    let mut sim = SimHarness::with_setup(content, setup);
-    sim.record(env!("CARGO_PKG_VERSION"));
-    // 关键时刻的时间线，方便用 --from 跳过去看
-    let mut marks: Vec<String> = Vec::new();
-    while !sim.is_over() && sim.tick() < 15 * 60 * u64::from(TICK_HZ) {
-        let (input, cmds) = bot::input(sim.tick());
-        bot::step(&mut sim, input, &cmds);
-        let t = sim.tick() / u64::from(TICK_HZ);
-        for ev in sim.take_events() {
-            let what = match ev {
-                SimEvent::Evolve { .. } => "进化",
-                SimEvent::Resonance { tier, .. } if tier >= 2 => "共鸣跨阶",
-                SimEvent::Reaction { first: true, .. } => "反应初见",
-                SimEvent::Elite { .. } => "精英",
-                SimEvent::EncircleWarn { .. } => "合围",
-                SimEvent::Surge => "妖潮",
-                SimEvent::Ult => "燃灯",
-                SimEvent::Combo { .. } => "连斩",
-                SimEvent::BossArrived { .. } => "夜主登场",
-                SimEvent::BossPhase { .. } => "夜主换阶段",
-                SimEvent::BossDefeated { .. } => "夜主伏诛",
-                _ => continue,
-            };
-            marks.push(format!("{:02}:{:02} {what}", t / 60, t % 60));
-        }
-    }
-    marks.dedup();
-    println!("{}", marks.join("\n"));
-    let replay = sim.replay().ok_or("没有录到回放")?;
-    std::fs::write(&out, replay.to_ron()).map_err(|e| format!("写入 {} 失败：{e}", out.display()))?;
-    let secs = sim.tick() / u64::from(TICK_HZ);
-    let won = sim.flow().result.as_ref().is_some_and(|r| r.won);
-    println!(
-        "已存到 {}：{:02}:{:02}，{}，击杀 {}",
-        out.display(),
-        secs / 60,
-        secs % 60,
-        if won { "天明" } else { "倒下" },
-        sim.progress().kills
-    );
-    Ok(())
-}
-
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
@@ -332,7 +277,6 @@ fn main() -> ExitCode {
         Some("replay") => replay(&args[1..]),
         Some("balance") => balance(&args[1..]),
         Some("kite") => kite::kite_cmd(&args[1..]),
-        Some("record") => record(&args[1..]),
         Some("check-content") => {
             Content::load(&data_dir()).map(|_| println!("内容数据校验通过")).map_err(|e| e.to_string())
         }

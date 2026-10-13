@@ -159,3 +159,32 @@ fn early_level_ups_show_two_new_weapons() {
         assert!(seen.len() >= 2, "种子 {seed}：前 5 次升级只出现了 {} 件新法器", seen.len());
     }
 }
+
+/// 余印：带印记的妖物死时，印记传给附近 60 以内还没有印记的妖物，最多 3 只。
+#[test]
+fn marks_pass_on_when_a_marked_enemy_dies() {
+    let c = content();
+    let mut sim = arena(&[], &[], "golem", 0);
+    let water = Element::Water.index() as u8 + 1;
+    let victim = sim.spawn("golem", Vec2::new(300.0, 0.0)).unwrap();
+    let near: Vec<usize> =
+        (0..5).map(|k| sim.spawn("golem", Vec2::new(300.0 + 10.0 * k as f32, 30.0)).unwrap()).collect();
+    let marked_already = sim.spawn("golem", Vec2::new(300.0, -30.0)).unwrap();
+    let far = sim.spawn("golem", Vec2::new(420.0, 0.0)).unwrap();
+    {
+        let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
+        (en.mark[victim], en.mark_t[victim]) = (water, 2.0);
+        (en.mark[marked_already], en.mark_t[marked_already]) = (Element::Fire.index() as u8 + 1, 2.0);
+        // 灼烧把它烧死
+        (en.hp[victim], en.burn_t[victim], en.burn_dps[victim], en.burn_stacks[victim]) =
+            (0.01, 1.0, 100.0, 1.0);
+    }
+    sim.step(InputFrame::default(), &[]);
+    let en = sim.enemies();
+    assert!(!en.alive[victim]);
+    let got: Vec<usize> = near.iter().copied().filter(|&j| en.mark[j] == water).collect();
+    assert_eq!(got.len(), 3, "最多传给 3 只");
+    assert!(got.iter().all(|&j| (en.mark_t[j] - c.elements.marks.duration).abs() < 0.05), "重新计时");
+    assert_eq!(en.mark[marked_already], Element::Fire.index() as u8 + 1, "已有印记的不覆盖");
+    assert_eq!(en.mark[far], 0, "60 以外的不传");
+}

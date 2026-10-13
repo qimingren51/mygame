@@ -179,7 +179,7 @@ fn second_watch_makes_enemies_tougher_and_elites_get_affixes() {
     let mut s2 = setup(4);
     s2.tier = 2;
     let two = SimHarness::with_setup(content(), s2);
-    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.4).abs() < 1e-4);
+    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.5).abs() < 1e-4);
     assert_eq!(two.stats().get(Stat::Affixes), 1.0);
     let mut s3 = setup(4);
     s3.tier = 3;

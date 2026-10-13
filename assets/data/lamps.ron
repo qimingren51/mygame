@@ -5,8 +5,8 @@
      good: "灼烧伤害 +20%", bad: "无（入门灯）", effects: [Add(BurnDamage, 0.2)], initial: true),
     (id: "mirror", name: "铜镜灯", school: "剑修", element: Metal, start_weapon: "sword", color: "#F0E6C8",
      good: "暴击率 +10%，暴击伤害 +20%", bad: "生命上限 -15%",
-     effects: [Add(CritChance, 0.10), Add(CritMult, 0.20), Mul(MaxHp, -0.15)]),
+     effects: [Add(CritChance, 0.10), Add(CritMult, 0.20), Mul(MaxHp, -0.08)]),
     (id: "frost", name: "霜瓷灯", school: "寒川", element: Water, start_weapon: "bell", color: "#9FD4FF",
-     good: "减速、冰冻时长 +30%；受击时 25% 冻住攻击者", bad: "伤害 -10%",
-     effects: [Add(SlowTime, 0.3), Add(FreezeTime, 0.3), Add(ThornFreeze, 0.25), Add(Damage, -0.10)]),
+     good: "减速、冰冻时长 +30%；受击时 25% 冻住攻击者", bad: "移速 -5%",
+     effects: [Add(SlowTime, 0.3), Add(FreezeTime, 0.3), Add(ThornFreeze, 0.25), Mul(Speed, -0.05)]),
 ]

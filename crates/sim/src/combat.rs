@@ -412,6 +412,7 @@ pub(crate) fn resolve_hits(
     // 反应产生的命中追加在队尾，本步一起结算
     let mut list = std::mem::take(&mut hits.0);
     let mut ctx = ReactCtx::new(content, &stats, &grid, progress.level, tick.secs(), &mut react);
+    let mut spread = Spread { content, grid: &grid, buf: Vec::new() };
     let mut k = 0;
     while k < list.len() {
         let hit = list[k];
@@ -536,15 +537,54 @@ pub(crate) fn resolve_hits(
                 apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
             }
         } else {
-            kill(en, i, rank, &mut deaths, &mut outbox);
+            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
         }
     }
     list.clear();
     hits.0 = list;
 }
 
-/// 妖物死亡：移出池子，记下死亡等 Death 阶段处理。
-pub(crate) fn kill(en: &mut Enemies, i: usize, rank: Rank, deaths: &mut Deaths, outbox: &mut SimOutbox) {
+/// 余印：带印记的妖物死时，印记传给附近还没有印记的妖物（docs/GAMEPLAY.md 第 6.2 节）。
+pub(crate) struct Spread<'a> {
+    pub content: &'a Content,
+    pub grid: &'a Grid,
+    pub buf: Vec<u32>,
+}
+
+impl Spread<'_> {
+    fn pass_on(&mut self, en: &mut Enemies, i: usize) {
+        let m = &self.content.elements.marks;
+        if en.mark[i] == 0 || en.mark_t[i] <= 0.0 || m.spread_count == 0 {
+            return;
+        }
+        self.buf.clear();
+        self.grid.query_circle(en, en.x[i], en.y[i], m.spread_radius, &mut self.buf);
+        let mut n = 0;
+        for &j in &self.buf {
+            let j = j as usize;
+            if j == i || !en.alive[j] || en.hp[j] <= 0.0 || en.mark_t[j] > 0.0 {
+                continue;
+            }
+            en.mark[j] = en.mark[i];
+            en.mark_t[j] = m.duration;
+            n += 1;
+            if n >= m.spread_count {
+                break;
+            }
+        }
+    }
+}
+
+/// 妖物死亡：传出余印，移出池子，记下死亡等 Death 阶段处理。
+pub(crate) fn kill(
+    en: &mut Enemies,
+    i: usize,
+    rank: Rank,
+    spread: &mut Spread,
+    deaths: &mut Deaths,
+    outbox: &mut SimOutbox,
+) {
+    spread.pass_on(en, i);
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
     deaths.0.push(Death {
@@ -760,6 +800,7 @@ pub(crate) fn burn(
     content: Res<GameContent>,
     stats: Res<Stats>,
     reveal: Res<Reveal>,
+    grid: Res<Grid>,
     mut en: ResMut<Enemies>,
     mut deaths: ResMut<Deaths>,
     mut log: ResMut<DamageLog>,
@@ -767,6 +808,7 @@ pub(crate) fn burn(
 ) {
     let en = &mut *en;
     let vuln = Vuln::new(&reveal, &stats, content.0.elements.zones.vuln_cap);
+    let mut spread = Spread { content: &content.0, grid: &grid, buf: Vec::new() };
     for i in 0..en.hi {
         if !en.alive[i] {
             continue;
@@ -795,7 +837,7 @@ pub(crate) fn burn(
         }
         if en.hp[i] <= 0.0 {
             let rank = content.0.enemies[en.kind[i] as usize].rank;
-            kill(en, i, rank, &mut deaths, &mut outbox);
+            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
         }
     }
 }

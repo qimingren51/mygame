@@ -44,7 +44,7 @@ fn lamp_sets_start_weapon_and_trait() {
     let sim = SimHarness::with_setup(content(), s);
     assert_eq!(c.weapons[sim.arsenal().0[0].def].id, "sword");
     assert!((sim.stats().get(Stat::CritChance) - 0.15).abs() < 1e-5, "基础 5% + 铜镜 10%");
-    assert!((sim.stats().max_hp() - 85.0).abs() < 1e-3);
+    assert!((sim.stats().max_hp() - 92.0).abs() < 1e-3, "铜镜灯生命上限 -8%");
     assert_eq!(sim.build().lamp_element, Some(lantern_content::Element::Metal));
     // 不写灯就用红纸灯
     let sim = SimHarness::with_setup(content(), setup(1));

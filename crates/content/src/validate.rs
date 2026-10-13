@@ -662,6 +662,7 @@ impl Content {
                 ("bonus_sword_rate", el.bonus_sword_rate),
             ],
         )?;
+        c.non_negative("elements.ron", &[("marks.spread_radius", el.marks.spread_radius)])?;
         c.unique("elements.ron", "反应", el.reactions.iter().map(|r| r.id.as_str()))?;
         for (i, r) in el.reactions.iter().enumerate() {
             if r.a == r.b {

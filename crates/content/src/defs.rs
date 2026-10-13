@@ -844,6 +844,9 @@ pub struct MarksDef {
     pub react_cooldown: f32,
     /// 每一步最多结算几次反应，超出的丢弃
     pub max_per_step: u32,
+    /// 余印：带印记的妖物死时，印记传给 spread_radius 以内还没有印记的妖物，最多 spread_count 只
+    pub spread_radius: f32,
+    pub spread_count: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
