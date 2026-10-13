@@ -50,10 +50,11 @@ test('标题、游戏、返回', async ({ page }, info) => {
   await page.mouse.move(200, 250);
   await page.mouse.down();
   await page.mouse.move(260, 250, { steps: 4 });
-  await page.waitForTimeout(1200);
+  // CI 用软件渲染，帧率低；按住摇杆直到走够距离，而不是固定等待
+  await expect
+    .poll(async () => (await dbg(page)).world.player.x - start, { timeout: 10_000 })
+    .toBeGreaterThan(40);
   await page.mouse.up();
-  const moved = (await dbg(page)).world.player.x - start;
-  expect(moved).toBeGreaterThan(40);
   await page.screenshot({ path: info.outputPath('play.png') });
 
   // 升级三选一：直接给经验，等卡片出现，点第一张
