@@ -15,9 +15,10 @@ use bevy::prelude::*;
 
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{AppState, Health, Player, Pos, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Health, Player, Pos, RunState, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
+use crate::fx::ult_flare;
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
 use crate::particles::{INK, Particles};
 use crate::{Feel, MainCamera, layer, to_screen};
@@ -70,8 +71,10 @@ pub(crate) struct Atmos {
     wisps: Vec<Wisp>,
     /// 受伤后的闪红（1 → 0）
     hurt: f32,
-    /// 辉光炸亮（燃灯、夜主倒下……），1 → 0
+    /// 通用辉光炸亮（夜主倒下、回光……），1 → 0
     flare: f32,
+    /// 燃灯单独计时，首帧不扣时间，400ms 后结束，不拉长其他高光。
+    ult_t: Option<f32>,
     /// 夜主登场的压暗（1 → 0）
     gloom: f32,
     /// 无尽夜：夜主每退去一次，夜就深一层（目标层数和当前过渡到的深度）
@@ -109,6 +112,7 @@ impl Default for Atmos {
             wisps,
             hurt: 0.0,
             flare: 0.0,
+            ult_t: None,
             gloom: 0.0,
             deeper: 0,
             depth: 0.0,
@@ -124,6 +128,7 @@ pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.hurt_dir = Vec2::ZERO;
     atmos.hurt_at = None;
     atmos.flare = 0.0;
+    atmos.ult_t = None;
     atmos.gloom = 0.0;
     atmos.deeper = 0;
     atmos.depth = 0.0;
@@ -160,7 +165,11 @@ pub(crate) fn atmos_events(
     mut dawn: ResMut<Dawn>,
     hero: Query<&Pos, With<Player>>,
     real: Res<Time<Real>>,
+    run: Option<Res<State<RunState>>>,
 ) {
+    if !run.is_some_and(|s| *s.get() == RunState::Paused) {
+        atmos.ult_t = atmos.ult_t.map(|t| t + real.delta_secs()).filter(|&t| t < 0.4);
+    }
     for ev in &outbox.0 {
         match ev {
             SimEvent::PlayerHurt { from, .. } => {
@@ -186,7 +195,7 @@ pub(crate) fn atmos_events(
                 atmos.gloom = 1.0;
             }
             // 大事件时辉光猛地一亮再回落
-            SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.flare = atmos.flare.max(0.8),
+            SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.ult_t = Some(0.0),
             SimEvent::LastStand { .. } | SimEvent::Revived { .. } => atmos.flare = atmos.flare.max(0.7),
             SimEvent::Evolve { .. } => atmos.flare = atmos.flare.max(0.5),
             SimEvent::LanternLit { all: true, .. } => atmos.flare = atmos.flare.max(0.6),
@@ -242,7 +251,8 @@ pub(crate) fn update_atmos(
     let (cam_tf, vignette, chroma, bloom) = &mut *cam;
     if let Some(b) = bloom {
         // 快起慢落：平方让尾巴拖长一点
-        b.intensity = BLOOM_BASE + 0.45 * atmos.flare * atmos.flare.sqrt();
+        let flare = atmos.flare.max(atmos.ult_t.map_or(0.0, ult_flare));
+        b.intensity = BLOOM_BASE + 0.45 * flare * flare.sqrt();
     }
     if let Some(v) = vignette {
         let base = base_vignette();
@@ -410,6 +420,31 @@ pub(crate) fn draw_hurt_arc(
 mod tests {
     use super::*;
     use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
+    #[test]
+    fn ult_bloom_peaks_on_event_frame_and_finishes_in_real_time() {
+        for dt in [1.0 / 60.0, 1.0 / 15.0, 1.0] {
+            let mut app = App::new();
+            app.init_resource::<Time<Real>>()
+                .init_resource::<Atmos>()
+                .init_resource::<Dawn>()
+                .init_resource::<SimOutbox>()
+                .add_systems(Update, atmos_events);
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.world_mut().resource_mut::<SimOutbox>().0 =
+                vec![SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult }];
+            app.update();
+            assert_eq!(app.world().resource::<Atmos>().ult_t, Some(0.0));
+            assert_eq!(app.world().resource::<Atmos>().ult_t.map(ult_flare), Some(0.8));
+            app.world_mut().resource_mut::<SimOutbox>().0.clear();
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(20));
+            app.update();
+            assert_eq!(app.world().resource::<Atmos>().ult_t.map(ult_flare), Some(0.8));
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(380));
+            app.update();
+            assert!(app.world().resource::<Atmos>().ult_t.is_none());
+        }
+    }
 
     #[test]
     fn hurt_arc_points_to_the_actual_source_in_screen_coordinates() {

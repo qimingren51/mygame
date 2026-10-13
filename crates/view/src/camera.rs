@@ -816,18 +816,28 @@ mod tests {
             for (event, peak) in [
                 (hurt(), 0.18),
                 (SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult }, 0.24),
+                (SimEvent::LastStand { pos: Vec2::ZERO }, 0.24),
+                (SimEvent::Revived { pos: Vec2::ZERO }, 0.24),
             ] {
                 let (mut app, flash) = feedback_app(false);
+                let ult = matches!(event, SimEvent::Strike { fx: StrikeFx::Ult, .. });
                 app.world_mut()
                     .resource_mut::<Time<Real>>()
                     .advance_by(std::time::Duration::from_secs_f32(dt));
                 app.world_mut().resource_mut::<SimOutbox>().0 = vec![event];
                 app.update();
                 assert_eq!(app.world().get::<Sprite>(flash).unwrap().color.alpha(), peak);
+                if ult {
+                    let rig = app.world().resource::<Rig>();
+                    assert_eq!(rig.stop, 0.09);
+                    assert_eq!(rig.zoom_to, 0.09);
+                    assert_eq!(rig.zoom_hold, 0.25);
+                }
                 app.world_mut().resource_mut::<SimOutbox>().0.clear();
                 app.update();
                 let alpha = app.world().get::<Sprite>(flash).unwrap().color.alpha();
-                assert!((alpha - (peak - dt * 3.0).max(0.0)).abs() < 1e-6);
+                let decay = if ult { 0.24 / crate::fx::ULT_FLASH } else { 3.0 };
+                assert!((alpha - (peak - dt * decay).max(0.0)).abs() < 1e-6);
             }
         }
     }

@@ -23,7 +23,7 @@ use lantern_sim::reveal::Reveal;
 use lantern_sim::weapons::drop::{Fissures, Seals};
 use lantern_sim::weapons::volley::Shots;
 use lantern_sim::{
-    AppState, Arsenal, Director, GameContent, Player, Pos, PrevPos, SimEvent, SimOutbox, Stats,
+    AppState, Arsenal, Director, GameContent, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox, Stats,
 };
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
@@ -33,6 +33,17 @@ use crate::{MainCamera, layer, to_screen};
 
 /// 透视：地面上的圆画成扁圆
 const FLAT: f32 = 0.62;
+
+/// 燃灯各拍用现实秒：收束与即时冲击叠起，不能为视觉蓄力推迟伤害。
+const ULT_CONTRACT: f32 = 0.08;
+const ULT_WAVE: f32 = 0.32;
+pub(crate) const ULT_FLASH: f32 = 0.12;
+pub(crate) const ULT_END: f32 = 0.8;
+
+/// 冲击帧即为光爆峰值，保持 20ms，400ms 内交给余烬。
+pub(crate) fn ult_flare(t: f32) -> f32 {
+    0.8 * (1.0 - ((t - 0.02) / 0.38).clamp(0.0, 1.0))
+}
 
 fn rgb(hex: u32) -> Color {
     Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -159,6 +170,7 @@ struct Live {
     pos: Vec2,
     r: f32,
     t: f32,
+    fresh: bool,
     life: f32,
     rot: f32,
 }
@@ -166,6 +178,19 @@ struct Live {
 impl Live {
     fn category(&self) -> Category {
         self.kind.category()
+    }
+
+    fn advance(&mut self, dt: f32, real_dt: f32) -> bool {
+        if matches!(self.kind, OneShot::Ult) {
+            // 燃灯先画事件帧的收束姿态与光爆峰值；随后穿过顿帧继续演出。
+            if !self.fresh {
+                self.t += real_dt;
+            }
+        } else {
+            self.t += dt;
+        }
+        self.fresh = false;
+        self.t < self.life
     }
 }
 
@@ -190,6 +215,7 @@ pub(crate) struct FxState {
     priority: Priority,
     flash_priority: Priority,
     flash_fresh: bool,
+    flash_decay: f32,
     /// 合围预警的墨雾：已经起了多久、预警多长、合拢后散了多久
     mist: Option<(f32, f32, Option<f32>)>,
 }
@@ -205,6 +231,7 @@ impl Default for FxState {
             priority: Priority::Normal,
             flash_priority: Priority::Ambient,
             flash_fresh: false,
+            flash_decay: 3.0,
             mist: None,
         }
     }
@@ -236,10 +263,14 @@ impl FxState {
             self.live.remove(index);
         }
         let rot = self.rng.range_f32(0.0, TAU);
-        self.live.push(Live { kind, pos, r, t: 0.0, life, rot, priority: self.priority });
+        self.live.push(Live { kind, pos, r, t: 0.0, fresh: true, life, rot, priority: self.priority });
     }
 
     fn flash(&mut self, color: Color, a: f32) {
+        self.flash_with_decay(color, a, 3.0);
+    }
+
+    fn flash_with_decay(&mut self, color: Color, a: f32, decay: f32) {
         let cap: f32 = match self.priority {
             Priority::Hurt | Priority::Death => 0.18,
             Priority::Finale => 0.3,
@@ -256,6 +287,7 @@ impl FxState {
             self.flash = color.with_alpha(a);
             self.flash_priority = self.priority;
             self.flash_fresh = true;
+            self.flash_decay = decay;
         }
     }
 }
@@ -316,8 +348,8 @@ pub(crate) fn read_fx_events(
                     StrikeFx::Quake => fx.push(OneShot::Quake, p, radius, 0.5),
                     StrikeFx::Taiji => fx.push(OneShot::Taiji, p, radius, 1.0),
                     StrikeFx::Ult => {
-                        fx.push(OneShot::Ult, p, radius, 1.0);
-                        fx.flash(rgb(0xffd98a), 0.55);
+                        fx.push(OneShot::Ult, p, radius, ULT_END);
+                        fx.flash_with_decay(rgb(0xffd98a), 0.55, 0.24 / ULT_FLASH);
                     }
                     StrikeFx::None => {}
                 }
@@ -386,6 +418,8 @@ pub(crate) fn read_fx_events(
 /// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
 pub(crate) fn collect_fx(
     time: Res<Time>,
+    real: Res<Time<Real>>,
+    run: Option<Res<State<RunState>>>,
     fixed: Res<Time<Fixed>>,
     content: Res<GameContent>,
     db: Res<AtlasDb>,
@@ -869,10 +903,8 @@ pub(crate) fn collect_fx(
 
     // ---- 一次性效果
     let fx = &mut *fx;
-    fx.live.retain_mut(|l| {
-        l.t += dt;
-        l.t < l.life
-    });
+    let real_dt = if run.is_some_and(|s| *s.get() == RunState::Paused) { 0.0 } else { real.delta_secs() };
+    fx.live.retain_mut(|l| l.advance(dt, real_dt));
     for l in &fx.live {
         let personal_start = (pools.fx.len(), glow.0.len());
         let u = l.t / l.life;
@@ -962,11 +994,33 @@ pub(crate) fn collect_fx(
                 }
             }
             OneShot::Ult => {
-                // 燃灯：墨焰向外翻卷、灯芯向上挑起，再让余烬接管画面。
-                let reach = 1.0 - (1.0 - (u / 0.4).min(1.0)).powi(3);
-                let fade = (1.0 - u).powi(2);
+                // 灯焰收束：外圈墨边向内压，灯芯从宽柱收成细线；冲击无需等它播完。
+                let contract = (l.t / ULT_CONTRACT).min(1.0);
+                if contract < 1.0 {
+                    let k = px(f.ring_ink, l.r * (1.15 - contract * 0.55));
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(k, k * FLAT),
+                        color: rgb(0x1b1720).with_alpha((1.0 - contract) * 0.45),
+                        ..Draw::new(f.ring_ink, l.pos.extend(layer::WEAPONS))
+                    });
+                    let k = px(f.streak, l.r.min(240.0) * (0.85 - contract * 0.4));
+                    glow.add(
+                        f.streak,
+                        (l.pos + Vec2::Y * l.r.min(240.0) * 0.22).extend(layer::EMISSIVE),
+                        Vec2::new(k, k * (0.4 - contract * 0.32)),
+                        TAU * 0.25,
+                        rgb(0xfff1c2).with_alpha((1.0 - contract) * 0.8),
+                    );
+                }
+                // 墨浪：首帧已有波前，20ms 后快速翻卷，320ms 内褪去。
+                let wave = ((l.t - 0.02) / (ULT_WAVE - 0.02)).clamp(0.0, 1.0);
+                let reach = 0.08 + 0.92 * (1.0 - (1.0 - wave).powi(3));
+                let fade = 1.0 - ((l.t - ULT_CONTRACT) / (ULT_WAVE - ULT_CONTRACT)).clamp(0.0, 1.0);
                 for i in 0..8 {
-                    let angle = i as f32 * TAU / 8.0 + u * 0.3;
+                    if fade <= 0.0 {
+                        break;
+                    }
+                    let angle = i as f32 * TAU / 8.0 + wave * 0.3;
                     let d = Vec2::from_angle(angle);
                     let at = l.pos + d * Vec2::new(1.0, FLAT) * l.r * reach * 0.6;
                     let k = px(f.slash, l.r * (0.35 + reach * 0.45));
@@ -981,17 +1035,14 @@ pub(crate) fn collect_fx(
                         at.extend(layer::EMISSIVE + 1.0),
                         Vec2::new(k * 0.9, k * 0.42),
                         angle,
-                        rgb(0xffd98a).with_alpha(fade * 0.65),
+                        rgb(0xffd98a).with_alpha(fade * ult_flare(l.t) * 0.8),
                     );
                 }
-                let k = px(f.streak, l.r.min(240.0) * (0.65 + reach));
-                glow.add(
-                    f.streak,
-                    (l.pos + Vec2::Y * l.r.min(240.0) * 0.3).extend(layer::EMISSIVE),
-                    Vec2::new(k, k * 0.65),
-                    TAU * 0.25,
-                    rgb(0xfff1c2).with_alpha(fade * 0.8),
-                );
+                // 局部光爆从第 0 帧取峰值；不因波前外扩而在后面补第二次爆闪。
+                let flare = ult_flare(l.t);
+                if flare > 0.0 {
+                    glow.light(&frames, &db, l.pos, (rgb(0xffd98a).with_alpha(flare), l.r * 0.9));
+                }
             }
             OneShot::Reaction { color } => {
                 // 五行相遇用交错短笔锋，避免每次反应再铺一个大圈。
@@ -1374,7 +1425,7 @@ pub(crate) fn apply_flash(
     mut flash: Query<(&mut Sprite, &mut Transform), (With<ScreenFlash>, Without<MainCamera>)>,
 ) {
     if !fx.flash_fresh {
-        let a = (fx.flash.alpha() - time.delta_secs() * 3.0).max(0.0);
+        let a = (fx.flash.alpha() - time.delta_secs() * fx.flash_decay).max(0.0);
         fx.flash.set_alpha(a);
     }
     fx.flash_fresh = false;
@@ -1398,6 +1449,24 @@ fn dim_personal(pools: &mut Pools, glow: &mut GlowRequests, start: (usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ult_keeps_impact_pose_then_advances_on_real_time_through_hitstop() {
+        for frame_dt in [1.0 / 60.0, 1.0 / 30.0, 0.2, 1.0] {
+            let mut fx = FxState::default();
+            fx.push(OneShot::Ult, Vec2::ZERO, 400.0, ULT_END);
+            let live = &mut fx.live[0];
+            assert!(live.advance(frame_dt, frame_dt));
+            assert_eq!(live.t, 0.0);
+            assert_eq!(ult_flare(live.t), 0.8);
+            assert!(live.advance(0.0, ULT_CONTRACT));
+            assert_eq!(live.t, ULT_CONTRACT);
+            assert!(ult_flare(live.t) < 0.8);
+            assert!(live.advance(0.0, 0.32));
+            assert!(ult_flare(live.t) < 1e-6);
+            assert!(!live.advance(0.0, 0.5));
+        }
+    }
 
     #[test]
     fn crowded_frame_keeps_all_five_rain_impacts_and_sweep_in_both_modes() {

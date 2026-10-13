@@ -16,12 +16,12 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use lantern_content::{BlastKind, Element, Rank};
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
+use lantern_sim::{Arsenal, GameContent, HitKind, Player, RunState, SimEvent, SimOutbox};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
 use crate::feedback::{Category, Feedback, Priority, eviction};
-use crate::fx::hex;
+use crate::fx::{ULT_END, ULT_FLASH, hex};
 use crate::{Feel, layer, to_screen};
 
 /// 总量固定，其中 480 个位置留给暴击、燃灯和夜主死亡。
@@ -244,6 +244,9 @@ pub(crate) struct P {
     pub accel: Vec2,
     pub t: f32,
     fresh: bool,
+    /// 燃灯用现实时间穿过顿帧；待发余烬也计入粒子预算，延迟期间不绘制、不运动。
+    real_time: bool,
+    delay: f32,
     pub life: f32,
     /// 起止大小（相对贴图原始尺寸）
     pub size: (f32, f32),
@@ -278,6 +281,8 @@ impl P {
             accel: Vec2::ZERO,
             t: 0.0,
             fresh: true,
+            real_time: false,
+            delay: 0.0,
             life,
             size: (1.0, 1.0),
             stretch: 1.0,
@@ -373,6 +378,10 @@ impl Particles {
 
     /// 火星：四散的细火线（叠加）。bias 不为零时偏向那个方向。
     pub fn sparks(&mut self, at: Vec2, color: Color, n: u32, speed: f32, bias: Vec2) {
+        self.sparks_with_clock(at, color, n, speed, bias, false);
+    }
+
+    fn sparks_with_clock(&mut self, at: Vec2, color: Color, n: u32, speed: f32, bias: Vec2, real_time: bool) {
         for _ in 0..self.n(n) {
             let d = (self.dir() + bias).normalize_or(Vec2::X);
             let v = d * speed * self.rng.range_f32(0.5, 1.2);
@@ -385,6 +394,7 @@ impl Particles {
                 color,
                 glow: true,
                 align: true,
+                real_time,
                 ..P::new(self.f.streak, at, life, layer::EMISSIVE + 1.0)
             };
             self.spawn(p);
@@ -407,6 +417,33 @@ impl Particles {
             };
             self.spawn(p);
         }
+    }
+
+    fn ult(&mut self, at: Vec2, radius: f32) {
+        // 火线保留即时冲击，余烬从闪屏结束时接棒，越往后越稀疏。
+        let count = self.n(60);
+        for i in 0..count {
+            let u = i as f32 / (count - 1) as f32;
+            let delay = ULT_FLASH + 0.38 * u * u;
+            let d = self.dir();
+            let r = self.rng.range_f32(0.2, 1.0) * radius;
+            let life = self.rng.range_f32(0.28, 0.5).min(ULT_END - delay);
+            let p = P {
+                vel: Vec2::new(self.rng.range_f32(-16.0, 16.0), self.rng.range_f32(35.0, 70.0)),
+                accel: Vec2::Y * 18.0,
+                drag: 1.2,
+                size: (self.rng.range_f32(0.5, 0.9) * (1.0 - u * 0.35), 0.08),
+                color: GOLD.with_alpha(0.9 - u * 0.3),
+                fade_in: 0.015 / life,
+                glow: true,
+                real_time: true,
+                delay,
+                ..P::new(self.f.ember, at + d * Vec2::new(r, r * 0.62), life, layer::EMISSIVE + 0.8)
+            };
+            self.spawn(p);
+        }
+        // 只给这次火线使用现实时间，不改变普通命中的粒子时钟。
+        self.sparks_with_clock(at, GOLD, 30, 420.0, Vec2::ZERO, true);
     }
 
     /// 墨溅：墨滴抛起、落地留点。
@@ -528,15 +565,18 @@ impl Particles {
     }
 }
 
-/// 推进粒子，攒成绘制请求。用虚拟时间：顿帧和慢镜时粒子一起停、一起慢。
+/// 推进粒子，攒成绘制请求。普通粒子跟虚拟时间，燃灯按现实时间走完三拍。
 pub(crate) fn update_particles(
     time: Res<Time>,
+    real: Res<Time<Real>>,
+    run: Option<Res<State<RunState>>>,
     feedback: Res<Feedback>,
     mut parts: ResMut<Particles>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
 ) {
     let dt = time.delta_secs();
+    let real_dt = if run.is_some_and(|s| *s.get() == RunState::Paused) { 0.0 } else { real.delta_secs() };
     let parts = &mut *parts;
     let drop = parts.f.drop;
     let mut landed: Vec<Vec2> = Vec::new();
@@ -545,6 +585,10 @@ pub(crate) fn update_particles(
         if p.fresh {
             return true;
         }
+        let dt = if p.real_time { real_dt } else { dt };
+        let active_dt = (dt - p.delay).max(0.0);
+        p.delay = (p.delay - dt).max(0.0);
+        let dt = active_dt;
         p.t += dt;
         if p.t >= p.life {
             return false;
@@ -581,6 +625,9 @@ pub(crate) fn update_particles(
     for p in &mut parts.list {
         // 落地墨点在本轮推进后生成，也从第一次绘制后开始计时。
         p.fresh = false;
+        if p.delay > 0.0 {
+            continue;
+        }
         let u = p.t / p.life;
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
@@ -766,14 +813,7 @@ pub(crate) fn particle_events(
                         parts.embers(at, radius * 0.4, c, 4);
                     }
                     StrikeFx::Quake => parts.dust(at, 18, radius / 40.0, DUST),
-                    StrikeFx::Ult => {
-                        for _ in 0..parts.n(60) {
-                            let d = Vec2::from_angle(parts.rng.range_f32(0.0, TAU));
-                            let r = parts.rng.range_f32(0.2, 1.0) * radius;
-                            parts.embers(at + Vec2::new(d.x * r, d.y * r * 0.62), 6.0, GOLD, 1);
-                        }
-                        parts.sparks(at, GOLD, 30, 420.0, Vec2::ZERO);
-                    }
+                    StrikeFx::Ult => parts.ult(at, radius),
                     _ => {}
                 }
             }
@@ -876,6 +916,7 @@ mod tests {
             parts.spawn(p);
             app.insert_resource(parts)
                 .init_resource::<Time>()
+                .init_resource::<Time<Real>>()
                 .init_resource::<Feedback>()
                 .init_resource::<Pools>()
                 .init_resource::<GlowRequests>()
@@ -921,6 +962,7 @@ mod tests {
         });
         app.insert_resource(parts)
             .init_resource::<Time>()
+            .init_resource::<Time<Real>>()
             .init_resource::<Feedback>()
             .init_resource::<Pools>()
             .init_resource::<GlowRequests>()
@@ -954,6 +996,76 @@ mod tests {
                 slash: frame,
             },
         }
+    }
+
+    #[test]
+    fn ult_embers_follow_the_real_beat_during_hitstop_in_both_quality_modes() {
+        for lite in [false, true] {
+            let mut app = App::new();
+            let mut parts = pool();
+            // 区分火线和余烬，直接检查绘制请求，不把已预约的粒子当成已经出现。
+            parts.f.ember = FrameId(1);
+            parts.begin_frame(lite);
+            parts.priority = Priority::Ultimate;
+            parts.ult(Vec2::ZERO, 400.0);
+            let count = if lite { 30 } else { 60 };
+            assert_eq!(parts.len(), count + count / 2);
+            app.insert_resource(parts)
+                .init_resource::<Time>()
+                .init_resource::<Time<Real>>()
+                .init_resource::<Feedback>()
+                .init_resource::<Pools>()
+                .init_resource::<GlowRequests>()
+                .add_systems(Update, update_particles);
+            // 即使事件帧很慢，也要先完整呈现冲击，余烬仍未出场。
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs(1));
+            app.update();
+            assert_eq!(app.world().resource::<GlowRequests>().0.len(), count / 2);
+            assert!(app.world().resource::<Particles>().list.iter().all(|p| p.t == 0.0));
+
+            let mut visible = Vec::new();
+            // 虚拟时间始终为零：关闭/开启顿帧不改变这套演出的节拍。
+            for ms in [100, 60, 100, 240, 400] {
+                app.world_mut().resource_mut::<GlowRequests>().0.clear();
+                app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(ms));
+                app.update();
+                let draws = &app.world().resource::<GlowRequests>().0;
+                visible.push(draws.iter().filter(|p| p.frame == FrameId(1)).count());
+            }
+            assert_eq!(visible[0], 0);
+            assert!(visible[1] > 0 && visible[1] < count);
+            assert!(visible[2] > visible[1]);
+            assert!(visible[3] > 0);
+            assert_eq!(visible[4], 0);
+            assert_eq!(app.world().resource::<Particles>().len(), 0);
+        }
+    }
+
+    #[test]
+    fn paused_ult_keeps_pending_embers_and_reset_clears_them() {
+        let mut app = App::new();
+        let mut parts = pool();
+        parts.priority = Priority::Ultimate;
+        parts.ult(Vec2::ZERO, 400.0);
+        app.insert_resource(parts)
+            .insert_resource(State::new(RunState::Paused))
+            .init_resource::<Time>()
+            .init_resource::<Time<Real>>()
+            .init_resource::<Feedback>()
+            .init_resource::<Pools>()
+            .init_resource::<GlowRequests>()
+            .init_resource::<ParticleClock>()
+            .add_systems(Update, update_particles);
+        app.update();
+        app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs(2));
+        app.update();
+        let parts = app.world().resource::<Particles>();
+        assert_eq!(parts.len(), 90);
+        assert!(parts.list.iter().all(|p| p.t == 0.0));
+        assert_eq!(parts.list.iter().filter(|p| p.delay > 0.0).count(), 60);
+        app.add_systems(Last, reset_particles);
+        app.update();
+        assert_eq!(app.world().resource::<Particles>().len(), 0);
     }
 
     #[test]
