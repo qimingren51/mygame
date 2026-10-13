@@ -20,6 +20,9 @@ use crate::lighting::{LightCamera, NIGHT_AMBIENT};
 use crate::particles::{INK, Particles};
 use crate::{MainCamera, layer};
 
+/// 无尽夜：夜主每退去一次夜色暗多少、最多几层
+const DEPTH_STEP: f32 = 0.06;
+const MAX_DEPTH: u32 = 4;
 /// 辉光平时的强度（`lib.rs` 的 `bloom()` 也用它）
 pub(crate) const BLOOM_BASE: f32 = 0.16;
 /// 天明用多久（现实秒），从夜主倒下后 DAWN_DELAY 秒开始
@@ -69,6 +72,9 @@ pub(crate) struct Atmos {
     flare: f32,
     /// 夜主登场的压暗（1 → 0）
     gloom: f32,
+    /// 无尽夜：夜主每退去一次，夜就深一层（目标层数和当前过渡到的深度）
+    deeper: u32,
+    depth: f32,
     heart: f32,
 }
 
@@ -91,7 +97,7 @@ impl Default for Atmos {
                 flip: rng.chance(0.5),
             })
             .collect();
-        Atmos { rng, motes, wisps, hurt: 0.0, flare: 0.0, gloom: 0.0, heart: 0.0 }
+        Atmos { rng, motes, wisps, hurt: 0.0, flare: 0.0, gloom: 0.0, deeper: 0, depth: 0.0, heart: 0.0 }
     }
 }
 
@@ -99,6 +105,8 @@ pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.hurt = 0.0;
     atmos.flare = 0.0;
     atmos.gloom = 0.0;
+    atmos.deeper = 0;
+    atmos.depth = 0.0;
     dawn.t = None;
 }
 
@@ -118,9 +126,14 @@ pub(crate) fn atmos_events(outbox: Res<SimOutbox>, mut atmos: ResMut<Atmos>, mut
         match ev {
             SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } => atmos.hurt = 1.0,
             SimEvent::BossArrived { .. } => atmos.gloom = 1.0,
-            SimEvent::BossDefeated { .. } => {
+            SimEvent::BossDefeated { dawn: true, .. } => {
                 dawn.t = Some(0.0);
                 atmos.flare = 1.0;
+            }
+            // 无尽夜：夜主倒下也不天明，梦太深，夜一更更往下沉（docs/LORE.md 第 8 节）
+            SimEvent::BossDefeated { dawn: false, .. } => {
+                atmos.flare = 0.8;
+                atmos.deeper = (atmos.deeper + 1).min(MAX_DEPTH);
             }
             // 大事件时辉光猛地一亮再回落
             SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.flare = atmos.flare.max(0.8),
@@ -156,6 +169,8 @@ pub(crate) fn update_atmos(
     atmos.hurt = (atmos.hurt - rdt * 2.5).max(0.0);
     atmos.flare = (atmos.flare - rdt * 1.6).max(0.0);
     atmos.gloom = (atmos.gloom - rdt / 3.0).max(0.0);
+    // 夜沉下去要慢，3 秒左右过渡完
+    atmos.depth += (atmos.deeper as f32 - atmos.depth) * (1.0 - (-rdt * 1.2).exp());
     if let Some(dt_dawn) = &mut dawn.t {
         *dt_dawn += rdt;
     }
@@ -209,7 +224,8 @@ pub(crate) fn update_atmos(
     let ambient = if day > 0.0 {
         dawn_col
     } else {
-        LinearRgba::rgb(night.red * gloom, night.green * gloom, night.blue * gloom)
+        let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth);
+        LinearRgba::rgb(night.red * deep, night.green * deep, night.blue * deep)
     };
     light.clear_color = ClearColorConfig::Custom(Color::LinearRgba(ambient.with_alpha(1.0)));
 

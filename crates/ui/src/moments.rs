@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy::ui::Val2;
 
-use lantern_sim::{AppState, GameContent, SimEvent, SimOutbox};
+use lantern_sim::{AppState, GameContent, RunMode, RunSetup, SimEvent, SimOutbox};
 use lantern_view::Dawn;
 use lantern_view::atlas::AtlasDb;
 
@@ -14,7 +14,8 @@ use crate::describe::{element_color, hex};
 use crate::{CINNABAR, Fonts, PAPER, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Run), reset)
+    app.init_resource::<BossVisits>()
+        .add_systems(OnEnter(AppState::Run), reset)
         .add_systems(Update, (read_events, dawn_title, animate).chain().run_if(in_state(AppState::Run)));
 }
 
@@ -45,10 +46,15 @@ struct Moment {
 #[derive(Component)]
 struct DawnTitle;
 
-fn reset(mut commands: Commands, q: Query<Entity, With<Moment>>) {
+/// 这一局夜主来过几次（无尽夜里会反复来）。
+#[derive(Resource, Default)]
+struct BossVisits(u32);
+
+fn reset(mut commands: Commands, q: Query<Entity, With<Moment>>, mut visits: ResMut<BossVisits>) {
     for e in &q {
         commands.entity(e).despawn();
     }
+    visits.0 = 0;
 }
 
 /// 底色原本的不透明度（淡入淡出时按它的比例算）。
@@ -111,6 +117,8 @@ fn read_events(
     fonts: Res<Fonts>,
     db: Res<AtlasDb>,
     outbox: Res<SimOutbox>,
+    setup: Option<Res<RunSetup>>,
+    mut visits: ResMut<BossVisits>,
 ) {
     let c = &content.0;
     for ev in &outbox.0 {
@@ -184,6 +192,14 @@ fn read_events(
             // 夜主登场：上下黑边，正中题字
             SimEvent::BossArrived { kind } => {
                 let e = &c.enemies[kind as usize];
+                visits.0 += 1;
+                // 无尽夜不天明，夜主一次次回来；题字照 docs/LORE.md 第 7 节
+                let endless = setup.as_ref().is_some_and(|s| s.mode == RunMode::Endless);
+                let sub = match (endless, visits.0) {
+                    (false, _) => "击败它，迎来天明",
+                    (true, 1) => "击败它，往深处走",
+                    (true, _) => "它回来了，梦又深了一层",
+                };
                 for top in [true, false] {
                     let mut node = Node { left: px(0), right: px(0), height: percent(0), ..absolute() };
                     if top {
@@ -225,7 +241,7 @@ fn read_events(
                             TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.85) };
                         p.spawn((text(&fonts.title, 36.0, hex(&e.eye), &title), shadow));
                         p.spawn((text(&fonts.title, 112.0, PAPER, &name), shadow));
-                        p.spawn((text(&fonts.body, 22.0, PAPER, "击败它，迎来天明"), shadow));
+                        p.spawn((text(&fonts.body, 22.0, PAPER, sub), shadow));
                     });
             }
             _ => {}
