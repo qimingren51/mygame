@@ -4,11 +4,14 @@
     LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py sample   # 样张：渲几帧到 out/qq_sample@2x/，拼审图
     LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py review   # 正式素材（out/assets@2x/）的审图、动图
     LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py sample --review  # 不渲染，只重拼样张审图
+    LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py sample --only=fox_wisp,boss  # 只重渲这几个
 输出（out/review@2x/）：
-    sample：qq_enemies_sample.png（游戏 1 倍大小：宣纸底一排、夜里一排，加和主角、影妖、疾影、赤面狐并排的比例图，白天 / 夜里），
-            qq_enemies_sample_zoom3_<素材>.png（同样的帧裁到内容、3 倍放大，宣纸底 + 夜里）
-    review：qq_<素材>_<动画>.gif（每个新动画一张）、qq_lineup_day.png / qq_lineup_night.png（夜景比例图）、
-            qq_frames_<素材>.png（全部新帧 1 倍：宣纸底 + 夜里）、qq_check_report.json
+    （文件名都以 qq_enemies_ 开头，和别的会话的 qq_* 审图分开）
+    sample：qq_enemies_sample.png（游戏 1 倍大小：比例图白天 / 夜里，每个素材宣纸底一排、夜里一排），
+            qq_enemies_sample_lineup_day/night.png、qq_enemies_sample_zoom3_<素材>.png（裁到内容、3 倍放大）、
+            qq_enemies_sample_check.json
+    review：qq_enemies_<素材>_<动画>.gif（每个新动画一张）、qq_enemies_lineup_day/night.png、
+            qq_enemies_night_scene.png / qq_enemies_day_scene.png、qq_enemies_frames_<素材>.png（全部新帧 1 倍：宣纸底 + 夜里）
 """
 
 from __future__ import annotations
@@ -50,13 +53,18 @@ ACTIONS = {"fox": ["pounce"], "ghoul": ["charge"], "boss": ["sweep", "summon"]}
 
 
 # ================================================================ 小工具
-def _font():
+def _font(size=11):
+    """标签字体：有 post/ui_fonts.py 缓存的思源宋体就用它（中文），没有就用 Pillow 自带的。"""
     from PIL import ImageFont
-    return ImageFont.load_default(size=int(11 * D))
+    p = OUT / "fonts" / "NotoSerifSC-VF.ttf"
+    try:
+        return ImageFont.truetype(str(p), int(size * D)) if p.exists() else ImageFont.load_default(size=int(size * D))
+    except OSError:
+        return ImageFont.load_default(size=int(size * D))
 
 
-def _text(im, xy, s, fill=None):
-    ImageDraw.Draw(im).text(xy, s, fill=fill or CS.rgb(S.INK["dan"]) + (255,), font=_font())
+def _text(im, xy, s, fill=None, size=11):
+    ImageDraw.Draw(im).text(xy, s, fill=fill or CS.rgb(S.INK["dan"]) + (255,), font=_font(size))
 
 
 def _night_tile(f, meta, light_at=None, radius=None):
@@ -128,6 +136,7 @@ def lineup(A: dict, picks, path_day, path_night, height=330):
     ground = H - 26 * D
     x = gap
     light = None
+    placed: list = []
     for (n, key, mir), w in zip(picks, ws):
         f = next(fr for fr in A[n]["frames"] if fr["key"] == key)
         if mir:
@@ -136,7 +145,8 @@ def lineup(A: dict, picks, path_day, path_night, height=330):
         at = (x + w / 2, ground)
         CS.place(day, f, A[n]["meta"], at)
         CS.place_emit(emit, f, A[n]["meta"], at)
-        _text(day, (int(x), int(4 * D)), f"{n}/{key}")
+        _text(day, (int(x), int((4 + 13 * (len(placed) % 2)) * D)), f"{n}/{key}", size=9)
+        placed.append(n)
         if n == "hero":
             lx, ly = f["sockets"]["lantern"]
             light = (at[0] + lx, at[1] + ly, CS.LIGHT_RADIUS_PX, S.LANTERN_LIGHT)
@@ -148,10 +158,12 @@ def lineup(A: dict, picks, path_day, path_night, height=330):
 
 
 # ================================================================ 样张
-def render_sample():
+def render_sample(only=None):
     import produce as PR
     timings: dict = {}
     for name, sel in SAMPLE_FRAMES.items():
+        if only and name not in only:
+            continue
         spec = f"{name}:{'+'.join(sel)}"
         PR.produce(spec, timings, out_root=SAMPLE, only_frames=sel)
     (SAMPLE / "timings.json").write_text(json.dumps(timings, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -175,7 +187,7 @@ def sample_sheet():
              ("shade", "float_E_00", False), ("wisp", "float_E_00", False), ("hero", "idle_S_00", False),
              ("fox_wisp", "float_E_00", True), ("fox", "move_E_00", True), ("bamboo_wraith", "move_E_00", True),
              ("taofeng_fox", "move_E_00", True)]
-    d, nt = lineup(A2, picks, REVIEW / "qq_sample_lineup_day.png", REVIEW / "qq_sample_lineup_night.png")
+    d, nt = lineup(A2, picks, REVIEW / "qq_enemies_sample_lineup_day.png", REVIEW / "qq_enemies_sample_lineup_night.png")
     blocks += [d, nt]
     # 2) 每个素材一行：宣纸底 1 倍；下面同样的帧在夜里（光圈边缘：灯在左下方 0.9 个半径外）
     R = CS.LIGHT_RADIUS_PX
@@ -189,7 +201,8 @@ def sample_sheet():
         lab = Image.new("RGB", (day_tiles[0].width * 0 + int(150 * D), day_tiles[0].height), CS.rgb(S.PAPER))
         _text(lab, (gap, gap), n)
         _text(lab, (gap, gap + int(14 * D)), " ".join(sorted({f["anim"] for f in fr})))
-        _text(lab, (gap, gap + int(28 * D)), "上：宣纸  下：光圈边缘 / 暗处")
+        _text(lab, (gap, gap + int(28 * D)), "上：宣纸")
+        _text(lab, (gap, gap + int(42 * D)), "下：光圈边缘，最后一格全暗")
         blocks.append(_row([lab] + day_tiles, gap))
         blocks.append(_row([Image.new("RGB", lab.size, CS.rgb(S.NIGHT_AMBIENT))] + night_tiles + dark_tiles, gap,
                            bg=CS.rgb(S.NIGHT_AMBIENT)))
@@ -218,7 +231,7 @@ def sample_checks():
     res = [C.check_asset(SAMPLE / n) for n in SAMPLE_FRAMES]
     for r in res:
         print(C.report(r))
-    (REVIEW / "qq_sample_check.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    (REVIEW / "qq_enemies_sample_check.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 # ================================================================ 正式审图
@@ -246,7 +259,7 @@ def build_review(timings: dict | None = None):
         k = 1 if box[2] - box[0] > 300 * D else 2
         ims = [t.resize((t.width * k // int(D), t.height * k // int(D)), Image.LANCZOS) if D > 1 else t for t in tiles]
         ims = [im.quantize(colors=160, method=Image.Quantize.MEDIANCUT) for im in ims]
-        ims[0].save(REVIEW / f"qq_{n}_{an}.gif", save_all=True, append_images=ims[1:], duration=round(1000 / a["fps"]),
+        ims[0].save(REVIEW / f"qq_enemies_{n}_{an}.gif", save_all=True, append_images=ims[1:], duration=round(1000 / a["fps"]),
                     loop=0, disposal=1)
     # 2) 逐帧总表（1 倍）：宣纸底 + 光圈边缘
     for n in NEW + list(ACTIONS):
@@ -257,13 +270,13 @@ def build_review(timings: dict | None = None):
             ff = [f for f in fr if f["anim"] == an]
             rows.append(_row([_day_tile(f, meta) for f in ff], gap // 2))
             rows.append(_row([_night_tile(f, meta, (-R * 0.75, R * 0.1)) for f in ff], gap // 2, bg=CS.rgb(S.NIGHT_AMBIENT)))
-        _stack(rows).save(REVIEW / f"qq_frames_{n}.png")
+        _stack(rows).save(REVIEW / f"qq_enemies_frames_{n}.png")
     # 3) 比例图：白天 / 夜里
     picks = [("taofeng_fox", "disguise_E_00", False), ("bamboo_wraith", "idle_E_00", False), ("fox_wisp", "float_E_00", False),
              ("shade", "float_E_00", False), ("wisp", "float_E_00", False), ("hero", "idle_S_00", False),
              ("fox_wisp", "pounce_E_01", True), ("fox", "pounce_E_01", True), ("bamboo_wraith", "shoot_E_01", True),
              ("taofeng_fox", "move_E_00", True)]
-    lineup(A, picks, REVIEW / "qq_lineup_day.png", REVIEW / "qq_lineup_night.png")
+    lineup(A, picks, REVIEW / "qq_enemies_lineup_day.png", REVIEW / "qq_enemies_lineup_night.png")
     # 4) 夜景：主角提灯居中；狐火绕圈（光里一只、暗处两只），竹魅藏在暗处的竹丛里，讨封狐在圈外扮人、圈边现形，
     #    赤面狐伏低蓄力、青面鬼低头蓄力、九尾在后方扫尾
     w, h = int(1100 * D), int(620 * D)
@@ -302,8 +315,8 @@ def build_review(timings: dict | None = None):
     for n, f, pos in sorted(items, key=lambda it: it[2][1]):
         CS.place(day, f, A[n]["meta"], pos, shadow=n != "fox_wisp" or True)
         CS.place_emit(emit, f, A[n]["meta"], pos)
-    CS.night_composite(day, emit, [(light[0], light[1], R, S.LANTERN_LIGHT)]).save(REVIEW / "qq_night_scene.png")
-    day.convert("RGB").save(REVIEW / "qq_day_scene.png")
+    CS.night_composite(day, emit, [(light[0], light[1], R, S.LANTERN_LIGHT)]).save(REVIEW / "qq_enemies_night_scene.png")
+    day.convert("RGB").save(REVIEW / "qq_enemies_day_scene.png")
     if timings is not None:
         timings["qq_review_s"] = round(time.perf_counter() - t0, 2)
 
@@ -311,8 +324,9 @@ def build_review(timings: dict | None = None):
 def main(argv):
     mode = argv[0] if argv else "sample"
     if mode == "sample":
+        only = next((a.split("=", 1)[1].split(",") for a in argv if a.startswith("--only=")), None)
         if "--review" not in argv:
-            render_sample()
+            render_sample(only)
         sample_checks()
         sample_sheet()
     elif mode == "review":

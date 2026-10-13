@@ -1101,8 +1101,8 @@ def qq_sample(path: Path) -> None:
     lm = np.clip(lm, 0, 1)
     night = world * lm
     draw_spikes(night, "add", lm)
-    mist_layer(night, mists[0], V.MIST_ALPHA, (V.dpx(37), V.dpx(11)))
-    mist_layer(night, mists[1], 0.2, (V.dpx(-90), V.dpx(60)))
+    mist_layer(night, mists[0], V.MIST_ALPHAS[0], (V.dpx(37), V.dpx(11)))
+    mist_layer(night, mists[1], V.MIST_ALPHAS[1], (V.dpx(-90), V.dpx(60)))
     gap, top = 12, V.dpx(30)
     tiles = []
     for m in mists:
@@ -1133,8 +1133,8 @@ def qq_sample(path: Path) -> None:
     dr = ImageDraw.Draw(im)
     f = V.font(V.dpx(14))
     dr.text((8, 7), f"day: paper, normal over (density {D:g}x, 1 texel = {1 / S.PX_PER_UNIT:g} world unit); bamboo_spike + trail (tinted {WT.SPIKE_TRAIL_TINT})", fill="#DDDDDD", font=f)
-    dr.text((Wm + gap + 8, 7), f"night: world x lightmap, trail additive, mist_0 @ {V.MIST_ALPHA} + mist_1 @ 0.2 over the dark layer (tint {V.MIST_TINT})", fill="#DDDDDD", font=f)
-    dr.text((8, y2 - top + 7), "mist_0 / mist_1 tiled 2x2, full alpha on NIGHT_AMBIENT (seams at the tile centre lines)", fill="#DDDDDD", font=f)
+    dr.text((Wm + gap + 8, 7), f"night: world x lightmap, trail additive, mist_0 @ {V.MIST_ALPHAS[0]} + mist_1 @ {V.MIST_ALPHAS[1]} over the dark layer (tint {V.MIST_TINT})", fill="#DDDDDD", font=f)
+    dr.text((8, y2 - top + 7), "mist_0 / mist_1 tiled 2x2, full alpha on NIGHT_AMBIENT (tile edges meet at the centre lines)", fill="#DDDDDD", font=f)
     dr.text((8, y3 - top + 7), "new decor + bamboo_spike at 2x nearest, on PAPER", fill="#DDDDDD", font=f)
     V.save_png(im, path)
 

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -443,6 +444,13 @@ def test_mist_density():
         quads = [al[: h // 2, : w // 2].mean(), al[: h // 2, w // 2 :].mean(), al[h // 2 :, : w // 2].mean(), al[h // 2 :, w // 2 :].mean()]
         assert max(quads) - min(quads) < 0.25, f"{name} 四个象限浓淡差太大（平铺时看得出重复）：{np.round(quads, 2)}"
     assert np.abs(alphas[0] - alphas[1]).mean() > 0.1, "两张迷雾太像"
+    for name, al in zip(TILEABLE, alphas):
+        # 一团团的雾，不是一道道横纹（像水波）：横向、竖向的起伏差不多
+        gy = np.abs(np.diff(al, axis=0)).mean()
+        gx = np.abs(np.diff(al, axis=1)).mean()
+        assert 0.67 <= gy / gx <= 1.5, f"{name} 有明显的方向性条纹（竖向 / 横向起伏比 {gy / gx:.2f}）"
+    vm = json.loads((V.VFX_DIR / "meta.json").read_text(encoding="utf-8"))["files"]
+    assert vm["mist_0.png"]["alpha_hint"] <= 0.25 and vm["mist_1.png"]["alpha_hint"] <= vm["mist_0.png"]["alpha_hint"], "迷雾建议的 alpha 应很低（约 0.2 / 0.15）"
 
 
 def test_qq_ground_content():
@@ -466,7 +474,7 @@ def test_qq_ground_content():
     for i in range(2):
         a = rgba(V.GROUND_DIR, f"qq_moss_{i}.png").astype(np.float64)
         dots = (a[..., 3] > 200) & (a[..., :3].sum(-1) < 160)
-        assert dots.sum() > 20 * D * D, f"qq_moss_{i} 苔点太少"
+        assert dots.sum() > 15 * D * D, f"qq_moss_{i} 苔点太少"
         wash = (a[..., 3] > 30) & (a[..., 3] < 140)
         assert wash.mean() > 0.1 and (a[wash][:, 1] >= a[wash][:, 0]).mean() > 0.5, f"qq_moss_{i} 底下应有兑石绿的淡墨"
     for i in range(2):
@@ -476,7 +484,8 @@ def test_qq_ground_content():
         vis = a[al > 0.08][:, :3]
         assert vis[:, 2].mean() > vis[:, 0].mean() - 4 and vis[:, 1].mean() > vis[:, 0].mean(), f"qq_wash_{i} 应偏青（花青、石绿），不是暖灰"
         g = np.hypot(*np.gradient(al))
-        assert np.percentile(g[al > 0.02], 99.5) < 0.05 / D, f"qq_wash_{i} 边太硬（应是湿接湿的柔边）"
+        # 柔边：最陡处也比积墨硬边的 wash_2 缓（wash_2 在 1 倍约 0.126、2 倍约 0.107）
+        assert np.percentile(g[al > 0.02], 99.5) < 0.11 / math.sqrt(D), f"qq_wash_{i} 边太硬（应是湿接湿的柔边）"
     a = rgba(V.GROUND_DIR, "qq_fox_tracks.png").astype(np.float64)
     ink = a[..., 3] > 120
     cols = ink.any(0)

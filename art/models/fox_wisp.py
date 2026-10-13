@@ -1,8 +1,9 @@
 """狐火（青丘小妖，妖类）：狐狸形状的青色鬼火。
 
-造型：一团青火烧成一只奔跑的狐狸——尖耳、尖吻、细腰、四条化成火舌的腿，一条长长的火尾向后甩出，尾尖分叉成火苗；
-背脊、尾巴、额顶窜出毛笔画法的火舌（火焰纹：S 形、收尖、尖端回勾）。火身沿每条火舌由亮青（火根）→ 中青 → 深青（火舌尖），
-整团火都在发光遮罩里（夜里淡淡地亮：produce.py 出图后把发光层里火身的 alpha 压到 FLAME_EMIT_ALPHA），
+造型：一团青火烧成一只奔跑的狐狸——尖耳、尖吻、细腰、四条化成火舌的腿，背上一排往上窜、一帧一帧长短跳动的火舌
+（火焰纹：S 形、收尖、尖端回勾），火尾往后甩，尾尖散成几缕越飘越透明的余火（不描线）。
+火身是近白的火芯，越靠轮廓、越往火舌尖越青、越暗（kit.flame_material：沿 fade 分段 + 轮廓 rim）。
+整团火都在发光遮罩里：夜里芯亮边暗地淡淡发光（produce.py 出图后调 finish_flame()：按亮度把发光层里火身的 alpha 压到 FLAME_EMIT_ALPHA），
 两只细长的眼嵌在焦墨眼眶里，最亮。墨线只用细线（thin），和墨烟幽灵（影妖、疾影）的粗外轮廓区分开。
 
 动画：
@@ -34,12 +35,13 @@ from style import style as S  # noqa: E402
 import kit as K  # noqa: E402
 
 # 沿 fade 属性分段：火根（身体）→ 火舌中段 → 火舌尖。每段三档（亮, 中, 暗）
-BANDS = [(0.0, ("#D2F5EA", "#A6E2D4", "#74C2B4")),
-         (0.56, ("#93D6C7", "#6CBCAE", "#4C9990")),
-         (0.84, ("#5AA9A0", "#438A86", "#33686B"))]
+# 火芯近白，往外（轮廓、火舌）是青，火舌尖是发暗的深青——亮度拉开，游戏大小下也读得出“一团火”
+BANDS = [(0.0, ("#E6FCF5", "#BDEEE2", "#8FD6C6")),
+         (0.56, ("#7CCBBE", "#58AFA6", "#3F8C88")),
+         (0.84, ("#3E8A87", "#2F6E72", "#25555E"))]
 EYE_HEX = "#F2FFFC"  # 眼：近白的青光
 PALETTE_EXTRA = [c for _, r in BANDS for c in r] + [EYE_HEX]
-FLAME_EMIT_ALPHA = 0.42  # 发光层里火身的强度（眼睛保持 1）；produce.py 出图后按颜色压
+FLAME_EMIT_ALPHA = (0.16, 0.42)  # 发光层里火身的强度：最暗的深青 → 最亮的火芯（眼睛保持 1）；见 finish_flame()
 FORWARD = -0.11  # 身体整体前移（米）：火尾往后甩也不出框
 
 
@@ -143,7 +145,7 @@ def _shapes(st):
     neck, chest, hip, rump = sp[0], sp[1], sp[3], sp[4]
     out["_head"] = neck + Vector((0, -0.10 + st["head_dy"] * 0.5, 0.07 + st["head_dz"]))
     # 尾巴：从臀后出发，向后、略向上弧起，尖端回卷成火苗；扫（sweep）越大越平直向后
-    tl = 0.46 * st["tail_len"]
+    tl = 0.40 * st["tail_len"]
     lift = 0.26 + st["tail_lift"] - 0.22 * sw
     tdir = Vector((0, math.cos(lift), math.sin(lift))).normalized()
     tail = []
@@ -166,24 +168,35 @@ def _shapes(st):
         tip = base + d * ln
         trail = tip + Vector((0, 0.09, 0.02)) * (0.6 + 0.4 * abs(s)) * (1 + 0.6 * sw)
         out[f"Leg{nm}"] = (_smooth([base, mid, tip, trail], 9), lambda t: 0.050 * (1 - t) ** 0.85 + 0.002, 0.8, 0.30, 1.0)
-    # 背上的长火舌：从肩、背、腰窜出，几乎平着向后，S 形，盖住背线，让上沿成一排火苗
-    for k, (t, r0, ln, a) in enumerate([(0.10, 0.048, 0.24, 26), (0.34, 0.052, 0.30, 20), (0.60, 0.048, 0.27, 16),
-                                        (0.84, 0.040, 0.22, 22)]):
+    # 背上一排往上窜的火舌：从肩、背、腰、臀窜出，向后上方，S 形、尖端回勾，长短一帧一帧地跳（火苗在烧）
+    for k, (t, r0, ln, a) in enumerate([(0.06, 0.050, 0.22, 58), (0.26, 0.058, 0.31, 50), (0.46, 0.056, 0.28, 44),
+                                        (0.66, 0.052, 0.30, 40), (0.86, 0.046, 0.24, 36)]):
         p = _at(body, t)
-        base = p + Vector((0.012 * (k % 2 * 2 - 1), 0, _body_radius(t) * 0.70))
-        aa = math.radians(a - 12 * sw)
+        base = p + Vector((0.012 * (k % 2 * 2 - 1), 0, _body_radius(t) * 0.62))
+        aa = math.radians(a - 26 * sw)
         d = Vector((0.05 * math.sin(k * 2.3), math.cos(aa), math.sin(aa)))
-        out[f"Tongue{k}"] = (_tongue_pts(base, d, ln * st["tongue_len"], ph + k * 1.3, curl=0.55 - 0.3 * sw),
-                             _tongue_r(r0), 0.7, 0.32, 1.0)
-    # 尾上的火舌和分叉的尾尖
-    for k, (t, r0, ln, a) in enumerate([(0.38, 0.050, 0.24, 34), (0.66, 0.046, 0.24, 24), (0.92, 0.040, 0.20, 50),
-                                        (0.92, 0.034, 0.17, -6)]):
+        flick = 1 + 0.28 * math.sin(ph * 2 + k * 2.1) * (1 - 0.6 * sw)
+        out[f"Tongue{k}"] = (_tongue_pts(base, d, ln * st["tongue_len"] * flick, ph * 2 + k * 1.3, curl=0.75 - 0.4 * sw,
+                                         wave=0.045), _tongue_r(r0), 0.7, 0.30, 1.0)
+    # 尾上的火舌和分叉的尾尖（往上窜）
+    for k, (t, r0, ln, a) in enumerate([(0.36, 0.052, 0.26, 58), (0.64, 0.048, 0.26, 50), (0.92, 0.044, 0.24, 66),
+                                        (0.92, 0.036, 0.20, 18)]):
         p = _at(tail, t)
         base = p + Vector((0, 0, 0.05 if k < 2 else 0.0))
-        aa = math.radians(a - 20 * sw)
+        aa = math.radians(a - 34 * sw)
         d = Vector((0.07 * math.sin(k * 1.7 + 1), math.cos(aa), math.sin(aa)))
-        out[f"TailTongue{k}"] = (_tongue_pts(base, d, ln * st["tongue_len"], ph + 0.8 + k * 1.1, curl=0.6 - 0.3 * sw),
-                                 _tongue_r(r0), 0.7, 0.40, 1.0)
+        flick = 1 + 0.25 * math.sin(ph * 2 + 1.3 + k * 1.9) * (1 - 0.6 * sw)
+        out[f"TailTongue{k}"] = (_tongue_pts(base, d, ln * st["tongue_len"] * flick, ph * 2 + 0.8 + k * 1.1,
+                                             curl=0.7 - 0.4 * sw, wave=0.045), _tongue_r(r0), 0.7, 0.40, 1.0)
+    # 尾尖散开的几缕余火（不描线、越往尖越透明）：从尾尖往后上方飘，一帧一帧往后传
+    tip, pre = tail[-1], tail[-3]
+    for k, (a, ln, side) in enumerate(((52, 0.26, -0.05), (30, 0.30, 0.04), (74, 0.22, 0.02))):
+        aa = math.radians(a - 30 * sw)
+        d = Vector((side, math.cos(aa), math.sin(aa)))
+        base = tip.lerp(pre, 0.3 * k)
+        ln *= (1 - 0.45 * sw) * (1 + 0.3 * math.sin(ph + k * 2.2))
+        out[f"Wisp{k}"] = (_tongue_pts(base, d, ln, ph * 1.5 + k * 2.0, curl=0.3,
+                                       wave=0.05), lambda t: 0.032 * (1 - t) ** 0.7 + 0.002, 0.8, 0.0, 1.0)
     # 腹下的小火舌（向后下飘），让下沿也是火
     for k, (t, a, ln) in enumerate(((0.32, -168, 0.14), (0.62, -172, 0.15))):
         base = _at(body, t) + Vector((0, 0, -_body_radius(t) * 0.7))
@@ -219,28 +232,50 @@ def _set(ob, pts, rfn, flat, t0, t1):
     B.set_point_attr(ob, "fade", [t0 + (t1 - t0) * f for f in fades])
 
 
-def dim_flame_emit(path, k: float = FLAME_EMIT_ALPHA) -> None:
-    """发光层后处理：火身的发光 alpha 乘 k，眼睛保持原样（按颜色分：离眼睛色近的算眼，离火身色近的算火身，
-    中间的过渡像素按比例插值）。出图后对每个 _emit.png 调一次（不能重复调）。"""
+def finish_flame(frame_png, k=FLAME_EMIT_ALPHA) -> None:
+    """出图后处理一帧（<帧>.png 和 <帧>_emit.png 一起改；每帧只能调一次）：
+    1. 火身像素硬吸附到最近的火色（BANDS）：管线不吸附发光像素，火芯和深青反差大，分段边界缩小后会留下一圈
+       调色板外的过渡色；火身内部的分界本来就是水墨的硬边，吸附后自检的调色板比例才够；
+    2. 发光层里火身的 alpha 按亮度从 k[0]（最暗的深青）到 k[1]（最亮的火芯）压暗，眼睛保持原样
+       （按颜色分：离眼睛色近的算眼，离火身色近的算火身，过渡像素按比例插值）。"""
     import numpy as np
     from PIL import Image
 
-    im = np.asarray(Image.open(path).convert("RGBA")).astype(np.float32)
-    rgb = im[..., :3]
+    frame_png = Path(frame_png)
+    emit_png = frame_png.with_name(frame_png.stem + "_emit.png")
+    im = np.asarray(Image.open(frame_png).convert("RGBA")).astype(np.float32)
+    em = np.asarray(Image.open(emit_png).convert("RGBA")).astype(np.float32)
+    flames = np.array([S.hex_to_rgb(c) for _, r in BANDS for c in r], np.float32)
     eye = np.array(S.hex_to_rgb(EYE_HEX), np.float32)
-    d_eye = np.sqrt(((rgb - eye) ** 2).sum(-1))
-    d_body = np.min([np.sqrt(((rgb - np.array(S.hex_to_rgb(c), np.float32)) ** 2).sum(-1))
-                     for _, r in BANDS for c in r], axis=0)
+
+    def nearest(rgb):
+        d = np.sqrt(((rgb[..., None, :] - flames) ** 2).sum(-1))
+        return flames[d.argmin(-1)], d.min(-1)
+
+    d_eye = np.sqrt(((em[..., :3] - eye) ** 2).sum(-1))
+    near, d_body = nearest(em[..., :3])
     w = np.clip(d_body / np.maximum(d_eye + d_body, 1e-6), 0, 1)  # 1 = 眼，0 = 火身
     w = w * w * (3 - 2 * w)
-    im[..., 3] *= k + (1 - k) * w
-    Image.fromarray(np.clip(im + 0.5, 0, 255).astype(np.uint8), "RGBA").save(path, optimize=True)
+    body = (em[..., 3] > 0.6 * 255) & (w < 0.5)  # 发光层里实在的火身像素（墨线处发光 alpha 已经扣掉）
+    em[..., :3] = np.where(body[..., None], near, em[..., :3])
+    snap, _ = nearest(im[..., :3])
+    im[..., :3] = np.where(body[..., None], snap, im[..., :3])
+    lums = flames.mean(-1)
+    lt = np.clip((em[..., :3].mean(-1) - lums.min()) / (lums.max() - lums.min()), 0, 1)
+    kb = k[0] + (k[1] - k[0]) * lt
+    em[..., 3] *= kb + (1 - kb) * w
+    Image.fromarray(np.clip(im + 0.5, 0, 255).astype(np.uint8), "RGBA").save(frame_png, optimize=True)
+    Image.fromarray(np.clip(em + 0.5, 0, 255).astype(np.uint8), "RGBA").save(emit_png, optimize=True)
 
 
 # ================================================================ 组装
 def build_fox_wisp():
     I = S.INK
-    flame = K.flame_material("FoxWispFlame", BANDS, seed=71.0, noise_amt=0.08)
+    flame = K.flame_material("FoxWispFlame", BANDS, seed=71.0, noise_amt=0.08, rim=1.0, rim_power=1.3)
+    wisp = B.smoke_material("FoxWispTrail", list(BANDS[1][1]), fade_start=0.05, fade_power=1.0, noise_amt=0.5,
+                            seed=72.0, edge=0.0, wash=0.25)
+    wisp["emissive"] = BANDS[1][1][0]
+    wisp["emit_strength"] = 1.0
     eye = B.emissive_material("FoxWispEye", EYE_HEX, 1.0)
     socket_m = B.flat_material("FoxWispSocket", I["jiao"])
     root = B.empty("FoxWispRoot")
@@ -253,8 +288,9 @@ def build_fox_wisp():
     for nm, v in _shapes(st).items():
         if nm.startswith("_"):
             continue
-        parts["obs"][nm] = B.mesh_object(f"FoxWisp{nm}", K.tube_build(v[0], v[1], 12, flat=v[2]), flame, "thin", body,
-                                         sharp_deg=0)
+        trail = nm.startswith("Wisp")
+        parts["obs"][nm] = B.mesh_object(f"FoxWisp{nm}", K.tube_build(v[0], v[1], 12, flat=v[2]),
+                                         wisp if trail else flame, "none" if trail else "thin", body, sharp_deg=0)
     # 头：一个椭球（头心）+ 吻 + 两耳 + 额顶火舌；整体朝镜头偏一点，E 向两只眼都看得见
     skull = B.mesh_object("FoxWispSkull", K.ellipsoid((0.112, 0.130, 0.100), 20, 12), flame, "thin", head, sharp_deg=0)
     B.set_point_attr(skull, "fade", [0.0] * len(skull.data.vertices))

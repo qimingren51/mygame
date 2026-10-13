@@ -67,7 +67,7 @@ BATCH2_ACTIONS = {
 # 构造 / 姿态函数是 build_<素材> / pose_<素材>；模块里的 PALETTE_EXTRA（调色板外的发光色）写进 meta.palette_extra，
 # SOCKETS（缺省只有 eyes）是逐帧挂点。第一个动画是“默认动画”（游戏里没有指定动作时播它）。
 QINGQIU = {
-    # 狐火：悬浮的青火狐狸，火身也在发光层里（出图后火身的发光 alpha 压到 fox_wisp.FLAME_EMIT_ALPHA，眼睛最亮）
+    # 狐火：悬浮的青火狐狸，火身也在发光层里（出图后 fox_wisp.finish_flame：火身吸附火色、发光 alpha 按亮度压暗，眼睛最亮）
     "fox_wisp": ("fox_wisp", "small", [("float", 8, 10, {}),
                                        ("pounce", 4, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
                  10, {"category": "enemy", "floating": True, "default_anim": "float"}),
@@ -218,11 +218,11 @@ def produce(name: str, timings: dict, out_root: Path = ASSETS, only_frames: dict
                            palette_extra=getattr(M, "PALETTE_EXTRA", ()),
                            meta_extra={**extra, "layers": ["emit", "flash"], "required_sockets": list(socks),
                                        "game_radius": radius, "shadow_radius_px": shadow, "anim_extra": anim_extra})
-        if hasattr(M, "dim_flame_emit"):  # 狐火：发光层里火身压暗（只处理这次重渲的动画，不能重复处理）
+        if hasattr(M, "finish_flame"):  # 狐火：火身吸附到火色、发光层里火身压暗（只处理这次重渲的动画，不能重复处理）
             redo = {j[0] for j in jobs}
-            for ep in out.glob("*_emit.png"):
-                if ep.name.split("_")[0] in redo:
-                    M.dim_flame_emit(ep)
+            for fp in out.glob("*.png"):
+                if fp.name.split("_")[0] in redo and fp.stem.count("_") == 2:
+                    M.finish_flame(fp)
     else:
         raise SystemExit(f"未知素材 {name}")
 
