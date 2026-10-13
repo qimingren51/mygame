@@ -913,6 +913,20 @@ impl Content {
             }
         }
 
+        // ---- regions.ron ----
+        if self.regions.is_empty() {
+            return c.fail("regions.ron", "至少要有一个地区".into());
+        }
+        c.unique("regions.ron", "地区", self.regions.iter().map(|r| r.id.as_str()))?;
+        for r in &self.regions {
+            if r.name.is_empty()
+                || r.scroll.trim().is_empty()
+                || r.dawn.as_ref().is_some_and(|d| d.trim().is_empty())
+            {
+                return c.fail("regions.ron", format!("{} 的名字、旁白不能为空", r.id));
+            }
+        }
+
         // ---- hub.ron ----
         c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
         for person in &self.hub {

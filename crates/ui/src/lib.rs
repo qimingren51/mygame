@@ -21,6 +21,7 @@ mod pause;
 mod perf;
 mod replay_ui;
 mod results;
+mod scroll;
 mod settings_ui;
 mod skin;
 mod title;

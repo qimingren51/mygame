@@ -1242,6 +1242,20 @@ pub enum Reward {
     Oil(u32),
 }
 
+/// 一个地区（`regions.ron`，docs/GAMEPLAY.md 第 8.1 节、docs/LORE.md 第 6 节）。P0 只有青丘。
+/// 开场卷轴的画按 ID 找：`atlas/screens/scroll_<id>.png`（长夜）和 `scroll_<id>_dawn.png`（天明）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RegionDef {
+    pub id: String,
+    pub name: String,
+    /// 第一次进入时的旁白（配长夜版）；换行处分行
+    pub scroll: String,
+    /// 拿回这里的烛火以后再来的旁白（配天明版）；不写时天明版不展开
+    #[serde(default)]
+    pub dawn: Option<String>,
+}
+
 /// 灯驿的一个人物（`hub.ron`，docs/LORE-TEXT.md 第 1 节）。顺序对应灯驿里的四个位置：老灯匠、货郎、灯童、说书人。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
