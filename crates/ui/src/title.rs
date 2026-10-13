@@ -72,7 +72,9 @@ fn enter(
     content: Res<GameContent>,
     mut profile: ResMut<Profile>,
 ) {
-    *mode = TitleMode::Main;
+    if *mode != TitleMode::Hub {
+        *mode = TitleMode::Main;
+    }
     *ui = TitleUi { dirty: true, ..default() };
     // 老存档迁移（要等内容加载好）
     if profile.upgrade(&content.0) {
@@ -92,7 +94,7 @@ fn random_seed() -> u64 {
     nanos % 1_000_000_000
 }
 
-fn input(
+pub(crate) fn input(
     actions: Res<Actions>,
     content: Res<GameContent>,
     seed: Res<SeedOverride>,
@@ -105,7 +107,11 @@ fn input(
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut reader: ResMut<crate::journals::Reader>,
 ) {
+    if reader.open {
+        return;
+    }
     let c = &content.0;
     let clicked = ui.clicked.take();
     let open = |ui: &mut TitleUi| {
@@ -250,6 +256,10 @@ fn input(
             }
         }
         TitleMode::Achievements | TitleMode::Codex => {
+            if *mode == TitleMode::Codex && actions.meta {
+                reader.open = true;
+                return;
+            }
             if actions.back || actions.confirm || clicked.is_some() {
                 let i = if *mode == TitleMode::Codex { 3 } else { 2 };
                 back_to_hub(&mut mode, &mut ui, i);
@@ -410,7 +420,7 @@ fn redraw(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     db: Res<AtlasDb>,
-    profile: Res<Profile>,
+    mut profile: ResMut<Profile>,
     news: Res<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
@@ -432,7 +442,12 @@ fn redraw(
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
-        TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        TitleMode::Hub => {
+            hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news);
+            if profile.saw_hub(c, &news) {
+                save(&profile);
+            }
+        }
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),

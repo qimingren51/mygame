@@ -23,6 +23,7 @@ pub use settings::Settings;
 pub struct Actions {
     pub move_dir: Vec2,
     pub dash: bool,
+    pub interact: bool,
     pub confirm: bool,
     pub back: bool,
     pub pause: bool,
@@ -92,6 +93,7 @@ fn gather_actions(
     let mut a = Actions {
         move_dir: dir.normalize_or_zero(),
         dash: keys.any_just_pressed([KeyCode::Space, KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+        interact: keys.just_pressed(KeyCode::KeyG),
         confirm: keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]),
         back: keys.just_pressed(KeyCode::Escape),
         pause: keys.just_pressed(KeyCode::Escape),
@@ -148,6 +150,7 @@ fn gather_actions(
         a.quit_to_title |= pad.just_pressed(GamepadButton::Select);
         a.ult |= pad.just_pressed(GamepadButton::North) || pad.just_pressed(GamepadButton::RightTrigger2);
         a.reroll |= pad.just_pressed(GamepadButton::North);
+        a.interact |= pad.just_pressed(GamepadButton::West);
         a.skip |= pad.just_pressed(GamepadButton::West);
         a.banish |= pad.just_pressed(GamepadButton::LeftTrigger);
         a.meta |= pad.just_pressed(GamepadButton::West);
@@ -202,6 +205,9 @@ fn feed_sim(
     if actions.dash {
         commands.0.push(SimCommand::Dash);
     }
+    if actions.interact {
+        commands.0.push(SimCommand::Interact);
+    }
     if actions.ult {
         commands.0.push(SimCommand::Ult);
     }
@@ -223,5 +229,59 @@ fn toggle_fullscreen(
     };
     if let Err(e) = settings.save() {
         warn!("保存设置失败：{e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn village_keys_only_feed_interaction_during_play() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Actions>()
+            .init_resource::<Time>()
+            .init_resource::<InputFrame>()
+            .init_resource::<SimCommands>()
+            .add_message::<CursorMoved>()
+            .add_systems(Update, (gather_actions, feed_sim).chain());
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        for gamepad in [false, true] {
+            app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+            app.world_mut().entity_mut(pad).get_mut::<Gamepad>().unwrap().digital_mut().reset_all();
+            if gamepad {
+                app.world_mut()
+                    .entity_mut(pad)
+                    .get_mut::<Gamepad>()
+                    .unwrap()
+                    .digital_mut()
+                    .press(GamepadButton::West);
+            } else {
+                app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyG);
+            }
+            for (state, phase) in [
+                (RunState::Playing, SimPhase::Play),
+                (RunState::Playing, SimPhase::LevelUp),
+                (RunState::Playing, SimPhase::Charm),
+                (RunState::Playing, SimPhase::Shop),
+                (RunState::Paused, SimPhase::Play),
+                (RunState::Over, SimPhase::Over),
+            ] {
+                app.insert_resource(State::new(state)).insert_resource(phase);
+                app.world_mut().resource_mut::<SimCommands>().0.clear();
+                app.update();
+                let a = app.world().resource::<Actions>();
+                assert!(a.interact);
+                assert_eq!(a.skip, gamepad);
+                assert_eq!(a.meta, gamepad);
+                let cmds = &app.world().resource::<SimCommands>().0;
+                if state == RunState::Playing && phase == SimPhase::Play {
+                    assert_eq!(cmds, &[SimCommand::Interact]);
+                } else {
+                    assert!(cmds.is_empty(), "选择、暂停和结算不能把 X 送进护火/留灯");
+                }
+            }
+        }
     }
 }

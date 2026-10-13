@@ -15,6 +15,7 @@ mod hub;
 mod hub_fx;
 mod hud;
 mod hud_fx;
+mod journals;
 mod markers;
 mod moments;
 mod pause;
@@ -24,6 +25,7 @@ mod results;
 mod scroll;
 mod settings_ui;
 mod skin;
+mod story;
 mod title;
 mod title_fx;
 mod toasts;
@@ -100,6 +102,8 @@ impl Plugin for UiPlugin {
         hud_fx::register(app);
         hub_fx::register(app);
         results::register(app);
+        journals::register(app);
+        story::register(app);
         pause::register(app);
     }
 }

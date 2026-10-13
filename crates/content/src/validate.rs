@@ -927,6 +927,29 @@ impl Content {
             }
         }
 
+        // 手记必须恰好覆盖三十页，不能重号、缺页或把谜语误放到别卷。
+        if self.journals.len() != 30
+            || (1..=30).any(|page| self.journals.iter().filter(|j| j.page == page).count() != 1)
+            || self
+                .journals
+                .iter()
+                .any(|j| j.text.trim().is_empty() || (!(13..=18).contains(&j.page) && !j.clue.is_empty()))
+        {
+            return c.fail("journals.ron", "手记须完整覆盖 1–30 页，正文不能为空，谜语仅在卷三".into());
+        }
+        fn valid_when(w: &crate::HubWhen, content: &Content) -> bool {
+            use crate::HubWhen;
+            match w {
+                HubWhen::Story(id) | HubWhen::WithoutStory(id) => crate::STORY_EVENTS.contains(&id.as_str()),
+                HubWhen::JournalCount(n) => (1..=30).contains(n),
+                HubWhen::HasCleared(t) => *t > 0 && *t as usize <= content.difficulty.len(),
+                HubWhen::All(ws) => !ws.is_empty() && ws.iter().all(|w| valid_when(w, content)),
+                HubWhen::Lamp(id) => content.lamp_index(id).is_some(),
+                HubWhen::Charm(id) => content.charm_index(id).is_some(),
+                HubWhen::Cleared(t) => *t > 0 && *t as usize <= content.difficulty.len(),
+                _ => true,
+            }
+        }
         // ---- hub.ron ----
         c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
         for person in &self.hub {
@@ -934,12 +957,8 @@ impl Content {
                 return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
             }
             for l in &person.lines {
-                let bad = match &l.when {
-                    crate::HubWhen::Lamp(id) => self.lamp_index(id).is_none(),
-                    crate::HubWhen::Charm(id) => self.charm_index(id).is_none(),
-                    crate::HubWhen::Cleared(t) => *t == 0 || *t as usize > self.difficulty.len(),
-                    _ => false,
-                };
+                let bad = !valid_when(&l.when, self)
+                    || l.seen_event.as_ref().is_some_and(|id| !crate::STORY_EVENTS.contains(&id.as_str()));
                 if bad || l.text.is_empty() {
                     return c.fail(
                         "hub.ron",

@@ -40,7 +40,9 @@ pub struct Content {
     pub hub: Vec<HubPersonDef>,
     /// 地区：名字、开场卷轴的旁白（纯文字，不计入内容哈希）
     pub regions: Vec<RegionDef>,
-    /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
+    /// 守灯人手记（纯文字，不计入内容哈希）。
+    pub journals: Vec<JournalDef>,
+    /// 玩法数据文件原文的哈希（FNV-1a）。回放只能在玩法内容相同的版本上重放。
     pub hash: u64,
 }
 
@@ -107,6 +109,7 @@ impl Content {
             achievements: read(data_dir, "achievements.ron", &mut hash)?,
             hub: read(data_dir, "hub.ron", &mut 0)?,
             regions: read(data_dir, "regions.ron", &mut 0)?,
+            journals: read(data_dir, "journals.ron", &mut 0)?,
             hash: 0,
         };
         content.hash = hash;
@@ -195,6 +198,22 @@ mod tests {
         c.enemies.push(dup);
         let err = c.validate(Path::new("data")).unwrap_err().to_string();
         assert!(err.contains("enemies.ron") && err.contains("重复"), "{err}");
+    }
+
+    #[test]
+    fn journals_and_story_conditions_are_validated() {
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        assert_eq!(c.journals.len(), 30);
+        assert!(c.journals[12].text.contains("狐村"));
+        assert!(c.journals[25].text.contains("一千年"));
+        c.journals[0].page = 2;
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("journals.ron"));
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        c.hub[2].lines[0].when = HubWhen::All(vec![HubWhen::Story("typo".into())]);
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("hub.ron"));
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        c.hub[2].lines[0].when = HubWhen::JournalCount(31);
+        assert!(c.validate(Path::new("data")).is_err());
     }
 
     #[test]

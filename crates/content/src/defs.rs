@@ -1268,6 +1268,9 @@ pub struct HubPersonDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HubLineDef {
+    /// 展示这句后记入已见事件；用于跨局关系转折。
+    #[serde(default)]
+    pub seen_event: Option<String>,
     pub when: HubWhen,
     pub text: String,
 }
@@ -1275,6 +1278,11 @@ pub struct HubLineDef {
 /// 台词的条件。几条同时满足时取排在最后的那条；都不满足时说“平时”的，几句轮着说。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum HubWhen {
+    Story(String),
+    WithoutStory(String),
+    JournalCount(u8),
+    HasCleared(u8),
+    All(Vec<HubWhen>),
     /// 平时
     Idle,
     /// 第一次见到这个人物
@@ -1300,3 +1308,39 @@ pub enum HubWhen {
     /// 刚从无尽夜回来
     EndlessBack,
 }
+
+/// 手记只存文字；页码决定卷次，门槛由叙事进度统一管理。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct JournalDef {
+    pub page: u8,
+    pub text: String,
+    #[serde(default)]
+    pub clue: String,
+}
+
+/// 可持久化的青丘节拍；界面和声音消费同一事件。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoryBeat {
+    GuardedFire,
+    LeftLantern,
+}
+
+impl StoryBeat {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::GuardedFire => "qingqiu_guarded_fire",
+            Self::LeftLantern => "qingqiu_left_lantern",
+        }
+    }
+}
+
+/// 灯驿条件和已见台词引用的事件表，拼错 ID 时拒绝加载。
+pub const STORY_EVENTS: &[&str] = &[
+    "qingqiu_entered",
+    "qingqiu_guarded_fire",
+    "qingqiu_left_lantern",
+    "qingqiu_asked_dark",
+    "qingqiu_asked_guarded",
+    "qingqiu_asked_lit",
+];

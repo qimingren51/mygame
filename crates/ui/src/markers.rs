@@ -44,6 +44,7 @@ fn update(
     content: Res<GameContent>,
     lanterns: Option<Res<Lanterns>>,
     encounters: Option<Res<Encounters>>,
+    story: Option<Res<lantern_sim::story::Story>>,
     enemies: Option<Res<Enemies>>,
     camera: Single<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut markers: Query<(&Marker, &mut Node, &mut UiTransform, &mut ImageNode, &mut Visibility)>,
@@ -51,6 +52,11 @@ fn update(
 ) {
     let c = &content.0;
     targets.clear();
+    if let Some(v) = story.as_ref().and_then(|s| s.village.as_ref())
+        && v.stage != lantern_sim::story::VillageStage::Lit
+    {
+        targets.push((v.pos, hex("#A4CEB5"), 0.85));
+    }
     if let Some(l) = &lanterns {
         targets.extend(l.0.iter().filter(|l| !l.lit).map(|l| (l.pos, hex("#FFD98A"), 1.0)));
     }

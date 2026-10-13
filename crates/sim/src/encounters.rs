@@ -128,6 +128,7 @@ pub(crate) fn update_encounters(
     mut encounters: ResMut<Encounters>,
     mut flow: ResMut<Flow>,
     mut dirty: ResMut<StatsDirty>,
+    mut story: ResMut<crate::story::Story>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     let c = &content.0;
@@ -171,6 +172,7 @@ pub(crate) fn update_encounters(
                     let b = rng.0.get(Stream::Event).below(c.events.buffs.len() as u32) as usize;
                     encounters.buff = Some((b, duration));
                     dirty.0 = true;
+                    story.find_journal(&mut rng, &mut outbox);
                     outbox.0.push(SimEvent::Buff { index: b as u16 });
                     done = true;
                 }
@@ -183,6 +185,7 @@ pub(crate) fn update_encounters(
                     for _ in 0..chests {
                         flow.chest_queue.push_back(ChestSource::Altar);
                     }
+                    story.find_journal(&mut rng, &mut outbox);
                     outbox.0.push(SimEvent::Sacrifice { amount: before - health.hp });
                     done = true;
                 }
@@ -190,6 +193,7 @@ pub(crate) fn update_encounters(
             EventKind::Merchant { radius, chest_cost, charm_cost } => {
                 // 货郎：碰到就摆摊（本步结束时打开），逛完就走
                 if !done && near(radius) {
+                    story.find_journal(&mut rng, &mut outbox);
                     flow.shop = Some(crate::flow::Shop { chest_cost, charm_cost, charm_ok: false });
                     done = true;
                 }

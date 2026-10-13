@@ -22,7 +22,7 @@ pub(crate) fn register(app: &mut App) {
 
 /// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
 #[derive(Resource)]
-struct Pending {
+pub(crate) struct Pending {
     recorded: Recorded,
     counts: bool,
     /// 还要等多久（现实秒）
@@ -172,7 +172,16 @@ fn spawn(
                     p, c, &fonts, &db, &skin, &r, &sub, omen, &recorded, counts, &arsenal, &build, &profile,
                 )
             });
-            root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));
+            root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回灯驿"));
+            root.spawn((
+                Node { padding: UiRect::all(px(8)), ..default() },
+                text(&fonts.body, 18.0, PAPER, "M / 手柄 X　翻看手记"),
+            ))
+            .observe(
+                |_: On<bevy::picking::events::PointerClick>, mut reader: ResMut<crate::journals::Reader>| {
+                    reader.open = true;
+                },
+            );
         });
 }
 
@@ -201,6 +210,22 @@ fn results_body(
                 if r.won { "天明" } else { "夜未尽" },
             ));
             p.spawn(text(&fonts.body, 20.0, INK, sub));
+            let memory = if r.events.contains("qingqiu_left_lantern") {
+                "檐下多了一盏灯。青火仍在。"
+            } else if r.events.contains("qingqiu_guarded_fire") {
+                "那一阵风过去时，小狐没有再往后缩。"
+            } else if !r.journals.is_empty() {
+                "旧纸收进灯座。回去，慢慢读。"
+            } else {
+                ""
+            };
+            if !memory.is_empty() {
+                p.spawn(text(&fonts.body, 18.0, INK_DIM, memory));
+            }
+            if !r.journals.is_empty() {
+                let pages = r.journals.iter().map(u8::to_string).collect::<Vec<_>>().join("、");
+                p.spawn(text(&fonts.body, 16.0, INK_DIM, &format!("拾回手记 · {pages} 页")));
+            }
             if let Some(pick) = omen {
                 p.spawn(text(
                     &fonts.body,
@@ -363,17 +388,24 @@ fn results_body(
     }
 }
 
-fn input(
+pub(crate) fn input(
     actions: Res<Actions>,
     playback: Option<Res<ReplayPlayback>>,
     pending: Option<Res<Pending>>,
+    mut reader: ResMut<crate::journals::Reader>,
+    mut title_mode: ResMut<crate::title::TitleMode>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 观看回放时由回放界面处理；结算还没浮现时不响应，免得倒下时手上的按键直接跳过
-    if playback.is_some() || pending.is_some() {
+    if playback.is_some() || pending.is_some() || reader.open {
+        return;
+    }
+    if actions.meta {
+        reader.open = true;
         return;
     }
     if actions.confirm || actions.back {
+        *title_mode = crate::title::TitleMode::Hub;
         next.set(AppState::Title);
     }
 }

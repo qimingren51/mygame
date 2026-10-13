@@ -446,52 +446,72 @@ pub(crate) fn codex_panel(
 ) {
     let seen = (0..c.elements.reactions.len()).filter(|&k| profile.reactions & (1 << k) != 0).count();
     let sub = format!("五行谱 · 见过的反应 {seen} / {}", c.elements.reactions.len());
-    frame(commands, fonts, skin, 1120.0, "说书人 · 图鉴", &sub, "Esc　返回", |panel| {
-        panel
-            .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
-            .with_children(|g| {
-                for (k, r) in c.elements.reactions.iter().enumerate() {
-                    let known = profile.reactions & (1 << k) != 0;
-                    g.spawn(Node {
-                        width: percent(50),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::axes(px(12), px(3)),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        let color = if known { on_paper(element_color(c, r.b)) } else { INK_DIM };
-                        let pair = format!(
-                            "{}{} · {}",
-                            c.element(r.a).name,
-                            c.element(r.b).name,
-                            if known { r.name.as_str() } else { "？？？" }
-                        );
-                        row.spawn(text(&fonts.title, 22.0, color, &pair));
-                        let desc = if known { r.desc.as_str() } else { "还没见过" };
-                        row.spawn(para(fonts, 13.0, INK_DIM, desc, 500.0));
-                    });
-                }
-            });
-        panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
-        let t = &profile.totals;
-        let lines = [
-            format!(
-                "夜行 {} 次　·　天明 {} 次　·　通关到 {}",
-                profile.runs,
-                profile.wins,
-                tier_name(c, profile.cleared)
-            ),
-            format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
-            endless_line(c, profile),
-            format!(
-                "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
-                t.gold, t.oil, t.lanterns, t.evolutions
-            ),
-        ];
-        for l in lines.iter().filter(|l| !l.is_empty()) {
-            panel.spawn(text(&fonts.body, 16.0, INK, l));
-        }
-    });
+    frame(
+        commands,
+        fonts,
+        skin,
+        1120.0,
+        "说书人 · 图鉴",
+        &sub,
+        "M / 手柄 X　手记　　Esc　返回",
+        |panel| {
+            panel
+                .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
+                .with_children(|g| {
+                    for (k, r) in c.elements.reactions.iter().enumerate() {
+                        let known = profile.reactions & (1 << k) != 0;
+                        g.spawn(Node {
+                            width: percent(50),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::axes(px(12), px(3)),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            let color = if known { on_paper(element_color(c, r.b)) } else { INK_DIM };
+                            let pair = format!(
+                                "{}{} · {}",
+                                c.element(r.a).name,
+                                c.element(r.b).name,
+                                if known { r.name.as_str() } else { "？？？" }
+                            );
+                            row.spawn(text(&fonts.title, 22.0, color, &pair));
+                            let desc = if known { r.desc.as_str() } else { "还没见过" };
+                            row.spawn(para(fonts, 13.0, INK_DIM, desc, 500.0));
+                        });
+                    }
+                });
+            panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+            let t = &profile.totals;
+            let lines = [
+                format!(
+                    "夜行 {} 次　·　天明 {} 次　·　通关到 {}",
+                    profile.runs,
+                    profile.wins,
+                    tier_name(c, profile.cleared)
+                ),
+                format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
+                endless_line(c, profile),
+                format!(
+                    "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
+                    t.gold, t.oil, t.lanterns, t.evolutions
+                ),
+            ];
+            for l in lines.iter().filter(|l| !l.is_empty()) {
+                panel.spawn(text(&fonts.body, 16.0, INK, l));
+            }
+            panel
+                .spawn((
+                    Node { padding: UiRect::all(px(10)), ..default() },
+                    text(&fonts.body, 20.0, INK, "翻看手记"),
+                ))
+                .observe(
+                    |_: On<bevy::picking::events::PointerClick>,
+                     mut reader: ResMut<crate::journals::Reader>| {
+                        reader.open = true;
+                    },
+                );
+        },
+    );
 }
 
 fn tier_name(c: &Content, tier: u8) -> &str {

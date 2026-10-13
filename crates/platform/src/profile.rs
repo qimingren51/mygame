@@ -16,7 +16,7 @@ use lantern_sim::{RunMode, RunResult, RunSetup};
 
 use crate::settings::write_atomic;
 
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 /// 最好成绩。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -97,6 +97,10 @@ pub struct Profile {
     pub met: BTreeSet<String>,
     /// 展开过的开场卷轴：地区 ID；天明版写成“ID_dawn”
     pub scrolls: BTreeSet<String>,
+    /// 已亲历的故事节拍与已听到的追问。
+    pub events: BTreeSet<String>,
+    /// 已拾到的手记页码；未知卷的文字不进入界面。
+    pub journals: BTreeSet<u8>,
     pub best: Best,
     /// 无尽夜的最长存活（按更；以后加了地区再按地区分开）
     pub endless: BTreeMap<u8, EndlessBest>,
@@ -129,6 +133,8 @@ impl Default for Profile {
             last: LastPick::default(),
             met: BTreeSet::new(),
             scrolls: BTreeSet::new(),
+            events: BTreeSet::new(),
+            journals: BTreeSet::new(),
             best: Best::default(),
             endless: BTreeMap::new(),
             totals: Totals::default(),
@@ -264,6 +270,7 @@ impl Profile {
                 }
             }
         }
+        // 第三版只增加有默认值的叙事集合；旧通关不冒认亲历过护火或留灯。
         self.version = SAVE_VERSION;
         true
     }
@@ -374,6 +381,11 @@ impl Profile {
     /// 按存档和上次的选择拼出下一局的设置。灯、灯坠、更、悟不可用时退回默认。
     pub fn run_setup(&self, content: &Content, seed: u64) -> RunSetup {
         let mut s = RunSetup::new(seed, RunMode::Normal);
+        s.story = Some(lantern_sim::story::StorySeed {
+            events: self.events.clone(),
+            journals: self.journals.clone(),
+            chapter: self.journal_chapter(),
+        });
         s.meta = self.meta.clone();
         s.attributes = self.active_attributes(content);
         s.tier = self.last.tier.clamp(1, self.tier.max(1));
@@ -457,12 +469,34 @@ impl Profile {
         content.attributes.list.iter().all(|a| self.attribute_price(content, &a.id).is_none())
     }
 
-    /// 灯驿第 who 个人物这次说哪句（docs/LORE-TEXT.md 第 1 节）。第一次见面总说 First；
-    /// 其余几条同时满足时取排在最后的那条；都不满足时说“平时”的，按回来的次数轮着说。
-    pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
-        let person = content.hub.get(who)?;
-        let first = !self.met.contains(&person.id);
-        let hit = |w: &HubWhen| match w {
+    /// 章节只在出发时开放；本局留灯可提前打开卷三，绝不越到卷五。
+    pub fn journal_chapter(&self) -> u8 {
+        let left = self.events.contains("qingqiu_left_lantern");
+        if self.cleared > 0
+            && self.runs >= 6
+            && self.journals.len() >= 18
+            && self.meta.values().sum::<u32>() >= 6
+            && self.endless.values().any(|e| e.seconds >= 900.0 && e.bosses > 0)
+        {
+            5
+        } else if self.cleared > 0 && self.runs >= 4 && self.journals.len() >= 12 {
+            4
+        } else if self.cleared > 0 || left {
+            3
+        } else if self.events.contains("qingqiu_entered") || self.runs > 0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn hub_when(&self, content: &Content, w: &HubWhen, news: &HubNews, first: bool) -> bool {
+        match w {
+            HubWhen::Story(id) => self.events.contains(id),
+            HubWhen::WithoutStory(id) => !self.events.contains(id),
+            HubWhen::JournalCount(n) => self.journals.len() >= usize::from(*n),
+            HubWhen::HasCleared(t) => self.cleared >= *t,
+            HubWhen::All(ws) => ws.iter().all(|w| self.hub_when(content, w, news, first)),
             HubWhen::Idle => false,
             HubWhen::First => first,
             HubWhen::MetaLit => news.meta_lit,
@@ -475,16 +509,54 @@ impl Profile {
             HubWhen::Charm(id) => self.basics && self.last.charm.as_ref() == Some(id),
             HubWhen::Reaction => news.reaction,
             HubWhen::EndlessBack => news.endless_back,
-        };
-        let pick = |only_first: bool| {
-            person.lines.iter().rev().find(|l| hit(&l.when) && (!only_first || l.when == HubWhen::First))
-        };
-        if let Some(l) = pick(true).filter(|_| first).or_else(|| pick(false)) {
-            return Some(&l.text);
         }
-        let idle: Vec<&str> =
-            person.lines.iter().filter(|l| l.when == HubWhen::Idle).map(|l| l.text.as_str()).collect();
-        idle.get(self.runs as usize % idle.len().max(1)).copied()
+    }
+
+    /// 未听过的关键追问优先于初次见面，避免首通回来被初见台词吞掉。
+    pub fn hub_dialogue<'a>(
+        &self,
+        content: &'a Content,
+        who: usize,
+        news: &HubNews,
+    ) -> Option<&'a lantern_content::HubLineDef> {
+        let person = content.hub.get(who)?;
+        let first = !self.met.contains(&person.id);
+        let hit = |l: &&lantern_content::HubLineDef| self.hub_when(content, &l.when, news, first);
+        person
+            .lines
+            .iter()
+            .rev()
+            .filter(hit)
+            .find(|l| l.seen_event.as_ref().is_some_and(|id| !self.events.contains(id)))
+            .or_else(|| person.lines.iter().find(|l| first && l.when == HubWhen::First))
+            .or_else(|| person.lines.iter().rev().find(hit))
+            .or_else(|| {
+                let idle: Vec<_> = person.lines.iter().filter(|l| l.when == HubWhen::Idle).collect();
+                idle.get(self.runs as usize % idle.len().max(1)).copied()
+            })
+    }
+
+    pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
+        self.hub_dialogue(content, who, news).map(|l| l.text.as_str())
+    }
+
+    /// 只在灯驿文字实际展示后调用。查看纯数据或回放不推进已见事件。
+    pub fn saw_hub(&mut self, content: &Content, news: &HubNews) -> bool {
+        let seen: Vec<_> = (0..content.hub.len())
+            .filter_map(|who| {
+                Some((
+                    content.hub[who].id.clone(),
+                    self.hub_dialogue(content, who, news)?.seen_event.clone()?,
+                ))
+            })
+            .collect();
+        let mut changed = false;
+        for (person, id) in seen {
+            changed |= self.events.insert(id);
+            // 已经说过关键追问，就确实见过这个人；重画卡片不能倒回初见。
+            changed |= self.met.insert(person);
+        }
+        changed
     }
 
     /// 这次出发要不要先展开某个地区的开场卷轴：第一次来展开长夜版（false），拿回烛火以后再来展开一次
@@ -542,6 +614,8 @@ impl Profile {
         if r.won {
             self.cleared = self.cleared.max(rec.tier);
         }
+        self.events.extend(r.events.iter().cloned());
+        self.journals.extend(r.journals.iter().copied().filter(|p| (1..=30).contains(p)));
         self.reactions |= r.feats.reactions;
         let t = &mut self.totals;
         t.kills += u64::from(r.kills);
@@ -571,6 +645,8 @@ mod tests {
 
     fn result(won: bool, seconds: f32, kills: u32, oil: u32, gold: u32) -> RunResult {
         RunResult {
+            events: BTreeSet::new(),
+            journals: BTreeSet::new(),
             won,
             seconds,
             kills,
@@ -713,6 +789,140 @@ mod tests {
         assert_eq!(Profile::load(&dir).oil, 0);
         assert!(dir.join("save.ron.broken").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn additive_story_save_loads_old_versions_and_roundtrips_new_progress() {
+        for version in [1, 2] {
+            let mut p: Profile = ron::from_str(&format!("(version: {version}, runs: 3)")).unwrap();
+            assert!(p.events.is_empty() && p.journals.is_empty());
+            assert!(p.upgrade(&content()));
+            assert_eq!(p.version, SAVE_VERSION);
+            assert!(p.events.is_empty() && p.journals.is_empty());
+            assert!(!p.upgrade(&content()), "不能重复迁移或补写未做过的故事");
+        }
+        let c = content();
+        let dir = temp("story");
+        let mut p = Profile::load(&dir);
+        let mut r = result(false, 100.0, 1, 0, 0);
+        r.events.extend(["qingqiu_entered", "qingqiu_guarded_fire"].map(String::from));
+        r.journals.insert(1);
+        p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        p.save().unwrap();
+        let q = Profile::load(&dir);
+        assert_eq!(p, q);
+        let seed = q.run_setup(&c, 1).story.unwrap();
+        assert!(seed.events.contains("qingqiu_guarded_fire"));
+        assert_eq!(seed.journals, BTreeSet::from([1]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn chapters_need_progress_even_if_the_first_night_is_cleared() {
+        let mut p = Profile::default();
+        assert_eq!(p.journal_chapter(), 1);
+        p.events.insert("qingqiu_entered".into());
+        assert_eq!(p.journal_chapter(), 2);
+        p.events.insert("qingqiu_left_lantern".into());
+        assert_eq!(p.journal_chapter(), 3);
+        p.cleared = 1;
+        p.runs = 1;
+        p.meta.insert("luck".into(), 6);
+        p.journals.extend(1..=24);
+        assert_eq!(p.journal_chapter(), 3, "首通也不能揭露卷五");
+        p.runs = 4;
+        assert_eq!(p.journal_chapter(), 4);
+        p.runs = 6;
+        assert_eq!(p.journal_chapter(), 4, "没从深处回来不能开卷五");
+        p.endless.insert(1, EndlessBest { seconds: 900.0, bosses: 1, kills: 1 });
+        assert_eq!(p.journal_chapter(), 5);
+        p.meta.clear();
+        assert_eq!(p.journal_chapter(), 4);
+    }
+
+    #[test]
+    fn childs_question_remembers_what_was_done_even_after_restart() {
+        let c = content();
+        let mut p = Profile { cleared: 1, ..Default::default() };
+        let news = HubNews::default();
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("回头看"), "关键追问优先于初见");
+        assert!(!p.events.contains("qingqiu_asked_dark"), "查询不会记录已见");
+        assert!(p.saw_hub(&c, &news));
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("回头看"));
+        p.events.insert("qingqiu_guarded_fire".into());
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("你走了以后"));
+        p.saw_hub(&c, &news);
+        p.events.insert("qingqiu_left_lantern".into());
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("替它们记"));
+        p.saw_hub(&c, &news);
+        assert!(p.events.contains("qingqiu_asked_lit"));
+        let q: Profile = ron::from_str(&ron::to_string(&p).unwrap()).unwrap();
+        assert_eq!(p.events, q.events);
+    }
+
+    #[test]
+    fn failed_nights_get_the_childs_response_before_any_clear_or_first_meeting() {
+        let c = content();
+        let news = HubNews::default();
+        let mut fresh = Profile::default();
+        assert!(fresh.hub_line(&c, 2, &news).unwrap().contains("你就是守灯人"));
+        // 第一夜没走到狐村也先接住回来的人，不假称他已经见过小狐。
+        let mut r = result(false, 1.0, 0, 0, 0);
+        r.events.insert("qingqiu_entered".into());
+        fresh.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        assert!(fresh.hub_line(&c, 2, &news).unwrap().contains("回来了就好"));
+        for (beat, expected) in [
+            (None, "qingqiu_asked_dark"),
+            (Some("qingqiu_guarded_fire"), "qingqiu_asked_guarded"),
+            (Some("qingqiu_left_lantern"), "qingqiu_asked_lit"),
+        ] {
+            if let Some(beat) = beat {
+                r.events.insert(beat.into());
+            }
+            if beat == Some("qingqiu_left_lantern") {
+                r.journals.insert(13);
+            }
+            // 每种经历都覆盖：结束后还没进灯驿就退出，重开仍要听到正确追问。
+            let dir = temp(expected);
+            let mut p = Profile::load(&dir);
+            p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+            p.save().unwrap();
+            let mut p = Profile::load(&dir);
+            assert_eq!(p.cleared, 0);
+            assert!(!p.met.contains("child"));
+            assert!(!p.events.contains(expected));
+            // 关键追问应盖过初见、成就和挂着长命锁的台词。
+            p.last.charm = Some("longevity".into());
+            let news = HubNews { achievement: true, ..Default::default() };
+            assert_eq!(p.hub_dialogue(&c, 2, &news).unwrap().seen_event.as_deref(), Some(expected));
+            assert!(p.saw_hub(&c, &news));
+            p.save().unwrap();
+            let mut p = Profile::load(&dir);
+            assert!(p.events.contains(expected));
+            assert!(p.met.contains("child"));
+            assert_eq!(p.hub_dialogue(&c, 2, &news).unwrap().seen_event.as_deref(), Some(expected));
+            assert!(!p.saw_hub(&c, &news), "重画或重开不能倒回较早但未见的追问");
+            if beat == Some("qingqiu_left_lantern") {
+                assert!(p.journals.contains(&13));
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn guarded_question_never_falls_back_to_unseen_dark_question_after_a_clear() {
+        let c = content();
+        let news = HubNews::default();
+        let mut p = Profile { cleared: 1, ..Default::default() };
+        p.events.insert("qingqiu_guarded_fire".into());
+        assert!(p.saw_hub(&c, &news));
+        assert!(p.events.contains("qingqiu_asked_guarded"));
+        assert!(!p.events.contains("qingqiu_asked_dark"));
+        assert_eq!(
+            p.hub_dialogue(&c, 2, &news).unwrap().seen_event.as_deref(),
+            Some("qingqiu_asked_guarded")
+        );
+        assert!(!p.saw_hub(&c, &news));
     }
 
     /// docs/BALANCE.md 第 10.6 节：M2 存档迁移。

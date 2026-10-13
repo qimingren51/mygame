@@ -112,6 +112,11 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(build);
     commands.insert_resource(arsenal);
     commands.insert_resource(flow);
+    commands.insert_resource(crate::story::Story::new(if matches!(setup.mode, RunMode::Bench { .. }) {
+        None
+    } else {
+        setup.story.clone()
+    }));
     commands.insert_resource(SimPhase::Play);
     commands.insert_resource(StepGate::default());
     commands.insert_resource(Hold::default());
@@ -199,6 +204,7 @@ pub(crate) fn advance_tick(mut tick: ResMut<Tick>) {
 #[derive(bevy_ecs::system::SystemParam)]
 pub(crate) struct HashParams<'w, 's> {
     tick: Res<'w, Tick>,
+    story: Res<'w, crate::story::Story>,
     rng: Res<'w, SimRng>,
     en: Res<'w, Enemies>,
     gems: Res<'w, Gems>,
@@ -262,6 +268,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.trail.hash_into(&mut h);
     p.survival.hash_into(&mut h);
     p.bamboo.hash_into(&mut h);
+    p.story.hash_into(&mut h);
     if let Some(e) = &p.director.endless {
         e.hash_into(&mut h);
     }
