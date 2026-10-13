@@ -34,11 +34,23 @@ PAD = 2  # 帧与帧之间的间距
 MARGIN = 1  # 裁边时保留的透明边，线性过滤时不会采到邻居
 
 
+# 帧 meta 里不导出的字段：尺寸、锚点已在帧数据里，blend / tint 单独写，其余是给人看的说明
+FRAME_INFO_SKIP = {"size", "anchor", "blend", "tint", "tile", "note", "color"}
+
+
+def frame_info_fields(info: dict) -> dict:
+    """素材 meta 里每个文件的附加标量字段（数字、布尔、字符串），写进图集的 meta.lantern.frames。"""
+    return {
+        k: v for k, v in info.items() if k not in FRAME_INFO_SKIP and isinstance(v, (int, float, bool, str))
+    }
+
+
 def load_asset(folder: Path, emit: bool = True) -> tuple[str, list[dict], dict]:
     """读取一个素材文件夹，返回 (素材名, 帧列表, 附加信息)。
 
-    每帧是 {"key", "img", "anchor", "blend", "tint"}：
+    每帧是 {"key", "img", "anchor", "blend", "tint", "info"}：
     - 特效 / 地面格式：blend、tint 取自 meta.json 的 files.<文件>.blend / tint；
+      其余标量字段（radius_px、angle_deg、flat、stretch、kind、id、name 等）放进 info，原样写进图集；
     - 角色格式：普通帧 blend=normal；自发光层 *_emit 是 blend=add（emit=False 时跳过）。
     """
     meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
@@ -58,6 +70,7 @@ def load_asset(folder: Path, emit: bool = True) -> tuple[str, list[dict], dict]:
                     "anchor": (ax, ay),
                     "blend": info.get("blend", "normal"),
                     "tint": bool(info.get("tint", False)),
+                    "info": frame_info_fields(info),
                 }
             )
     else:
@@ -231,7 +244,7 @@ def build_atlas(
         png = out / f"{names[i]}.png"
         sheet.save(png, optimize=True)
         # 每帧的混合方式与是否染色（只列本页的帧）
-        frame_info = {e["key"]: {"blend": e["blend"], "tint": e["tint"]} for e in page}
+        frame_info = {e["key"]: {**e.get("info", {}), "blend": e["blend"], "tint": e["tint"]} for e in page}
         lantern: dict = {"pxPerUnit": px_per_unit, "page": i, "pages": len(pages), "frames": frame_info}
         # 动画序列和角色元数据只写在第 0 页；多页时读取方要先合并所有页的 frames
         if i == 0:

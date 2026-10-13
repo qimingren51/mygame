@@ -444,7 +444,7 @@ assets/data/
 - **`meta.lantern`**（每页都有）：
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
-  - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。
+  - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。特效、地面、界面帧还可能带素材 meta 里的其他标量字段，例如 `radius_px`（反应区域、扇形的半径）、`angle_deg`、`flat`、`stretch`、`width_px`，界面帧带 `kind`、`id`、`name`。像素单位都是本图集的像素，换算到世界单位除以 `pxPerUnit`。这些字段都是可选的，读取时不认识的字段忽略即可。
   - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼和古灯 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
