@@ -7,10 +7,12 @@
 
 use std::f32::consts::TAU;
 
+use bevy::post_process::bloom::Bloom;
 use bevy::post_process::effect_stack::{ChromaticAberration, Vignette};
 use bevy::prelude::*;
 
 use lantern_core::Pcg32;
+use lantern_sim::combat::StrikeFx;
 use lantern_sim::{Health, Player, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
@@ -18,6 +20,8 @@ use crate::lighting::{LightCamera, NIGHT_AMBIENT};
 use crate::particles::{INK, Particles};
 use crate::{MainCamera, layer};
 
+/// 辉光平时的强度（`lib.rs` 的 `bloom()` 也用它）
+pub(crate) const BLOOM_BASE: f32 = 0.16;
 /// 天明用多久（现实秒），从夜主倒下后 DAWN_DELAY 秒开始
 pub const DAWN_LEN: f32 = 3.0;
 const DAWN_DELAY: f32 = 0.8;
@@ -61,6 +65,8 @@ pub(crate) struct Atmos {
     wisps: Vec<Wisp>,
     /// 受伤后的闪红（1 → 0）
     hurt: f32,
+    /// 辉光炸亮（燃灯、夜主倒下……），1 → 0
+    flare: f32,
     /// 夜主登场的压暗（1 → 0）
     gloom: f32,
     heart: f32,
@@ -85,12 +91,13 @@ impl Default for Atmos {
                 flip: rng.chance(0.5),
             })
             .collect();
-        Atmos { rng, motes, wisps, hurt: 0.0, gloom: 0.0, heart: 0.0 }
+        Atmos { rng, motes, wisps, hurt: 0.0, flare: 0.0, gloom: 0.0, heart: 0.0 }
     }
 }
 
 pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.hurt = 0.0;
+    atmos.flare = 0.0;
     atmos.gloom = 0.0;
     dawn.t = None;
 }
@@ -111,7 +118,16 @@ pub(crate) fn atmos_events(outbox: Res<SimOutbox>, mut atmos: ResMut<Atmos>, mut
         match ev {
             SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } => atmos.hurt = 1.0,
             SimEvent::BossArrived { .. } => atmos.gloom = 1.0,
-            SimEvent::BossDefeated { .. } => dawn.t = Some(0.0),
+            SimEvent::BossDefeated { .. } => {
+                dawn.t = Some(0.0);
+                atmos.flare = 1.0;
+            }
+            // 大事件时辉光猛地一亮再回落
+            SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.flare = atmos.flare.max(0.8),
+            SimEvent::LastStand { .. } | SimEvent::Revived { .. } => atmos.flare = atmos.flare.max(0.7),
+            SimEvent::Evolve { .. } => atmos.flare = atmos.flare.max(0.5),
+            SimEvent::LanternLit { all: true, .. } => atmos.flare = atmos.flare.max(0.6),
+            SimEvent::Reaction { first: true, .. } => atmos.flare = atmos.flare.max(0.3),
             _ => {}
         }
     }
@@ -127,7 +143,10 @@ pub(crate) fn update_atmos(
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
     hero: Single<&Health, With<Player>>,
-    mut cam: Single<(&Transform, Option<&mut Vignette>, Option<&mut ChromaticAberration>), With<MainCamera>>,
+    mut cam: Single<
+        (&Transform, Option<&mut Vignette>, Option<&mut ChromaticAberration>, Option<&mut Bloom>),
+        With<MainCamera>,
+    >,
     mut light: Single<&mut Camera, With<LightCamera>>,
 ) {
     let rdt = real.delta_secs().min(0.1);
@@ -135,6 +154,7 @@ pub(crate) fn update_atmos(
     let t = time.elapsed_secs();
     let atmos = &mut *atmos;
     atmos.hurt = (atmos.hurt - rdt * 2.5).max(0.0);
+    atmos.flare = (atmos.flare - rdt * 1.6).max(0.0);
     atmos.gloom = (atmos.gloom - rdt / 3.0).max(0.0);
     if let Some(dt_dawn) = &mut dawn.t {
         *dt_dawn += rdt;
@@ -153,7 +173,11 @@ pub(crate) fn update_atmos(
         let b = (-((h - 0.28) * 18.0).powi(2)).exp() * 0.7;
         a + b
     };
-    let (cam_tf, vignette, chroma) = &mut *cam;
+    let (cam_tf, vignette, chroma, bloom) = &mut *cam;
+    if let Some(b) = bloom {
+        // 快起慢落：平方让尾巴拖长一点
+        b.intensity = BLOOM_BASE + 0.45 * atmos.flare * atmos.flare.sqrt();
+    }
     if let Some(v) = vignette {
         let base = base_vignette();
         v.intensity = (base.intensity + atmos.hurt * 0.35 + low * (0.3 + 0.2 * beat)) * (1.0 - day * 0.7);

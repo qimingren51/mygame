@@ -18,7 +18,7 @@ pub struct Settings {
     pub music_volume: f32,
     /// 0–1
     pub sfx_volume: f32,
-    /// 震屏和镜头冲击的强度，0–1（0 为关）
+    /// 震屏、镜头冲击和手柄震动的强度，0–1（0 为关）
     pub shake: f32,
     /// 顿帧与慢镜
     pub hitstop: bool,

@@ -316,6 +316,8 @@ pub(crate) struct HeroView {
     emit: Option<FrameId>,
     /// 本帧画的图集帧（闪避残影用）
     pub(crate) frame_id: Option<FrameId>,
+    /// 本帧灯笼叠层的帧（闪避残影要连灯笼一起画）
+    pub(crate) lantern_id: Option<FrameId>,
     /// 这一局的灯的光色（没有灯笼叠层时用默认的暖光）
     light: Option<Color>,
 }
@@ -440,6 +442,7 @@ pub(crate) fn animate_hero(
         // 灯笼叠层：同一动作、同一朝向、同一帧号，画在主角上面一点
         let (lantern_frame, lantern_emit) = layer.map_or((None, None), |l| l.frame(anim.name, view.dir, k));
         view.light = layer.filter(|_| lantern_frame.is_some()).map(|l| l.light);
+        view.lantern_id = lantern_frame;
         if lantern_frame.is_some() {
             view.emit = lantern_emit;
         }

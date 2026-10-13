@@ -150,7 +150,7 @@ pub struct MainCamera;
 /// 辉光：只让比较亮的东西（灯火、法术、自发光）往外晕开，纸面和墨色不受影响。
 fn bloom() -> Bloom {
     Bloom {
-        intensity: 0.16,
+        intensity: atmos::BLOOM_BASE,
         low_frequency_boost: 0.5,
         low_frequency_boost_curvature: 0.9,
         high_pass_frequency: 1.0,

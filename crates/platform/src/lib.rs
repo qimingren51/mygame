@@ -12,6 +12,7 @@ use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands,
 pub mod paths;
 pub mod profile;
 pub mod replays;
+mod rumble;
 pub mod settings;
 
 pub use profile::Profile;
@@ -64,6 +65,7 @@ impl Plugin for PlatformPlugin {
             .add_systems(PreUpdate, (gather_actions, feed_sim).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
         replays::register(app);
+        rumble::register(app);
     }
 }
 

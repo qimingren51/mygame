@@ -766,15 +766,11 @@ pub(crate) fn particle_events(
         && let Some(f) = view.frame_id
     {
         clock.trail_cd = 0.028;
-        parts.ghost(
-            f,
-            hero_at,
-            false,
-            Color::srgb(0.55, 0.78, 1.0).with_alpha(0.4),
-            0.3,
-            true,
-            layer::EMISSIVE - 0.3,
-        );
+        let tint = Color::srgb(0.55, 0.78, 1.0).with_alpha(0.4);
+        // 主角和灯笼叠层是同画布、同锚点的两帧，残影两张一起画
+        for frame in std::iter::once(f).chain(view.lantern_id) {
+            parts.ghost(frame, hero_at, false, tint, 0.3, true, layer::EMISSIVE - 0.3);
+        }
     }
 }
 
