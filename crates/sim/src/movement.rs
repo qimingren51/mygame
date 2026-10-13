@@ -229,9 +229,11 @@ fn charge(
     let done = en.charge_t[i] <= 0.0;
     match en.charge[i] {
         CHARGE_WINDUP => {
-            // 蓄力：原地转向跟着主角，时间到就锁定方向冲出
-            en.charge_dx[i] = to_player.0;
-            en.charge_dy[i] = to_player.1;
+            // 蓄力：原地转向跟着主角，出手前 lock 秒锁定方向；时间到就冲出
+            if en.charge_t[i] > ch.lock {
+                en.charge_dx[i] = to_player.0;
+                en.charge_dy[i] = to_player.1;
+            }
             if done {
                 en.charge[i] = CHARGE_DASH;
                 en.charge_t[i] = ch.duration;

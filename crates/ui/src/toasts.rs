@@ -162,7 +162,7 @@ fn read_events(
                 msg(format!("奇遇 · {}", k.name), k.hint.clone(), hex(&k.color), false)
             }
             SimEvent::CritterFled { .. } => msg("金蟾遁走了", "下次快一点", DIM, false),
-            SimEvent::CritterLooted { .. } => msg("金蟾散财", "魂火与灯油", hex("#FFD98A"), false),
+            SimEvent::CritterLooted { .. } => msg("金蟾散财", "魂火与铜钱", hex("#FFD98A"), false),
             SimEvent::Buff { index } => {
                 let b = &c.events.buffs[index as usize];
                 let secs = c

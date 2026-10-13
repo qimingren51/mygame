@@ -2,12 +2,12 @@
 // P0 只做一更到三更。灯油和铜钱的倍率乘在结算上。
 [
     (name: "一更", desc: "标准", effects: []),
-    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.4、伤害 ×1.45", effects: [
-        Mul(EnemyHp, 0.4), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.45), Add(Affixes, 1.0), Mul(BossHp, 0.2),
+    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.4、伤害 ×1.7", effects: [
+        Mul(EnemyHp, 0.4), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.7), Add(Affixes, 1.0), Mul(BossHp, 0.2),
         Mul(OilGain, 0.25), Mul(GoldGain, 0.25),
     ]),
-    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×1.8、伤害 ×1.7", effects: [
-        Mul(EnemyHp, 0.8), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 0.7), Add(Affixes, 1.0), Mul(BossHp, 0.4),
+    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×2、伤害 ×2.4", effects: [
+        Mul(EnemyHp, 1.0), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 1.4), Add(Affixes, 1.0), Mul(BossHp, 0.4),
         Mul(Healing, -0.25), Rule(BossExtra),
         Mul(OilGain, 0.5), Mul(GoldGain, 0.5),
     ]),

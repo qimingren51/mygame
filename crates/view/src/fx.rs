@@ -777,7 +777,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮）
+    // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮，锁定后最亮）
     if let Some(en) = &res.enemies {
         let c = &content.0;
         let red = rgb(0xff4a3a);
@@ -793,7 +793,9 @@ pub(crate) fn collect_fx(
             let start = to_screen(at);
             let screen_dir = to_screen(at + dir * len) - start;
             let rot = screen_dir.y.atan2(screen_dir.x);
-            let (line_a, glow_a) = (0.25 + 0.45 * u, 0.15 + 0.35 * u);
+            // 锁定以后线停下、变亮，给玩家躲的信号
+            let locked = en.charge_t[i] <= ch.lock;
+            let (line_a, glow_a) = if locked { (0.95, 0.75) } else { (0.2 + 0.35 * u, 0.12 + 0.25 * u) };
             if let Some((line, head)) = f.charge {
                 // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）；车道宽约为妖物直径的 0.8 倍
                 let (lf, hf) = (db.frame(line), db.frame(head));

@@ -360,8 +360,8 @@ fn fox_winds_up_then_pounces_in_a_locked_direction() {
     let en = sim.enemies();
     assert_eq!(en.charge[i], CHARGE_WINDUP);
     let start = Vec2::new(en.x[i], en.y[i]);
-    // 蓄力途中主角往下走，狐狸原地转向跟着
-    let steps = (ch.windup * 60.0).round() as usize - 2;
+    // 蓄力途中主角往下走，狐狸原地转向跟着（到锁定之前）
+    let steps = ((ch.windup - ch.lock) * 60.0).round() as usize - 2;
     for _ in 0..steps {
         sim.step(InputFrame::quantize(Vec2::Y), &[]);
     }
@@ -369,12 +369,16 @@ fn fox_winds_up_then_pounces_in_a_locked_direction() {
     assert_eq!(en.charge[i], CHARGE_WINDUP);
     assert!(Vec2::new(en.x[i], en.y[i]).distance(start) < 1.0, "蓄力时不动");
     assert!(en.charge_dy[i] > 0.05, "转向跟着主角：{}", en.charge_dy[i]);
-    // 出手：方向锁定，主角再怎么走也不变
-    while sim.enemies().charge[i] == CHARGE_WINDUP {
+    // 出手前 lock 秒锁定：主角往回走，方向不再变
+    for _ in 0..4 {
         sim.step(InputFrame::quantize(Vec2::Y), &[]);
     }
-    assert_eq!(sim.enemies().charge[i], CHARGE_DASH);
     let locked = (sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]);
+    while sim.enemies().charge[i] == CHARGE_WINDUP {
+        sim.step(InputFrame::quantize(-Vec2::Y), &[]);
+        assert_eq!((sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]), locked, "锁定后不再转向");
+    }
+    assert_eq!(sim.enemies().charge[i], CHARGE_DASH);
     let from = Vec2::new(sim.enemies().x[i], sim.enemies().y[i]);
     while sim.enemies().charge[i] == CHARGE_DASH {
         sim.step(InputFrame::quantize(-Vec2::Y), &[]);

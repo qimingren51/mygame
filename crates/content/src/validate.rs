@@ -524,7 +524,10 @@ impl Content {
                         ("charge.damage_mult", ch.damage_mult),
                     ],
                 )?;
-                c.non_negative("enemies.ron", &[("charge.recover", ch.recover)])?;
+                c.non_negative("enemies.ron", &[("charge.recover", ch.recover), ("charge.lock", ch.lock)])?;
+                if ch.lock > ch.windup {
+                    return c.fail("enemies.ron", format!("{} 的 charge.lock 不能超过 windup", e.id));
+                }
             }
             if let Some(b) = &e.boss {
                 c.positive(
