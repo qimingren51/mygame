@@ -223,9 +223,10 @@ pub(crate) fn camera_events(
     outbox: Res<SimOutbox>,
     feedback: Res<Feedback>,
     mut rig: ResMut<Rig>,
-    player: Single<&Player>,
+    player: Single<(&Player, &Pos)>,
 ) {
-    let impulse = camera_impulse(&outbox.0, player.facing);
+    let (player, pos) = *player;
+    let impulse = camera_impulse(&outbox.0, player.facing, pos.0);
     apply_impulse(&mut rig, &feedback, impulse);
 }
 
@@ -272,7 +273,7 @@ struct Impulse {
     scale: f32,
 }
 
-fn camera_impulse(events: &[SimEvent], facing: Vec2) -> Impulse {
+fn camera_impulse(events: &[SimEvent], facing: Vec2, hero: Vec2) -> Impulse {
     let mut best = Impulse::default();
     let mut stop: f32 = 0.0;
     for event in events {
@@ -286,9 +287,9 @@ fn camera_impulse(events: &[SimEvent], facing: Vec2) -> Impulse {
                 cue.trauma = 0.3;
                 cue.stop = 0.06;
             }
-            SimEvent::PlayerHurt { .. } => {
+            SimEvent::PlayerHurt { from, .. } => {
                 cue.trauma = 0.32;
-                cue.jolt = 0.6;
+                cue.kick = -to_screen(crate::atmos::hurt_from(hero, from)) * 0.6;
                 cue.stop = 0.045;
             }
             SimEvent::Dash { .. } => cue.kick = -to_screen(facing).normalize_or_zero() * 0.3,
@@ -496,6 +497,20 @@ mod tests {
         SimEvent::Hit { pos: Vec2::ZERO, damage, crit: true, kind: HitKind::Normal, element: None }
     }
 
+    #[test]
+    fn hurt_kicks_away_from_the_source_and_overlap_has_no_direction() {
+        let hero = Vec2::new(60.0, -90.0);
+        for offset in [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::ONE, Vec2::ZERO] {
+            let event = SimEvent::PlayerHurt { amount: 10.0, by: HurtBy::Rain, from: hero + offset };
+            let impulse = camera_impulse(&[event], Vec2::X, hero);
+            assert_eq!(impulse.jolt, 0.0);
+            assert!(impulse.kick.distance(-to_screen(offset).normalize_or_zero() * 0.6) < 1e-5);
+            assert_eq!(impulse.priority, Priority::Hurt);
+            assert_eq!(impulse.trauma, 0.32);
+            assert_eq!(impulse.stop, 0.045);
+        }
+    }
+
     /// 走实际的事件筛选、镜头申请和闪屏绘制链，不需要窗口或渲染插件。
     fn feedback_app(lite: bool) -> (App, Entity) {
         let content = lantern_content::Content::load(
@@ -549,7 +564,7 @@ mod tests {
                     let (mut app, flash) = feedback_app(lite);
                     app.world_mut().resource_mut::<SimOutbox>().0 = events.to_vec();
                     app.update();
-                    let stop = camera_impulse(&[attack], Vec2::X).stop.max(0.045);
+                    let stop = camera_impulse(&[attack], Vec2::X, Vec2::ZERO).stop.max(0.045);
                     assert_hurt_feedback(&app, flash, stop);
                 }
             }
@@ -617,7 +632,7 @@ mod tests {
             assert_eq!(rig.zoom_to, 0.08);
             assert_eq!(rig.zoom_hold, 1.2);
         }
-        let fatal = camera_impulse(&[hurt(), SimEvent::PlayerDied], Vec2::X);
+        let fatal = camera_impulse(&[hurt(), SimEvent::PlayerDied], Vec2::X, Vec2::ZERO);
         assert_eq!(fatal.priority, Priority::Death);
         assert_eq!(fatal.stop, 0.045);
     }
@@ -626,7 +641,11 @@ mod tests {
     fn only_large_crits_request_global_hitstop() {
         for (damage, stop) in [(1.0, 0.0), (999.0, 0.0), (1000.0, 0.035), (2000.0, 0.035)] {
             let mut rig = Rig::default();
-            apply_impulse(&mut rig, &Feedback::default(), camera_impulse(&[crit(damage)], Vec2::X));
+            apply_impulse(
+                &mut rig,
+                &Feedback::default(),
+                camera_impulse(&[crit(damage)], Vec2::X, Vec2::ZERO),
+            );
             assert_eq!(rig.stop, stop);
             assert_eq!(rig.time_scale(), if stop > 0.0 { 0.0 } else { 1.0 });
             assert_eq!(rig.trauma, 0.1);
@@ -820,11 +839,14 @@ mod tests {
         let mut events = vec![small; 500];
         events.push(SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult });
         events.push(climax);
-        let expected = camera_impulse(&[climax], Vec2::X);
-        assert_eq!(camera_impulse(&events, Vec2::X), expected);
+        let expected = camera_impulse(&[climax], Vec2::X, Vec2::ZERO);
+        assert_eq!(camera_impulse(&events, Vec2::X, Vec2::ZERO), expected);
         events.reverse();
-        assert_eq!(camera_impulse(&events, Vec2::X), expected);
-        assert_eq!(camera_impulse(&vec![small; 500], Vec2::X), camera_impulse(&[small], Vec2::X));
+        assert_eq!(camera_impulse(&events, Vec2::X, Vec2::ZERO), expected);
+        assert_eq!(
+            camera_impulse(&vec![small; 500], Vec2::X, Vec2::ZERO),
+            camera_impulse(&[small], Vec2::X, Vec2::ZERO)
+        );
     }
 
     #[test]
