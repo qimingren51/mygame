@@ -110,6 +110,8 @@ pub enum SimEvent {
     PlayerHurt {
         amount: f32,
         by: HurtBy,
+        /// 伤害从哪儿来（妖物、弹幕、扇形的顶点、落点），画面用它定受伤的方向
+        from: Vec2,
     },
     PlayerHealed {
         amount: f32,

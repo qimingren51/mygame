@@ -217,7 +217,7 @@ pub(crate) fn update_enemies(
         };
         if d < en.r[i] + pr
             && contact > 0.0
-            && hurt_player(&mut player, &mut health, pos.0, contact, by, &mut ctx)
+            && hurt_player(&mut player, &mut health, pos.0, contact, (by, Vec2::new(x, y)), &mut ctx)
             && thorn > 0.0
             && ctx.rng.chance(thorn)
         {

@@ -1087,12 +1087,13 @@ pub(crate) struct HurtCtx<'a> {
 
 /// 主角受伤：无敌或闪避中不受伤；减伤（含定海神针的站定减伤）、护甲、护盾依次生效；之后进入无敌时间。
 /// 致命时先试回光、九转金丹。这一下落到了主角身上（哪怕被护盾挡下）时返回 true。
+/// pos 是主角的位置，from 是伤害的来源位置。
 pub(crate) fn hurt_player(
     player: &mut Player,
     health: &mut Health,
     pos: Vec2,
     amount: f32,
-    by: HurtBy,
+    (by, from): (HurtBy, Vec2),
     ctx: &mut HurtCtx,
 ) -> bool {
     if player.iframe > 0.0 || player.dash_t > 0.0 || health.hp <= 0.0 {
@@ -1127,7 +1128,7 @@ pub(crate) fn hurt_player(
     ctx.survival.hurts += 1;
     ctx.survival.taken += dmg.min(health.hp);
     health.hp = (health.hp - dmg).max(0.0);
-    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg, by });
+    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg, by, from });
     if health.hp <= 0.0 && !try_rescue(ctx.content, s, ctx.survival, player, health, pos, ctx.outbox) {
         ctx.outbox.0.push(SimEvent::PlayerDied);
     }
