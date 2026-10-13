@@ -3,8 +3,9 @@
 
 use bevy::prelude::*;
 
-use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
-use lantern_platform::{Actions, HubNews, Profile};
+use lantern_platform::profile::{NewRecord, Recorded};
+use lantern_platform::profile_commands::LastRecorded;
+use lantern_platform::{Actions, Profile};
 use lantern_sim::omens::{omen_good, omen_name};
 use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
 use lantern_view::Dawn;
@@ -23,8 +24,6 @@ pub(crate) fn register(app: &mut App) {
 /// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
 #[derive(Resource)]
 struct Pending {
-    recorded: Recorded,
-    counts: bool,
     /// 还要等多久（现实秒）
     wait: f32,
 }
@@ -40,32 +39,8 @@ struct SlideIn {
 #[derive(Component)]
 struct SlidePanel;
 
-fn record(
-    mut commands: Commands,
-    content: Res<GameContent>,
-    flow: Res<Flow>,
-    setup: Res<RunSetup>,
-    playback: Option<Res<ReplayPlayback>>,
-    mut profile: ResMut<Profile>,
-    mut news: ResMut<HubNews>,
-) {
-    let c = &content.0;
-    let Some(r) = flow.result.clone() else { return };
-    let counts =
-        playback.is_none() && !matches!(setup.mode, lantern_sim::RunMode::Bench { .. }) && !setup.god;
-    let recorded = if counts {
-        let rec = RunRecord { result: &r, tier: setup.tier, attributes: !setup.attributes.is_empty() };
-        let before = profile.clone();
-        let got = profile.record(c, rec);
-        // 回到灯驿时人物会说起这一局带来的变化
-        *news = HubNews::after_run(c, &before, &profile, &r, &got);
-        if let Err(e) = profile.save() {
-            warn!("保存存档失败：{e}");
-        }
-        got
-    } else {
-        Recorded::default()
-    };
+fn record(mut commands: Commands, flow: Res<Flow>, setup: Res<RunSetup>) {
+    let Some(r) = &flow.result else { return };
     let bench = matches!(setup.mode, lantern_sim::RunMode::Bench { .. });
     let wait = if bench {
         0.0
@@ -74,7 +49,7 @@ fn record(
     } else {
         1.6
     };
-    commands.insert_resource(Pending { recorded, counts, wait });
+    commands.insert_resource(Pending { wait });
 }
 
 fn slide_in(
@@ -112,6 +87,7 @@ fn spawn(
     dawn: Res<Dawn>,
     pending: Option<ResMut<Pending>>,
     profile: Res<Profile>,
+    last: Res<LastRecorded>,
 ) {
     let Some(mut pending) = pending else { return };
     // 天明：等夜色褪完再开始计时
@@ -123,7 +99,7 @@ fn spawn(
         return;
     }
     commands.remove_resource::<Pending>();
-    let (recorded, counts) = (std::mem::take(&mut pending.recorded), pending.counts);
+    let (recorded, counts) = (&last.recorded, last.counts);
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
     let boss_name = c.enemies.iter().find(|e| e.boss.is_some()).map_or("夜主", |e| e.name.as_str());
@@ -169,7 +145,7 @@ fn spawn(
             ))
             .with_children(|p| {
                 results_body(
-                    p, c, &fonts, &db, &skin, &r, &sub, omen, &recorded, counts, &arsenal, &build, &profile,
+                    p, c, &fonts, &db, &skin, &r, &sub, omen, recorded, counts, &arsenal, &build, &profile,
                 )
             });
             root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));

@@ -4,6 +4,7 @@ use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
 use lantern_content::Content;
+use lantern_platform::profile_commands::ProfileCommand;
 use lantern_platform::{Actions, HubNews, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good, omen_name};
 use lantern_sim::{AppState, GameContent, OmenPick, RunSetup};
@@ -66,21 +67,9 @@ pub(crate) fn register(app: &mut App) {
         );
 }
 
-fn enter(
-    mut mode: ResMut<TitleMode>,
-    mut ui: ResMut<TitleUi>,
-    content: Res<GameContent>,
-    mut profile: ResMut<Profile>,
-) {
+fn enter(mut mode: ResMut<TitleMode>, mut ui: ResMut<TitleUi>) {
     *mode = TitleMode::Main;
     *ui = TitleUi { dirty: true, ..default() };
-    // 老存档迁移（要等内容加载好）
-    if profile.upgrade(&content.0) {
-        info!("存档已迁移到第 {} 版", profile.version);
-        if let Err(e) = profile.save() {
-            warn!("保存存档失败：{e}");
-        }
-    }
 }
 
 /// 只用于挑选新一局的种子，不参与模拟。
@@ -96,8 +85,7 @@ fn input(
     actions: Res<Actions>,
     content: Res<GameContent>,
     seed: Res<SeedOverride>,
-    mut profile: ResMut<Profile>,
-    mut news: ResMut<HubNews>,
+    profile: Res<Profile>,
     mut settings: ResMut<Settings>,
     mut window: PrimaryWindowQuery,
     mut mode: ResMut<TitleMode>,
@@ -132,7 +120,7 @@ fn input(
                 Some(0) => {
                     let seed = seed.0.unwrap_or_else(random_seed);
                     if profile.basics {
-                        hub::normalize_last(c, &mut profile);
+                        commands.queue(ProfileCommand::Pick(hub::normalize_last(c, &profile)));
                         *mode = TitleMode::Prep;
                         // 光标默认停在“出发”上
                         ui.selected = hub::prep_rows(c, &profile).len() - 1;
@@ -189,21 +177,18 @@ fn input(
         }
         TitleMode::Scroll { setup, dawn } => {
             if clicked.is_some() || actions.confirm || actions.back {
-                profile.saw_scroll(crate::scroll::REGION, dawn);
-                save(&profile);
+                commands.queue(ProfileCommand::SawScroll { region: crate::scroll::REGION.into(), dawn });
                 commands.insert_resource(*setup);
                 next.set(AppState::Run);
             }
         }
-        TitleMode::Prep => match hub::prep_input(&actions, c, &mut profile, &mut ui, clicked) {
+        TitleMode::Prep => match hub::prep_input(&actions, c, &profile, &mut ui, clicked, &mut commands) {
             hub::PrepAction::Go => {
-                save(&profile);
                 let seed = seed.0.unwrap_or_else(random_seed);
                 *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
                 open(&mut ui);
             }
             hub::PrepAction::Back => {
-                save(&profile);
                 *mode = TitleMode::Main;
                 open(&mut ui);
             }
@@ -214,14 +199,8 @@ fn input(
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, n) {
                 *mode =
                     [TitleMode::Meta, TitleMode::Shop, TitleMode::Achievements, TitleMode::Codex][i].clone();
-                // 进去过就算见过，下次不再说“第一次”那句
-                if let Some(p) = c.hub.get(i)
-                    && profile.met.insert(p.id.clone())
-                {
-                    save(&profile);
-                }
                 open(&mut ui);
-            } else if actions.back || actions.meta {
+            } else if actions.back || (actions.meta && !actions.skip) {
                 *mode = TitleMode::Main;
                 ui.selected = 1;
                 ui.dirty = true;
@@ -230,20 +209,10 @@ fn input(
         TitleMode::Shop => {
             let n = c.attributes.list.len() + 1;
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, hub::SHOP_COLUMNS) {
-                let changed = match c.attributes.list.get(i) {
-                    Some(a) => {
-                        let id = a.id.clone();
-                        profile.buy_attribute(c, &id)
-                    }
-                    None => {
-                        let back = profile.refund_attributes() > 0;
-                        news.refunded |= back;
-                        back
-                    }
-                };
-                if changed {
-                    save(&profile);
-                }
+                commands.queue(match c.attributes.list.get(i) {
+                    Some(a) => ProfileCommand::BuyAttribute(a.id.clone()),
+                    None => ProfileCommand::RefundAttributes,
+                });
                 ui.dirty = true;
             } else if actions.back {
                 back_to_hub(&mut mode, &mut ui, 1);
@@ -281,10 +250,7 @@ fn input(
             let n = c.meta.nodes.len();
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, META_COLUMNS) {
                 let id = c.meta.nodes[i].id.clone();
-                if profile.buy_meta(c, &id) {
-                    news.meta_lit = true;
-                    save(&profile);
-                }
+                commands.queue(ProfileCommand::BuyMeta(id));
                 ui.dirty = true;
             } else if actions.back || actions.meta {
                 back_to_hub(&mut mode, &mut ui, 0);
@@ -313,12 +279,6 @@ fn depart(
             commands.insert_resource(setup);
             next.set(AppState::Run);
         }
-    }
-}
-
-fn save(profile: &Profile) {
-    if let Err(e) = profile.save() {
-        warn!("保存存档失败：{e}");
     }
 }
 
@@ -418,6 +378,9 @@ fn redraw(
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
+    art: Res<crate::hub_fx::ScrollArt>,
+    mut lanterns: ResMut<Assets<crate::hub_fx::HubLanterns>>,
+    mut dawns: ResMut<Assets<crate::hub_fx::DawnReveal>>,
 ) {
     if !ui.dirty {
         return;
@@ -432,7 +395,18 @@ fn redraw(
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
-        TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        TitleMode::Hub => hub::hub_panel(
+            &mut commands,
+            c,
+            &fonts,
+            &skin,
+            &db,
+            &profile,
+            &news,
+            &art,
+            &mut lanterns,
+            &mut dawns,
+        ),
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
@@ -636,7 +610,15 @@ fn meta_panel(
         ))
         .with_children(|panel| {
             panel.spawn(text(&fonts.title, 56.0, INK, "心灯"));
-            panel.spawn(text(&fonts.body, 18.0, on_paper(hex("#FFD98A")), &format!("灯油 {}", profile.oil)));
+            panel.spawn(text(
+                &fonts.body,
+                18.0,
+                on_paper(hex("#FFD98A")),
+                &match profile.next_meta_intro(c) {
+                    Some(n) => format!("灯油 {}　·　初程下一盏：{}　·　也可自由点灯", profile.oil, n.name),
+                    None => format!("灯油 {}　·　点亮的心灯会留在灯驿长卷上", profile.oil),
+                },
+            ));
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
             let mut grid = panel.spawn(Node {
                 width: percent(100),
@@ -736,4 +718,52 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
         });
         p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　← → 调整　Enter 切换　　Esc 返回"));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hub_input_keeps_navigation_and_purchases_live_when_skipping() {
+        let c = Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(GameContent(std::sync::Arc::new(c)))
+            .init_resource::<Actions>()
+            .init_resource::<SeedOverride>()
+            .init_resource::<Profile>()
+            .init_resource::<HubNews>()
+            .init_resource::<Settings>()
+            .init_resource::<TitleUi>()
+            .insert_resource(TitleMode::Hub)
+            .init_resource::<NextState<AppState>>()
+            .add_message::<AppExit>()
+            .add_systems(Update, input);
+        app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut().resource_mut::<Profile>().oil = 200;
+        let step = |app: &mut App, actions| {
+            *app.world_mut().resource_mut::<Actions>() = actions;
+            app.update();
+        };
+        // 西键在平台同时映射 skip / meta，灯驿必须把它留给略过，不能误退回标题。
+        step(&mut app, Actions { skip: true, meta: true, ..default() });
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Hub);
+        assert_eq!(app.world().resource::<TitleUi>().selected, 0);
+        step(&mut app, Actions { nav: IVec2::X, ..default() });
+        assert_eq!(app.world().resource::<TitleUi>().selected, 1);
+        step(&mut app, Actions { confirm: true, ..default() });
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Shop);
+        step(&mut app, Actions { back: true, ..default() });
+        assert_eq!(app.world().resource::<TitleUi>().selected, 1);
+        step(&mut app, Actions { pick: Some(0), ..default() });
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Meta);
+        step(&mut app, Actions { confirm: true, ..default() });
+        assert_eq!(app.world().resource::<Profile>().meta_level("luck"), 1);
+        assert_eq!(app.world().resource::<Profile>().oil, 0);
+        step(&mut app, Actions { back: true, ..default() });
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Hub);
+        step(&mut app, Actions { back: true, ..default() });
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Main);
+    }
 }

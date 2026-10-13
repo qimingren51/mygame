@@ -841,6 +841,12 @@ impl Content {
         let m = &self.meta;
         c.positive("meta.ron", &[("cost_exp", m.cost_exp), ("cost_round", m.cost_round)])?;
         c.unique("meta.ron", "心灯", m.nodes.iter().map(|n| n.id.as_str()))?;
+        let mut intro = std::collections::BTreeSet::new();
+        for (id, lv) in &m.intro {
+            if m.node(id).is_none_or(|n| *lv == 0 || *lv > n.max_level) || !intro.insert((id, lv)) {
+                return c.fail("meta.ron", format!("初程节点 {id} 的等级 {lv} 无效或重复"));
+            }
+        }
         for n in &m.nodes {
             if n.max_level == 0 {
                 return c.fail("meta.ron", format!("心灯 \"{}\" 的 max_level 至少为 1", n.id));
@@ -929,18 +935,43 @@ impl Content {
 
         // ---- hub.ron ----
         c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
+        c.unique(
+            "hub.ron",
+            "首次台词",
+            self.hub.iter().flat_map(|p| &p.lines).filter(|l| !l.once.is_empty()).map(|l| l.once.as_str()),
+        )?;
         for person in &self.hub {
             if !person.lines.iter().any(|l| l.when == crate::HubWhen::Idle) {
                 return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
             }
             for l in &person.lines {
                 let bad = match &l.when {
+                    crate::HubWhen::MetaLevels(n) => {
+                        *n == 0 || *n > self.meta.nodes.iter().map(|n| n.max_level).sum()
+                    }
+                    crate::HubWhen::MetaLevel(id, lv) => {
+                        self.meta.node(id).is_none_or(|n| *lv == 0 || *lv > n.max_level)
+                    }
+                    crate::HubWhen::Runs(n) | crate::HubWhen::Wins(n) => *n == 0,
                     crate::HubWhen::Lamp(id) => self.lamp_index(id).is_none(),
                     crate::HubWhen::Charm(id) => self.charm_index(id).is_none(),
                     crate::HubWhen::Cleared(t) => *t == 0 || *t as usize > self.difficulty.len(),
                     _ => false,
                 };
-                if bad || l.text.is_empty() {
+                let milestone = matches!(
+                    l.when,
+                    crate::HubWhen::MetaLevels(_)
+                        | crate::HubWhen::MetaLevel(..)
+                        | crate::HubWhen::Runs(_)
+                        | crate::HubWhen::Wins(_)
+                );
+                if bad
+                    || l.text.trim().is_empty()
+                    || (milestone && l.once.trim().is_empty())
+                    || (!l.once.is_empty()
+                        && (l.once.trim() != l.once
+                            || matches!(l.when, crate::HubWhen::Idle | crate::HubWhen::First)))
+                {
                     return c.fail(
                         "hub.ron",
                         format!("{} 的台词条件 {:?} 不对，或者台词是空的", person.id, l.when),

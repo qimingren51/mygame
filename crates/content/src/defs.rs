@@ -1076,6 +1076,9 @@ pub struct BuffDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MetaDef {
+    /// 初程建议的节点与目标等级；只提示，不锁住其他选择。
+    #[serde(default)]
+    pub intro: Vec<(String, u32)>,
     /// 第 n 级（从 1 起）的花费 = round(base_cost × exp^(n−1) / round_to) × round_to
     pub cost_exp: f32,
     pub cost_round: f32,
@@ -1268,6 +1271,9 @@ pub struct HubPersonDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HubLineDef {
+    /// 首次回应的稳定标识；空串表示可重复台词，调整排序和文字不改变已听记录。
+    #[serde(default)]
+    pub once: String,
     pub when: HubWhen,
     pub text: String,
 }
@@ -1275,6 +1281,14 @@ pub struct HubLineDef {
 /// 台词的条件。几条同时满足时取排在最后的那条；都不满足时说“平时”的，几句轮着说。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum HubWhen {
+    /// 已点心灯总级数达到门槛
+    MetaLevels(u32),
+    /// 某个心灯节点达到等级
+    MetaLevel(String, u32),
+    /// 累计归来局数
+    Runs(u32),
+    /// 累计天明次数
+    Wins(u32),
     /// 平时
     Idle,
     /// 第一次见到这个人物

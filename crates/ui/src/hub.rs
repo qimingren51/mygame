@@ -6,6 +6,8 @@
 use bevy::prelude::*;
 
 use lantern_content::{Content, Reward};
+use lantern_platform::profile::LastPick;
+use lantern_platform::profile_commands::ProfileCommand;
 use lantern_platform::{Actions, HubNews, Profile};
 use lantern_view::atlas::AtlasDb;
 
@@ -63,7 +65,7 @@ pub(crate) fn prep_rows(c: &Content, profile: &Profile) -> Vec<PrepRow> {
 }
 
 /// 上次的选择里不可用的项退回默认（灯：第一盏初始灯；灯坠、悟：不选）。
-pub(crate) fn normalize_last(c: &Content, profile: &mut Profile) {
+pub(crate) fn normalize_last(c: &Content, profile: &Profile) -> LastPick {
     let tier = profile.tier.max(1);
     let last = &profile.last;
     let lamp = last
@@ -75,11 +77,7 @@ pub(crate) fn normalize_last(c: &Content, profile: &mut Profile) {
     let insight = last.insight.filter(|e| profile.insights(c).contains(e));
     let endless = last.endless && profile.endless_unlocked();
     let tier = last.tier.clamp(1, max_tier(profile, endless).min(tier));
-    profile.last.endless = endless;
-    profile.last.lamp = lamp;
-    profile.last.charm = charm;
-    profile.last.insight = insight;
-    profile.last.tier = tier;
+    LastPick { endless, lamp, charm, insight, tier }
 }
 
 /// 能选到第几更：无尽夜只能选通关过的更。
@@ -104,9 +102,10 @@ pub(crate) enum PrepAction {
 pub(crate) fn prep_input(
     actions: &Actions,
     c: &Content,
-    profile: &mut Profile,
+    profile: &Profile,
     ui: &mut TitleUi,
     clicked: Option<usize>,
+    commands: &mut Commands,
 ) -> PrepAction {
     let rows = prep_rows(c, profile);
     let n = rows.len();
@@ -129,16 +128,17 @@ pub(crate) fn prep_input(
     if dir == 0 {
         return PrepAction::None;
     }
+    let mut last = profile.last.clone();
     match rows[ui.selected] {
         PrepRow::Go if pressed => return PrepAction::Go,
         PrepRow::Go => return PrepAction::None,
         PrepRow::Mode => {
-            profile.last.endless = !profile.last.endless;
-            profile.last.tier = profile.last.tier.min(max_tier(profile, profile.last.endless));
+            last.endless = !last.endless;
+            last.tier = last.tier.min(max_tier(profile, last.endless));
         }
         PrepRow::Tier => {
-            let tiers: Vec<u8> = (1..=max_tier(profile, profile.last.endless)).collect();
-            profile.last.tier = cycle(&tiers, &profile.last.tier, dir);
+            let tiers: Vec<u8> = (1..=max_tier(profile, last.endless)).collect();
+            last.tier = cycle(&tiers, &last.tier, dir);
         }
         PrepRow::Lamp => {
             let lamps: Vec<Option<String>> = c
@@ -147,23 +147,24 @@ pub(crate) fn prep_input(
                 .filter(|l| profile.lamp_unlocked(c, &l.id))
                 .map(|l| Some(l.id.clone()))
                 .collect();
-            profile.last.lamp = cycle(&lamps, &profile.last.lamp, dir);
+            last.lamp = cycle(&lamps, &last.lamp, dir);
         }
         PrepRow::Charm => {
             let mut charms = vec![None];
             charms.extend(profile.charm_pool(c).into_iter().map(Some));
-            profile.last.charm = cycle(&charms, &profile.last.charm, dir);
+            last.charm = cycle(&charms, &last.charm, dir);
         }
         PrepRow::Insight => {
             let mut ins = vec![None];
             ins.extend(profile.insights(c).into_iter().map(Some));
-            profile.last.insight = cycle(&ins, &profile.last.insight, dir);
+            last.insight = cycle(&ins, &last.insight, dir);
         }
         PrepRow::Attribute(k) => {
             let id = c.attributes.list[k].id.clone();
-            profile.toggle_attribute(c, &id);
+            commands.queue(ProfileCommand::ToggleAttribute(id));
         }
     }
+    commands.queue(ProfileCommand::Pick(last));
     ui.dirty = true;
     PrepAction::None
 }
@@ -228,50 +229,93 @@ pub(crate) fn hub_panel(
     db: &AtlasDb,
     profile: &Profile,
     news: &HubNews,
+    art: &crate::hub_fx::ScrollArt,
+    lanterns: &mut Assets<crate::hub_fx::HubLanterns>,
+    dawns: &mut Assets<crate::hub_fx::DawnReveal>,
 ) {
-    frame(
-        commands,
-        fonts,
-        skin,
-        1080.0,
-        "灯驿",
-        &purses(profile),
-        "← → 选择　Enter　进去　　Esc　返回",
-        |panel| {
-            panel
-                .spawn(Node { column_gap: px(22), padding: UiRect::top(px(10)), ..default() })
-                .with_children(|row| {
-                    for (i, (who, what, glyph)) in HUB.iter().enumerate() {
-                        let mut card = row.spawn((
-                            Node {
-                                width: px(210),
-                                min_height: px(250),
-                                flex_direction: FlexDirection::Column,
-                                align_items: AlignItems::Center,
-                                padding: UiRect::axes(px(20), px(24)),
-                                row_gap: px(12),
-                                ..default()
-                            },
-                            skin.image("card_omen"),
-                        ));
-                        card.with_children(|card| {
-                            card.spawn(focus(skin, "card_focus", i, 6.0));
-                            let icon = format!("ui/icon_hub_{i}");
-                            spawn_icon(card, db, fonts, Some(&icon), glyph, INK, 84.0);
-                            card.spawn(text(&fonts.title, 40.0, INK, who));
-                            card.spawn(text(&fonts.body, 16.0, INK_DIM, what));
-                            // 人物这次说的一句（docs/LORE-TEXT.md 第 1 节）
-                            if let Some(line) = profile.hub_line(c, i, news) {
-                                card.spawn(para(fonts, 14.0, INK, &format!("“{line}”"), 170.0));
-                            }
-                            card.spawn(Node { flex_grow: 1.0, ..default() });
-                            card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
-                        });
-                        clickable(&mut card, i);
-                    }
+    commands.spawn(panel()).with_children(|root| {
+        root.spawn(dim_layer());
+        root.spawn((
+            Node {
+                width: percent(94),
+                max_width: px(1200),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::axes(px(28), px(18)),
+                row_gap: px(8),
+                ..default()
+            },
+            skin.image("scroll_body"),
+        ))
+        .with_children(|paper| {
+            paper
+                .spawn(Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|header| {
+                    header.spawn(text(&fonts.title, 42.0, INK, "灯驿"));
+                    header.spawn(text(
+                        &fonts.body,
+                        17.0,
+                        INK_DIM,
+                        &format!(
+                            "心灯 {} 级　·　归来 {} 夜　·　天明 {} 次",
+                            profile.meta_levels(c),
+                            profile.runs,
+                            profile.wins
+                        ),
+                    ));
+                    header.spawn(text(&fonts.body, 17.0, INK, &purses(profile)));
                 });
-        },
-    );
+            crate::hub_fx::spawn(paper, c, profile, art, lanterns, dawns);
+            paper.spawn(Node { width: percent(100), column_gap: px(12), ..default() }).with_children(|row| {
+                for (i, (who, what, glyph)) in HUB.iter().enumerate() {
+                    let mut person = row.spawn(Node {
+                        width: percent(25),
+                        min_height: px(160),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(px(12)),
+                        row_gap: px(6),
+                        ..default()
+                    });
+                    person.with_children(|p| {
+                        p.spawn(focus(skin, "focus_ring", i, 2.0));
+                        p.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() })
+                            .with_children(|heading| {
+                                let icon = format!("ui/icon_hub_{i}");
+                                spawn_icon(heading, db, fonts, Some(&icon), glyph, INK, 38.0);
+                                heading.spawn(text(&fonts.title, 28.0, INK, who));
+                            });
+                        p.spawn(text(&fonts.body, 14.0, INK_DIM, &format!("{}　{what}", i + 1)));
+                        if let Some(line) = profile.hub_line(c, i, news) {
+                            p.spawn((
+                                text(&fonts.body, 17.0, INK, &format!("“{line}”")),
+                                Node { width: percent(100), ..default() },
+                            ));
+                        }
+                    });
+                    clickable(&mut person, i);
+                }
+            });
+        });
+        root.spawn(Node { column_gap: px(28), align_items: AlignItems::Center, ..default() }).with_children(
+            |footer| {
+                footer.spawn(text(
+                    &fonts.body,
+                    17.0,
+                    PAPER,
+                    "← → / 十字键　选择　　Enter / A　交谈　　Esc / B　返回",
+                ));
+                let mut skip = footer.spawn((
+                    Node { padding: UiRect::axes(px(16), px(8)), ..default() },
+                    text(&fonts.body, 17.0, PAPER, "X / 西键　略过亮灯"),
+                ));
+                crate::hub_fx::skip_on_click(&mut skip);
+            },
+        );
+    });
+    commands.queue(ProfileCommand::SawHub);
 }
 
 /// 属性铺：Enter 买一级；最后一项全部退还。

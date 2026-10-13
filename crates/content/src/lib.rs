@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(c.stats.len(), Stat::COUNT);
         assert_eq!(c.stat(Stat::CritMult).base, 2.0);
         let luck = c.meta.node("luck").unwrap();
-        assert_eq!((c.meta.cost(luck, 0), c.meta.cost(luck, 2), c.meta.cost(luck, 4)), (300, 770, 1970));
+        assert_eq!((c.meta.cost(luck, 0), c.meta.cost(luck, 2), c.meta.cost(luck, 4)), (200, 510, 1310));
         let dmg = &c.attributes.list[0];
         assert_eq!((c.attributes.price(dmg, 0, 0), c.attributes.price(dmg, 9, 0)), (60, 600));
         assert_eq!(c.attributes.price(dmg, 1, 10), 145);
@@ -221,6 +221,56 @@ mod tests {
         assert_eq!(el.weapon_points(8, false), 3);
         assert_eq!(el.weapon_points(8, true), 4);
         assert_eq!(el.passive_points(5), 3);
+    }
+
+    #[test]
+    fn hub_milestones_validate_thresholds_references_and_ids() {
+        let original = Content::load(&repo_data_dir()).unwrap();
+        let invalid = [
+            HubWhen::MetaLevels(0),
+            HubWhen::MetaLevels(1000),
+            HubWhen::MetaLevel("missing".into(), 1),
+            HubWhen::MetaLevel("luck".into(), 0),
+            HubWhen::MetaLevel("luck".into(), 6),
+            HubWhen::Runs(0),
+            HubWhen::Wins(0),
+        ];
+        for when in invalid {
+            let mut c = original.clone();
+            c.hub[0].lines.push(HubLineDef { once: "test_bad".into(), when, text: "灯".into() });
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("hub.ron"));
+        }
+        for when in [
+            HubWhen::MetaLevels(1),
+            HubWhen::MetaLevel("luck".into(), 5),
+            HubWhen::Runs(10),
+            HubWhen::Wins(1),
+        ] {
+            let mut c = original.clone();
+            c.hub[0].lines.push(HubLineDef { once: "test_ok".into(), when, text: "灯".into() });
+            c.validate(Path::new("data")).unwrap();
+            c.hub[0].lines.last_mut().unwrap().once.clear();
+            assert!(c.validate(Path::new("data")).is_err(), "里程碑必须有稳定 ID");
+        }
+        let mut c = original;
+        let duplicate = c.hub[0].lines.iter().find(|l| !l.once.is_empty()).unwrap().clone();
+        c.hub[1].lines.push(duplicate);
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("重复"));
+        let old: HubLineDef = ron::from_str("(when: Idle, text: \"灯\")").unwrap();
+        assert!(old.once.is_empty());
+    }
+
+    #[test]
+    fn intro_route_rejects_invalid_levels_and_references() {
+        let original = Content::load(&repo_data_dir()).unwrap();
+        for entry in [("missing", 1), ("luck", 0), ("luck", 6), ("luck", 1)] {
+            let mut c = original.clone();
+            c.meta.intro.push((entry.0.into(), entry.1));
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("meta.ron"));
+        }
+        let mut c = original;
+        c.meta.intro.clear();
+        c.validate(Path::new("data")).unwrap();
     }
 
     #[test]

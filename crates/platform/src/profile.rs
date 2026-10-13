@@ -16,7 +16,7 @@ use lantern_sim::{RunMode, RunResult, RunSetup};
 
 use crate::settings::write_atomic;
 
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 /// 最好成绩。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -95,6 +95,10 @@ pub struct Profile {
     pub last: LastPick,
     /// 灯驿里已经见过的人物（`hub.ron` 的 ID）
     pub met: BTreeSet<String>,
+    /// 长卷已经呈现过的灯火；按来源记录，避免购买顺序变化导致亮错灯。
+    pub hub_lights_seen: BTreeSet<String>,
+    /// 已呈现的首次台词（hub.ron 的 once ID）。
+    pub hub_lines_seen: BTreeSet<String>,
     /// 展开过的开场卷轴：地区 ID；天明版写成“ID_dawn”
     pub scrolls: BTreeSet<String>,
     pub best: Best,
@@ -128,6 +132,8 @@ impl Default for Profile {
             reactions: 0,
             last: LastPick::default(),
             met: BTreeSet::new(),
+            hub_lights_seen: BTreeSet::new(),
+            hub_lines_seen: BTreeSet::new(),
             scrolls: BTreeSet::new(),
             best: Best::default(),
             endless: BTreeMap::new(),
@@ -206,6 +212,9 @@ pub struct Recorded {
     pub achievements: Vec<usize>,
 }
 
+/// 前十局每次归来都添路灯，之后在这些局数扩展归途。
+pub const HUB_RETURN_MILESTONES: [u32; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 50, 100];
+
 /// M2 心灯每级的花费：round(120 × n^1.6 ÷ 10) × 10。
 const M2_COSTS: [u32; 5] = [120, 360, 700, 1100, 1580];
 /// M2 改由属性提供的三系（退还灯油）
@@ -264,6 +273,7 @@ impl Profile {
                 }
             }
         }
+        // 第 2 版没有长卷记忆；默认空集让旧积累在首次打开时统一亮起一次，余额与等级原样保留。
         self.version = SAVE_VERSION;
         true
     }
@@ -272,6 +282,16 @@ impl Profile {
 
     pub fn meta_level(&self, id: &str) -> u32 {
         self.meta.get(id).copied().unwrap_or(0)
+    }
+
+    /// 初程下一盏建议；自由选过的节点自动跳过。
+    pub fn next_meta_intro<'a>(&self, content: &'a Content) -> Option<&'a lantern_content::MetaNodeDef> {
+        content
+            .meta
+            .intro
+            .iter()
+            .find(|(id, lv)| self.meta_level(id) < *lv)
+            .and_then(|(id, _)| content.meta.node(id))
     }
 
     /// 点亮下一级要多少灯油；已经满级时返回 None。
@@ -457,12 +477,50 @@ impl Profile {
         content.attributes.list.iter().all(|a| self.attribute_price(content, &a.id).is_none())
     }
 
+    /// 有效心灯总级数；不认识的旧节点和超出上限的等级不计入长卷。
+    pub fn meta_levels(&self, content: &Content) -> u32 {
+        content.meta.nodes.iter().map(|n| self.meta_level(&n.id).min(n.max_level)).sum()
+    }
+
+    /// 长卷的稳定灯火标识：心灯每级一盏、归途按局数、远山按通关更数。
+    pub fn hub_lights(&self, content: &Content) -> BTreeSet<String> {
+        let mut lights = BTreeSet::new();
+        for n in &content.meta.nodes {
+            for lv in 1..=self.meta_level(&n.id).min(n.max_level) {
+                lights.insert(format!("meta/{}/{lv}", n.id));
+            }
+        }
+        for n in HUB_RETURN_MILESTONES {
+            if self.runs >= n {
+                lights.insert(format!("return/{n}"));
+            }
+        }
+        for t in 1..=self.cleared.min(content.difficulty.len() as u8) {
+            lights.insert(format!("dawn/{t}"));
+        }
+        lights
+    }
+
     /// 灯驿第 who 个人物这次说哪句（docs/LORE-TEXT.md 第 1 节）。第一次见面总说 First；
     /// 其余几条同时满足时取排在最后的那条；都不满足时说“平时”的，按回来的次数轮着说。
     pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
+        self.hub_line_def(content, who, news).map(|l| l.text.as_str())
+    }
+
+    /// 初见优先，其次未听过的里程碑，再到即时回应与闲话；同档取数据中最后一句。
+    pub fn hub_line_def<'a>(
+        &self,
+        content: &'a Content,
+        who: usize,
+        news: &HubNews,
+    ) -> Option<&'a lantern_content::HubLineDef> {
         let person = content.hub.get(who)?;
         let first = !self.met.contains(&person.id);
         let hit = |w: &HubWhen| match w {
+            HubWhen::MetaLevels(n) => self.meta_levels(content) >= *n,
+            HubWhen::MetaLevel(id, lv) => self.meta_level(id) >= *lv,
+            HubWhen::Runs(n) => self.runs >= *n,
+            HubWhen::Wins(n) => self.wins >= *n,
             HubWhen::Idle => false,
             HubWhen::First => first,
             HubWhen::MetaLit => news.meta_lit,
@@ -476,15 +534,35 @@ impl Profile {
             HubWhen::Reaction => news.reaction,
             HubWhen::EndlessBack => news.endless_back,
         };
-        let pick = |only_first: bool| {
-            person.lines.iter().rev().find(|l| hit(&l.when) && (!only_first || l.when == HubWhen::First))
-        };
-        if let Some(l) = pick(true).filter(|_| first).or_else(|| pick(false)) {
-            return Some(&l.text);
+        let lines = &person.lines;
+        if first && let Some(l) = lines.iter().find(|l| l.when == HubWhen::First) {
+            return Some(l);
         }
-        let idle: Vec<&str> =
-            person.lines.iter().filter(|l| l.when == HubWhen::Idle).map(|l| l.text.as_str()).collect();
+        if let Some(l) = lines
+            .iter()
+            .rev()
+            .find(|l| !l.once.is_empty() && !self.hub_lines_seen.contains(&l.once) && hit(&l.when))
+        {
+            return Some(l);
+        }
+        if let Some(l) = lines.iter().rev().find(|l| l.once.is_empty() && hit(&l.when)) {
+            return Some(l);
+        }
+        let idle: Vec<_> = lines.iter().filter(|l| l.when == HubWhen::Idle).collect();
         idle.get(self.runs as usize % idle.len().max(1)).copied()
+    }
+
+    /// 仅确认这次实际显示的台词；被更高优先级盖住的留待下次。
+    pub fn see_hub(&mut self, content: &Content, news: &HubNews) {
+        for who in 0..content.hub.len() {
+            if let Some(l) = self.hub_line_def(content, who, news)
+                && !l.once.is_empty()
+            {
+                self.hub_lines_seen.insert(l.once.clone());
+            }
+            self.met.insert(content.hub[who].id.clone());
+        }
+        self.hub_lights_seen.extend(self.hub_lights(content));
     }
 
     /// 这次出发要不要先展开某个地区的开场卷轴：第一次来展开长夜版（false），拿回烛火以后再来展开一次
@@ -663,9 +741,9 @@ mod tests {
         assert_eq!(p.oil, 1760);
         assert_eq!(p.gold, 50 + 650 + 500);
 
-        // 心灯：祈福第 1 级 300
+        // 心灯：祈福第 1 级 200
         assert!(p.buy_meta(&c, "luck"));
-        assert_eq!((p.meta_level("luck"), p.oil), (1, 1460));
+        assert_eq!((p.meta_level("luck"), p.oil), (1, 1560));
         // 属性：伤害 60，第二次买涨价 2%：生命 40 → 80 × 1.02 ≈ 80
         assert!(p.buy_attribute(&c, "damage"));
         assert_eq!(p.attribute_price(&c, "health"), Some(40));
@@ -713,6 +791,99 @@ mod tests {
         assert_eq!(Profile::load(&dir).oil, 0);
         assert!(dir.join("save.ron.broken").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_ten_runs_have_meaningful_lights_without_victory_rewards() {
+        let c = content();
+        let route = [
+            (1, "luck"),
+            (2, "seal"),
+            (3, "ember"),
+            (4, "wu_fire"),
+            (5, "afterglow"),
+            (6, "wick"),
+            (7, "wu_wood"),
+            (8, "seal"),
+            (10, "slot"),
+        ];
+        let minimum = [1, 2, 3, 4, 5, 6, 7, 8, 8, 9];
+        let balances = [30, 230, 330, 430, 330, 630, 730, 750, 1250, 150];
+        let mut p = Profile::default();
+        for run in 1..=10 {
+            // 灯油来自实际结算入口；不依赖通关、香火加成或成就赠油。
+            let r = result(false, 180.0, 0, if run == 1 { 230 } else { 500 }, 0);
+            p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+            for &(_, id) in route.iter().filter(|(at, _)| *at == run) {
+                assert_eq!(p.next_meta_intro(&c).unwrap().id, id, "界面指引与节奏表一致");
+                assert!(p.buy_meta(&c, id), "第 {run} 局应能点亮 {id}");
+            }
+            assert_eq!(p.meta_levels(&c), minimum[run - 1]);
+            assert_eq!(p.oil, balances[run - 1]);
+        }
+        assert!(p.next_meta_intro(&c).is_none());
+        assert_eq!(p.meta.len(), 8, "九级心灯覆盖八个不同节点");
+        // 即便一直在约三分钟倒下，选廉价新功能也不必连续攒三局。
+        let route = [(1, "luck"), (2, "wick"), (4, "seal"), (5, "ember"), (7, "wu_fire"), (9, "wu_wood")];
+        let mut p = Profile::default();
+        for run in 1..=10 {
+            p.oil += 230;
+            for &(_, id) in route.iter().filter(|(at, _)| *at == run) {
+                assert!(p.buy_meta(&c, id));
+            }
+        }
+        assert_eq!(p.meta_levels(&c), 6);
+    }
+
+    #[test]
+    fn hub_seen_state_survives_v2_migration_and_diffs_by_identity() {
+        let c = content();
+        let old = r#"(version: 2, oil: 321, runs: 3, wins: 1, cleared: 1, meta: {"luck": 2})"#;
+        let mut p: Profile = ron::from_str(old).unwrap();
+        assert!(p.hub_lights_seen.is_empty() && p.hub_lines_seen.is_empty());
+        assert!(p.upgrade(&c));
+        assert_eq!((p.oil, p.meta_level("luck"), p.runs, p.wins), (321, 2, 3, 1));
+        let lit = p.hub_lights(&c);
+        assert_eq!(lit.len(), 6);
+        p.see_hub(&c, &HubNews::default());
+        assert_eq!(p.hub_lights_seen, lit);
+        assert!(!p.upgrade(&c));
+        p.meta.insert("ember".into(), 1);
+        p.runs = 4;
+        assert_eq!(
+            p.hub_lights(&c).difference(&p.hub_lights_seen).cloned().collect::<Vec<_>>(),
+            ["meta/ember/1", "return/4"]
+        );
+        let mut restored: Profile = ron::from_str(&ron::to_string(&p).unwrap()).unwrap();
+        assert_eq!(restored, p);
+        restored.see_hub(&c, &HubNews::default());
+        assert!(restored.hub_lights(&c).is_subset(&restored.hub_lights_seen));
+    }
+
+    #[test]
+    fn hub_milestones_queue_once_and_survive_text_and_order_changes() {
+        let mut c = content();
+        let mut p = Profile { runs: 10, wins: 1, ..Default::default() };
+        p.meta.insert("luck".into(), 1);
+        let news = HubNews { meta_lit: true, ..Default::default() };
+        assert_eq!(p.hub_line_def(&c, 0, &news).unwrap().when, HubWhen::First);
+        p.see_hub(&c, &news);
+        assert!(p.hub_lines_seen.is_empty(), "初见遮住的里程碑不能被确认");
+        assert_eq!(p.hub_line_def(&c, 0, &news).unwrap().once, "smith_first_light");
+        assert_eq!(p.hub_line_def(&c, 2, &news).unwrap().once, "child_ten_returns");
+        p.see_hub(&c, &news);
+        assert_eq!(p.hub_line_def(&c, 2, &news).unwrap().once, "child_three_returns");
+        let saved = ron::to_string(&p).unwrap();
+        let mut p: Profile = ron::from_str(&saved).unwrap();
+        let line = c.hub[0].lines.iter_mut().find(|l| l.once == "smith_first_light").unwrap();
+        line.text = "新稿".into();
+        c.hub[0].lines.reverse();
+        assert_eq!(p.hub_line_def(&c, 0, &news).unwrap().when, HubWhen::MetaLit);
+        p.see_hub(&c, &news);
+        assert!(p.hub_line_def(&c, 2, &news).unwrap().once.is_empty());
+        assert!(!p.hub_lines_seen.contains("peddler_ember"));
+        p.meta.insert("ember".into(), 1);
+        assert_eq!(p.hub_line_def(&c, 1, &news).unwrap().once, "peddler_ember");
     }
 
     /// docs/BALANCE.md 第 10.6 节：M2 存档迁移。
