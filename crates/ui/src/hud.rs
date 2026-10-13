@@ -255,8 +255,32 @@ pub(crate) fn spawn_hud(
                     ),
                 ],
             ),
-            bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
-            (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
+            (
+                crate::hud_fx::UltBar::default(),
+                UiTransform::default(),
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(4),
+                    ..default()
+                },
+                children![
+                    bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
+                    (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
+                    (
+                        crate::hud_fx::UltHint,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: percent(100),
+                            top: px(-4),
+                            width: px(100),
+                            margin: UiRect::left(px(12)),
+                            ..default()
+                        },
+                        text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "灯火未满"),
+                    ),
+                ],
+            ),
         ],
     ));
     // 左下：操作提示

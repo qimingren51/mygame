@@ -253,6 +253,8 @@ pub enum SimEvent {
     },
     UltReady,
     Ult,
+    /// 尝试燃灯时灯火未满，只供界面和音频反馈
+    UltNotReady,
     /// 奇遇出现；kind 是 `events.ron` 里 kinds 的下标
     Encounter {
         kind: u16,

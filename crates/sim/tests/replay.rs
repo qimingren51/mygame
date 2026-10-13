@@ -3,7 +3,7 @@
 mod common;
 
 use bevy_math::{Vec2, ops};
-use lantern_sim::{InputFrame, OmenPick, Replay, RunMode, RunSetup, SimCommand, SimHarness};
+use lantern_sim::{InputFrame, OmenPick, Replay, RunMode, RunSetup, SimCommand, SimEvent, SimHarness};
 
 use common::{bot_step, content};
 
@@ -50,6 +50,26 @@ fn replay_roundtrip_reproduces_the_run() {
     let (replayed, diverged) = play(parsed);
     assert_eq!(diverged, None);
     assert_eq!(replayed, original);
+}
+
+#[test]
+fn uncharged_ult_feedback_is_reproduced_by_replay() {
+    let mut sim = SimHarness::new(content(), 99);
+    sim.record("test");
+    for step in 0..120 {
+        let commands: &[SimCommand] = if step % 20 == 0 { &[SimCommand::Ult] } else { &[] };
+        sim.step(InputFrame::default(), commands);
+    }
+    let events = sim.take_events();
+    assert!(events.contains(&SimEvent::UltNotReady));
+    let replay = Replay::parse(&sim.replay().unwrap().to_ron()).unwrap();
+    let mut played = SimHarness::from_replay(content(), replay);
+    while !played.playback().unwrap().finished {
+        played.step(InputFrame::default(), &[]);
+    }
+    assert_eq!(played.playback().unwrap().diverged_at, None);
+    assert_eq!(played.hashes(), sim.hashes());
+    assert_eq!(played.take_events(), events, "回放也在相同步骤发出未满提示");
 }
 
 #[test]
