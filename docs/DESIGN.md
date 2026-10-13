@@ -438,14 +438,14 @@ assets/data/
 
   | 图集 | 内容 |
   | --- | --- |
-  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
-  | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head` |
-  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow` |
+  | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”） |
+  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
-  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底） |
+  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底）；地区开场卷轴 `scroll_qingqiu.png`（长夜，只有墨色）和 `scroll_qingqiu_dawn.png`（天明，同一幅画上了颜色），见下面“开场卷轴” |
   | `skin/` | 不进 index.json：界面九宫格皮肤，一张图一个文件，清单 `skin.json`（见下面“界面皮肤”） |
   | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
 
@@ -457,7 +457,7 @@ assets/data/
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
   - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。特效、地面、界面帧还可能带素材 meta 里的其他标量字段，例如 `radius_px`（反应区域、扇形的半径）、`angle_deg`、`flat`、`stretch`、`width_px`，界面帧带 `kind`、`id`、`name`。像素单位都是本图集的像素，换算到世界单位除以 `pxPerUnit`。这些字段都是可选的，读取时不认识的字段忽略即可。
-  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼、古灯和货郎担 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`、`windup_frames`、`loop_from`，见下面“妖物动作”）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`（竹魅另有 `muzzle`），石灯笼、古灯和货郎担 `flame`，血祭坛、狐仙祠 `glow`，狐灯 `glow` 和 `glow_0..2`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影、狐火），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
   - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；
@@ -475,10 +475,25 @@ assets/data/
   - 灯光位置照旧用主角的 `lantern` 挂点。铜镜灯的铜镜在灯芯后面当反光镜，背面朝向（N、NE、NW）时灯芯被挡住，`_emit` 帧接近全透明，属正常现象，光源照常放。
   - 倒地动画里灯笼落在地上，灯芯渐暗，三盏灯一致。
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
-- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
-- **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
+- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`weapons/bamboo_spike_trail` 染 `#A8E6B8`；`vfx/mist_*` 染 `#DDD9CF`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
+- **锚点补充**：芦苇、竹子、竹笋 `qq_shoots_*` 的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。`qq_wash_*` 的 meta 有 `max_alpha: 0.3`（整张最浓处的不透明度），`qq_fox_tracks` 已压扁成地面透视（`flat: 0.7`）。
 - **扇形预警**：`weapons/sector` 是 120° 扇形，锚点在扇形顶点（`(0.0625, 0.5)`），开口朝 +X，2 倍下半径 128 像素，按需要的半径缩放、按方向旋转；`sector_fill` 是同形的填充层，蓄力时从顶点向外放大。
 - **平时的动作**：有好几个动作的素材在 `meta.lantern.assets.<素材>.default_anim` 写平时循环的动作名；没写时用 `move`，再没有取名字排在最前的（`AssetMeta::default_anim`）。
+- **妖物动作**（青丘包起）：
+  - `windup_frames: n`：出手动作的第 0 到 n−1 帧是蓄力。预警一开始播这几帧，然后停在第 n−1 帧（最后一个蓄力帧）等预警结束，再从第 n 帧接着播。目前都是 2：赤面狐 `pounce`、青面鬼 `charge`、狐火 `pounce`、竹魅 `shoot`、九尾 `sweep`。
+  - `loop: false`：播一遍停在最后一帧，播完回到平时的动作。上面这些出手动作、九尾 `summon`、讨封狐 `reveal` 都是。没写 `loop` 的动作循环。
+  - `loop_from: n`：播完后从第 n 帧起循环，直到这一招结束。目前只有青面鬼 `charge`（第 0–1 帧蓄力，2–5 帧是冲锋的跑步循环）。
+  - 新妖物的 `eye_color`（妖眼染色，写进 enemies.ron）：狐火 `#F2FFFC`、竹魅 `#9BF5C9`、讨封狐 `#FFD23F`。
+  - **狐火** `fox_wisp`：`float` 8 帧（平时，悬浮）、`pounce` 4 帧（绕圈后扑出）。身体是青白的火，夜里整只发光，不只是眼睛。
+  - **竹魅** `bamboo_wraith`：`idle` 4 帧是藏在竹丛里（面具半露，眼睛暗淡），`move` 6 帧，`shoot` 5 帧（竹枝甩出竹刺）。竹刺从 `muzzle` 挂点出手，挂点每帧都有，只在 `shoot` 有意义。
+  - **讨封狐** `taofeng_fox`：`disguise` 6 帧是斗笠蓑衣的路人（平时的动作，`_emit` 是空的，眼睛不亮），`reveal` 4 帧甩掉蓑衣现形（眼睛亮起），之后用 `move` 6 帧。进照见圈时播 `reveal`。
+  - **九尾**：`sweep` 6 帧是原地转身一圈、尾巴扫过身前（第 3 帧尾巴在 E 方向铺开，配扇形预警）；`summon` 4 帧九条尾尖各亮一团狐火（`_emit`，同狐火弹幕的颜色），召唤或狐火雨时用。幻身没有单独的帧，用 `boss` 的帧画（建议半透明、不画 `_emit`）。
+- **青丘道具**：
+  - `bamboo_clump`（竹丛，可打碎的软障碍）和 `bamboo_clump_broken` 同画布、同锚点，打碎时直接换图；meta 里互相用 `broken_variant` / `intact_variant` 指向对方。2 倍下 320²，比别的道具大。
+  - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 70）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。
+- **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
+- **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15）。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
+- **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。
 - **冲锋预警**：`weapons/charge_line` 是车道，锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − `head_len_px`”再旋转；沿 X 透明度一致，拉多长都不走样，宽 `width_px`（2 倍下 28 像素）。`weapons/charge_line_head` 是箭头，锚点在箭头底边正中，放在车道末端、同样旋转、不拉伸，箭尖离锚点 `head_len_px`（2 倍下 51 像素）。两张都是白色、叠加、可染色，建议染 `#FF4A3A`。
 - **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。

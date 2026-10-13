@@ -11,10 +11,12 @@
 
 输出（直通 alpha 的 RGBA PNG；宣纸是不透明平铺图，存为 RGB）。<A> = style.ASSETS_DIR_NAME（assets / assets@2x）：
   art/out/<A>/vfx/         light glow eyes shadow spark gem_0..2 flame_0..3 ink_0..2 lantern
-                           + M2.5：coin（金币）coin_emit（金币的自发光）+ meta.json
+                           + M2.5：coin（金币）coin_emit（金币的自发光）
+                           + 青丘：mist_0..1（可平铺的迷雾，白色可染色）+ meta.json
   art/out/<A>/ground/      paper wash_0..2 grass_0..3 + 第二批（ground_decor.py）：spring rift rift_glow reed_0..2
                            leaves_0..1 pebbles_0..1 puddle_0 bamboo_0..1
-                           + M2.5：zone_lava zone_lava_glow zone_mud zone_herb zone_herb_glow（五行反应留下的区域）+ meta.json
+                           + M2.5：zone_lava zone_lava_glow zone_mud zone_herb zone_herb_glow（五行反应留下的区域）
+                           + 青丘（ground_decor.py）：qq_bamboo_leaves_0..2 qq_shoots_0..1 qq_moss_0..1 qq_wash_0..1 qq_fox_tracks + meta.json
   art/out/review/（2 倍：review@2x/）  vfx_sheet.png  paper_tile_2x2.png  light_test.png
 
 用法（在仓库根目录下）：
@@ -738,6 +740,52 @@ def make_coin_emit() -> Image.Image:
     return to_rgba8(rgb_s, a)
 
 
+# ============================================================== 迷雾（青丘追加：狐冢的迷雾、平时的夜雾）
+
+MIST_SIZE = 256  # 1 倍像素（2 倍 512²），一张覆盖 128 世界单位
+MIST_TINT = "#DDD9CF"  # 建议染色：月下的纸白（偏中性，不要蓝灰）
+MIST_ALPHAS = (0.2, 0.15)  # 建议的整体不透明度（画在暗层之上）：mist_0 大团、mist_1 碎团
+
+
+def wrap_sample(f: np.ndarray, dx: np.ndarray, dy: np.ndarray) -> np.ndarray:
+    """周期场 f 在 (x + dx, y + dy) 处的双线性采样，越界环绕（扭曲后仍可平铺）。dx、dy 以数组像素计。"""
+    h, w = f.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    x = np.mod(xx + dx, w)
+    y = np.mod(yy + dy, h)
+    x0f, y0f = np.floor(x), np.floor(y)
+    fx, fy = x - x0f, y - y0f
+    x0, y0 = x0f.astype(np.int64) % w, y0f.astype(np.int64) % h
+    x1, y1 = (x0 + 1) % w, (y0 + 1) % h
+    return (f[y0, x0] * (1 - fx) + f[y0, x1] * fx) * (1 - fy) + (f[y1, x0] * (1 - fx) + f[y1, x1] * fx) * fy
+
+
+def make_mist(variant: int) -> Image.Image:
+    """可无缝平铺的水墨雾：白色、可染色、正常混合，画在暗层之上（低不透明度）。全部在周期域里生成（周期噪声 + 环绕采样）。
+    雾是一团团、一片片的（不是一道道横纹）：几层大小不同、几乎各向同性的云絮叠起来，坐标再轻轻扭一下，边缘柔、
+    雾心浓、团与团之间有透亮的空隙；里面再按另一层噪声浓淡起伏（墨晕的层次）。
+    variant 0：大团的雾堤，夹几团小的；variant 1：碎一些的小团、淡一些，和 0 错开叠用。"""
+    size = dpx(MIST_SIZE)
+    sh = (size, size)
+    rng = np.random.default_rng((1510, 1501)[variant])  # 种子挑过：四个象限浓淡均匀，平铺时不显出一团独大
+    # 坐标扭曲：位移按 1 倍像素给，乘 D 落到当前密度（2 倍是同一张画）；位移比雾团小得多，不会扭出褶子
+    wx = 3.5 * D * noise1(rng, sh, 22.0)
+    wy = 3.5 * D * noise1(rng, sh, 22.0)
+    if variant == 0:
+        scales, weights, lo, hi = ((20.0, 16.0), (11.0, 9.0), (5.5, 4.5)), (0.6, 0.33, 0.12), -0.6, 1.35
+    else:
+        scales, weights, lo, hi = ((16.0, 13.0), (8.0, 7.0), (4.0, 3.5)), (0.6, 0.32, 0.1), -0.45, 1.6
+    f = sum(w * noise1(rng, sh, sg) for sg, w in zip(scales, weights))
+    f = wrap_sample(f / f.std(), wx, wy)
+    body = smoothstep(lo, hi, f)  # 雾团：边柔，团与团之间透亮
+    inner = noise1(rng, sh, (9.0, 8.0))  # 雾里的浓淡（另一层，和团的形状无关）
+    a = body ** 1.3 * (0.72 + 0.28 * smoothstep(-1.4, 1.4, inner))
+    a = fft_blur(a, sig(1.8), wrap=True)  # 雾边再化开一点（周期模糊，仍可平铺）
+    a = a * (1.0 + 0.02 * noise1(rng, sh, 1.5))  # 很轻的颗粒
+    a = np.clip(a / np.percentile(a, 99.8), 0, 1)
+    return to_rgba8(WHITE, a)
+
+
 # ============================================================== 地面：宣纸
 
 
@@ -1121,6 +1169,15 @@ def main() -> dict:
                                              "note": "金币：地上的方孔金钱（稍俯看），钱面宽约 11 世界单位，锚点在钱心；方孔透明；不带影子，可另叠 vfx/shadow"})
     vfx["coin_emit"] = (make_coin_emit(), (0.5, 0.5), {"color": "full", "blend": "add", "tint": False, "kind": "pickup",
                                                        "note": "金币的自发光：与 coin 同尺寸同锚点、叠加画在暗层之上（钱面微光、一圈金晕、左上闪光），夜里也看得见"})
+    # ---- 青丘追加（只往后加）：迷雾，四边无缝可平铺
+    for i, kind in enumerate(("大团的雾堤", "碎一些的小团")):
+        vfx[f"mist_{i}"] = (make_mist(i), (0.5, 0.5), {
+            # 不写 tile 键（pack_atlas 会跳过 tile: true 的文件）；tileable + tile_units 告诉游戏可以首尾相接地铺
+            "color": "white", "blend": "normal", "tint": True, "tileable": True, "tile_units": int(round(dpx(MIST_SIZE) / S.PX_PER_UNIT)),
+            "alpha_hint": MIST_ALPHAS[i], "kind": "fx", "region": "qingqiu",
+            "note": f"迷雾（{kind}）：狐冢整夜的迷雾、平时的夜雾。四边无缝，可首尾相接铺成大片、缓慢平移，mist_0 与 mist_1 错开叠用；"
+                    f"白色，画在暗层之上、正常混合，建议染 {MIST_TINT}、整体 alpha 约 {MIST_ALPHAS[i]}。"
+                    "打进图集后贴边那一圈纹素会采到邻居，平铺时 UV 往里收半个纹素（或相邻两张重叠 1 纹素）"})
 
     ground: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
     paper = make_paper()
@@ -1161,6 +1218,8 @@ def main() -> dict:
         "gem_0": col(S.SOUL_LIGHT),
         "gem_1": col(S.SOUL_LIGHT),
         "gem_2": col(S.SOUL_LIGHT),
+        "mist_0": col(MIST_TINT),
+        "mist_1": col(MIST_TINT),
     }
     entries = []
     order = [k for k in vfx if k != "light"] + [k for k in ground if k.startswith("grass")] + ["light"]

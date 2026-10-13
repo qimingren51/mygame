@@ -15,7 +15,8 @@
 输出：
   art/out/<A>/weapons/      sword sword_evo sword_trail crane_0..3 crane_evo_0..3 ring ring_ink seal seal_evo
                             seal_mark crack warn taiji blast shield chest soulbell lotus foxfire_0..2
-                            + M2.5：sector sector_fill（扇形预警）charge_line charge_line_head（冲锋预警）+ meta.json
+                            + M2.5：sector sector_fill（扇形预警）charge_line charge_line_head（冲锋预警）
+                            + 青丘：bamboo_spike bamboo_spike_trail（竹魅的竹刺与尾光）+ meta.json
                             （<A> = style.ASSETS_DIR_NAME：assets / assets@2x）
   art/out/review/（2 倍：review@2x/）  weapons_sheet.png（纸色底 / 夜色底）  weapons_ingame.png（游戏比例的模拟场景）
 
@@ -1410,6 +1411,121 @@ def make_charge_line_head() -> Image.Image:
     return white_image(a, ss)
 
 
+# ============================================================== 竹刺（青丘追加：竹魅放的弹）
+#
+# 一截削尖的竹竿：后端平切（露出竹腔），中间一个竹节，前段斜着削成尖，削面露出浅色的竹肉和竹腔；
+# 竹节上抽出一枝小叶，被风压向后面。朝 +X 飞，墨线勾边、带颜色（不染色）。长 56 像素（1 倍）= 28 世界单位。
+# 锚点在竹刺正中（与 foxfire 同一约定），竹刺尾光 bamboo_spike_trail 的右端也放在这里（藏在竹竿后半截下面）。
+
+SPIKE_W, SPIKE_H = 64, 22  # 画布（1 倍像素；2 倍 128×44）
+SPIKE_LEN = 56.0  # 竹刺长（1 倍像素）
+SPIKE_ANCHOR = (0.5, 0.5)
+SPIKE_BACK = SPIKE_ANCHOR[0] * SPIKE_W - SPIKE_LEN / 2.0  # 后端 x：锚点在竹刺正中
+SPIKE_TIP = SPIKE_BACK + SPIKE_LEN
+SPIKE_R = 2.3  # 竹竿半径（1 倍像素）
+SPIKE_TRAIL_TINT = "#A8E6B8"
+
+
+def make_bamboo_spike() -> Image.Image:
+    """竹刺：削尖的竹竿（见上面的说明）。"""
+    P = Painter(SPIKE_W, SPIKE_H, 2600, ss=8)
+    rng = P.rng
+    cy = SPIKE_H / 2.0
+    xb, xt, r = SPIKE_BACK, SPIKE_TIP, SPIKE_R
+    xn = xb + 0.40 * SPIKE_LEN  # 竹节
+    xc = xt - 0.40 * SPIKE_LEN  # 斜削的起点
+    # ---- 竹叶（先画，压在竹竿后面）：节上一根小枝向后上方伸，枝头两片叶子被风压向后
+    twig_end = np.array([xn - 3.2, cy - r - 2.6])
+    P.line(seg_pts((xn - 0.3, cy - r + 0.4), (xn - 1.6, cy - r - 1.4), tuple(twig_end), n=20), 0.3, mixc(SHILV, JIAO, 0.6))
+    leaf_rgb = (mixc(SHILV, JIAO, 0.42), mixc(SHILV, NONG, 0.3))
+    for (dx, dy, L, wmax, rgb) in ((-13.5, -4.2, 13.5, 1.25, leaf_rgb[0]), (-9.0, 1.2, 9.5, 0.95, leaf_rgb[1])):
+        tip = twig_end + np.array([dx, dy])
+        mid = (twig_end + tip) / 2 + np.array([0.0, -1.1 if dy < 0 else -0.6])
+        pts = V.bezier([twig_end, mid, tip], 50)
+        prof = np.interp(np.linspace(0, 1, 50), [0, 0.12, 0.35, 1.0], [0.25, 0.8, 1.0, 0.04])
+        P.line(pts, wmax * prof, rgb, 0.96, dry=0.2, dry_start=0.7)
+    # ---- 竹竿外形：后端平切、竹节处略鼓、前段斜削成尖（上沿斜下去，下沿直到尖前才收）
+    xs = np.linspace(xb, xt, 160)
+    node_bulge = 0.16 * r * np.exp(-(((xs - xn) / 0.9) ** 2))
+    tip_y = 0.3 * r  # 尖在中线略下（削面朝上、朝镜头）
+    xk = xt - 0.3 * (xt - xc)  # 下沿从这里开始收向尖
+    top = np.where(xs < xc, -r - node_bulge, -r + (xs - xc) / (xt - xc) * (r + tip_y))
+    bot = np.where(xs < xk, r + node_bulge, r - (1.0 - np.cos(0.5 * np.pi * (xs - xk) / (xt - xk))) * (r - tip_y))
+    top = np.minimum(top, bot - 0.02)
+    sil = np.vstack([np.stack([xs, cy + top], -1), np.stack([xs[::-1], cy + bot[::-1]], -1)])
+    d, t = P.sdf(sil, pad=3.0)
+    # 竹皮：石绿兑墨，上亮下暗；顺着竹竿的干笔细纹
+    yrel = (P.Y - cy) / r
+    hi, mid_c, lo = mixc(SHILV, PAPER, 0.25), mixc(SHILV, NONG, 0.35), mixc(SHILV, JIAO, 0.62)
+    rgb = mixc(mixc(hi, mid_c, smoothstep(-0.95, -0.15, yrel)), lo, smoothstep(0.0, 0.95, yrel))
+    streak = V.noise1(rng, P.X.shape, (5.0 * P.ss, 0.35 * P.ss))
+    rgb = mixc(rgb, mixc(rgb, JIAO, 0.35), 0.35 * smoothstep(0.6, 1.8, streak))
+    rgb = mixc(rgb, mixc(rgb, PAPER, 0.4), 0.3 * smoothstep(0.8, 2.0, -streak))
+    # 后段（竹节后）略带一点赭黄（老竹的颜色）
+    rgb = mixc(rgb, mixc(rgb, W_ZHESHI, 0.4), smoothstep(xn - 2.0, xb + 2.0, P.X) * 0.6)
+    P.fill(d, rgb, pool=0.35, pool_rgb=mixc(SHILV, JIAO, 0.7), pool_w=0.45)
+    body = P.cover(d)
+    # ---- 削面：斜削露出的竹肉（浅黄白，近边一线竹青）和竹腔（暗）
+    fx = np.linspace(xc, xt, 60)
+    u = (fx - xc) / (xt - xc)
+    face_top = cy - r + u * (r + tip_y)
+    face_bot = cy - r + (1.45 * r) * np.sin(np.pi * u ** 0.7) ** 0.8 * (1.0 - 0.25 * u) + u * (r + tip_y)
+    face_bot = np.minimum(face_bot, cy + r - 0.35)
+    face = np.vstack([np.stack([fx, face_top - 0.05], -1), np.stack([fx[::-1], face_bot[::-1]], -1)])
+    df, tf = P.sdf(face, pad=2.0)
+    flesh = mixc(mixc(PAPER, W_TENG, 0.35), WHITE, 0.15)
+    P.fill(df, mixc(flesh, mixc(W_TENG, W_ZHESHI, 0.5), smoothstep(xc, xt, P.X) * 0.5), clip=body)
+    cav = ellipse_pts(xc + 0.3 * (xt - xc), cy - 0.05 * r, 0.2 * (xt - xc), 0.36 * r, 40)
+    dc, tc = P.sdf(cav, pad=2.0)
+    P.fill(dc, mixc(NONG, ZHESHI, 0.25), pool=0.5, pool_rgb=JIAO, pool_w=0.4, clip=body)
+    for k in range(3):  # 竹肉的纤维
+        P.line(seg_pts((xc + 0.55 * (xt - xc) + 1.2 * k, cy - 0.2 * r + 0.3 * k * r), (xt - 1.5, cy + 0.2 * r + 0.05 * k), n=20), 0.12, mixc(W_ZHESHI, ZHESHI, 0.4), 0.55, clip=P.cover(df))
+    P.outline(df, tf, 0.32, mixc(SHILV, JIAO, 0.5), jitter=0.15, clip=body)
+    # ---- 后端平切：一圈竹壁，中间竹腔
+    end = ellipse_pts(xb + 0.55, cy, 0.75, r * 0.98, 40)
+    de, te = P.sdf(end, pad=2.0)
+    P.fill(de, mixc(flesh, mixc(W_TENG, W_ZHESHI, 0.5), 0.4), clip=body)
+    P.dot(xb + 0.6, cy + 0.1, 0.42, mixc(NONG, ZHESHI, 0.2), 0.95, ry=r * 0.6, clip=body)
+    # ---- 竹节：两道环（箨环焦墨、秆环淡），节上一点白粉
+    for dxn, w_, c_, a_ in ((-0.35, 0.36, JIAO, 0.95), (0.55, 0.2, mixc(SHILV, NONG, 0.5), 0.8)):
+        P.line(V.bezier([(xn + dxn - 0.15, cy - r - 0.25), (xn + dxn + 0.35, cy), (xn + dxn - 0.1, cy + r + 0.25)], 20), w_, c_, a_, clip=body)
+    P.line(seg_pts((xn + 1.0, cy - 0.7 * r), (xn + 1.2, cy + 0.4 * r), n=10), 0.22, mixc(PAPER, WHITE, 0.4), 0.45, clip=body)
+    # 高光：竹竿上沿一道
+    P.line(seg_pts((xb + 2.0, cy - 0.55 * r), (xn - 1.2, cy - 0.58 * r), n=20), 0.2 * brush_profile(20, 0.5, 0.4), mixc(PAPER, WHITE, 0.5), 0.6, clip=body)
+    P.line(seg_pts((xn + 1.8, cy - 0.55 * r), (xc - 0.5, cy - 0.6 * r), n=20), 0.2 * brush_profile(20, 0.5, 0.4), mixc(PAPER, WHITE, 0.5), 0.6, clip=body)
+    # ---- 外轮廓：焦墨，尖头收得重一点
+    P.outline(d, t, 0.55, mixc(JIAO, NONG, 0.2), jitter=0.2, dry=0.1)
+    P.line(seg_pts((xt - 6.0, cy + 0.85 * r), (xt - 0.2, cy + tip_y), n=20), 0.3 * np.linspace(1.0, 0.4, 20), JIAO, 0.9)
+    return P.image()
+
+
+def make_spike_trail() -> Image.Image:
+    """竹刺尾光：比剑尾光细，右端（锚点）亮，向左收成一线；中间一道芯、两侧几缕更细的丝（像劈开的竹丝）。
+    白色，染淡绿后叠加。"""
+    W_, H_, ss = 56, 8, 8
+    X, Y = V.grid1(H_, W_, ss)
+    rng = np.random.default_rng(2610)
+    x_head = 53.8
+    u = np.clip(X / x_head, 0, 1)
+    cy = H_ / 2.0
+    hw = 2.1 * u ** 1.5 + 0.12
+    v = (Y - cy) / hw
+    head = np.hypot((X - x_head) / 1.6, (Y - cy) / 2.2)
+    shape = np.where(X <= x_head, smoothstep(1.0, 0.5, np.abs(v)), smoothstep(1.0, 0.55, head))
+    core = np.exp(-((v / 0.35) ** 2)) * (X <= x_head) + np.exp(-((head / 0.35) ** 2)) * (X > x_head)
+    tex = V.bristle_texture(rng, ns=12, nt=256)
+    b = V.sample_tex(tex, np.clip(v, -1, 1), u)
+    dry = 0.8 * (1 - u) ** 1.4
+    streak = smoothstep(dry - 0.12, dry + 0.12, b) * (0.65 + 0.35 * b)
+    a = shape * (0.2 + 0.8 * u ** 1.2) * (0.5 * streak + 0.5 * core)
+    # 两侧的细丝：比主体长一点、更淡，各自起伏
+    for sgn, ph in ((-1.0, 0.0), (1.0, 2.1)):
+        yl = cy + sgn * (1.25 + 0.35 * np.sin(X / 9.0 + ph)) * (0.4 + 0.6 * u)
+        a = np.maximum(a, 0.45 * u ** 1.6 * np.exp(-(((Y - yl) / 0.3) ** 2)) * smoothstep(0.1, 0.5, u) * (X <= x_head))
+    a = np.clip(a + 0.3 * core * u ** 2, 0, 1)
+    return white_image(a, ss)
+
+
 # ============================================================== 汇总
 
 WHITE_ADD = {"color": "white", "blend": "add", "tint": True}
@@ -1455,6 +1571,11 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
                                                                  "沿 X 透明度一致（只有起点淡入），拉多长都不走样；末端接 charge_line_head；建议染红 #FF4A3A"})
     out["charge_line_head"] = (make_charge_line_head(), (HEAD_BASE / HEAD_W, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "width_px": V.dpx(2 * CHARGE_HW), "head_len_px": head_len,
                                                                                     "note": "冲锋预警的箭头：锚点在箭头底边正中，放在车道末端、同样旋转，不拉伸；箭尖比锚点远 head_len_px"})
+    # ---- 青丘追加（只往后加）：竹魅的竹刺
+    out["bamboo_spike"] = (make_bamboo_spike(), SPIKE_ANCHOR, {**full, "kind": "fx", "points": "+x", "length_units": int(SPIKE_LEN / 2), "region": "qingqiu",
+                                                               "note": f"竹魅的竹刺：削尖的竹竿，尖朝 +X；长 {int(SPIKE_LEN / 2)} 世界单位，锚点在竹刺正中（同 foxfire）"})
+    out["bamboo_spike_trail"] = (make_spike_trail(), (1.0, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "region": "qingqiu",
+                                                                  "note": f"竹刺尾光：锚点在右端（同 sword_trail），放在竹刺的锚点（竹刺正中）上、画在竹刺后面，向左拖尾；建议染 {SPIKE_TRAIL_TINT}"})
     return out
 
 
@@ -1473,6 +1594,7 @@ TINTS = {
     "sector_fill": "#FF4A3A",
     "charge_line": "#FF4A3A",
     "charge_line_head": "#FF4A3A",
+    "bamboo_spike_trail": SPIKE_TRAIL_TINT,
 }
 
 
