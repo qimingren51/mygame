@@ -5,9 +5,11 @@ use bevy::prelude::*;
 
 use lantern_content::{Element, Rank};
 use lantern_core::step::TICK_HZ;
+use lantern_platform::InputDevice;
 use lantern_sim::encounters::Encounters;
 use lantern_sim::{
-    AppState, Arsenal, Build, Director, Enemies, GameContent, Health, Player, Progress, RunSetup, Tick,
+    AppState, Arsenal, Build, Director, Enemies, GameContent, Health, Player, Progress, RunMode, RunSetup,
+    RunState, SimPhase, Tick,
 };
 use lantern_view::atlas::AtlasDb;
 
@@ -64,6 +66,28 @@ pub(crate) struct ComboLabel;
 #[derive(Component)]
 pub(crate) struct BuffLabel;
 
+#[derive(Component)]
+pub(crate) struct ControlHints;
+
+#[derive(Component)]
+pub(crate) struct HudFooter;
+
+pub(crate) const FOOTER_BOTTOM: f32 = 14.0;
+
+fn control_hints(device: InputDevice) -> &'static str {
+    match device {
+        InputDevice::Keyboard => "WASD　移动　　空格　闪避　　E　燃灯　　Esc　暂停",
+        InputDevice::Gamepad => "左摇杆　移动　　A　闪避　　Y　燃灯　　Start　暂停",
+    }
+}
+
+fn ult_hint(device: InputDevice) -> &'static str {
+    match device {
+        InputDevice::Keyboard => "燃灯　E",
+        InputDevice::Gamepad => "燃灯　Y",
+    }
+}
+
 const BAR_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
 
@@ -119,18 +143,18 @@ pub(crate) fn spawn_hud(
             skin.image("bar_fill_xp")
         )],
     ));
-    // 左上：用时、击杀、种子、夜签
+    // 左上：用时、击杀、夜签；种子号收进性能面板。
     let omen = setup
         .omen
         .as_ref()
-        .map_or(String::new(), |o| format!("　夜签 · {}", lantern_sim::omens::omen_name(c, o)));
+        .map_or(String::new(), |o| format!("夜签 · {}", lantern_sim::omens::omen_name(c, o)));
     commands.spawn((
         run.clone(),
         Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
         children![
             (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
             (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
-            text(&fonts.body, 14.0, DIM, &format!("种子 {}{omen}", setup.seed)),
+            text(&fonts.body, 14.0, DIM, &omen),
             (BuffLabel, text(&fonts.body, 16.0, GOLD, "")),
         ],
     ));
@@ -196,14 +220,16 @@ pub(crate) fn spawn_hud(
         abs(None, Some(28.0), Some(260.0), None),
         children![(ComboLabel, text(&fonts.title, 36.0, GOLD, ""))],
     ));
-    // 底部中间：生命、护盾、燃灯
+    // 底部共用纵向布局：提示换行时向上让位，不与生命、燃灯相互覆盖。
     commands.spawn((
-        run.clone(),
+        run,
+        HudFooter,
         Node {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             row_gap: px(4),
-            ..abs(Some(0.0), Some(0.0), None, Some(40.0))
+            padding: UiRect::horizontal(px(20)),
+            ..abs(Some(0.0), Some(0.0), None, Some(FOOTER_BOTTOM))
         },
         children![
             (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
@@ -257,19 +283,39 @@ pub(crate) fn spawn_hud(
             ),
             bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
             (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
+            (
+                ControlHints,
+                Node {
+                    display: Display::None,
+                    max_width: percent(100),
+                    margin: UiRect::top(px(10)),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                text(&fonts.body, 16.0, DIM, ""),
+            ),
         ],
     ));
-    // 左下：操作提示
-    commands.spawn((
-        run,
-        abs(Some(20.0), None, None, Some(14.0)),
-        children![text(
-            &fonts.body,
-            16.0,
-            DIM,
-            "WASD / 方向键 / 左摇杆　移动　　空格 / 手柄 A　闪避　　E / 手柄 Y　燃灯　　Esc　暂停　　F3　性能"
-        )],
-    ));
+}
+
+/// 结算的底部收益区不再透出战斗按键；模拟结束的当帧就收起，无须等状态切换。
+pub(crate) fn update_control_hints(
+    device: Res<InputDevice>,
+    state: Res<State<RunState>>,
+    phase: Res<SimPhase>,
+    setup: Res<RunSetup>,
+    mut hints: Query<(&mut Text, &mut Node), With<ControlHints>>,
+) {
+    let visible = *state.get() == RunState::Playing
+        && *phase == SimPhase::Play
+        && !matches!(setup.mode, RunMode::Bench { .. });
+    for (mut text, mut node) in &mut hints {
+        let display = if visible { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        text.set_if_neq(Text::new(control_hints(*device)));
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -285,6 +331,7 @@ pub(crate) struct HudState<'w> {
 
 pub(crate) fn update_hud(
     s: HudState,
+    device: Res<InputDevice>,
     player: Query<(&Health, &Player)>,
     mut texts: ParamSet<(
         Query<&mut Text, With<Clock>>,
@@ -359,7 +406,7 @@ pub(crate) fn update_hud(
         set(
             &mut t,
             if ready {
-                "燃灯　E / 手柄 Y".into()
+                ult_hint(*device).into()
             } else {
                 format!("燃灯 {}%", (progress.ult * 100.0) as u32)
             },
@@ -508,4 +555,49 @@ pub(crate) fn update_slots(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    #[test]
+    fn hints_follow_device_and_leave_results_clear() {
+        let mut app = App::new();
+        app.init_resource::<InputDevice>()
+            .insert_resource(State::new(RunState::Playing))
+            .insert_resource(SimPhase::Play)
+            .insert_resource(RunSetup::new(1, RunMode::Normal))
+            .add_systems(Update, update_control_hints);
+        let hints = app.world_mut().spawn((ControlHints, Text::new(""), Node::default())).id();
+        app.update();
+        assert!(app.world().get::<Text>(hints).unwrap().0.contains("WASD"));
+        assert!(!app.world().get::<Text>(hints).unwrap().0.contains("Start"));
+        assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::Flex);
+        app.insert_resource(InputDevice::Gamepad);
+        app.update();
+        assert!(app.world().get::<Text>(hints).unwrap().0.contains("左摇杆"));
+        assert!(!app.world().get::<Text>(hints).unwrap().0.contains("Esc"));
+
+        // 模拟先结束、界面状态下一帧才切换；这一帧也不能残留提示。
+        app.insert_resource(SimPhase::Over);
+        app.update();
+        assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::None);
+        for state in [RunState::Over, RunState::Paused] {
+            app.insert_resource(SimPhase::Play);
+            app.insert_resource(State::new(state));
+            app.update();
+            assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::None);
+        }
+        app.insert_resource(State::new(RunState::Playing));
+        app.insert_resource(SimPhase::LevelUp);
+        app.update();
+        assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::None);
+        app.insert_resource(SimPhase::Play);
+        app.update();
+        assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::Flex);
+        app.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: 250 }));
+        app.update();
+        assert_eq!(app.world().get::<Node>(hints).unwrap().display, Display::None);
+    }
 }

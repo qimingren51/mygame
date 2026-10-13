@@ -9,12 +9,14 @@ use bevy::window::{CursorMoved, MonitorSelection, PrimaryWindow, WindowMode};
 
 use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands, SimPhase};
 
+mod input_device;
 pub mod paths;
 pub mod profile;
 pub mod replays;
 mod rumble;
 pub mod settings;
 
+pub use input_device::InputDevice;
 pub use profile::{HubNews, Profile};
 pub use settings::Settings;
 
@@ -28,8 +30,6 @@ pub struct Actions {
     pub pause: bool,
     pub quit_to_title: bool,
     pub toggle_fullscreen: bool,
-    /// 标题界面：开始跑分
-    pub bench: bool,
     /// 显示 / 隐藏性能面板
     pub toggle_perf: bool,
     /// 燃灯
@@ -58,11 +58,22 @@ pub struct PlatformPlugin {
     pub settings: Settings,
 }
 
+/// 界面遮罩可在汇总操作后、提交模拟输入前拦截操作。
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputSet {
+    Gather,
+    Feed,
+}
+
 impl Plugin for PlatformPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.settings.clone())
             .init_resource::<Actions>()
-            .add_systems(PreUpdate, (gather_actions, feed_sim).chain().after(InputSystems))
+            .init_resource::<InputDevice>()
+            .configure_sets(PreUpdate, (InputSet::Gather, InputSet::Feed).chain().after(InputSystems))
+            .add_systems(PreUpdate, gather_actions.in_set(InputSet::Gather))
+            .add_systems(PreUpdate, input_device::track.in_set(InputSet::Gather))
+            .add_systems(PreUpdate, feed_sim.in_set(InputSet::Feed))
             .add_systems(Update, toggle_fullscreen);
         replays::register(app);
         rumble::register(app);
@@ -98,7 +109,6 @@ fn gather_actions(
         quit_to_title: keys.just_pressed(KeyCode::KeyQ),
         toggle_fullscreen: keys.just_pressed(KeyCode::F11)
             || (keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::Enter)),
-        bench: keys.just_pressed(KeyCode::KeyB),
         toggle_perf: keys.just_pressed(KeyCode::F3),
         ult: keys.any_just_pressed([KeyCode::KeyE, KeyCode::KeyF]),
         reroll: keys.just_pressed(KeyCode::KeyR),

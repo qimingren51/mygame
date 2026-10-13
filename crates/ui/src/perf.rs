@@ -5,8 +5,8 @@
 use std::time::Instant;
 
 use bevy::prelude::*;
-use lantern_platform::Actions;
-use lantern_sim::{Enemies, Gems, RunState, SimSet};
+use lantern_platform::{Actions, Settings};
+use lantern_sim::{Enemies, Gems, RunSetup, RunState, SimSet};
 use lantern_view::ViewStats;
 
 use crate::{Fonts, PAPER, text};
@@ -75,6 +75,8 @@ fn spawn_panel(mut commands: Commands, fonts: Res<Fonts>) {
 fn update_panel(
     time: Res<Time<Real>>,
     actions: Res<Actions>,
+    settings: Res<Settings>,
+    setup: Option<Res<RunSetup>>,
     timing: Res<SimTiming>,
     view: Res<ViewStats>,
     en: Option<Res<Enemies>>,
@@ -83,10 +85,12 @@ fn update_panel(
     mut q: Query<(&mut Text, &mut Visibility), With<PerfText>>,
 ) {
     let Ok((mut text, mut vis)) = q.single_mut() else { return };
-    if actions.toggle_perf {
+    if !settings.debug_tools_enabled() {
+        w.visible = false;
+    } else if actions.toggle_perf {
         w.visible = !w.visible;
-        *vis = if w.visible { Visibility::Inherited } else { Visibility::Hidden };
     }
+    vis.set_if_neq(if w.visible { Visibility::Inherited } else { Visibility::Hidden });
     let ms = time.delta_secs() * 1e3;
     w.t += time.delta_secs();
     w.frames += 1;
@@ -119,6 +123,9 @@ fn update_panel(
         view.glows,
         view.particles,
     );
+    if let Some(setup) = setup {
+        text.0.push_str(&format!("\n种子 {}", setup.seed));
+    }
     w.sim_ms = timing.total_ms;
     w.sim_steps = timing.steps;
     w.view_ms = view.total_ms;
@@ -127,4 +134,46 @@ fn update_panel(
     w.frames = 0;
     w.sum_ms = 0.0;
     w.max_ms = 0.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_starts_hidden_and_requires_opt_in_or_dev_build() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<Actions>()
+            .init_resource::<Settings>()
+            .init_resource::<SimTiming>()
+            .init_resource::<ViewStats>()
+            .init_resource::<PerfWindow>()
+            .add_systems(Update, update_panel);
+        let panel = app.world_mut().spawn((PerfText, Text::new(""), Visibility::Hidden)).id();
+        app.update();
+        assert_eq!(app.world().get::<Visibility>(panel), Some(&Visibility::Hidden));
+
+        app.world_mut().resource_mut::<Actions>().toggle_perf = true;
+        app.update();
+        let enabled = app.world().resource::<Settings>().debug_tools_enabled();
+        assert_eq!(app.world().resource::<PerfWindow>().visible, enabled);
+
+        app.world_mut().resource_mut::<Actions>().toggle_perf = false;
+        app.world_mut().resource_mut::<Settings>().debug_tools = true;
+        app.world_mut().resource_mut::<PerfWindow>().visible = false;
+        app.update();
+        assert_eq!(app.world().get::<Visibility>(panel), Some(&Visibility::Hidden));
+        app.world_mut().resource_mut::<Actions>().toggle_perf = true;
+        app.update();
+        assert_eq!(app.world().get::<Visibility>(panel), Some(&Visibility::Inherited));
+        app.update();
+        assert_eq!(app.world().get::<Visibility>(panel), Some(&Visibility::Hidden));
+
+        app.world_mut().resource_mut::<Actions>().toggle_perf = false;
+        app.world_mut().resource_mut::<Settings>().debug_tools = false;
+        app.world_mut().resource_mut::<PerfWindow>().visible = true;
+        app.update();
+        assert_eq!(app.world().resource::<PerfWindow>().visible, enabled);
+    }
 }

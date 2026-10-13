@@ -18,10 +18,13 @@ pub(crate) enum Item {
     Hitstop,
     Bloom,
     Fx,
+    DebugTools,
 }
 
 pub(crate) const ITEMS: [Item; 7] =
     [Item::Music, Item::Sfx, Item::Fullscreen, Item::Shake, Item::Hitstop, Item::Bloom, Item::Fx];
+
+pub(crate) const ADVANCED_ITEMS: [Item; 1] = [Item::DebugTools];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -36,6 +39,7 @@ fn label(item: Item) -> &'static str {
         Item::Hitstop => "顿帧",
         Item::Bloom => "辉光",
         Item::Fx => "特效",
+        Item::DebugTools => "性能调试",
     }
 }
 
@@ -49,6 +53,7 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Hitstop => on_off(s.hitstop),
         Item::Bloom => on_off(s.bloom),
         Item::Fx => if s.lite_fx { "精简" } else { "完整" }.into(),
+        Item::DebugTools => on_off(s.debug_tools),
     }
 }
 
@@ -91,6 +96,10 @@ pub(crate) fn adjust(item: Item, actions: &Actions, settings: &mut Settings, win
         }
         Item::Fx if actions.nav.x != 0 || actions.confirm => {
             settings.lite_fx = !settings.lite_fx;
+            true
+        }
+        Item::DebugTools if actions.nav.x != 0 || actions.confirm => {
+            settings.debug_tools = !settings.debug_tools;
             true
         }
         Item::Fullscreen if actions.nav.x != 0 || actions.confirm => {

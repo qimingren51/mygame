@@ -26,6 +26,8 @@ pub struct Settings {
     pub bloom: bool,
     /// 精简特效：粒子减半，不画环境萤火、夜雾和色散（配置低的机器用）
     pub lite_fx: bool,
+    /// 允许用 F3 查看种子号和性能面板；面板仍由玩家主动打开。
+    pub debug_tools: bool,
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -42,12 +44,17 @@ impl Default for Settings {
             hitstop: true,
             bloom: true,
             lite_fx: false,
+            debug_tools: false,
             path: None,
         }
     }
 }
 
 impl Settings {
+    pub fn debug_tools_enabled(&self) -> bool {
+        cfg!(feature = "dev") || self.debug_tools
+    }
+
     /// 从数据目录读取。文件不存在或已损坏时用默认值（损坏的文件会先改名保留）。
     pub fn load(dir: &Path) -> Settings {
         let path = dir.join("settings.ron");
@@ -100,8 +107,10 @@ mod tests {
         let mut s = Settings::load(&dir);
         assert_eq!(s, Settings { path: Some(dir.join("settings.ron")), ..Settings::default() });
         s.fullscreen = true;
+        s.debug_tools = true;
         s.save().unwrap();
         assert!(Settings::load(&dir).fullscreen);
+        assert!(Settings::load(&dir).debug_tools);
 
         std::fs::write(dir.join("settings.ron"), "(fullscreen: maybe").unwrap();
         assert!(!Settings::load(&dir).fullscreen);
@@ -111,6 +120,7 @@ mod tests {
         std::fs::write(dir.join("settings.ron"), "(fullscreen: true)").unwrap();
         let s = Settings::load(&dir);
         assert!(s.fullscreen && s.vsync);
+        assert!(!s.debug_tools);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

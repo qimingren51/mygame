@@ -9,6 +9,7 @@ use lantern_sim::{AppState, Enemies, GameContent};
 use lantern_view::{MainCamera, to_screen};
 
 use crate::describe::hex;
+use crate::hud::{FOOTER_BOTTOM, HudFooter};
 use crate::skin::Skin;
 
 /// 同时显示的箭头上限
@@ -46,6 +47,7 @@ fn update(
     encounters: Option<Res<Encounters>>,
     enemies: Option<Res<Enemies>>,
     camera: Single<(&Camera, &GlobalTransform), With<MainCamera>>,
+    footer: Query<&ComputedNode, With<HudFooter>>,
     mut markers: Query<(&Marker, &mut Node, &mut UiTransform, &mut ImageNode, &mut Visibility)>,
     mut targets: Local<Vec<(Vec2, Color, f32)>>,
 ) {
@@ -72,6 +74,10 @@ fn update(
     let (cam, gt) = *camera;
     let Some(view) = cam.logical_viewport_size() else { return };
     let center = view * 0.5;
+    // 布局结果来自上一帧；首帧先留出常规 HUD 的高度，换行后按实际高度继续让位。
+    let bottom = footer.iter().next().map_or(140.0, |node| {
+        (node.size().y * node.inverse_scale_factor() + FOOTER_BOTTOM + MARGIN).max(140.0)
+    });
     let mut shown = 0;
     for &(world, color, size) in targets.iter() {
         if shown >= SLOTS {
@@ -84,7 +90,10 @@ fn update(
         }
         // 从屏幕中心朝目标的方向，贴到屏幕边缘
         let d = sp - center;
-        let half = center - Vec2::splat(MARGIN);
+        let half = Vec2::new(
+            (center.x - MARGIN).max(1.0),
+            (center.y - if d.y > 0.0 { bottom } else { MARGIN }).max(1.0),
+        );
         let k = (half.x / d.x.abs().max(1e-3)).min(half.y / d.y.abs().max(1e-3));
         let at = center + d * k;
         for (m, mut node, mut tf, mut img, mut vis) in &mut markers {

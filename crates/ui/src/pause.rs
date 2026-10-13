@@ -128,12 +128,18 @@ fn spawn(
 
 fn input(
     actions: Res<Actions>,
+    transition: Res<crate::transition::InkTransition>,
     mut ui: ResMut<PauseUi>,
     mut settings: ResMut<Settings>,
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
 ) {
+    if transition.active() {
+        ui.clicked = None;
+        ui.hovered = None;
+        return;
+    }
     if let Some(h) = ui.hovered.take()
         && actions.pointer_moved
     {

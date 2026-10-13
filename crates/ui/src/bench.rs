@@ -1,4 +1,4 @@
-//! 跑分模式（标题界面按 B）：场上依次保持 250、1000、2500、5000 只妖物，各跑 10 秒，
+//! 跑分模式（设置 → 高级）：场上依次保持 250、1000、2500、5000 只妖物，各跑 10 秒，
 //! 主角自动绕圈、无敌。每段统计帧率、帧时间和模拟耗时，最后显示结果并存成文本文件，
 //! 方便把结果发回来（docs/DESIGN.md 第 16、17 节，M1 的门槛就是这份结果）。
 
@@ -39,7 +39,7 @@ pub(crate) struct BenchRun {
     done: bool,
 }
 
-/// 从标题界面开始跑分。
+/// 从设置的高级页开始跑分。
 pub(crate) fn start(commands: &mut Commands, next: &mut NextState<AppState>) {
     info!("开始跑分");
     commands.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: STAGES[0] }));

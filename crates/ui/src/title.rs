@@ -1,4 +1,4 @@
-//! 标题界面：出发前抽夜签三选一、心灯（局外成长）、跑分（移植自网页版 lantern/game.js）。
+//! 标题界面：出发前抽夜签三选一、心灯（局外成长）、设置。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
@@ -13,7 +13,7 @@ use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
-use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
+use crate::settings_ui::{self, ADVANCED_ITEMS, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
 use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, SeedOverride, bench, hub, on_paper, text};
 
@@ -37,6 +37,7 @@ pub(crate) enum TitleMode {
     Codex,
     /// 设置
     Settings,
+    AdvancedSettings,
     /// 开场卷轴：看完用这份设置出发
     Scroll {
         setup: Box<RunSetup>,
@@ -56,6 +57,10 @@ pub(crate) struct TitleUi {
 #[derive(Component)]
 pub(crate) struct TitlePanel;
 
+/// 结算指定的落点，只在真正进入标题场景时消费。
+#[derive(Resource)]
+pub(crate) struct ReturnToHub;
+
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<TitleMode>()
         .init_resource::<TitleUi>()
@@ -66,13 +71,16 @@ pub(crate) fn register(app: &mut App) {
         );
 }
 
-fn enter(
+pub(super) fn enter(
+    mut commands: Commands,
+    hub: Option<Res<ReturnToHub>>,
     mut mode: ResMut<TitleMode>,
     mut ui: ResMut<TitleUi>,
     content: Res<GameContent>,
     mut profile: ResMut<Profile>,
 ) {
-    *mode = TitleMode::Main;
+    *mode = if hub.is_some() { TitleMode::Hub } else { TitleMode::Main };
+    commands.remove_resource::<ReturnToHub>();
     *ui = TitleUi { dirty: true, ..default() };
     // 老存档迁移（要等内容加载好）
     if profile.upgrade(&content.0) {
@@ -105,7 +113,15 @@ fn input(
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut transition: ResMut<crate::transition::InkTransition>,
 ) {
+    if transition.active() {
+        ui.clicked = None;
+        ui.hovered = None;
+        return;
+    }
+    let previous = mode.clone();
+    let selected = ui.selected;
     let c = &content.0;
     let clicked = ui.clicked.take();
     let open = |ui: &mut TitleUi| {
@@ -122,12 +138,11 @@ fn input(
             if actions.nav.y != 0 {
                 ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(MENU.len() as i32) as usize;
             }
-            // 菜单：0 出发、1 灯驿、2 设置、3 跑分、4 退出；快捷键直接对应
+            // 菜单：0 出发、1 灯驿、2 设置、3 退出；快捷键直接对应
             let act = clicked
                 .or(actions.confirm.then_some(ui.selected))
                 .or(actions.meta.then_some(1))
-                .or(actions.bench.then_some(3))
-                .or(actions.back.then_some(4));
+                .or(actions.back.then_some(3));
             match act {
                 Some(0) => {
                     let seed = seed.0.unwrap_or_else(random_seed);
@@ -153,8 +168,7 @@ fn input(
                     *mode = TitleMode::Settings;
                     open(&mut ui);
                 }
-                Some(3) => bench::start(&mut commands, &mut next),
-                Some(4) => {
+                Some(3) => {
                     exit.write(AppExit::Success);
                 }
                 _ => {}
@@ -255,8 +269,10 @@ fn input(
                 back_to_hub(&mut mode, &mut ui, i);
             }
         }
-        TitleMode::Settings => {
-            let n = ITEMS.len();
+        TitleMode::Settings | TitleMode::AdvancedSettings => {
+            let advanced = *mode == TitleMode::AdvancedSettings;
+            let items: &[settings_ui::Item] = if advanced { &ADVANCED_ITEMS } else { &ITEMS };
+            let n = items.len() + 1;
             if let Some(h) = ui.hovered.take()
                 && actions.pointer_moved
             {
@@ -269,12 +285,20 @@ fn input(
                 ui.selected = i;
             }
             if actions.back {
-                *mode = TitleMode::Main;
+                *mode = if advanced { TitleMode::Settings } else { TitleMode::Main };
                 open(&mut ui);
-            } else if ui.selected < n {
+                ui.selected = if advanced { ITEMS.len() } else { 2 };
+            } else if ui.selected < items.len() {
                 let mut a = *actions;
                 a.confirm |= clicked.is_some();
-                settings_ui::adjust(ITEMS[ui.selected], &a, &mut settings, &mut window);
+                settings_ui::adjust(items[ui.selected], &a, &mut settings, &mut window);
+            } else if actions.confirm || clicked.is_some() {
+                if advanced {
+                    bench::start(&mut commands, &mut next);
+                } else {
+                    *mode = TitleMode::AdvancedSettings;
+                    open(&mut ui);
+                }
             }
         }
         TitleMode::Meta => {
@@ -290,6 +314,13 @@ fn input(
                 back_to_hub(&mut mode, &mut ui, 0);
             }
         }
+    }
+    // 保留旧面板，等墨色盖满后再重画；同一面板内的数值刷新不转场。
+    if *mode != previous {
+        transition.page(mode.clone(), ui.selected);
+        *mode = previous;
+        ui.selected = selected;
+        ui.dirty = false;
     }
 }
 
@@ -367,8 +398,7 @@ fn list_nav(
 const META_COLUMNS: usize = 2;
 
 /// 标题菜单：(文字, 快捷键)
-const MENU: [(&str, &str); 5] =
-    [("出发", "Enter"), ("灯驿", "M"), ("设置", ""), ("跑分", "B"), ("退出", "Esc")];
+const MENU: [(&str, &str); 4] = [("出发", "Enter"), ("灯驿", "M"), ("设置", ""), ("退出", "Esc")];
 
 pub(crate) fn panel() -> impl Bundle {
     (
@@ -414,7 +444,7 @@ fn redraw(
     news: Res<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
-    assets: Res<AssetServer>,
+    art: Res<crate::scroll::ScrollArt>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
@@ -429,20 +459,22 @@ fn redraw(
     let c = &content.0;
     match &*mode {
         TitleMode::Main => main_panel(&mut commands, &fonts, &skin, &profile),
-        TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
+        TitleMode::Omen { picks, .. } => omen_panel(&mut commands, c, &fonts, &skin, &db, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
-        TitleMode::Settings => settings_panel(&mut commands, &fonts, &skin, &settings),
+        TitleMode::Settings | TitleMode::AdvancedSettings => {
+            settings_panel(&mut commands, &fonts, &skin, &settings, *mode == TitleMode::AdvancedSettings)
+        }
         TitleMode::Scroll { dawn, .. } => {
             if let Some(region) = c.regions.iter().find(|r| r.id == crate::scroll::REGION) {
                 let mut root = commands.spawn(panel());
                 clickable(&mut root, 0);
                 let root = root.id();
-                crate::scroll::spawn(&mut commands, root, &assets, &fonts, region, *dawn, window.width());
+                crate::scroll::spawn(&mut commands, root, &art, &fonts, region, *dawn, window.width());
             }
         }
     }
@@ -564,13 +596,12 @@ fn omen_panel(
     fonts: &Fonts,
     skin: &Skin,
     db: &AtlasDb,
-    seed: u64,
     picks: &[OmenPick],
 ) {
     commands.spawn(panel()).with_children(|p| {
         p.spawn(dim_layer());
         p.spawn(text(&fonts.title, 72.0, PAPER, "抽取夜签"));
-        p.spawn(text(&fonts.body, 18.0, DIM, &format!("本局规则三选一　·　种子 {seed}")));
+        p.spawn(text(&fonts.body, 18.0, DIM, "本局规则三选一"));
         p.spawn(Node { column_gap: px(24), ..default() }).with_children(|row| {
             for (i, pick) in picks.iter().enumerate() {
                 let Some(def) = c.omen_index(&pick.id).map(|k| &c.omens[k]) else { continue };
@@ -704,7 +735,8 @@ fn meta_panel(
     });
 }
 
-fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings: &Settings) {
+fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings: &Settings, advanced: bool) {
+    let items: &[settings_ui::Item] = if advanced { &ADVANCED_ITEMS } else { &ITEMS };
     commands.spawn(panel()).with_children(|p| {
         p.spawn(dim_layer());
         p.spawn((
@@ -719,9 +751,12 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
             skin.image("panel"),
         ))
         .with_children(|panel| {
-            panel.spawn(text(&fonts.title, 64.0, INK, "设置"));
+            panel.spawn(text(&fonts.title, 64.0, INK, if advanced { "高级" } else { "设置" }));
+            if advanced {
+                panel.spawn(text(&fonts.body, 18.0, INK_DIM, "开发者工具"));
+            }
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
-            for (i, &item) in ITEMS.iter().enumerate() {
+            for (i, &item) in items.iter().enumerate() {
                 let mut row = panel.spawn(Node {
                     width: percent(100),
                     padding: UiRect::axes(px(18), px(8)),
@@ -732,6 +767,17 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
                     settings_ui::spawn_row(r, fonts, settings, item);
                 });
                 clickable(&mut row, i);
+            }
+            let mut row =
+                panel.spawn(Node { width: percent(100), padding: UiRect::axes(px(18), px(8)), ..default() });
+            row.with_children(|r| {
+                r.spawn(focus(skin, "focus_ring", items.len(), 0.0));
+                r.spawn(text(&fonts.title, 30.0, INK, if advanced { "性能跑分" } else { "高级" }));
+            });
+            clickable(&mut row, items.len());
+            if advanced {
+                panel.spawn(text(&fonts.body, 16.0, INK_DIM, "开启性能调试后，按 F3 查看种子与性能数据。"));
+                panel.spawn(text(&fonts.body, 16.0, INK_DIM, "开发模式始终支持 F3。"));
             }
         });
         p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　← → 调整　Enter 切换　　Esc 返回"));

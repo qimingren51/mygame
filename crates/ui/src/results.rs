@@ -1,24 +1,41 @@
 //! 结算：天明 / 夜未尽、本局数据、构筑、灯油（移植自网页版 lantern/game.js 的 endRun）。
 //! 灯油和最好成绩记进存档；跑分和观看回放不记。
 
+use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
 use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
-use lantern_platform::{Actions, HubNews, Profile};
+use lantern_platform::{Actions, HubNews, InputDevice, Profile};
 use lantern_sim::omens::{omen_good, omen_name};
-use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
+use lantern_sim::{Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
 use lantern_view::Dawn;
 use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex, passive_color};
 use crate::skin::Skin;
+use crate::transition::InkTransition;
 use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(OnEnter(RunState::Over), record)
-        .add_systems(Update, (spawn, slide_in, input).chain().run_if(in_state(RunState::Over)));
+    app.init_resource::<ResultsUi>()
+        .add_systems(OnEnter(RunState::Over), record)
+        .add_systems(Update, (spawn, slide_in, input, highlight).chain().run_if(in_state(RunState::Over)));
 }
+
+#[derive(Resource, Default)]
+struct ResultsUi {
+    selected: usize,
+    clicked: Option<usize>,
+    hovered: Option<usize>,
+    stick: i32,
+}
+
+#[derive(Component)]
+struct ResultsFocus(usize);
+
+#[derive(Component)]
+struct ResultsHint;
 
 /// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
 #[derive(Resource)]
@@ -48,7 +65,9 @@ fn record(
     playback: Option<Res<ReplayPlayback>>,
     mut profile: ResMut<Profile>,
     mut news: ResMut<HubNews>,
+    mut ui: ResMut<ResultsUi>,
 ) {
+    *ui = ResultsUi::default();
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
     let counts =
@@ -112,6 +131,7 @@ fn spawn(
     dawn: Res<Dawn>,
     pending: Option<ResMut<Pending>>,
     profile: Res<Profile>,
+    playback: Option<Res<ReplayPlayback>>,
 ) {
     let Some(mut pending) = pending else { return };
     // 天明：等夜色褪完再开始计时
@@ -170,10 +190,56 @@ fn spawn(
             .with_children(|p| {
                 results_body(
                     p, c, &fonts, &db, &skin, &r, &sub, omen, &recorded, counts, &arsenal, &build, &profile,
-                )
+                );
+                if playback.is_none() {
+                    result_options(p, &fonts, &skin);
+                }
             });
-            root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));
+            if playback.is_none() {
+                root.spawn((ResultsHint, text(&fonts.body, 18.0, PAPER, "")));
+            } else {
+                root.spawn(text(&fonts.body, 18.0, PAPER, "Enter　回到标题"));
+            }
         });
+}
+
+fn result_options(p: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin) {
+    p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+    p.spawn(Node { column_gap: px(24), ..default() }).with_children(|row| {
+        for (i, label) in ["回灯驿", "再来一夜"].into_iter().enumerate() {
+            let mut button = row.spawn((
+                Node {
+                    width: px(248),
+                    height: px(64),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                skin.image("btn"),
+            ));
+            button.with_children(|b| {
+                b.spawn((
+                    ResultsFocus(i),
+                    Visibility::Hidden,
+                    Pickable::IGNORE,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: percent(100),
+                        height: percent(100),
+                        ..default()
+                    },
+                    skin.image("btn_focus"),
+                ));
+                b.spawn((Pickable::IGNORE, text(&fonts.title, 32.0, PAPER, label)));
+            });
+            button.observe(move |click: On<PointerClick>, mut ui: ResMut<ResultsUi>| {
+                if click.button == bevy::picking::pointer::PointerButton::Primary {
+                    ui.clicked = Some(i);
+                }
+            });
+            button.observe(move |_: On<PointerOver>, mut ui: ResMut<ResultsUi>| ui.hovered = Some(i));
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -347,7 +413,7 @@ fn results_body(
                 if let Some((line, cost)) = next {
                     let lv = profile.meta_level(&line.id) + 1;
                     let s = if profile.oil >= cost {
-                        format!("灯油 {}　·　可点亮「{}」Lv{lv}（标题界面按 M）", profile.oil, line.name)
+                        format!("灯油 {}　·　可点亮「{}」Lv{lv}（回灯驿找老灯匠）", profile.oil, line.name)
                     } else {
                         format!(
                             "灯油 {}　·　点亮「{}」Lv{lv} 还差 {}",
@@ -367,13 +433,149 @@ fn input(
     actions: Res<Actions>,
     playback: Option<Res<ReplayPlayback>>,
     pending: Option<Res<Pending>>,
-    mut next: ResMut<NextState<AppState>>,
+    slides: Query<&SlideIn>,
+    mut ui: ResMut<ResultsUi>,
+    mut transition: ResMut<InkTransition>,
 ) {
-    // 观看回放时由回放界面处理；结算还没浮现时不响应，免得倒下时手上的按键直接跳过
-    if playback.is_some() || pending.is_some() {
+    let axis = if actions.move_dir.x.abs() >= actions.move_dir.y.abs() {
+        actions.move_dir.x
+    } else {
+        actions.move_dir.y
+    };
+    let stick = if axis.abs() >= 0.55 { axis.signum() as i32 } else { 0 };
+    let stick_pressed = stick != 0 && stick != ui.stick;
+    ui.stick = stick;
+    // 观看回放由回放界面处理；等纸卷落定才接输入，墨幕期间丢弃鼠标事件。
+    if playback.is_some() || pending.is_some() || transition.active() || !slides.iter().any(|s| s.t >= 0.6) {
+        ui.clicked = None;
+        ui.hovered = None;
         return;
     }
-    if actions.confirm || actions.back {
-        next.set(AppState::Title);
+    if let Some(h) = ui.hovered.take()
+        && actions.pointer_moved
+    {
+        ui.selected = h;
+    }
+    let nav = if actions.nav.x != 0 { actions.nav.x } else { actions.nav.y };
+    let nav = if nav != 0 {
+        nav
+    } else if stick_pressed {
+        stick
+    } else {
+        0
+    };
+    if nav != 0 {
+        ui.selected = (ui.selected as i32 + nav).rem_euclid(2) as usize;
+    }
+    let clicked = ui.clicked.take();
+    if let Some(i) = clicked {
+        ui.selected = i;
+    }
+    if actions.back {
+        transition.return_to_hub();
+    } else if actions.confirm || clicked.is_some() {
+        if ui.selected == 0 {
+            transition.return_to_hub();
+        } else {
+            transition.retry();
+        }
+    }
+}
+
+fn highlight(
+    ui: Res<ResultsUi>,
+    device: Res<InputDevice>,
+    mut focus: Query<(&ResultsFocus, &mut Visibility)>,
+    mut hints: Query<&mut Text, With<ResultsHint>>,
+) {
+    for (f, mut v) in &mut focus {
+        v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
+    }
+    let hint = match *device {
+        InputDevice::Keyboard => "← → 选择　Enter 确定　Esc 回灯驿",
+        InputDevice::Gamepad => "左摇杆 / 十字键 选择　A 确定　B 回灯驿",
+    };
+    for mut text in &mut hints {
+        text.set_if_neq(Text::new(hint));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<ResultsUi>()
+            .init_resource::<Actions>()
+            .init_resource::<InputDevice>()
+            .init_resource::<InkTransition>()
+            .add_systems(Update, (input, highlight).chain());
+        app.world_mut().spawn(SlideIn { t: 0.6, alpha: 0.8 });
+        app
+    }
+
+    #[test]
+    fn keyboard_stick_and_pointer_share_focus_without_held_input_repeating() {
+        let mut app = input_app();
+        let focus = app.world_mut().spawn((ResultsFocus(1), Visibility::Hidden)).id();
+        let hint = app.world_mut().spawn((ResultsHint, Text::default())).id();
+        app.insert_resource(Actions { nav: IVec2::X, move_dir: Vec2::X, ..default() });
+        app.update();
+        assert_eq!(app.world().resource::<ResultsUi>().selected, 1);
+        assert_eq!(*app.world().get::<Visibility>(focus).unwrap(), Visibility::Inherited);
+        app.insert_resource(Actions { move_dir: Vec2::X, ..default() });
+        app.update();
+        assert_eq!(app.world().resource::<ResultsUi>().selected, 1);
+        app.insert_resource(Actions::default());
+        app.update();
+        app.insert_resource(InputDevice::Gamepad);
+        app.insert_resource(Actions { move_dir: -Vec2::X, ..default() });
+        app.update();
+        assert_eq!(app.world().resource::<ResultsUi>().selected, 0);
+        assert!(app.world().get::<Text>(hint).unwrap().0.contains("A 确定"));
+        assert!(!app.world().get::<Text>(hint).unwrap().0.contains("Enter"));
+        app.world_mut().resource_mut::<ResultsUi>().hovered = Some(1);
+        app.insert_resource(Actions { pointer_moved: true, ..default() });
+        app.update();
+        assert_eq!(app.world().resource::<ResultsUi>().selected, 1);
+        app.world_mut().resource_mut::<ResultsUi>().clicked = Some(0);
+        app.update();
+        assert_eq!(app.world().resource::<ResultsUi>().selected, 0);
+        assert!(app.world().resource::<InkTransition>().active());
+    }
+
+    #[test]
+    fn pending_reveal_replay_and_curtain_discard_confirm_and_pointer_events() {
+        let mut app = input_app();
+        for blocked in 0..4 {
+            app.insert_resource(InkTransition::default());
+            app.insert_resource(ResultsUi { clicked: Some(1), hovered: Some(1), ..default() });
+            app.insert_resource(Actions { confirm: true, pointer_moved: true, ..default() });
+            match blocked {
+                0 => {
+                    app.insert_resource(Pending { recorded: Recorded::default(), counts: true, wait: 1.0 });
+                }
+                1 => {
+                    app.world_mut().query::<&mut SlideIn>().single_mut(app.world_mut()).unwrap().t = 0.1;
+                }
+                2 => {
+                    app.insert_resource(ReplayPlayback::new(lantern_sim::Replay::new(
+                        "test",
+                        0,
+                        RunSetup::new(1, lantern_sim::RunMode::Normal),
+                    )));
+                }
+                _ => app.world_mut().resource_mut::<InkTransition>().return_to_hub(),
+            }
+            app.update();
+            let ui = app.world().resource::<ResultsUi>();
+            assert_eq!(ui.selected, 0);
+            assert!(ui.clicked.is_none() && ui.hovered.is_none());
+            assert_eq!(app.world().resource::<InkTransition>().active(), blocked == 3);
+            app.world_mut().remove_resource::<Pending>();
+            app.world_mut().remove_resource::<ReplayPlayback>();
+            app.world_mut().query::<&mut SlideIn>().single_mut(app.world_mut()).unwrap().t = 0.6;
+        }
     }
 }

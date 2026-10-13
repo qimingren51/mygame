@@ -12,6 +12,19 @@ use crate::{DIM, Fonts, INK, PAPER, text};
 /// P0 只有青丘
 pub(crate) const REGION: &str = "qingqiu";
 
+#[derive(Resource)]
+pub(crate) struct ScrollArt {
+    pub night: Handle<Image>,
+    pub dawn: Handle<Image>,
+}
+
+pub(crate) fn preload(mut commands: Commands, assets: Res<AssetServer>) {
+    commands.insert_resource(ScrollArt {
+        night: assets.load(format!("atlas/screens/scroll_{REGION}.png")),
+        dawn: assets.load(format!("atlas/screens/scroll_{REGION}_dawn.png")),
+    });
+}
+
 /// 卷轴占屏幕宽度的比例（视口宽度的百分数）；画是 3:1
 const WIDTH_VW: f32 = 94.0;
 /// 展开用时、旁白开始浮出的时刻、每行间隔（秒）
@@ -36,18 +49,17 @@ pub(crate) struct Line {
 pub(crate) fn spawn(
     commands: &mut Commands,
     root: Entity,
-    assets: &AssetServer,
+    art: &ScrollArt,
     fonts: &Fonts,
     region: &RegionDef,
     dawn: bool,
     window_width: f32,
 ) {
-    let (file, words, color) = if dawn {
-        (format!("atlas/screens/scroll_{}_dawn.png", region.id), region.dawn.as_deref().unwrap_or(""), INK)
+    let (image, words, color) = if dawn {
+        (art.dawn.clone(), region.dawn.as_deref().unwrap_or(""), INK)
     } else {
-        (format!("atlas/screens/scroll_{}.png", region.id), region.scroll.as_str(), PAPER)
+        (art.night.clone(), region.scroll.as_str(), PAPER)
     };
-    let image: Handle<Image> = assets.load(file);
     // 字号跟着卷轴的实际宽度走：留白的天空约占画宽的 40%，一行放二十五个字左右
     let size = (window_width * WIDTH_VW / 100.0 * 0.0155).clamp(16.0, 44.0);
     commands.entity(root).insert(BackgroundColor(Color::srgb(0.03, 0.035, 0.05))).with_children(|p| {
@@ -60,7 +72,7 @@ pub(crate) fn spawn(
                             position_type: PositionType::Absolute,
                             left: px(0),
                             top: px(0),
-                            width: percent(0),
+                            width: percent(12),
                             height: percent(100),
                             overflow: Overflow::clip(),
                             ..default()
@@ -115,7 +127,8 @@ pub(crate) fn animate(
         u.t += dt;
         // 先快后慢，像手推开的卷轴
         let k = (u.t / UNROLL).clamp(0.0, 1.0);
-        node.width = percent(100.0 * (1.0 - (1.0 - k) * (1.0 - k)));
+        // 首帧已有画幅，避免墨幕揭开后又等一段近乎全黑的展开。
+        node.width = percent(12.0 + 88.0 * (1.0 - (1.0 - k) * (1.0 - k)));
         t = Some(u.t);
     }
     let Some(t) = t else { return };

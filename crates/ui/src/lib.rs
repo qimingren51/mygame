@@ -27,6 +27,7 @@ mod skin;
 mod title;
 mod title_fx;
 mod toasts;
+mod transition;
 
 pub use perf::SimTiming;
 pub use replay_ui::ReplaySeek;
@@ -73,7 +74,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SeedOverride>()
             .init_resource::<lantern_platform::HubNews>()
-            .add_systems(Startup, (load_fonts, skin::load_skin))
+            .add_systems(Startup, (load_fonts, skin::load_skin, scroll::preload))
             .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
             .add_systems(OnExit(AppState::Run), bench::cleanup)
             .add_systems(
@@ -82,7 +83,8 @@ impl Plugin for UiPlugin {
                     playing_input.run_if(in_state(RunState::Playing)),
                     settings_ui::refresh_values,
                     settings_ui::sync_feel,
-                    (hud::update_hud, hud::update_slots, hud::update_chips).run_if(in_state(AppState::Run)),
+                    (hud::update_hud, hud::update_slots, hud::update_chips, hud::update_control_hints)
+                        .run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
                         .run_if(in_state(RunState::Playing))
@@ -93,6 +95,7 @@ impl Plugin for UiPlugin {
         replay_ui::register(app);
         title::register(app);
         title_fx::register(app);
+        transition::register(app);
         choice::register(app);
         markers::register(app);
         toasts::register(app);
@@ -108,7 +111,7 @@ fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut next: ResMut
     let title: Handle<Font> = assets.load("fonts/MaShanZheng-subset.ttf");
     let _ = TITLE_FONT.set(title.id());
     commands.insert_resource(Fonts { title, body: assets.load("fonts/NotoSerifSC-subset.ttf") });
-    // 没有需要等待的加载，直接进入标题。
+    // 标题期间异步预载；后续切页由墨幕等待贴图与首次渲染。
     next.set(AppState::Title);
 }
 
