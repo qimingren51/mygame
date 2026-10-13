@@ -169,7 +169,7 @@ pub(crate) fn read_events(
     let fx = &mut *fx;
     for ev in &outbox.0 {
         match *ev {
-            SimEvent::Hit { pos, damage, crit, kind, element } => {
+            SimEvent::Hit { pos, damage, crit, kind, element, .. } => {
                 let Some(&e) = fx.numbers.get(fx.next_number) else { continue };
                 fx.next_number = (fx.next_number + 1) % fx.numbers.len().max(1);
                 let Ok((mut text, mut font, mut color, mut num, mut vis)) = numbers.get_mut(e) else {

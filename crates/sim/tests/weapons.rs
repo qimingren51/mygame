@@ -95,3 +95,18 @@ fn crane_count_grows_with_level_and_evolution() {
     assert_eq!(a.arsenal().0[0].cranes.len(), 1);
     assert_eq!(b.arsenal().0[0].cranes.len(), 10);
 }
+
+#[test]
+fn each_real_weapon_emits_direction_and_content_index() {
+    let content = content();
+    for id in ["lamp", "sword", "bell", "crane", "seal"] {
+        let mut sim = arena(id, 8, false);
+        let index = content.weapon_index(id).unwrap() as u16;
+        let events = run_for(&mut sim, 3.0);
+        assert!(
+            events.iter().any(|e| matches!(e, SimEvent::Hit { weapon: Some(w), incoming_dir, .. }
+            if *w == index && (incoming_dir.length() - 1.0).abs() < 1e-5)),
+            "{id}"
+        );
+    }
+}

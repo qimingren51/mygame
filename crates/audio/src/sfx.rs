@@ -2,12 +2,15 @@
 //! 一帧几十次命中也不会叠成噪音。
 
 use kira::sound::static_sound::StaticSoundData;
+use lantern_content::WeaponIdentity;
 
-use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, pent, render};
+use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, pent, render, render_seeded};
 
 /// 渲染好的全部音效。
 pub struct Sfx {
     pub hit: StaticSoundData,
+    /// 法器 × 普通/暴击 × 三种材质纹理
+    pub impacts: [[[StaticSoundData; 3]; 2]; 5],
     pub crit: StaticSoundData,
     pub kill: StaticSoundData,
     /// 拾取魂火：基准音 pent(10)，播放时按连拾次数升调
@@ -23,7 +26,6 @@ pub struct Sfx {
     pub dash: StaticSoundData,
     pub hurt: StaticSoundData,
     pub sword: StaticSoundData,
-    pub crane: StaticSoundData,
     pub bell_pulse: StaticSoundData,
     pub big_bell: StaticSoundData,
     pub seal: StaticSoundData,
@@ -87,9 +89,112 @@ fn chest(n: usize) -> StaticSoundData {
     })
 }
 
+/// 节流键和合成槽位按法器区分，暴击有自己的起音空间。
+pub(crate) fn impact_group(identity: WeaponIdentity, crit: bool) -> (usize, &'static str, f64) {
+    use WeaponIdentity::*;
+    let (index, keys, gap) = match identity {
+        Lamp => (0, ["lamp_hit", "lamp_crit"], 0.08),
+        Sword => (1, ["sword_hit", "sword_crit"], 0.04),
+        Bell => (2, ["bell_hit", "bell_crit"], 0.075),
+        Crane => (3, ["crane_hit", "crane_crit"], 0.06),
+        Seal => (4, ["seal_hit", "seal_crit"], 0.10),
+    };
+    (index, keys[usize::from(crit)], gap)
+}
+
+fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticSoundData {
+    use WeaponIdentity::*;
+    let v = variant as f32;
+    let gain = if crit { 1.35 } else { 1.0 };
+    let (index, _, _) = impact_group(identity, crit);
+    let life = match identity {
+        Lamp => 0.12,
+        Sword => 0.10,
+        Bell => 0.24,
+        Crane => 0.13,
+        Seal => 0.22,
+    };
+    render_seeded(life, 0x92a4_017b_u32.wrapping_add((index * 37 + variant * 101) as u32), |b| {
+        match identity {
+            Lamp => {
+                b.noise(
+                    0.0,
+                    0.07 + v * 0.009,
+                    0.13 * gain,
+                    NoiseOpts {
+                        attack: 0.001,
+                        slide: Some(450.0),
+                        ..noise(FilterKind::Low, 1800.0 + v * 180.0)
+                    },
+                );
+                b.osc(Wave::Sine, 160.0, 0.0, 0.07, 0.045 * gain, Some((65.0, 0.06)), 0.002);
+                for i in 0..3 {
+                    b.noise(
+                        0.014 + i as f32 * (0.017 + v * 0.002),
+                        0.006,
+                        0.045 * gain,
+                        noise(FilterKind::High, 3500.0),
+                    );
+                }
+            }
+            Sword => {
+                b.noise(
+                    0.0,
+                    0.045 + v * 0.008,
+                    0.07 * gain,
+                    NoiseOpts {
+                        attack: 0.001,
+                        slide: Some(6800.0),
+                        ..noise(FilterKind::High, 2600.0 + v * 250.0)
+                    },
+                );
+                for (i, ratio) in [1.0, 1.48, 2.17].into_iter().enumerate() {
+                    b.sine(
+                        (2450.0 + v * 55.0) * ratio,
+                        0.0,
+                        0.065 - i as f32 * 0.014,
+                        0.035 * gain / (i + 1) as f32,
+                    );
+                }
+            }
+            Bell => {
+                b.noise(0.0, 0.023 + v * 0.004, 0.07 * gain, noise(FilterKind::High, 5500.0 + v * 200.0));
+                b.bell(pent(20), 0.0, 0.045 * gain, 0.17 + v * 0.015);
+                b.sine(7040.0, 0.003, 0.05, 0.014 * gain);
+            }
+            Crane => {
+                b.noise(
+                    0.0,
+                    0.045,
+                    0.08 * gain,
+                    NoiseOpts { q: 0.7, slide: Some(4200.0), ..noise(FilterKind::Band, 1500.0 + v * 160.0) },
+                );
+                b.noise(0.018 + v * 0.004, 0.065, 0.075 * gain, noise(FilterKind::High, 2300.0));
+                b.noise(0.055, 0.03, 0.05 * gain, noise(FilterKind::Low, 750.0 + v * 80.0));
+            }
+            Seal => {
+                b.drum(0.0, 0.18 * gain, 92.0 + v * 3.0);
+                b.sine(70.0, 0.0, 0.16, 0.065 * gain);
+                b.noise(0.0, 0.10 + v * 0.015, 0.13 * gain, noise(FilterKind::Low, 1100.0 + v * 180.0));
+                b.noise(0.015, 0.04, 0.035 * gain, noise(FilterKind::Band, 2200.0));
+            }
+        }
+        // 暴击仍保留材质，只增加短促起音与低处的分量。
+        if crit {
+            b.noise(0.0, 0.012, 0.04, noise(FilterKind::High, 6000.0));
+            b.sine(if identity == Seal { 68.0 } else { 155.0 }, 0.0, 0.055, 0.045);
+        }
+    })
+}
+
 impl Sfx {
     pub fn new() -> Self {
         Sfx {
+            impacts: std::array::from_fn(|i| {
+                std::array::from_fn(|crit| {
+                    std::array::from_fn(|variant| impact_sound(WeaponIdentity::ALL[i], crit != 0, variant))
+                })
+            }),
             hit: render(0.1, |b| b.noise(0.0, 0.035, 0.07, noise(FilterKind::High, 3300.0))),
             // 暴击：清脆的金属声（docs/GAMEPLAY.md 第 14 节）
             crit: render(0.5, |b| {
@@ -183,14 +288,6 @@ impl Sfx {
                         slide: Some(7000.0),
                         ..Default::default()
                     },
-                )
-            }),
-            crane: render(0.15, |b| {
-                b.noise(
-                    0.0,
-                    0.06,
-                    0.04,
-                    NoiseOpts { freq: 1800.0, slide: Some(900.0), q: 2.0, ..Default::default() },
                 )
             }),
             bell_pulse: render(1.4, |b| b.bell(pent(15), 0.0, 0.06, 1.1)),
@@ -393,6 +490,48 @@ mod tests {
             let clipped = sound.frames.iter().filter(|f| f.left.abs() >= 0.999).count();
             assert!(peak > 0.01, "{name} 没有声音（峰值 {peak}）");
             assert!(clipped <= 2, "{name} 削波 {clipped} 个采样（峰值 {peak}）");
+        }
+    }
+}
+
+#[cfg(test)]
+mod impact_tests {
+    use super::*;
+
+    #[test]
+    fn material_variants_are_distinct_prompt_and_not_clipped() {
+        let s = Sfx::new();
+        let mut keys = Vec::new();
+        for (i, identity) in WeaponIdentity::ALL.into_iter().enumerate() {
+            for crit in [false, true] {
+                let (index, key, gap) = impact_group(identity, crit);
+                assert_eq!(index, i);
+                assert!(!keys.contains(&key));
+                keys.push(key);
+                assert!((0.04..=0.1).contains(&gap));
+                let bank = &s.impacts[i][usize::from(crit)];
+                for (v, sound) in bank.iter().enumerate() {
+                    let peak = sound.frames.iter().map(|f| f.left.abs()).fold(0.0, f32::max);
+                    assert!(peak > 0.02 && peak < 0.98, "{identity:?}/{crit}/{v}: {peak}");
+                    assert!(sound.frames.iter().take(220).any(|f| f.left.abs() > 0.002));
+                    if v > 0 {
+                        assert!(
+                            sound
+                                .frames
+                                .iter()
+                                .zip(bank[0].frames.iter())
+                                .any(|(a, b)| (a.left - b.left).abs() > 0.001)
+                        );
+                    }
+                }
+                assert!(
+                    s.impacts[i][0][0].frames.iter().zip(s.impacts[i][1][0].frames.iter()).any(|(a, b)| (a
+                        .left
+                        - b.left)
+                        .abs()
+                        > 0.001)
+                );
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ mod camera;
 mod effects;
 mod fx;
 mod ground;
+mod impact;
 pub mod lighting;
 mod mist;
 mod particles;
@@ -62,6 +63,7 @@ impl Plugin for ViewPlugin {
             .insert_resource(ClearColor(NIGHT))
             .insert_resource(AssetRoot(self.asset_root.clone()))
             .init_resource::<actors::Pools>()
+            .init_resource::<impact::Impacts>()
             .init_resource::<actors::GlowPool>()
             .init_resource::<actors::GlowRequests>()
             .init_resource::<fx::FxState>()
@@ -96,6 +98,7 @@ impl Plugin for ViewPlugin {
                     effects::spawn_number_pool,
                     fx::spawn_flash,
                     fx::reset_fx,
+                    impact::reset,
                     camera::reset_rig,
                     particles::reset_particles,
                     atmos::reset_atmos,
@@ -110,6 +113,12 @@ impl Plugin for ViewPlugin {
                     camera::reset_rig,
                     mist::hide_mist,
                 ),
+            )
+            .add_systems(
+                PostUpdate,
+                impact::apply_deform
+                    .after(bevy::transform::TransformSystems::Propagate)
+                    .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
             )
             .add_observer(actors::dress_player)
             .add_systems(Update, (lighting::resize_lightmap, apply_bloom, mist::setup_mist))
@@ -128,7 +137,9 @@ impl Plugin for ViewPlugin {
                     )
                         .chain(),
                     (
+                        impact::read_events,
                         actors::collect_draws,
+                        impact::draw_deaths,
                         fx::read_fx_events,
                         fx::collect_fx,
                         actors::hero_glow,

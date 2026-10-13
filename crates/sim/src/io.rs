@@ -4,7 +4,8 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 use lantern_content::{Element, Rank};
 
-use crate::combat::StrikeFx;
+use crate::combat::{Source, StrikeFx};
+use crate::enemies::EnemyHandle;
 use crate::flow::ChestSource;
 use crate::pickups::PickupKind;
 
@@ -93,6 +94,13 @@ pub enum SimEvent {
     /// 命中妖物；pos 是伤害数字的位置，element 是这一击的五行（画面按它上色）
     Hit {
         pos: Vec2,
+        /// 迎击面上的接触点；无方向时为中心
+        impact_pos: Vec2,
+        /// 攻击力的单位方向；零表示无方向
+        incoming_dir: Vec2,
+        weapon: Option<u16>,
+        source: Source,
+        target: EnemyHandle,
         damage: f32,
         crit: bool,
         kind: HitKind,
@@ -101,6 +109,9 @@ pub enum SimEvent {
     /// 击杀；kind 是 `enemies.ron` 里的下标
     Kill {
         pos: Vec2,
+        target: EnemyHandle,
+        weapon: Option<u16>,
+        incoming_dir: Vec2,
         kind: u16,
         rank: Rank,
     },

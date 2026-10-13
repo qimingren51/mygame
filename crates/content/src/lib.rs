@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 
 mod defs;
 mod effects;
+mod identity;
 mod validate;
 
 pub use defs::*;
 pub use effects::*;
+pub use identity::WeaponIdentity;
 
 /// 全部内容数据。
 #[derive(Clone, Debug, PartialEq)]

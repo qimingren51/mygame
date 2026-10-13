@@ -22,7 +22,7 @@ pub const TAG_CHILD: u8 = 2;
 pub const TAG_FRENZY: u8 = 4;
 
 /// 指向某只妖物的句柄。妖物死后（或槽位被复用后）解析为 `None`。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnemyHandle(u32);
 
 /// 冲锋的阶段：冷却（照常追击）、蓄力（原地转向）、冲出（方向锁定）、收势（原地停）。

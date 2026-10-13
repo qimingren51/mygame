@@ -13,7 +13,7 @@ use bevy::math::URect;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use lantern_content::{BlastKind, Element, Rank};
+use lantern_content::{BlastKind, Element, Rank, WeaponIdentity};
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
@@ -227,6 +227,8 @@ pub(crate) struct P {
     pub drag: f32,
     pub accel: Vec2,
     pub t: f32,
+    fresh: bool,
+    core: bool,
     pub life: f32,
     /// 起止大小（相对贴图原始尺寸）
     pub size: (f32, f32),
@@ -258,6 +260,8 @@ impl P {
             drag: 0.0,
             accel: Vec2::ZERO,
             t: 0.0,
+            fresh: true,
+            core: false,
             life,
             size: (1.0, 1.0),
             stretch: 1.0,
@@ -286,6 +290,12 @@ pub(crate) struct Particles {
 impl Particles {
     pub fn spawn(&mut self, p: P) {
         let cap = if self.lite { CAP / 2 } else { CAP };
+        if self.list.len() >= cap
+            && p.core
+            && let Some(i) = self.list.iter().position(|p| !p.core)
+        {
+            self.list.swap_remove(i);
+        }
         if self.list.len() < cap {
             self.list.push(p);
         }
@@ -324,6 +334,99 @@ impl Particles {
                 align: true,
                 ..P::new(self.f.streak, at, life, layer::EMISSIVE + 1.0)
             };
+            self.spawn(p);
+        }
+    }
+
+    /// 一个接触核心加材质碎片；核心在粒子池满时可替换装饰粒子。
+    fn impact(
+        &mut self,
+        at: Vec2,
+        dir: Vec2,
+        fallback: Vec2,
+        identity: Option<WeaponIdentity>,
+        color: Color,
+        crit: bool,
+    ) {
+        use WeaponIdentity::*;
+        let angle = dir.y.atan2(dir.x);
+        let (frame, life, size, stretch) = match identity {
+            Some(Sword) => (self.f.streak, 0.10, 0.18, 4.5),
+            Some(Bell) => (self.f.ember, 0.04, 1.0, 1.0),
+            Some(Crane) => (self.f.ash, 0.05, 0.65, 1.5),
+            Some(Seal) => (self.f.drop, 0.06, 0.5, 1.7),
+            _ => (self.f.ember, 0.06, 1.0, 1.0),
+        };
+        let core_color = if crit {
+            Color::srgb(1.0, 0.97, 0.83)
+        } else {
+            match identity {
+                Some(Sword) => Color::srgb(1.0, 0.95, 0.78),
+                Some(Bell) => Color::srgb(0.88, 0.97, 1.0),
+                _ => color,
+            }
+        };
+        self.spawn(P {
+            color: core_color,
+            size: (size * if crit { 1.3 } else { 1.0 }, size * 0.5),
+            stretch,
+            rot: angle,
+            glow: true,
+            core: true,
+            ..P::new(frame, at, life, layer::EMISSIVE + 1.2)
+        });
+        let n = self.n(if crit { 6 } else { 4 });
+        for k in 0..n {
+            let d = emission_dir(dir, fallback, self.rng.next_f32(), self.rng.next_f32());
+            let mut p = P {
+                vel: d * self.rng.range_f32(100.0, if crit { 220.0 } else { 160.0 }),
+                drag: 7.0,
+                size: (0.35, 0.12),
+                color,
+                glow: true,
+                rot: angle,
+                ..P::new(self.f.ember, at, 0.22, layer::EMISSIVE + 1.0)
+            };
+            match identity {
+                Some(Lamp) => {
+                    p.accel = Vec2::Y * 190.0;
+                    p.life = 0.34;
+                    p.color = Color::srgb(1.0, 0.31 + 0.07 * k as f32, 0.10);
+                }
+                Some(Sword) | None => {
+                    p.frame = self.f.streak;
+                    p.align = true;
+                    p.stretch = 1.5;
+                    p.life = 0.16;
+                    p.size = (0.22, 0.04);
+                }
+                Some(Bell) => {
+                    p.frame = self.f.ash;
+                    p.stretch = 0.45;
+                    p.spin = 9.0;
+                    p.life = 0.18;
+                    p.accel = Vec2::NEG_Y * 150.0;
+                }
+                Some(Crane) => {
+                    p.frame = self.f.ash;
+                    p.glow = false;
+                    p.z = layer::ACTORS + 1.5;
+                    p.accel = d.perp() * 180.0 + Vec2::NEG_Y * 55.0;
+                    p.spin = if k % 2 == 0 { 18.0 } else { -16.0 };
+                    p.stretch = 1.8;
+                    p.drag = 4.0;
+                }
+                Some(Seal) => {
+                    p.frame = if k == n - 1 { self.f.smoke } else { self.f.ash };
+                    p.glow = false;
+                    p.z = layer::ACTORS + 1.5;
+                    p.accel = Vec2::NEG_Y * 420.0;
+                    p.spin = 7.0;
+                    p.drag = 3.0;
+                    p.life = 0.28;
+                    p.size = if k == n - 1 { (0.18, 0.42) } else { (0.4, 0.3) };
+                }
+            }
             self.spawn(p);
         }
     }
@@ -479,6 +582,11 @@ pub(crate) fn update_particles(
     let drop = parts.f.drop;
     let mut landed: Vec<Vec2> = Vec::new();
     parts.list.retain_mut(|p| {
+        // 接触帧必须画到，即使本帧跨过了整个短闪光寿命。
+        if p.fresh {
+            p.fresh = false;
+            return true;
+        }
         p.t += dt;
         if p.t >= p.life {
             return false;
@@ -567,7 +675,6 @@ const KILL_BUDGET: u32 = 32;
 /// 本帧的计数和暴击笔触的冷却。
 #[derive(Resource, Default)]
 pub(crate) struct ParticleClock {
-    slash_cd: f32,
     trail_cd: f32,
     /// 主角走过的路，每一步扬一点尘
     stride: f32,
@@ -587,7 +694,6 @@ pub(crate) fn particle_events(
     mut parts: ResMut<Particles>,
 ) {
     let dt = time.delta_secs();
-    clock.slash_cd -= dt;
     clock.trail_cd -= dt;
     let (htf, pl, view) = *hero;
     let hero_at = htf.translation.truncate();
@@ -595,48 +701,51 @@ pub(crate) fn particle_events(
     // 击杀很多时每只少放一些，总量不超过预算
     let per_kill = if kills == 0 { 0.0 } else { (KILL_BUDGET as f32 / kills as f32).min(1.0) };
     let mut hits = 0;
+    let mut pulses = 0;
     let mut kill_k = 0.0;
     for ev in &outbox.0 {
         match *ev {
-            SimEvent::Hit { pos, damage, crit, kind, element } => {
-                if kind == HitKind::Dot || hits >= HIT_BUDGET {
+            SimEvent::Hit { impact_pos, incoming_dir, crit, kind, element, weapon, source, .. } => {
+                let at = to_screen(impact_pos);
+                let identity = WeaponIdentity::resolve(&content.0, weapon);
+                let color = element_glow(
+                    element
+                        .or_else(|| weapon.and_then(|i| content.0.weapons.get(i as usize).map(|w| w.element)))
+                        .or_else(|| match source {
+                            lantern_sim::combat::Source::Burn => Some(Element::Fire),
+                            lantern_sim::combat::Source::Reaction(i) => {
+                                content.0.elements.reactions.get(i as usize).map(|r| r.b)
+                            }
+                            _ => None,
+                        }),
+                );
+                if matches!(kind, HitKind::Dot | HitKind::Reaction) {
+                    if pulses < 12 {
+                        pulses += 1;
+                        let f = parts.f.ember;
+                        parts.spawn(P {
+                            color: color.with_alpha(0.5),
+                            size: (0.65, 0.3),
+                            glow: true,
+                            ..P::new(f, at, 0.03, layer::EMISSIVE)
+                        });
+                    }
+                    continue;
+                }
+                if hits >= HIT_BUDGET {
                     continue;
                 }
                 hits += 1;
-                let at = to_screen(pos) + Vec2::new(0.0, -6.0);
-                let away = (at - hero_at).normalize_or_zero() * 0.7;
-                if crit {
-                    parts.sparks(at, GOLD, 7, 230.0, away);
-                    if clock.slash_cd <= 0.0 {
-                        clock.slash_cd = 0.06;
-                        let a = parts.rng.range_f32(-0.9, 0.9) + if parts.rng.chance(0.5) { 0.0 } else { PI };
-                        let s = (0.22 + damage.max(1.0).log10() * 0.05).min(0.5);
-                        parts.slash(at, a, s, INK.with_alpha(0.85), false);
-                        parts.slash(at, a, s * 1.05, GOLD.with_alpha(0.7), true);
-                    }
-                } else {
-                    let n = if damage >= 50.0 { 3 } else { 2 };
-                    parts.sparks(at, element_glow(element), n, 160.0, away);
-                }
+                let fallback = (at - hero_at).normalize_or_zero() * 0.7;
+                parts.impact(at, to_screen(incoming_dir), fallback, identity, color, crit);
             }
-            SimEvent::Kill { pos, kind, rank } => {
+            SimEvent::Kill { pos, kind, rank, .. } => {
                 let def = &content.0.enemies[kind as usize];
                 let at = to_screen(pos);
                 let body = at + Vec2::new(0.0, def.radius.max(8.0));
                 let eye = hex(&def.eye);
                 match rank {
                     Rank::Elite => {
-                        if let Some(f) = frames.enemy_ghost(kind as usize) {
-                            parts.ghost(
-                                f,
-                                at,
-                                hero_at.x < at.x,
-                                INK.with_alpha(0.9),
-                                0.55,
-                                false,
-                                layer::ACTORS + 1.1,
-                            );
-                        }
                         parts.ink(body, 16, 1.6);
                         parts.ash(body, def.radius, 14, INK.with_alpha(0.8));
                         parts.smoke(body, 1.2, INK.with_alpha(0.45), 5);
@@ -645,17 +754,6 @@ pub(crate) fn particle_events(
                     }
                     // 夜主倒下：化成一大团墨，墨点四溅，灰烬冲天
                     Rank::Boss => {
-                        if let Some(f) = frames.enemy_ghost(kind as usize) {
-                            parts.ghost(
-                                f,
-                                at,
-                                hero_at.x < at.x,
-                                INK.with_alpha(0.95),
-                                1.6,
-                                false,
-                                layer::ACTORS + 1.1,
-                            );
-                        }
                         let r = def.radius;
                         parts.ink(body, 60, 2.6);
                         parts.ash(body, r, 70, INK.with_alpha(0.85));
@@ -671,17 +769,7 @@ pub(crate) fn particle_events(
                             continue;
                         }
                         kill_k -= 1.0;
-                        if let Some(f) = frames.enemy_ghost(kind as usize) {
-                            parts.ghost(
-                                f,
-                                at,
-                                hero_at.x < at.x,
-                                INK.with_alpha(0.5),
-                                0.22,
-                                false,
-                                layer::ACTORS + 1.1,
-                            );
-                        }
+
                         parts.ink(body, 3, 1.0);
                         parts.ash(body, def.radius * 0.6, 2, INK.with_alpha(0.7));
                         parts.embers(body, 4.0, eye, 1);
@@ -787,3 +875,42 @@ pub(crate) fn particle_events(
 
 const DUST: Color = Color::srgba(0.42, 0.38, 0.32, 0.4);
 const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
+
+/// 七成样本落在入射方向 ±30°，其余完整散射；无方向沿用旧偏置。
+fn emission_dir(dir: Vec2, fallback: Vec2, choose: f32, spread: f32) -> Vec2 {
+    if dir == Vec2::ZERO {
+        return (Vec2::from_angle(spread * TAU) + fallback).normalize_or(Vec2::X);
+    }
+    let angle =
+        if choose < 0.7 { dir.y.atan2(dir.x) + (spread * 2.0 - 1.0) * PI / 6.0 } else { spread * TAU };
+    Vec2::from_angle(angle)
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn seventy_percent_is_directed_and_zero_uses_old_scatter() {
+        let d = Vec2::from_angle(1.2);
+        let mut inside = 0;
+        for i in 0..100 {
+            for j in 0..100 {
+                let choose = (i as f32 + 0.5) / 100.0;
+                let spread = (j as f32 + 0.5) / 100.0;
+                let v = emission_dir(d, Vec2::ZERO, choose, spread);
+                let in_cone = v.dot(d) >= (PI / 6.0).cos() - 1e-6;
+                if choose < 0.7 {
+                    assert!(in_cone);
+                }
+                inside += usize::from(in_cone);
+            }
+        }
+        assert!((7000..=7600).contains(&inside));
+        let fallback = Vec2::X * 0.7;
+        assert_eq!(
+            emission_dir(Vec2::ZERO, fallback, 0.2, 0.25),
+            (Vec2::from_angle(TAU * 0.25) + fallback).normalize()
+        );
+    }
+}
