@@ -451,6 +451,14 @@ impl Content {
             &[("endless.oil_per_second", e.oil_per_second), ("endless.oil_per_kill", e.oil_per_kill)],
         )?;
         c.fraction("run.ron", "endless.gold", e.gold)?;
+        let d = &e.depth;
+        c.non_negative("run.ron", &[("endless.depth.speed", d.speed), ("endless.depth.control", d.control)])?;
+        if d.hp_growth < 1.0 || !(d.xp > 0.0 && d.xp <= 1.0) || !(0.0..1.0).contains(&d.control_max) {
+            return c.fail(
+                "run.ron",
+                "endless.depth：hp_growth 不小于 1，xp 在 (0, 1]，control_max 在 [0, 1)".into(),
+            );
+        }
         if e.boss_growth < 1.0 {
             return c.fail("run.ron", "endless.boss_growth 不能小于 1".into());
         }

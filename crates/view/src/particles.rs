@@ -21,7 +21,7 @@ use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
 use crate::fx::hex;
-use crate::{layer, to_screen};
+use crate::{Feel, layer, to_screen};
 
 /// 同时存在的粒子上限；满了就不再生成（先来的先演完）
 const CAP: usize = 1800;
@@ -197,6 +197,7 @@ pub(crate) fn setup_particles(
     commands.insert_resource(Particles {
         list: Vec::with_capacity(CAP),
         rng: Pcg32::new(0x0b1a_5e20, 5),
+        lite: false,
         f: PFrames {
             streak: f("fx/streak"),
             smoke: f("fx/smoke"),
@@ -278,13 +279,21 @@ pub(crate) struct Particles {
     list: Vec<P>,
     pub rng: Pcg32,
     pub f: PFrames,
+    /// 精简特效：成团的粒子减半，上限减半
+    pub lite: bool,
 }
 
 impl Particles {
     pub fn spawn(&mut self, p: P) {
-        if self.list.len() < CAP {
+        let cap = if self.lite { CAP / 2 } else { CAP };
+        if self.list.len() < cap {
             self.list.push(p);
         }
+    }
+
+    /// 一团粒子的个数：精简特效时减半（至少留一个）。
+    fn n(&self, n: u32) -> u32 {
+        if self.lite { n.div_ceil(2) } else { n }
     }
 
     pub fn clear(&mut self) {
@@ -301,7 +310,7 @@ impl Particles {
 
     /// 火星：四散的细火线（叠加）。bias 不为零时偏向那个方向。
     pub fn sparks(&mut self, at: Vec2, color: Color, n: u32, speed: f32, bias: Vec2) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let d = (self.dir() + bias).normalize_or(Vec2::X);
             let v = d * speed * self.rng.range_f32(0.5, 1.2);
             let life = self.rng.range_f32(0.14, 0.3);
@@ -321,7 +330,7 @@ impl Particles {
 
     /// 余烬：慢慢上飘、忽明忽暗的小火点（叠加）。
     pub fn embers(&mut self, at: Vec2, spread: f32, color: Color, n: u32) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let off = self.dir() * self.rng.range_f32(0.0, spread);
             let p = P {
                 vel: Vec2::new(self.rng.range_f32(-12.0, 12.0), self.rng.range_f32(14.0, 42.0)),
@@ -339,7 +348,7 @@ impl Particles {
 
     /// 墨溅：墨滴抛起、落地留点。
     pub fn ink(&mut self, at: Vec2, n: u32, power: f32) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let v = self.dir() * self.rng.range_f32(30.0, 110.0) * power;
             let s = self.rng.range_f32(0.18, 0.42) * power.sqrt();
             let p = P {
@@ -359,7 +368,7 @@ impl Particles {
 
     /// 化灰：灰片向上飘散（普通混合）。
     pub fn ash(&mut self, at: Vec2, spread: f32, n: u32, color: Color) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let off = Vec2::new(self.rng.range_f32(-spread, spread), self.rng.range_f32(0.0, spread * 1.4));
             let p = P {
                 vel: Vec2::new(self.rng.range_f32(-16.0, 16.0), self.rng.range_f32(12.0, 40.0)),
@@ -378,7 +387,7 @@ impl Particles {
 
     /// 烟团：慢慢胀开、上升、淡去（普通混合）。
     pub fn smoke(&mut self, at: Vec2, size: f32, color: Color, n: u32) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let off = self.dir() * self.rng.range_f32(0.0, size * 6.0);
             let p = P {
                 vel: self.dir() * self.rng.range_f32(4.0, 16.0) + Vec2::new(0.0, 10.0),
@@ -396,7 +405,7 @@ impl Particles {
 
     /// 地上扬起的尘（闪避、落印）。
     pub fn dust(&mut self, at: Vec2, n: u32, power: f32, color: Color) {
-        for _ in 0..n {
+        for _ in 0..self.n(n) {
             let d = self.dir();
             let p = P {
                 vel: Vec2::new(d.x, d.y * 0.62) * self.rng.range_f32(20.0, 60.0) * power,
@@ -459,12 +468,14 @@ impl Particles {
 /// 推进粒子，攒成绘制请求。用虚拟时间：顿帧和慢镜时粒子一起停、一起慢。
 pub(crate) fn update_particles(
     time: Res<Time>,
+    feel: Res<Feel>,
     mut parts: ResMut<Particles>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
 ) {
     let dt = time.delta_secs();
     let parts = &mut *parts;
+    parts.lite = feel.lite;
     let drop = parts.f.drop;
     let mut landed: Vec<Vec2> = Vec::new();
     parts.list.retain_mut(|p| {
@@ -736,7 +747,7 @@ pub(crate) fn particle_events(
     // 走路扬尘：每走一段，脚边起一小团尘
     let moved = clock.last_hero.map_or(0.0, |p| p.distance(hero_at));
     clock.last_hero = Some(hero_at);
-    if moved < 40.0 && pl.moved > 0.01 && pl.dash_t <= 0.0 {
+    if moved < 40.0 && pl.moved > 0.01 && pl.dash_t <= 0.0 && !parts.lite {
         clock.stride += moved;
         if clock.stride > 26.0 {
             clock.stride = 0.0;
@@ -744,7 +755,7 @@ pub(crate) fn particle_events(
         }
     }
     // 灯火飘火星
-    if let Some(arsenal) = &arsenal {
+    if let Some(arsenal) = arsenal.as_ref().filter(|_| !parts.lite) {
         let a = fixed.overstep_fraction();
         for slot in &arsenal.0 {
             if slot.count == 0 || slot.size <= 0.0 {

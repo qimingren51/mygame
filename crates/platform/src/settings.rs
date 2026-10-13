@@ -24,6 +24,8 @@ pub struct Settings {
     pub hitstop: bool,
     /// 辉光
     pub bloom: bool,
+    /// 精简特效：粒子减半，不画环境萤火、夜雾和色散（配置低的机器用）
+    pub lite_fx: bool,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
@@ -41,6 +43,7 @@ impl Default for Settings {
             shake: 1.0,
             hitstop: true,
             bloom: true,
+            lite_fx: false,
             path: None,
             save_error: None,
         }

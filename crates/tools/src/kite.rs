@@ -321,6 +321,7 @@ fn moment(ev: &SimEvent) -> Option<&'static str> {
         SimEvent::Elite { .. } => "精英",
         SimEvent::EncircleWarn { .. } => "合围",
         SimEvent::Surge => "妖潮",
+        SimEvent::NightDeeper { .. } => "夜深",
         SimEvent::Ult => "燃灯",
         SimEvent::Combo { .. } => "连斩",
         SimEvent::BossArrived { .. } => "夜主登场",

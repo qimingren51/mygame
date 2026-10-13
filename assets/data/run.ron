@@ -166,6 +166,9 @@
         oil_per_kill: 0.01,
         oil_boss: 150,
         gold: 0.5,
+        // 夜深（BALANCE 4.7）：10 分钟以后每分钟生命 × 1.2（复利，取代 late.hp）、移速 +10%、魂火 × 0.8、
+        // 抗控制 +25%（最多 90%）
+        depth: (hp_growth: 1.2, speed: 0.10, xp: 0.8, control: 0.25, control_max: 0.9),
     ),
 
     bench: (

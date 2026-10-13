@@ -38,11 +38,13 @@ pub struct Feel {
     pub hitstop: bool,
     /// 辉光
     pub bloom: bool,
+    /// 精简特效：粒子减半，不画环境萤火、夜雾和色散
+    pub lite: bool,
 }
 
 impl Default for Feel {
     fn default() -> Self {
-        Feel { shake: 1.0, hitstop: true, bloom: true }
+        Feel { shake: 1.0, hitstop: true, bloom: true, lite: false }
     }
 }
 
