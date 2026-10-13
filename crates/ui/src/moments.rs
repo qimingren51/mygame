@@ -13,12 +13,14 @@ use lantern_view::Dawn;
 use lantern_view::atlas::AtlasDb;
 
 use crate::describe::{element_color, hex};
+use crate::toasts::ToastStack;
 use crate::{CINNABAR, Fonts, PAPER, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.init_resource::<LastBoss>()
-        .add_systems(OnEnter(AppState::Run), reset)
-        .add_systems(Update, (read_events, dawn_title, animate).chain().run_if(in_state(AppState::Run)));
+    app.init_resource::<LastBoss>().add_systems(OnEnter(AppState::Run), reset).add_systems(
+        Update,
+        (read_events, dawn_title, animate, hold_toasts).chain().run_if(in_state(AppState::Run)),
+    );
 }
 
 /// 墨色（写在晨光里的大字）
@@ -141,9 +143,13 @@ fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, en
 #[derive(Component)]
 struct BaseAlpha(f32);
 
-/// 墨晕：题字后面一团淡墨（粒子的烟团拉大、染黑），背后是一片火光时字也看得清。数是浓度。
+/// 墨晕：题字后面一团淡墨（羽化很大的阴影），背后是一片火光时字也看得清。数是浓度。
 #[derive(Component)]
 struct Wash(f32);
+
+/// 夜主登场的题字。它在的时候，上方的提示条先藏起来，别和题字叠在一起。
+#[derive(Component)]
+struct BossCard;
 
 /// 演出里会跟着淡入淡出的颜色。
 type Paint<'w, 's> = Query<
@@ -156,7 +162,7 @@ type Paint<'w, 's> = Query<
         Option<&'static mut BorderColor>,
         Option<&'static mut TextShadow>,
         Option<&'static BaseAlpha>,
-        Option<&'static Wash>,
+        Option<(&'static Wash, &'static mut BoxShadow)>,
     ),
 >;
 
@@ -314,6 +320,7 @@ fn read_events(
                 commands
                     .spawn((
                         Moment { t: 0.0, life: 3.8, anim: Anim::Fade },
+                        BossCard,
                         DespawnOnExit(AppState::Run),
                         GlobalZIndex(6),
                         Node {
@@ -327,21 +334,18 @@ fn read_events(
                         UiTransform::default(),
                     ))
                     .with_children(|p| {
-                        if let Some(smoke) = db.find("fx/smoke") {
-                            let mut img = db.ui_image(smoke);
-                            img.color = INK.with_alpha(0.0);
-                            p.spawn((
-                                Node {
-                                    left: percent(22),
-                                    right: percent(22),
-                                    top: px(-50),
-                                    bottom: px(-44),
-                                    ..absolute()
-                                },
-                                Wash(0.8),
-                                img,
-                            ));
-                        }
+                        p.spawn((
+                            Node {
+                                left: percent(33),
+                                right: percent(33),
+                                top: px(16),
+                                bottom: px(10),
+                                border_radius: BorderRadius::all(px(120)),
+                                ..absolute()
+                            },
+                            Wash(0.85),
+                            BoxShadow::new(INK.with_alpha(0.0), px(0), px(0), px(16), px(60)),
+                        ));
                         let shadow =
                             TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.85) };
                         p.spawn((text(&fonts.title, 36.0, hex(&e.eye), &title), shadow));
@@ -404,6 +408,20 @@ fn ease_out_back(x: f32) -> f32 {
     let c1 = 1.70158;
     let c3 = c1 + 1.0;
     1.0 + c3 * (x - 1.0).powi(3) + c1 * (x - 1.0).powi(2)
+}
+
+/// 夜主题字在的时候、天明以后，藏起上方的提示条（提示照常计时，藏着的那几秒就错过了）。
+/// 天明时提示条自己也会清空，但击杀夜主那一下常常同时充满燃灯，“燃灯已满”排在伏诛前面，清不掉。
+fn hold_toasts(
+    cards: Query<(), With<BossCard>>,
+    dawn: Res<Dawn>,
+    mut stack: Query<&mut Visibility, With<ToastStack>>,
+) {
+    let hide = !cards.is_empty() || dawn.t.is_some();
+    let want = if hide { Visibility::Hidden } else { Visibility::Inherited };
+    for mut v in &mut stack {
+        v.set_if_neq(want);
+    }
 }
 
 /// 推进所有演出，按各自的方式改大小、透明度。
@@ -473,7 +491,12 @@ fn set_alpha(e: Entity, a: f32, children: &Query<&Children>, colors: &mut Paint)
             tc.0.set_alpha(a);
         }
         if let Some(mut img) = img {
-            img.color.set_alpha(wash.map_or(1.0, |w| w.0) * a);
+            img.color.set_alpha(a);
+        }
+        if let Some((w, mut bs)) = wash {
+            for s in &mut bs.0 {
+                s.color.set_alpha(w.0 * a);
+            }
         }
         // 每个节点都自带透明的底色和边框，只改有底子（标了 BaseAlpha）的，否则会变成黑块
         if let Some(base) = base {

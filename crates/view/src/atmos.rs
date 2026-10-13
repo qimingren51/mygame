@@ -18,7 +18,7 @@ use lantern_sim::{Health, Player, SimEvent, SimOutbox};
 use crate::actors::{GlowRequests, Pools};
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
 use crate::particles::{INK, Particles};
-use crate::{MainCamera, layer};
+use crate::{Feel, MainCamera, layer};
 
 /// 无尽夜：夜主每退去一次夜色暗多少、最多几层
 const DEPTH_STEP: f32 = 0.06;
@@ -161,6 +161,7 @@ pub(crate) fn update_atmos(
         With<MainCamera>,
     >,
     mut light: Single<&mut Camera, With<LightCamera>>,
+    feel: Res<Feel>,
 ) {
     let rdt = real.delta_secs().min(0.1);
     let dt = time.delta_secs();
@@ -201,7 +202,7 @@ pub(crate) fn update_atmos(
         v.color = base.color.mix(&Color::srgb(0.35, 0.02, 0.03), red);
     }
     if let Some(c) = chroma {
-        c.intensity = atmos.hurt * 0.012 + low * beat * 0.006;
+        c.intensity = if feel.lite { 0.0 } else { atmos.hurt * 0.012 + low * beat * 0.006 };
     }
 
     // ---- 光照图底色：夜色 → 夜主登场时更暗 → 天明时变成晨光
@@ -243,6 +244,10 @@ pub(crate) fn update_atmos(
     // ---- 萤火：绕着镜头飘，忽明忽暗；天亮了就散
     let center = cam_tf.translation.truncate();
     let night_k = 1.0 - day;
+    // 精简特效：萤火和夜雾都不画
+    if feel.lite {
+        return;
+    }
     if night_k > 0.01 {
         for m in &mut atmos.motes {
             let wander =

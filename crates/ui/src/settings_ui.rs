@@ -1,4 +1,4 @@
-//! 设置项（暂停界面和标题界面共用）：音乐音量、音效音量、全屏、震屏、顿帧、辉光。
+//! 设置项（暂停界面和标题界面共用）：音乐音量、音效音量、全屏、震屏、顿帧、辉光、特效。
 //! 左右键调整，改完立即生效并存盘。
 
 use bevy::prelude::*;
@@ -17,10 +17,11 @@ pub(crate) enum Item {
     Shake,
     Hitstop,
     Bloom,
+    Fx,
 }
 
-pub(crate) const ITEMS: [Item; 6] =
-    [Item::Music, Item::Sfx, Item::Fullscreen, Item::Shake, Item::Hitstop, Item::Bloom];
+pub(crate) const ITEMS: [Item; 7] =
+    [Item::Music, Item::Sfx, Item::Fullscreen, Item::Shake, Item::Hitstop, Item::Bloom, Item::Fx];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -34,6 +35,7 @@ fn label(item: Item) -> &'static str {
         Item::Shake => "震屏",
         Item::Hitstop => "顿帧",
         Item::Bloom => "辉光",
+        Item::Fx => "特效",
     }
 }
 
@@ -46,6 +48,7 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Fullscreen => on_off(s.fullscreen),
         Item::Hitstop => on_off(s.hitstop),
         Item::Bloom => on_off(s.bloom),
+        Item::Fx => if s.lite_fx { "精简" } else { "完整" }.into(),
     }
 }
 
@@ -86,6 +89,10 @@ pub(crate) fn adjust(item: Item, actions: &Actions, settings: &mut Settings, win
             settings.bloom = !settings.bloom;
             true
         }
+        Item::Fx if actions.nav.x != 0 || actions.confirm => {
+            settings.lite_fx = !settings.lite_fx;
+            true
+        }
         Item::Fullscreen if actions.nav.x != 0 || actions.confirm => {
             settings.fullscreen = !settings.fullscreen;
             window.mode = if settings.fullscreen {
@@ -118,7 +125,12 @@ pub(crate) fn sync_feel(settings: Res<Settings>, mut feel: ResMut<Feel>) {
     if !settings.is_changed() {
         return;
     }
-    let want = Feel { shake: settings.shake, hitstop: settings.hitstop, bloom: settings.bloom };
+    let want = Feel {
+        shake: settings.shake,
+        hitstop: settings.hitstop,
+        bloom: settings.bloom,
+        lite: settings.lite_fx,
+    };
     if *feel != want {
         *feel = want;
     }

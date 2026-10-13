@@ -46,7 +46,7 @@
     Light: (base: 1.0, min: 0.3, max: 2.5),
     // 照见圈：基础 130，最大 220（docs/GAMEPLAY.md 第 4.2 节）；照见易伤 10%，最多 40%
     Reveal: (base: 130.0, min: 40.0, max: 220.0),
-    RevealVuln: (base: 0.10, min: 0.0, max: 0.40),
+    RevealVuln: (base: 0.10, min: 0.0, max: 0.30),
     FlameBand: (base: 0.0, min: 0.0),
     FlameBandMult: (base: 1.0, min: 0.0),
     UltCharge: (base: 1.0, min: 0.0),

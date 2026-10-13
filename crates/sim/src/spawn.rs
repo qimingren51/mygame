@@ -5,7 +5,7 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{AffixKind, Content, PlanEvent, Rank, SpawnDef, Stat};
+use lantern_content::{AffixKind, Content, PlanEvent, Quad, Rank, RunDef, SpawnDef, Stat};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
@@ -37,9 +37,9 @@ pub fn spawn_enemy(
     let run = &content.run;
     let hp_scale = match def.rank {
         Rank::Boss => stats.get(Stat::BossHp),
-        Rank::Elite => run.late_at(run.elite_hp_scale, run.late.hp, minute) * stats.get(Stat::EnemyHp),
+        Rank::Elite => hp_curve(run, en.endless, run.elite_hp_scale, minute) * stats.get(Stat::EnemyHp),
         Rank::Normal | Rank::Critter => {
-            run.late_at(run.enemy_hp_scale, run.late.hp, minute) * stats.get(Stat::EnemyHp)
+            hp_curve(run, en.endless, run.enemy_hp_scale, minute) * stats.get(Stat::EnemyHp)
         }
     };
     let speed_scale = if def.rank == Rank::Critter { 1.0 } else { stats.get(Stat::EnemySpeed) };
@@ -66,6 +66,21 @@ pub fn spawn_enemy(
     Some(i)
 }
 
+/// 杂兵、精英生命的倍率：10 分钟以后普通一夜按 late.hp 线性涨，无尽夜按夜深复利涨（docs/BALANCE.md 第 4.7 节）。
+fn hp_curve(run: &RunDef, endless: bool, q: Quad, minute: f32) -> f32 {
+    let deep = minute - run.late.after;
+    if endless && deep > 0.0 {
+        q.at(run.late.after) * ops::powf(run.endless.depth.hp_growth, deep)
+    } else {
+        run.late_at(q, run.late.hp, minute)
+    }
+}
+
+/// 无尽夜 10 分钟以后过了几分钟（夜深的程度）；普通一夜、10 分钟以前是 0。
+pub(crate) fn depth(content: &Content, endless: bool, minute: f32) -> f32 {
+    if endless { (minute - content.run.late.after).max(0.0) } else { 0.0 }
+}
+
 /// 给精英随机挑 n 个不重复的词缀（二更起）。
 pub(crate) fn give_affixes(content: &Content, en: &mut Enemies, i: usize, n: u32, rng: &mut Pcg32) {
     let total = content.affixes.len() as u32;
@@ -90,15 +105,16 @@ pub(crate) fn soft_cap(s: &SpawnDef, minute: f32) -> usize {
     s.soft_cap.iter().rev().find(|(m, _)| minute >= *m).map_or(0, |&(_, n)| n as usize)
 }
 
-/// 基础刷怪曲线每秒刷出的总血量（以默认妖物计，不含妖潮和属性倍率）。燃灯按它充能。
-pub fn base_spawn_hp(content: &Content, minute: f32) -> f32 {
+/// 基础刷怪曲线每秒刷出的总血量（以默认妖物计，不含妖潮和属性倍率）。燃灯按它充能；
+/// 无尽夜的夜深里生命按复利涨，这里也跟着涨，燃灯不会越打越快。
+pub fn base_spawn_hp(content: &Content, endless: bool, minute: f32) -> f32 {
     let s = &content.run.spawn;
     let base = content.enemy_index(&s.base).map_or(10.0, |k| content.enemies[k].hp);
     let run = &content.run;
     run.late_at(s.rate, run.late.spawn, minute)
         * s.scale
         * base
-        * run.late_at(run.enemy_hp_scale, run.late.hp, minute)
+        * hp_curve(run, endless, run.enemy_hp_scale, minute)
 }
 
 /// 视野外一圈上的随机位置。
@@ -248,6 +264,7 @@ pub(crate) fn update_spawns(
         {
             e.wave += 1;
             due.push((k, None));
+            outbox.0.push(SimEvent::NightDeeper { layer: e.wave });
             if let PlanEvent::Surge { duration, .. } = schedule[k].event {
                 e.boss_due = Some(t + duration);
             }

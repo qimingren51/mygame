@@ -8,14 +8,14 @@
         // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
         behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
         levels: [
-            (count: 3, radius: 54.0, damage: 12.8),
-            (count: 3, radius: 58.0, damage: 15.3),
-            (count: 4, radius: 62.0, damage: 17.8),
-            (count: 4, radius: 66.0, damage: 20.4),
-            (count: 5, radius: 70.0, damage: 22.9),
-            (count: 5, radius: 74.0, damage: 25.5),
-            (count: 6, radius: 78.0, damage: 28.1),
-            (count: 6, radius: 82.0, damage: 30.6),
+            (count: 3, radius: 54.0, damage: 10.9),
+            (count: 3, radius: 58.0, damage: 13.0),
+            (count: 4, radius: 62.0, damage: 15.1),
+            (count: 4, radius: 66.0, damage: 17.3),
+            (count: 5, radius: 70.0, damage: 19.5),
+            (count: 5, radius: 74.0, damage: 21.7),
+            (count: 6, radius: 78.0, damage: 23.9),
+            (count: 6, radius: 82.0, damage: 26.0),
         ],
         evolution: Some((
             name: "不夜城", passive: "changming",
@@ -23,7 +23,7 @@
             // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
                             inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
-            level: (count: 10, radius: 92.0, damage: 61.2),
+            level: (count: 10, radius: 92.0, damage: 52.0),
         )),
     ),
     (

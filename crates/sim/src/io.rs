@@ -223,6 +223,10 @@ pub enum SimEvent {
         count: u8,
     },
     Surge,
+    /// 无尽夜：夜又深了一层（10 分钟以后每 5 分钟一次）
+    NightDeeper {
+        layer: u32,
+    },
     BossArrived {
         kind: u16,
     },

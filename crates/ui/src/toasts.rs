@@ -103,6 +103,13 @@ fn read_events(
                 msg(format!("{title} · {}", e.name), body, hex(&e.eye), false)
             }
             SimEvent::Surge => msg("妖潮来袭", "妖物大量涌来，撑过去", hex("#B07CF0"), true),
+            // 无尽夜每 5 分钟深一层（docs/BALANCE.md 第 4.7 节）
+            SimEvent::NightDeeper { layer } => msg(
+                format!("夜深 · 第 {layer} 层"),
+                "妖物更硬、更快，越来越不怕冻和晕；魂火越来越少",
+                hex("#7C6CF0"),
+                true,
+            ),
             SimEvent::EncircleWarn { .. } => msg("合围", "妖物从四面合拢，找缺口突围", hex("#FF6B5A"), true),
             SimEvent::LanternLit { lit, all, .. } => {
                 if all {
