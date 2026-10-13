@@ -132,6 +132,9 @@ pub(crate) fn update_encounters(
 ) {
     let c = &content.0;
     let (pos, mut health) = player.into_inner();
+    if health.hp <= 0.0 {
+        return;
+    }
     let p = pos.0;
     let encounters = &mut *encounters;
     if let Some((_, t)) = &mut encounters.buff {

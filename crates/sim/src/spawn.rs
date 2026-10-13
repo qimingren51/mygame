@@ -226,7 +226,6 @@ pub(crate) fn update_spawns(
         if step.done || t < step.at {
             continue;
         }
-        step.done = true;
         let spawn_elite = |pool: &[String],
                            rng: &mut Pcg32,
                            en: &mut Enemies,
@@ -280,8 +279,12 @@ pub(crate) fn update_spawns(
                         director.barrier = Some((Vec2::new(p.x, p.y), *barrier));
                     }
                     outbox.0.push(SimEvent::BossArrived { kind });
+                } else {
+                    // 满员时保留夜主事件，腾出槽位后重试。
+                    continue;
                 }
             }
         }
+        step.done = true;
     }
 }

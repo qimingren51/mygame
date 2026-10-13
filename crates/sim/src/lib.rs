@@ -283,6 +283,8 @@ impl Plugin for SimPlugin {
                     (tick::advance_tick, tick::record_hash, replay::sync_hashes).chain().in_set(SimSet::Hash),
                 ),
             )
+            // 终局后 Input 不再运行，回放仍须在本步标记结束。
+            .add_systems(FixedUpdate, replay::finish_playback.after(SimSet::Hash))
             // 模拟进入结束阶段后切换界面状态；画面、音频、界面在 Update 里消费完事件后，这里统一清空。
             .add_systems(
                 Update,

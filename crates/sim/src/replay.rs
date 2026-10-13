@@ -11,7 +11,7 @@
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{HashLog, InputFrame, RunSetup, SimCommand, SimCommands, Tick};
+use crate::{HashLog, InputFrame, RunSetup, SimCommand, SimCommands, SimPhase, Tick};
 
 /// 回放文件格式的版本。改动格式时加一，并在 [`Replay::parse`] 里处理旧版本。
 /// 第 2 版：按步录制，文件头带完整的开局设置（夜签、心灯）。第 1 版（M1）不再支持。
@@ -158,6 +158,15 @@ pub(crate) fn feed_playback(
             p.finished = true;
             *input = InputFrame::default();
         }
+    }
+}
+
+/// 终局后不会再读取输入，直接结束回放。
+pub(crate) fn finish_playback(phase: Option<Res<SimPhase>>, playback: Option<ResMut<ReplayPlayback>>) {
+    if phase.is_some_and(|p| *p == SimPhase::Over)
+        && let Some(mut p) = playback
+    {
+        p.finished = true;
     }
 }
 

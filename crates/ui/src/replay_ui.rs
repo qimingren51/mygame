@@ -92,15 +92,26 @@ fn update_status(
     }
 }
 
-/// 开局后的第一帧把 `--from` 之前的步数一口气跑完（事件直接丢掉，画面从那一刻开始）。
+/// 快进到 `--from`（事件直接丢掉）；时间没推进时让出本帧，下帧继续。
 fn seek(world: &mut World) {
     let Some(ReplaySeek(secs)) = world.remove_resource::<ReplaySeek>() else { return };
     let target = u64::from(secs) * u64::from(TICK_HZ);
     while world.resource::<Tick>().0 < target
         && world.get_resource::<ReplayPlayback>().is_some_and(|p| !p.finished)
+        && *world.resource::<SimPhase>() != SimPhase::Over
     {
+        let before = world.resource::<Tick>().0;
         world.run_schedule(FixedUpdate);
         world.resource_mut::<SimOutbox>().0.clear();
+        if world.resource::<Tick>().0 <= before {
+            // 选择和演出停顿也会暂停 tick；结束前保留目标，但不能在本帧空转。
+            if *world.resource::<SimPhase>() != SimPhase::Over
+                && world.get_resource::<ReplayPlayback>().is_some_and(|p| !p.finished)
+            {
+                world.insert_resource(ReplaySeek(secs));
+            }
+            break;
+        }
     }
 }
 
@@ -108,4 +119,80 @@ fn seek(world: &mut World) {
 fn stop(mut commands: Commands, mut time: ResMut<Time<Virtual>>) {
     commands.remove_resource::<ReplayPlayback>();
     time.unpause();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lantern_sim::{Replay, RunMode, RunSetup};
+
+    #[derive(Resource, Default)]
+    struct Steps(u32);
+
+    fn world() -> World {
+        let mut world = World::new();
+        world.insert_resource(Tick(0));
+        world.insert_resource(SimPhase::Play);
+        world.insert_resource(SimOutbox::default());
+        world.insert_resource(ReplayPlayback::new(Replay::new("test", 0, RunSetup::new(1, RunMode::Normal))));
+        world.insert_resource(ReplaySeek(60));
+        world.init_resource::<Steps>();
+        world
+    }
+
+    #[test]
+    fn seek_stops_at_the_end_even_before_playback_is_marked_finished() {
+        let mut world = world();
+        let mut schedule = Schedule::new(FixedUpdate);
+        schedule.add_systems(
+            |mut tick: ResMut<Tick>, mut phase: ResMut<SimPhase>, mut steps: ResMut<Steps>| {
+                steps.0 += 1;
+                assert_eq!(steps.0, 1, "终局后不能继续快进");
+                tick.0 += 1;
+                *phase = SimPhase::Over;
+            },
+        );
+        world.add_schedule(schedule);
+        seek(&mut world);
+        assert_eq!(world.resource::<Tick>().0, 1);
+        assert_eq!(*world.resource::<SimPhase>(), SimPhase::Over);
+        assert!(!world.contains_resource::<ReplaySeek>());
+        // 已在终局时也不能再执行调度。
+        world.insert_resource(ReplaySeek(60));
+        seek(&mut world);
+        assert_eq!(world.resource::<Steps>().0, 1);
+    }
+
+    #[test]
+    fn seek_yields_when_tick_stalls_and_resumes_next_frame() {
+        let mut world = world();
+        world.insert_resource(ReplaySeek(1));
+        let mut schedule = Schedule::new(FixedUpdate);
+        schedule.add_systems(|mut steps: ResMut<Steps>| {
+            steps.0 += 1;
+            assert!(steps.0 <= 1, "无进展时必须先退出本帧循环");
+        });
+        world.add_schedule(schedule);
+        seek(&mut world);
+        assert_eq!(world.resource::<Tick>().0, 0);
+        assert!(world.contains_resource::<ReplaySeek>());
+
+        let mut schedule = Schedule::new(FixedUpdate);
+        schedule.add_systems(|mut tick: ResMut<Tick>| tick.0 += 1);
+        world.add_schedule(schedule);
+        seek(&mut world);
+        assert_eq!(world.resource::<Tick>().0, u64::from(TICK_HZ));
+        assert!(!world.contains_resource::<ReplaySeek>());
+    }
+
+    #[test]
+    fn seek_stops_when_inputs_run_out_without_tick_progress() {
+        let mut world = world();
+        let mut schedule = Schedule::new(FixedUpdate);
+        schedule.add_systems(|mut playback: ResMut<ReplayPlayback>| playback.finished = true);
+        world.add_schedule(schedule);
+        seek(&mut world);
+        assert_eq!(world.resource::<Tick>().0, 0);
+        assert!(!world.contains_resource::<ReplaySeek>());
+    }
 }
