@@ -13,6 +13,7 @@ use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::{GameContent, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox};
 
+use crate::feedback::{Feedback, Priority};
 use crate::lighting::{Darkness, LightCamera};
 use crate::{MainCamera, layer, to_screen};
 
@@ -67,6 +68,9 @@ pub(crate) struct Rig {
     /// 顿帧剩余（现实秒）、慢镜剩余与倍率
     stop: f32,
     stop_ready: f32,
+    stop_priority: Priority,
+    time_fresh: bool,
+    slow_priority: Priority,
     slow: f32,
     slow_len: f32,
     slow_scale: f32,
@@ -91,6 +95,9 @@ impl Default for Rig {
             zoom_hold: 0.0,
             stop: 0.0,
             stop_ready: 0.0,
+            stop_priority: Priority::Ambient,
+            time_fresh: false,
+            slow_priority: Priority::Ambient,
             slow: 0.0,
             slow_len: 0.0,
             slow_scale: 1.0,
@@ -100,14 +107,17 @@ impl Default for Rig {
 }
 
 impl Rig {
-    /// 震屏：创伤叠加，封顶 1（总量预算，大事件同时发生也不会晕）。
+    /// 同帧和连续小事件只补到该级强度，不能靠堆数量超过大事件。
     pub fn trauma(&mut self, amount: f32) {
-        self.trauma = (self.trauma + amount).min(1.0);
+        self.trauma = self.trauma.max(amount.min(1.0));
     }
 
     /// 方向冲击：镜头朝 dir（屏幕坐标）猛地一顿再弹回。
     pub fn kick(&mut self, dir: Vec2, amount: f32) {
-        self.kick_v += dir.normalize_or_zero() * amount * 60.0;
+        let velocity = dir.normalize_or_zero() * amount * 60.0;
+        if velocity.length_squared() >= self.kick_v.length_squared() {
+            self.kick_v = velocity;
+        }
     }
 
     /// 随机方向的小冲击。
@@ -118,26 +128,45 @@ impl Rig {
 
     /// 缩放冲击：推进 amount（0.06 即放大 6%），保持 hold 秒后弹回。
     pub fn punch(&mut self, amount: f32, hold: f32) {
-        if amount >= self.zoom_to {
+        if amount > 0.0 && amount >= self.zoom_to {
             self.zoom_to = amount;
             self.zoom_hold = hold;
         }
     }
 
     /// 顿帧：画面和模拟一起停 secs 现实秒。
-    pub fn hitstop(&mut self, secs: f32) {
-        if self.stop_ready > 0.0 {
+    pub fn hitstop(&mut self, secs: f32, priority: Priority) {
+        if self.stop_ready > 0.0 && priority <= self.stop_priority {
             return;
         }
+        self.stop_priority = priority;
+        self.time_fresh = true;
         self.stop = self.stop.max(secs);
         self.stop_ready = STOP_GAP + secs;
     }
 
     /// 慢镜：secs 现实秒内以 scale 倍速运行，最后一段平滑回到正常速度。
-    pub fn slowmo(&mut self, secs: f32, scale: f32) {
+    pub fn slowmo(&mut self, secs: f32, scale: f32, priority: Priority) {
+        if self.slow > 0.0 && priority < self.slow_priority {
+            return;
+        }
+        self.slow_priority = priority;
+        self.time_fresh = true;
         self.slow = secs;
         self.slow_len = secs;
         self.slow_scale = scale;
+    }
+
+    fn advance_time(&mut self, dt: f32) {
+        // 事件刚到达时不扣掉上一帧耗时，低帧率也至少能看到一次完整停顿。
+        if self.time_fresh {
+            self.time_fresh = false;
+            return;
+        }
+        let after_stop = (dt - self.stop).max(0.0);
+        self.stop = (self.stop - dt).max(0.0);
+        self.slow = (self.slow - after_stop).max(0.0);
+        self.stop_ready = (self.stop_ready - dt).max(0.0);
     }
 
     /// 当前的时间倍率。
@@ -171,83 +200,150 @@ impl Rig {
 }
 
 /// 模拟事件 → 震屏、冲击、缩放、顿帧、慢镜（docs/FEEL.md 第 2 节的手感表）。
-pub(crate) fn camera_events(outbox: Res<SimOutbox>, mut rig: ResMut<Rig>, player: Single<&Player>) {
-    for ev in &outbox.0 {
-        match *ev {
-            // 大暴击停 2 帧（docs/GAMEPLAY.md 第 14 节）
-            SimEvent::Hit { damage, crit: true, .. } if damage >= 1000.0 => {
-                rig.hitstop(0.035);
-                rig.trauma(0.1);
+pub(crate) fn camera_events(
+    outbox: Res<SimOutbox>,
+    feedback: Res<Feedback>,
+    mut rig: ResMut<Rig>,
+    player: Single<&Player>,
+) {
+    let impulse = camera_impulse(&outbox.0, player.facing);
+    let weight = feedback.visibility(impulse.priority);
+    rig.trauma(impulse.trauma * weight);
+    if impulse.jolt > 0.0 {
+        rig.jolt(impulse.jolt * weight);
+    }
+    rig.kick(impulse.kick, impulse.kick.length() * weight);
+    rig.punch(impulse.zoom * weight, impulse.hold);
+    if impulse.stop > 0.0 && weight == 1.0 {
+        rig.hitstop(impulse.stop, impulse.priority);
+    }
+    if impulse.slow > 0.0 && weight == 1.0 {
+        rig.slowmo(impulse.slow, impulse.scale, impulse.priority);
+    }
+}
+
+/// 每帧只保留最高级的冲击；同级各通道取最大值，不按事件数相加。
+#[derive(Default, Debug, PartialEq)]
+struct Impulse {
+    priority: Priority,
+    trauma: f32,
+    kick: Vec2,
+    jolt: f32,
+    zoom: f32,
+    hold: f32,
+    stop: f32,
+    slow: f32,
+    scale: f32,
+}
+
+fn camera_impulse(events: &[SimEvent], facing: Vec2) -> Impulse {
+    let mut best = Impulse::default();
+    for event in events {
+        let mut cue = Impulse { priority: Priority::of(event), ..default() };
+        match *event {
+            SimEvent::Hit { damage, crit: true, .. } => {
+                cue.stop = if damage >= 1000.0 { 0.035 } else { 0.025 };
+                cue.trauma = 0.1;
             }
             SimEvent::Kill { rank: Rank::Elite, .. } => {
-                rig.trauma(0.3);
-                rig.hitstop(0.06);
+                cue.trauma = 0.3;
+                cue.stop = 0.06;
             }
             SimEvent::PlayerHurt { .. } => {
-                rig.trauma(0.32);
-                rig.jolt(0.6);
-                rig.hitstop(0.045);
+                cue.trauma = 0.32;
+                cue.jolt = 0.6;
+                cue.stop = 0.045;
             }
-            SimEvent::Dash { .. } => rig.kick(-to_screen(player.facing), 0.3),
+            SimEvent::Dash { .. } => cue.kick = -to_screen(facing).normalize_or_zero() * 0.3,
             SimEvent::Strike { fx, .. } => match fx {
                 StrikeFx::Seal { evolved } => {
-                    rig.trauma(if evolved { 0.3 } else { 0.15 });
-                    rig.kick(Vec2::NEG_Y, if evolved { 0.9 } else { 0.45 });
+                    cue.trauma = if evolved { 0.3 } else { 0.15 };
+                    cue.kick = Vec2::NEG_Y * if evolved { 0.9 } else { 0.45 };
                 }
-                StrikeFx::Quake => rig.trauma(0.42),
+                StrikeFx::Quake => cue.trauma = 0.42,
                 StrikeFx::Toll => {
-                    rig.trauma(0.28);
-                    rig.punch(0.03, 0.08);
+                    cue.trauma = 0.28;
+                    cue.zoom = 0.03;
+                    cue.hold = 0.08;
                 }
-                StrikeFx::Blast(_) => rig.trauma(0.05),
+                StrikeFx::Blast(_) => cue.trauma = 0.05,
                 StrikeFx::Taiji => {
-                    rig.trauma(0.25);
-                    rig.punch(0.04, 0.15);
+                    cue.trauma = 0.25;
+                    cue.zoom = 0.04;
+                    cue.hold = 0.15;
                 }
                 StrikeFx::Ult => {
-                    rig.trauma(0.75);
-                    rig.punch(0.09, 0.25);
-                    rig.hitstop(0.09);
+                    cue.trauma = 0.75;
+                    cue.zoom = 0.09;
+                    cue.hold = 0.25;
+                    cue.stop = 0.09;
                 }
-                StrikeFx::Pulse | StrikeFx::None => {}
+                StrikeFx::Pulse | StrikeFx::None => continue,
             },
             SimEvent::SweepStrike { dir, .. } => {
-                rig.trauma(0.38);
-                rig.kick(to_screen(Vec2::from_angle(dir)), 0.8);
+                cue.trauma = 0.38;
+                cue.kick = to_screen(Vec2::from_angle(dir)) * 0.8;
             }
-            SimEvent::RainStrike { .. } => rig.trauma(0.08),
-            SimEvent::Reaction { first: true, .. } => rig.trauma(0.2),
+            SimEvent::RainStrike { .. } => cue.trauma = 0.08,
+            SimEvent::Reaction { first: true, .. } => cue.trauma = 0.2,
             SimEvent::LastStand { .. } | SimEvent::Revived { .. } => {
-                rig.trauma(0.7);
-                rig.punch(0.1, 0.4);
-                rig.slowmo(0.9, 0.3);
+                cue.trauma = 0.7;
+                cue.zoom = 0.1;
+                cue.hold = 0.4;
+                cue.slow = 0.9;
+                cue.scale = 0.3;
             }
-            SimEvent::LanternLit { all, .. } => rig.punch(if all { 0.05 } else { 0.025 }, 0.2),
-            SimEvent::Surge => rig.trauma(0.3),
-            SimEvent::Encircle { .. } => rig.trauma(0.2),
+            SimEvent::LanternLit { all, .. } => {
+                cue.zoom = if all { 0.05 } else { 0.025 };
+                cue.hold = 0.2;
+            }
+            SimEvent::Surge => cue.trauma = 0.3,
+            SimEvent::Encircle { .. } => cue.trauma = 0.2,
             SimEvent::BossArrived { .. } => {
-                rig.trauma(0.6);
-                rig.punch(0.06, 0.6);
+                cue.trauma = 0.6;
+                cue.zoom = 0.06;
+                cue.hold = 0.6;
             }
             SimEvent::BossPhase { .. } => {
-                rig.trauma(0.45);
-                rig.hitstop(0.12);
+                cue.trauma = 0.45;
+                cue.stop = 0.12;
             }
-            SimEvent::BossEnraged => rig.trauma(0.3),
-            // 夜主倒下：慢镜 1 秒多（docs/GAMEPLAY.md 第 14 节）
+            SimEvent::BossEnraged => cue.trauma = 0.3,
             SimEvent::BossDefeated { .. } => {
-                rig.trauma(0.9);
-                rig.punch(0.12, 0.8);
-                rig.hitstop(0.12);
-                rig.slowmo(1.6, 0.2);
+                cue.trauma = 0.9;
+                cue.zoom = 0.12;
+                cue.hold = 0.8;
+                cue.stop = 0.12;
+                cue.slow = 1.6;
+                cue.scale = 0.2;
             }
             SimEvent::PlayerDied => {
-                rig.trauma(0.5);
-                rig.punch(0.08, 1.2);
+                cue.trauma = 0.5;
+                cue.zoom = 0.08;
+                cue.hold = 1.2;
             }
-            _ => {}
+            _ => continue,
+        }
+        if cue.priority > best.priority {
+            best = cue;
+        } else if cue.priority == best.priority {
+            best.trauma = best.trauma.max(cue.trauma);
+            best.jolt = best.jolt.max(cue.jolt);
+            if cue.kick.length_squared() > best.kick.length_squared() {
+                best.kick = cue.kick;
+            }
+            if cue.zoom > best.zoom || (cue.zoom == best.zoom && cue.hold > best.hold) {
+                best.zoom = cue.zoom;
+                best.hold = cue.hold;
+            }
+            best.stop = best.stop.max(cue.stop);
+            if cue.slow > best.slow {
+                best.slow = cue.slow;
+                best.scale = cue.scale;
+            }
         }
     }
+    best
 }
 
 pub(crate) fn reset_rig(mut rig: ResMut<Rig>, mut time: ResMut<Time<Virtual>>) {
@@ -274,10 +370,8 @@ pub(crate) fn update_rig(
 
     // ---- 时间：暂停时顿帧、慢镜不倒数（结算时照常倒数，免得一直慢着）
     if !paused {
-        rig.stop = (rig.stop - dt).max(0.0);
-        rig.slow = (rig.slow - dt).max(0.0);
+        rig.advance_time(dt);
     }
-    rig.stop_ready = (rig.stop_ready - dt).max(0.0);
     let scale = if feel.hitstop { rig.time_scale() } else { 1.0 };
     if (time.relative_speed() - scale).abs() > 1e-4 {
         time.set_relative_speed(scale);
@@ -357,29 +451,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trauma_is_capped() {
+    fn small_shakes_cannot_accumulate_into_a_climax() {
         let mut rig = Rig::default();
         for _ in 0..10 {
             rig.trauma(0.4);
         }
-        assert_eq!(rig.trauma, 1.0);
+        assert_eq!(rig.trauma, 0.4);
     }
 
     #[test]
     fn hitstop_freezes_then_respects_gap() {
         let mut rig = Rig::default();
-        rig.hitstop(0.05);
+        rig.hitstop(0.05, Priority::Impact);
         assert_eq!(rig.time_scale(), 0.0);
         // 顿帧结束后，间隔内再来一次不生效
         rig.stop = 0.0;
-        rig.hitstop(0.05);
+        rig.hitstop(0.05, Priority::Impact);
         assert_eq!(rig.time_scale(), 1.0);
+    }
+
+    #[test]
+    fn climax_upgrades_active_stop_and_cooldown_without_being_downgraded() {
+        for active in [true, false] {
+            let mut rig = Rig::default();
+            rig.hitstop(0.035, Priority::Critical);
+            if !active {
+                rig.stop = 0.0;
+            }
+            rig.hitstop(0.09, Priority::Ultimate);
+            assert_eq!(rig.stop, 0.09);
+            rig.hitstop(0.12, Priority::Finale);
+            assert_eq!(rig.stop, 0.12);
+            rig.hitstop(0.25, Priority::Impact);
+            assert_eq!(rig.stop, 0.12);
+        }
+    }
+
+    #[test]
+    fn slow_frame_does_not_consume_a_new_stop_or_the_following_slowmo() {
+        let mut rig = Rig::default();
+        rig.hitstop(0.12, Priority::Finale);
+        rig.slowmo(1.6, 0.2, Priority::Finale);
+        rig.advance_time(0.2);
+        assert_eq!(rig.stop, 0.12);
+        assert_eq!(rig.time_scale(), 0.0);
+        rig.advance_time(0.12);
+        assert_eq!(rig.slow, 1.6);
+        assert_eq!(rig.time_scale(), 0.2);
+        rig.slowmo(0.9, 0.3, Priority::Ultimate);
+        assert_eq!(rig.slow, 1.6);
+    }
+
+    #[test]
+    fn frame_arbitration_ignores_event_order_and_small_event_count() {
+        let small = SimEvent::Strike { pos: Vec2::ZERO, radius: 50.0, fx: StrikeFx::Seal { evolved: true } };
+        let climax = SimEvent::BossDefeated { pos: Vec2::ZERO, dawn: true };
+        let mut events = vec![small; 500];
+        events.push(SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult });
+        events.push(climax);
+        let expected = camera_impulse(&[climax], Vec2::X);
+        assert_eq!(camera_impulse(&events, Vec2::X), expected);
+        events.reverse();
+        assert_eq!(camera_impulse(&events, Vec2::X), expected);
+        assert_eq!(camera_impulse(&vec![small; 500], Vec2::X), camera_impulse(&[small], Vec2::X));
     }
 
     #[test]
     fn slowmo_eases_back_to_full_speed() {
         let mut rig = Rig::default();
-        rig.slowmo(1.0, 0.2);
+        rig.slowmo(1.0, 0.2, Priority::Ultimate);
         assert!((rig.time_scale() - 0.2).abs() < 1e-5);
         rig.slow = 0.2;
         let mid = rig.time_scale();

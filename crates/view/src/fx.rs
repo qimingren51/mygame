@@ -28,6 +28,7 @@ use lantern_sim::{
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
+use crate::feedback::{Feedback, Priority, eviction};
 use crate::{MainCamera, layer, to_screen};
 
 /// 透视：地面上的圆画成扁圆
@@ -49,9 +50,11 @@ pub(crate) struct FxFrames {
     seal_mark: FrameId,
     warn: FrameId,
     ring: FrameId,
+    wave: FrameId,
     ring_ink: FrameId,
     crack: FrameId,
-    blast: FrameId,
+    slash: FrameId,
+    streak: FrameId,
     taiji: FrameId,
     shield: FrameId,
     chest: FrameId,
@@ -108,9 +111,11 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         seal_mark: need("weapons/seal_mark"),
         warn: need("weapons/warn"),
         ring: need("weapons/ring"),
+        wave: need("fx/wave"),
         ring_ink: need("weapons/ring_ink"),
         crack: need("weapons/crack"),
-        blast: need("weapons/blast"),
+        slash: need("fx/slash"),
+        streak: need("fx/streak"),
         taiji: need("weapons/taiji"),
         shield: need("weapons/shield"),
         chest: need("weapons/chest"),
@@ -142,11 +147,17 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
 enum OneShot {
     Ring { color: Color, ink: bool, light: bool, strong: bool },
     Mark { evolved: bool },
-    Blast { color: Color },
+    Blast { color: Color, ice: bool },
+    Pulse,
+    Toll,
+    Quake,
+    Ult,
+    Reaction { color: Color },
     Taiji,
 }
 
 struct Live {
+    priority: Priority,
     kind: OneShot,
     pos: Vec2,
     r: f32,
@@ -164,6 +175,9 @@ pub(crate) struct FxState {
     /// 石灯笼点亮的时刻（按下标），光区从小慢慢铺开
     lamp_lit: Vec<(u8, f32)>,
     pub flash: Color,
+    priority: Priority,
+    flash_priority: Priority,
+    flash_fresh: bool,
     /// 合围预警的墨雾：已经起了多久、预警多长、合拢后散了多久
     mist: Option<(f32, f32, Option<f32>)>,
 }
@@ -176,25 +190,44 @@ impl Default for FxState {
             time: 0.0,
             lamp_lit: Vec::new(),
             flash: Color::NONE,
+            priority: Priority::Normal,
+            flash_priority: Priority::Ambient,
+            flash_fresh: false,
             mist: None,
         }
     }
 }
 
-const MAX_LIVE: usize = 160;
+const MAX_LIVE: usize = 64;
+const LIVE_RESERVE: usize = 8;
 
 impl FxState {
     fn push(&mut self, kind: OneShot, pos: Vec2, r: f32, life: f32) {
-        if self.live.len() >= MAX_LIVE {
-            self.live.remove(0);
+        let limit = if self.priority < Priority::Critical { MAX_LIVE - LIVE_RESERVE } else { MAX_LIVE };
+        if self.live.len() >= limit {
+            let Some(index) = eviction(&self.live, self.priority, |l| l.priority) else { return };
+            self.live.remove(index);
         }
         let rot = self.rng.range_f32(0.0, TAU);
-        self.live.push(Live { kind, pos, r, t: 0.0, life, rot });
+        self.live.push(Live { kind, pos, r, t: 0.0, life, rot, priority: self.priority });
     }
 
     fn flash(&mut self, color: Color, a: f32) {
-        if a >= self.flash.alpha() {
+        let cap: f32 = match self.priority {
+            Priority::Finale => 0.3,
+            Priority::Ultimate => 0.24,
+            Priority::Critical => 0.18,
+            Priority::Impact => 0.12,
+            _ => 0.06,
+        };
+        let a = a.min(cap);
+        if self.priority > self.flash_priority
+            || (self.priority == self.flash_priority && a >= self.flash.alpha())
+            || self.flash.alpha() <= 0.0
+        {
             self.flash = color.with_alpha(a);
+            self.flash_priority = self.priority;
+            self.flash_fresh = true;
         }
     }
 }
@@ -216,14 +249,21 @@ fn element_rgb(e: Element) -> Color {
 }
 
 /// 把模拟事件变成一次性效果和闪屏。
-pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
-    for ev in &outbox.0 {
+pub(crate) fn read_fx_events(
+    content: Res<GameContent>,
+    outbox: Res<SimOutbox>,
+    feedback: Res<Feedback>,
+    mut fx: ResMut<FxState>,
+) {
+    for &index in &feedback.selected {
+        let ev = &outbox.0[index];
+        fx.priority = Priority::of(ev);
         match *ev {
             SimEvent::Reaction { kind, pos, first, .. } => {
                 let r = &content.0.elements.reactions[kind as usize];
                 let color = element_rgb(r.b);
                 fx.push(
-                    OneShot::Ring { color, ink: false, light: first, strong: first },
+                    OneShot::Reaction { color },
                     to_screen(pos),
                     if first { 90.0 } else { 46.0 },
                     if first { 0.6 } else { 0.35 },
@@ -235,50 +275,20 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             SimEvent::Strike { pos, radius, fx: kind } => {
                 let p = to_screen(pos);
                 match kind {
-                    StrikeFx::Pulse => fx.push(
-                        OneShot::Ring { color: rgb(0x6fb8ff), ink: true, light: false, strong: false },
-                        p,
-                        radius,
-                        0.45,
-                    ),
-                    StrikeFx::Toll => {
-                        fx.push(
-                            OneShot::Ring { color: rgb(0xa8d4ff), ink: true, light: true, strong: true },
-                            p,
-                            radius,
-                            0.7,
-                        );
-                        fx.flash(rgb(0x6fb8ff), 0.18);
-                    }
+                    StrikeFx::Pulse => fx.push(OneShot::Pulse, p, radius, 0.45),
+                    StrikeFx::Toll => fx.push(OneShot::Toll, p, radius, 0.7),
                     StrikeFx::Seal { evolved } => {
                         fx.push(OneShot::Mark { evolved }, p, radius, if evolved { 2.4 } else { 1.8 });
-                        fx.push(
-                            OneShot::Ring { color: rgb(0xc9925a), ink: false, light: false, strong: false },
-                            p,
-                            radius * 1.2,
-                            0.35,
-                        );
+                        fx.push(OneShot::Quake, p, radius * 1.2, 0.35);
                     }
                     StrikeFx::Blast(kind) => {
                         let color = if kind == BlastKind::Ice { rgb(0x6fb8ff) } else { rgb(0xff8a3d) };
-                        fx.push(OneShot::Blast { color }, p, radius, 0.3);
+                        fx.push(OneShot::Blast { color, ice: kind == BlastKind::Ice }, p, radius, 0.3);
                     }
-                    StrikeFx::Quake => {
-                        fx.push(
-                            OneShot::Ring { color: rgb(0xc9925a), ink: false, light: false, strong: false },
-                            p,
-                            radius,
-                            0.5,
-                        );
-                    }
+                    StrikeFx::Quake => fx.push(OneShot::Quake, p, radius, 0.5),
                     StrikeFx::Taiji => fx.push(OneShot::Taiji, p, radius, 1.0),
                     StrikeFx::Ult => {
-                        fx.push(
-                            OneShot::Ring { color: rgb(0xffd98a), ink: false, light: true, strong: true },
-                            p,
-                            radius * 1.1,
-                            1.0,
-                        );
+                        fx.push(OneShot::Ult, p, radius, 1.0);
                         fx.flash(rgb(0xffd98a), 0.55);
                     }
                     StrikeFx::None => {}
@@ -286,7 +296,7 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             }
             SimEvent::SweepStrike { pos, dir } => {
                 let tip = pos + Vec2::new(dir.cos(), dir.sin()) * 110.0;
-                fx.push(OneShot::Blast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
+                fx.push(OneShot::Blast { color: rgb(0xff4a3a), ice: false }, to_screen(tip), 120.0, 0.35);
             }
             // 回光、九转金丹：金色的大环，震屏
             SimEvent::LastStand { pos } | SimEvent::Revived { pos } => {
@@ -300,7 +310,7 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                 fx.flash(rgb(0xfff1c2), 0.45);
             }
             SimEvent::RainStrike { pos } => {
-                fx.push(OneShot::Blast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
+                fx.push(OneShot::Blast { color: rgb(0xff6b5a), ice: false }, to_screen(pos), 44.0, 0.3);
             }
             SimEvent::IllusionDispelled { pos } => fx.push(
                 OneShot::Ring { color: rgb(0xd8c8ff), ink: false, light: true, strong: false },
@@ -353,6 +363,7 @@ pub(crate) fn collect_fx(
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     f: Res<FxFrames>,
+    feedback: Res<Feedback>,
     res: FxSources,
     player: Single<(&Pos, &PrevPos, &Player)>,
     cam: Single<(&Transform, &Projection), With<MainCamera>>,
@@ -437,13 +448,13 @@ pub(crate) fn collect_fx(
             ..Draw::new(f.ring_ink, hero.extend(layer::GROUND + 0.5))
         });
         if reveal.band_dps > 0.0 {
-            let kr = px(f.ring, reveal.radius * 2.0);
-            let flicker = 0.45 + 0.15 * (now * 9.0).sin() + 0.08 * (now * 23.0).sin();
+            let kr = px(f.wave, reveal.radius * 2.0 / 0.84);
+            let flicker = (0.22 + 0.05 * (now * 9.0).sin()) * feedback.visibility(Priority::Normal);
             glow.add(
-                f.ring,
+                f.wave,
                 hero.extend(layer::EMISSIVE - 2.5),
                 Vec2::new(kr, kr * FLAT),
-                now * 0.3,
+                0.0,
                 rgb(0xff9a4a).with_alpha(flicker),
             );
         }
@@ -455,16 +466,21 @@ pub(crate) fn collect_fx(
         for slot in &arsenal.0 {
             if let WeaponBehavior::Orbit { inner: Some(fire), .. } = slot.behavior(c) {
                 let r = fire.radius * stats.get(Stat::Area);
-                let kr = px(f.ring, r * 2.0);
-                let flicker = 0.55 + 0.2 * (now * 11.0).sin();
+                let kr = px(f.wave, r * 2.0 / 0.84);
+                let flicker = (0.28 + 0.06 * (now * 11.0).sin()) * feedback.visibility(Priority::Normal);
                 glow.add(
-                    f.ring,
+                    f.wave,
                     hero.extend(layer::EMISSIVE - 1.5),
                     Vec2::new(kr, kr * FLAT),
-                    -now * 1.5,
+                    0.0,
                     rgb(0xff7a2a).with_alpha(flicker),
                 );
-                glow.light(&frames, &db, hero, (rgb(0xff8a3d).with_alpha(0.35), r * 1.6));
+                glow.light(
+                    &frames,
+                    &db,
+                    hero,
+                    (rgb(0xff8a3d).with_alpha(0.12 * feedback.visibility(Priority::Normal)), r * 1.6),
+                );
             }
         }
     }
@@ -889,6 +905,8 @@ pub(crate) fn collect_fx(
     });
     for l in &fx.live {
         let u = l.t / l.life;
+        let sprites_before = pools.fx.len();
+        let glows_before = glow.0.len();
         match l.kind {
             OneShot::Ring { color, ink, light, strong } => {
                 let rr = 12.0 + (l.r - 12.0) * (1.0 - (1.0 - u) * (1.0 - u));
@@ -925,16 +943,128 @@ pub(crate) fn collect_fx(
                     ..Draw::new(f.seal_mark, l.pos.extend(layer::GROUND + 0.93))
                 });
             }
-            OneShot::Blast { color } => {
-                let k = px(f.blast, l.r * 2.0 * (0.5 + u * 0.7));
+            OneShot::Pulse => {
+                // 寒波：六道细长冰棱贴地外推，留出大片负空间。
+                for i in 0..6 {
+                    let angle = i as f32 * TAU / 6.0;
+                    let d = Vec2::from_angle(angle);
+                    let at = l.pos + d * Vec2::new(1.0, FLAT) * l.r * (0.18 + u * 0.78);
+                    let k = px(f.streak, l.r * (0.5 - u * 0.25));
+                    glow.add(
+                        f.streak,
+                        at.extend(layer::EMISSIVE),
+                        Vec2::new(k, k * 0.22),
+                        (d.y * FLAT).atan2(d.x),
+                        rgb(0xa8d4ff).with_alpha((1.0 - u) * 0.75),
+                    );
+                }
+            }
+            OneShot::Toll => {
+                // 钟鸣保留波纹身份：两道错拍的窄波前，没有整片填色。
+                for delay in [0.0, 0.24] {
+                    let wave = (u - delay) / (1.0 - delay);
+                    if !(0.0..1.0).contains(&wave) {
+                        continue;
+                    }
+                    let k = px(f.wave, l.r * 2.0 * (0.15 + 0.85 * wave));
+                    glow.add(
+                        f.wave,
+                        l.pos.extend(layer::EMISSIVE - 1.0),
+                        Vec2::new(k, k * FLAT),
+                        0.0,
+                        rgb(0xa8d4ff).with_alpha((1.0 - wave) * 0.55),
+                    );
+                }
+            }
+            OneShot::Quake => {
+                // 震地 / 落印：裂纹从落点分叉，停在地上褪去。
+                let reach = (u * 5.0).min(1.0);
+                for i in 0..5 {
+                    let angle = l.rot + i as f32 * TAU / 5.0;
+                    let d = Vec2::from_angle(angle);
+                    let k = px(f.crack, l.r * reach);
+                    let at = l.pos + d * Vec2::new(1.0, FLAT) * l.r * reach * 0.38;
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(k, k * 0.28),
+                        rot: (d.y * FLAT).atan2(d.x),
+                        color: rgb(0x4b342b).with_alpha((1.0 - u) * 0.85),
+                        ..Draw::new(f.crack, at.extend(layer::GROUND + 0.96))
+                    });
+                }
+            }
+            OneShot::Ult => {
+                // 燃灯：墨焰向外翻卷、灯芯向上挑起，再让余烬接管画面。
+                let reach = 1.0 - (1.0 - (u / 0.4).min(1.0)).powi(3);
+                let fade = (1.0 - u).powi(2);
+                for i in 0..8 {
+                    let angle = i as f32 * TAU / 8.0 + u * 0.3;
+                    let d = Vec2::from_angle(angle);
+                    let at = l.pos + d * Vec2::new(1.0, FLAT) * l.r * reach * 0.6;
+                    let k = px(f.slash, l.r * (0.35 + reach * 0.45));
+                    pools.fx.push(Draw {
+                        scale: Vec2::new(k, k * 0.85),
+                        rot: angle,
+                        color: rgb(0x1b1720).with_alpha(fade * 0.8),
+                        ..Draw::new(f.slash, at.extend(layer::WEAPONS + 1.0))
+                    });
+                    glow.add(
+                        f.slash,
+                        at.extend(layer::EMISSIVE + 1.0),
+                        Vec2::new(k * 0.9, k * 0.42),
+                        angle,
+                        rgb(0xffd98a).with_alpha(fade * 0.65),
+                    );
+                }
+                let k = px(f.streak, l.r.min(240.0) * (0.65 + reach));
                 glow.add(
-                    f.blast,
-                    l.pos.extend(layer::EMISSIVE),
-                    Vec2::splat(k),
-                    0.0,
-                    color.with_alpha(1.0 - u),
+                    f.streak,
+                    (l.pos + Vec2::Y * l.r.min(240.0) * 0.3).extend(layer::EMISSIVE),
+                    Vec2::new(k, k * 0.65),
+                    TAU * 0.25,
+                    rgb(0xfff1c2).with_alpha(fade * 0.8),
                 );
-                glow.light(&frames, &db, l.pos, (color.with_alpha((1.0 - u) * 0.8), l.r * 1.6));
+            }
+            OneShot::Reaction { color } => {
+                // 五行相遇用交错短笔锋，避免每次反应再铺一个大圈。
+                let k = px(f.slash, l.r * (0.8 + u * 0.4));
+                for angle in [l.rot, l.rot + TAU * 0.4] {
+                    glow.add(
+                        f.slash,
+                        l.pos.extend(layer::EMISSIVE),
+                        Vec2::new(k, k * 0.5),
+                        angle,
+                        color.with_alpha((1.0 - u) * 0.6),
+                    );
+                }
+            }
+            OneShot::Blast { color, ice } => {
+                if ice {
+                    // 冰爆是向外迸射的尖棱，火爆是向上卷的焰舌。
+                    for i in 0..7 {
+                        let angle = l.rot + i as f32 * TAU / 7.0;
+                        let at = l.pos + Vec2::from_angle(angle) * l.r * u;
+                        let k = px(f.streak, l.r * (0.9 - u * 0.5));
+                        glow.add(
+                            f.streak,
+                            at.extend(layer::EMISSIVE),
+                            Vec2::new(k, k * 0.3),
+                            angle,
+                            color.with_alpha((1.0 - u) * 0.8),
+                        );
+                    }
+                } else {
+                    for i in -1..=1 {
+                        let at = l.pos + Vec2::new(i as f32 * l.r * 0.32, l.r * u * 0.65);
+                        let k = px(f.slash, l.r * (0.8 + u * 0.4));
+                        glow.add(
+                            f.slash,
+                            at.extend(layer::EMISSIVE),
+                            Vec2::new(k, k * 0.7),
+                            TAU * 0.25 + i as f32 * 0.3,
+                            color.with_alpha((1.0 - u) * 0.65),
+                        );
+                    }
+                }
             }
             OneShot::Taiji => {
                 // 太极：在主角脚下转一圈后淡出
@@ -945,15 +1075,26 @@ pub(crate) fn collect_fx(
                     color: Color::WHITE.with_alpha((1.0 - u) * 0.85),
                     ..Draw::new(f.taiji, hero.extend(layer::GROUND + 0.95))
                 });
-                let kr = px(f.ring, l.r * 2.0 * u);
-                glow.add(
-                    f.ring,
-                    hero.extend(layer::EMISSIVE),
-                    Vec2::new(kr, kr * 0.6),
-                    0.0,
-                    rgb(0xffd98a).with_alpha(1.0 - u),
-                );
+                for angle in [u * TAU, u * TAU + TAU * 0.5] {
+                    let d = Vec2::from_angle(angle);
+                    let at = l.pos + d * Vec2::new(1.0, FLAT) * l.r * 0.55;
+                    let k = px(f.slash, l.r * 0.75);
+                    glow.add(
+                        f.slash,
+                        at.extend(layer::EMISSIVE),
+                        Vec2::new(k, k * 0.6),
+                        angle,
+                        rgb(0xffd98a).with_alpha((1.0 - u) * 0.65),
+                    );
+                }
             }
+        }
+        let visibility = feedback.visibility(l.priority);
+        for draw in &mut pools.fx[sprites_before..] {
+            draw.color.set_alpha(draw.color.alpha() * visibility);
+        }
+        for draw in &mut glow.0[glows_before..] {
+            draw.color.set_alpha(draw.color.alpha() * visibility);
         }
     }
 
@@ -963,14 +1104,14 @@ pub(crate) fn collect_fx(
             let pulse = 0.55 + 0.25 * (now * 18.0).sin();
             let show = if s.t > -0.05 { 1.0 } else { 0.4 };
             let p = to_screen(s.pos);
-            let kr = px(f.ring, s.radius * 2.0);
+            let kr = px(f.wave, s.radius * 2.0 / 0.84);
             let earth = rgb(0xc9925a);
             glow.add(
-                f.ring,
+                f.wave,
                 p.extend(layer::EMISSIVE - 2.0),
                 Vec2::new(kr, kr * FLAT),
                 0.0,
-                earth.with_alpha(pulse * show * 0.8),
+                earth.with_alpha(pulse * show * 0.55 * feedback.visibility(Priority::Normal)),
             );
             glow.add(
                 f.warn,
@@ -1258,15 +1399,57 @@ pub(crate) fn spawn_flash(mut commands: Commands) {
 /// 闪屏淡出，跟着镜头。
 pub(crate) fn apply_flash(
     time: Res<Time<Real>>,
+    feedback: Res<Feedback>,
     mut fx: ResMut<FxState>,
     cam: Single<&Transform, With<MainCamera>>,
     mut flash: Query<(&mut Sprite, &mut Transform), (With<ScreenFlash>, Without<MainCamera>)>,
 ) {
-    let a = (fx.flash.alpha() - time.delta_secs() * 3.0).max(0.0);
-    fx.flash.set_alpha(a);
+    if !fx.flash_fresh {
+        let a = (fx.flash.alpha() - time.delta_secs() * 3.0).max(0.0);
+        fx.flash.set_alpha(a);
+    }
+    fx.flash_fresh = false;
     for (mut sprite, mut tf) in &mut flash {
-        sprite.color = fx.flash;
+        sprite.color = fx.flash.with_alpha(fx.flash.alpha() * feedback.visibility(fx.flash_priority));
         tf.translation.x = cam.translation.x;
         tf.translation.y = cam.translation.y;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_transient_pool_reserves_and_then_evicts_for_ultimate() {
+        let mut fx = FxState::default();
+        for _ in 0..200 {
+            fx.push(OneShot::Pulse, Vec2::ZERO, 100.0, 0.5);
+        }
+        assert_eq!(fx.live.len(), MAX_LIVE - LIVE_RESERVE);
+        fx.priority = Priority::Critical;
+        for _ in 0..LIVE_RESERVE {
+            fx.push(OneShot::Toll, Vec2::ZERO, 100.0, 0.5);
+        }
+        fx.priority = Priority::Ultimate;
+        fx.push(OneShot::Ult, Vec2::ZERO, 400.0, 1.0);
+        assert_eq!(fx.live.len(), MAX_LIVE);
+        assert!(fx.live.iter().any(|l| matches!(l.kind, OneShot::Ult)));
+        fx.priority = Priority::Normal;
+        fx.push(OneShot::Pulse, Vec2::ZERO, 100.0, 0.5);
+        assert!(fx.live.iter().any(|l| matches!(l.kind, OneShot::Ult)));
+    }
+
+    #[test]
+    fn weaker_flash_cannot_recolor_a_climax() {
+        let mut fx = FxState { priority: Priority::Finale, ..default() };
+        let gold = rgb(0xfff1c2);
+        fx.flash(gold, 0.6);
+        fx.priority = Priority::Normal;
+        fx.flash(Color::BLACK, 1.0);
+        assert_eq!(fx.flash, gold.with_alpha(0.3));
+        fx.flash.set_alpha(0.0);
+        fx.flash(Color::BLACK, 1.0);
+        assert_eq!(fx.flash.alpha(), 0.06);
     }
 }

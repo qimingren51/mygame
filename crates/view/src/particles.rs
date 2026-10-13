@@ -20,11 +20,14 @@ use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
+use crate::feedback::{Feedback, Priority, eviction};
 use crate::fx::hex;
 use crate::{Feel, layer, to_screen};
 
-/// 同时存在的粒子上限；满了就不再生成（先来的先演完）
+/// 总量固定，其中 480 个位置留给暴击、燃灯和夜主死亡。
 const CAP: usize = 1800;
+const RESERVE: usize = 480;
+const FRAME_BUDGET: [u32; 6] = [32, 120, 180, 64, 128, 320];
 
 /// 墨色（普通混合的粒子）
 pub(crate) const INK: Color = Color::srgb(0.07, 0.075, 0.1);
@@ -113,6 +116,7 @@ fn build_page() -> (Vec<u8>, Vec<(&'static str, URect)>) {
         ("fx/drop", r(192, 0, 24, 24)),
         ("fx/wisp", r(224, 0, 128, 64)),
         ("fx/slash", r(0, 64, 256, 64)),
+        ("fx/wave", r(352, 0, 96, 96)),
     ];
     let at = |name: &str| frames.iter().find(|f| f.0 == name).map(|f| f.1).unwrap_or_default();
     let radial = |u: f32, v: f32| ((u - 0.5) * 2.0).hypot((v - 0.5) * 2.0);
@@ -120,6 +124,12 @@ fn build_page() -> (Vec<u8>, Vec<(&'static str, URect)>) {
     paint(&mut px, at("fx/dot"), |u, v| {
         let d = radial(u, v);
         (-d * d * 4.5).exp() * smoothstep(1.0, 0.85, d)
+    });
+    // 空心波前：细边带少许飞白，中心完全透明，不把法术范围涂成色块。
+    paint(&mut px, at("fx/wave"), |u, v| {
+        let d = radial(u, v);
+        let band = (-((d - 0.84) / 0.025).powi(2)).exp();
+        band * (0.55 + 0.45 * fbm(u * 14.0, v * 14.0, 31))
     });
     // 火线：头亮尾淡的细长条，沿 +X 飞
     paint(&mut px, at("fx/streak"), |u, v| {
@@ -198,6 +208,8 @@ pub(crate) fn setup_particles(
         list: Vec::with_capacity(CAP),
         rng: Pcg32::new(0x0b1a_5e20, 5),
         lite: false,
+        priority: Priority::Ambient,
+        spawned: [0; 6],
         f: PFrames {
             streak: f("fx/streak"),
             smoke: f("fx/smoke"),
@@ -218,6 +230,7 @@ pub(crate) fn setup_particles(
 #[derive(Clone, Copy)]
 pub(crate) struct P {
     pub frame: FrameId,
+    priority: Priority,
     pub pos: Vec2,
     pub vel: Vec2,
     /// 离地高度和竖直速度：墨滴抛起再落地
@@ -251,6 +264,7 @@ impl P {
     pub fn new(frame: FrameId, pos: Vec2, life: f32, z: f32) -> Self {
         P {
             frame,
+            priority: Priority::Ambient,
             pos,
             vel: Vec2::ZERO,
             h: 0.0,
@@ -281,14 +295,41 @@ pub(crate) struct Particles {
     pub f: PFrames,
     /// 精简特效：成团的粒子减半，上限减半
     pub lite: bool,
+    priority: Priority,
+    spawned: [u32; 6],
 }
 
 impl Particles {
-    pub fn spawn(&mut self, p: P) {
-        let cap = if self.lite { CAP / 2 } else { CAP };
-        if self.list.len() < cap {
-            self.list.push(p);
+    fn begin_frame(&mut self, lite: bool) {
+        self.lite = lite;
+        self.spawned = [0; 6];
+        self.priority = Priority::Ambient;
+        let cap = if lite { CAP / 2 } else { CAP };
+        if self.list.len() > cap {
+            self.list.sort_by_key(|p| std::cmp::Reverse(p.priority));
+            self.list.truncate(cap);
         }
+    }
+
+    pub fn spawn(&mut self, mut p: P) {
+        let divisor = if self.lite { 2 } else { 1 };
+        let priority = self.priority;
+        let used = &mut self.spawned[priority as usize];
+        if *used >= FRAME_BUDGET[priority as usize].div_ceil(divisor as u32) {
+            return;
+        }
+        let cap = CAP / divisor;
+        let limit = if priority < Priority::Critical { cap - RESERVE / divisor } else { cap };
+        p.priority = priority;
+        if self.list.len() < limit {
+            self.list.push(p);
+        } else if let Some(index) = eviction(&self.list, priority, |p| p.priority) {
+            self.list.remove(index);
+            self.list.push(p);
+        } else {
+            return;
+        }
+        *used += 1;
     }
 
     /// 一团粒子的个数：精简特效时减半（至少留一个）。
@@ -298,6 +339,8 @@ impl Particles {
 
     pub fn clear(&mut self) {
         self.list.clear();
+        self.spawned = [0; 6];
+        self.priority = Priority::Ambient;
     }
 
     pub fn len(&self) -> usize {
@@ -468,14 +511,13 @@ impl Particles {
 /// 推进粒子，攒成绘制请求。用虚拟时间：顿帧和慢镜时粒子一起停、一起慢。
 pub(crate) fn update_particles(
     time: Res<Time>,
-    feel: Res<Feel>,
+    feedback: Res<Feedback>,
     mut parts: ResMut<Particles>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
 ) {
     let dt = time.delta_secs();
     let parts = &mut *parts;
-    parts.lite = feel.lite;
     let drop = parts.f.drop;
     let mut landed: Vec<Vec2> = Vec::new();
     parts.list.retain_mut(|p| {
@@ -517,7 +559,7 @@ pub(crate) fn update_particles(
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
         let fade_out = if u > 0.5 { 1.0 - (u - 0.5) / 0.5 } else { 1.0 };
-        let alpha = p.color.alpha() * fade_in * fade_out * fade_out.sqrt();
+        let alpha = p.color.alpha() * fade_in * fade_out * fade_out.sqrt() * feedback.visibility(p.priority);
         if alpha <= 0.01 {
             continue;
         }
@@ -539,8 +581,9 @@ pub(crate) fn update_particles(
     }
 }
 
-pub(crate) fn reset_particles(mut parts: ResMut<Particles>) {
+pub(crate) fn reset_particles(mut parts: ResMut<Particles>, mut clock: ResMut<ParticleClock>) {
     parts.clear();
+    *clock = ParticleClock::default();
 }
 
 // ---------------------------------------------------------------------------
@@ -560,10 +603,6 @@ pub(crate) fn element_glow(e: Option<Element>) -> Color {
 }
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.42);
-/// 一帧里最多为多少次命中、击杀放粒子（其余照样有伤害数字和墨点）
-const HIT_BUDGET: u32 = 28;
-const KILL_BUDGET: u32 = 32;
-
 /// 本帧的计数和暴击笔触的冷却。
 #[derive(Resource, Default)]
 pub(crate) struct ParticleClock {
@@ -578,6 +617,8 @@ pub(crate) fn particle_events(
     time: Res<Time>,
     content: Res<GameContent>,
     outbox: Res<SimOutbox>,
+    feedback: Res<Feedback>,
+    feel: Res<Feel>,
     frames: Res<ActorFrames>,
     hero: Single<(&Transform, &Player, &HeroView)>,
     arsenal: Option<Res<Arsenal>>,
@@ -591,18 +632,15 @@ pub(crate) fn particle_events(
     clock.trail_cd -= dt;
     let (htf, pl, view) = *hero;
     let hero_at = htf.translation.truncate();
-    let kills = outbox.0.iter().filter(|e| matches!(e, SimEvent::Kill { .. })).count() as u32;
-    // 击杀很多时每只少放一些，总量不超过预算
-    let per_kill = if kills == 0 { 0.0 } else { (KILL_BUDGET as f32 / kills as f32).min(1.0) };
-    let mut hits = 0;
-    let mut kill_k = 0.0;
-    for ev in &outbox.0 {
+    parts.begin_frame(feel.lite);
+    for &index in &feedback.selected {
+        let ev = &outbox.0[index];
+        parts.priority = Priority::of(ev);
         match *ev {
             SimEvent::Hit { pos, damage, crit, kind, element } => {
-                if kind == HitKind::Dot || hits >= HIT_BUDGET {
+                if kind == HitKind::Dot {
                     continue;
                 }
-                hits += 1;
                 let at = to_screen(pos) + Vec2::new(0.0, -6.0);
                 let away = (at - hero_at).normalize_or_zero() * 0.7;
                 if crit {
@@ -666,11 +704,6 @@ pub(crate) fn particle_events(
                         parts.halo(frames.ring, at, 0.2, 6.0, 1.4, GOLD.with_alpha(0.9));
                     }
                     _ => {
-                        kill_k += per_kill;
-                        if kill_k < 1.0 {
-                            continue;
-                        }
-                        kill_k -= 1.0;
                         if let Some(f) = frames.enemy_ghost(kind as usize) {
                             parts.ghost(
                                 f,
@@ -703,7 +736,7 @@ pub(crate) fn particle_events(
                     }
                     StrikeFx::Quake => parts.dust(at, 18, radius / 40.0, DUST),
                     StrikeFx::Ult => {
-                        for _ in 0..60 {
+                        for _ in 0..parts.n(60) {
                             let d = Vec2::from_angle(parts.rng.range_f32(0.0, TAU));
                             let r = parts.rng.range_f32(0.2, 1.0) * radius;
                             parts.embers(at + Vec2::new(d.x * r, d.y * r * 0.62), 6.0, GOLD, 1);
@@ -744,6 +777,7 @@ pub(crate) fn particle_events(
             _ => {}
         }
     }
+    parts.priority = Priority::Ambient;
     // 走路扬尘：每走一段，脚边起一小团尘
     let moved = clock.last_hero.map_or(0.0, |p| p.distance(hero_at));
     clock.last_hero = Some(hero_at);
@@ -787,3 +821,81 @@ pub(crate) fn particle_events(
 
 const DUST: Color = Color::srgba(0.42, 0.38, 0.32, 0.4);
 const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pool() -> Particles {
+        let frame = FrameId(0);
+        Particles {
+            list: Vec::new(),
+            rng: Pcg32::new(1, 2),
+            lite: false,
+            priority: Priority::Ambient,
+            spawned: [0; 6],
+            f: PFrames {
+                streak: frame,
+                smoke: frame,
+                ash: frame,
+                ember: frame,
+                drop: frame,
+                wisp: frame,
+                slash: frame,
+            },
+        }
+    }
+
+    #[test]
+    fn small_particles_leave_room_for_crit_ult_and_boss_in_both_quality_modes() {
+        for lite in [false, true] {
+            let divisor = if lite { 2 } else { 1 };
+            let mut parts = pool();
+            let p = P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0);
+            for _ in 0..40 {
+                parts.begin_frame(lite);
+                parts.priority = Priority::Normal;
+                for _ in 0..200 {
+                    parts.spawn(p);
+                }
+            }
+            assert_eq!(parts.len(), (CAP - RESERVE) / divisor);
+            parts.begin_frame(lite);
+            for (priority, count) in
+                [(Priority::Finale, 258), (Priority::Ultimate, 90), (Priority::Critical, 44)]
+            {
+                parts.priority = priority;
+                for _ in 0..count / divisor {
+                    parts.spawn(p);
+                }
+                assert_eq!(parts.list.iter().filter(|p| p.priority == priority).count(), count / divisor);
+            }
+            assert!(parts.len() <= CAP / divisor);
+        }
+    }
+
+    #[test]
+    fn full_pool_evicts_lower_priority_and_lite_switch_preserves_finale() {
+        let mut parts = pool();
+        let p = P { priority: Priority::Normal, ..P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0) };
+        parts.list = vec![p; CAP];
+        parts.priority = Priority::Finale;
+        parts.spawn(p);
+        assert_eq!(parts.len(), CAP);
+        assert_eq!(parts.list.iter().filter(|p| p.priority == Priority::Finale).count(), 1);
+        parts.begin_frame(true);
+        assert_eq!(parts.len(), CAP / 2);
+        assert_eq!(parts.list[0].priority, Priority::Finale);
+    }
+
+    #[test]
+    fn per_frame_particle_budget_is_shared_by_all_small_emitters() {
+        let mut parts = pool();
+        parts.priority = Priority::Normal;
+        for _ in 0..500 {
+            parts.sparks(Vec2::ZERO, GOLD, 8, 200.0, Vec2::ZERO);
+            parts.embers(Vec2::ZERO, 20.0, GOLD, 4);
+        }
+        assert_eq!(parts.len(), FRAME_BUDGET[Priority::Normal as usize] as usize);
+    }
+}
