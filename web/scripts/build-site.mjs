@@ -42,6 +42,8 @@ function walk(dir, fn) {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
+if (CI && !SKIP_TESTS) run('node --test scripts/*.test.mjs', ROOT);
+
 // 根目录文件
 for (const name of readdirSync(ROOT)) {
   const p = join(ROOT, name);

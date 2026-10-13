@@ -39,7 +39,9 @@ impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_audio)
             .add_systems(OnEnter(AppState::Title), |mut a: NonSendMut<Audio>| {
-                a.set_mode(MusicMode::Title, None)
+                a.muffle(false);
+                a.last_phase = None;
+                a.set_mode(MusicMode::Title, None);
             })
             .add_systems(OnEnter(AppState::Run), start_run)
             .add_systems(

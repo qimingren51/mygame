@@ -213,6 +213,8 @@ export interface World {
   readonly seed: number;
   readonly rng: Streams;
   phase: Phase;
+  // 选择界面的实例序号；连续相同阶段也要重新显示。
+  choiceId: number;
   t: number;
   tick: number;
   /** 可见范围（世界单位），由画面层通过 setView 传入 */
@@ -303,6 +305,7 @@ export function createWorld(opts: WorldOptions): World {
     seed: opts.seed,
     rng,
     phase: 'play',
+    choiceId: 0,
     t: 0,
     tick: 0,
     view,

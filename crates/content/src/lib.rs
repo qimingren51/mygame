@@ -222,4 +222,31 @@ mod tests {
         let q = Quad(1.6, 1.1, 0.1);
         assert!((q.at(2.0) - (1.6 + 2.2 + 0.4)).abs() < 1e-6);
     }
+
+    #[test]
+    fn invalid_experience_curves_and_stat_bounds_are_rejected() {
+        let content = Content::load(&repo_data_dir()).unwrap();
+        for q in [
+            Quad(0.0, 0.0, 0.0),
+            Quad(3.5, -4.0, 1.0), // 端点合法，低等级中间为负
+            Quad(1.0, 0.0, -0.0001),
+            Quad(f32::NAN, 0.0, 0.0),
+            Quad(1.0, 0.0, f32::MAX),
+        ] {
+            let mut c = content.clone();
+            c.run.xp_need = q;
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("xp_need"));
+        }
+        for (minimum, bound) in
+            [(true, f32::NAN), (false, f32::NAN), (true, f32::INFINITY), (false, f32::NEG_INFINITY)]
+        {
+            let mut c = content.clone();
+            if minimum {
+                c.stats[0].min = bound;
+            } else {
+                c.stats[0].max = bound;
+            }
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("stats.ron"));
+        }
+    }
 }

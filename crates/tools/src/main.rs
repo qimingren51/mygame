@@ -52,8 +52,15 @@ fn flag(args: &[String], name: &str, default: u64) -> Result<u64, String> {
 }
 
 fn bench(args: &[String]) -> Result<(), String> {
-    let enemies = flag(args, "--enemies", 5000)? as u32;
+    let enemies = flag(args, "--enemies", 5000)?;
+    if enemies == 0 || enemies > lantern_sim::enemies::ENEMY_CAP as u64 {
+        return Err(format!("跑分妖物数量必须在 1..={} 内", lantern_sim::enemies::ENEMY_CAP));
+    }
+    let enemies = enemies as u32;
     let seconds = flag(args, "--seconds", 20)?;
+    if seconds == 0 {
+        return Err("跑分秒数必须大于 0".into());
+    }
     let seed = flag(args, "--seed", 1)?;
     let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
     let mut sim = SimHarness::with_mode(content, seed, RunMode::Bench { enemies });
@@ -63,8 +70,13 @@ fn bench(args: &[String]) -> Result<(), String> {
     };
     // 热身 5 秒：妖物补满、围上来
     let warmup = 5 * u64::from(TICK_HZ);
+    let mut reached = false;
     for tick in 0..warmup {
         sim.step(input(tick), &[]);
+        reached |= sim.enemies().count >= enemies as usize;
+    }
+    if !reached {
+        return Err(format!("跑分预热未达到目标 {enemies}，实际 {}", sim.enemies().count));
     }
     let ticks = seconds * u64::from(TICK_HZ);
     let mut times = Vec::with_capacity(ticks as usize);
@@ -95,7 +107,7 @@ fn replay(args: &[String]) -> Result<(), String> {
     if replay.content_hash != content.hash {
         println!("注意：回放录制时的内容数据与当前不同（游戏版本 {}），结果可能不一致", replay.game_version);
     }
-    let (ticks, checkpoints, seed) = (replay.ticks, replay.hashes.len(), replay.setup.seed);
+    let (ticks, seed) = (replay.ticks, replay.setup.seed);
     let start = Instant::now();
     let mut sim = SimHarness::from_replay(content, replay);
     while !sim.playback().is_some_and(|p| p.finished) && !sim.is_over() {
@@ -109,13 +121,9 @@ fn replay(args: &[String]) -> Result<(), String> {
         secs % 60,
         start.elapsed().as_secs_f64()
     );
-    match sim.playback().and_then(|p| p.diverged_at) {
-        None => {
-            println!("全部 {checkpoints} 个检查点与录制时一致");
-            Ok(())
-        }
-        Some(t) => Err(format!("从第 {t} 步（{:.1} 秒）起与录制时不一致", t as f64 / f64::from(TICK_HZ))),
-    }
+    let checkpoints = sim.playback().expect("正在重放").verification_result(sim.tick())?;
+    println!("全部 {checkpoints} 个检查点与录制时一致");
+    Ok(())
 }
 
 struct RunStats {

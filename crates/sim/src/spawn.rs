@@ -1,6 +1,6 @@
 //! 刷怪（docs/BALANCE.md 第 4.1、4.6 节）：常规刷怪、成群涌来、本局时间表（精英、合围、小头目、妖潮、夜主）。
 //!
-//! 常规刷怪受分段的常规上限限制；妖群、合围、妖潮不受常规上限限制；任何刷怪都不超过硬上限。
+//! 常规刷怪受分段上限限制；妖群、合围、妖潮受硬上限限制；跑分只受池容量限制。
 
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
@@ -32,6 +32,20 @@ pub fn spawn_enemy(
     if en.count >= content.run.spawn.hard_cap as usize {
         return None;
     }
+    spawn_in_pool(content, stats, en, rng, kind, x, y, minute)
+}
+
+/// 共用初始化；正常玩法先检查硬上限，跑分直接使用完整池容量。
+fn spawn_in_pool(
+    content: &Content,
+    stats: &Stats,
+    en: &mut Enemies,
+    rng: &mut Pcg32,
+    kind: u16,
+    x: f32,
+    y: f32,
+    minute: f32,
+) -> Option<usize> {
     let def = &content.enemies[kind as usize];
     let i = en.alloc()?;
     let run = &content.run;
@@ -130,7 +144,7 @@ pub(crate) fn update_spawns(
             let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
             let kind =
                 if rng.chance(content.run.bench.alt_share) { plan.bench_alt_kind } else { plan.bench_kind };
-            spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m);
+            spawn_in_pool(content, &stats, &mut en, rng, kind, x, y, m);
         }
         return;
     }

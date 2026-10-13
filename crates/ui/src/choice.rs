@@ -45,6 +45,17 @@ pub(crate) struct ChoiceUi {
     hovered: Option<usize>,
 }
 
+impl ChoiceUi {
+    /// 资源的变更版本也参与缓存：同样的选项可能属于下一次选择，描述还依赖构筑。
+    fn update(&mut self, now: Shown, changed: bool) -> bool {
+        if now == self.shown && (!changed || now == Shown::None) {
+            return false;
+        }
+        *self = Self { shown: now, ..default() };
+        true
+    }
+}
+
 #[derive(Component)]
 pub(crate) struct ChoiceRoot;
 
@@ -104,22 +115,13 @@ fn sync(
     roots: Query<Entity, With<ChoiceRoot>>,
 ) {
     ui.age += time.delta_secs();
-    if flow.is_changed() {
-        ui.waiting = false;
-    }
     let now = current(*phase, &flow, &build);
-    if now == ui.shown {
+    if !ui.update(now.clone(), flow.is_changed() || arsenal.is_changed() || build.is_changed()) {
         return;
     }
     for e in &roots {
         commands.entity(e).despawn();
     }
-    ui.shown = now.clone();
-    ui.selected = 0;
-    ui.age = 0.0;
-    ui.waiting = false;
-    ui.clicked = None;
-    ui.hovered = None;
     let c = &content.0;
     match now {
         Shown::None => {}
@@ -981,5 +983,64 @@ pub(crate) fn animate_evolve(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lantern_sim::flow::{ChestItem, ChestReveal, Choice};
+
+    fn track(
+        flow: Res<Flow>,
+        build: Res<Build>,
+        arsenal: Res<Arsenal>,
+        phase: Res<SimPhase>,
+        mut ui: ResMut<ChoiceUi>,
+    ) {
+        ui.update(
+            current(*phase, &flow, &build),
+            flow.is_changed() || build.is_changed() || arsenal.is_changed(),
+        );
+    }
+
+    #[test]
+    fn consecutive_choices_reset_the_cache_and_input_guard() {
+        let mut app = App::new();
+        app.init_resource::<Flow>()
+            .init_resource::<Build>()
+            .init_resource::<Arsenal>()
+            .init_resource::<ChoiceUi>()
+            .insert_resource(SimPhase::Chest)
+            .add_systems(Update, track);
+        for offer in [Offer::Oil, Offer::Heal, Offer::Heal] {
+            app.world_mut().resource_mut::<Flow>().chest =
+                Some(ChestReveal { items: vec![ChestItem { offer, level: 0 }], source: ChestSource::Elite });
+            app.update();
+            {
+                let mut ui = app.world_mut().resource_mut::<ChoiceUi>();
+                assert_eq!(ui.age, 0.0);
+                assert!(!ui.waiting);
+                ui.age = 1.0;
+                ui.waiting = true;
+            }
+            app.update();
+            assert_eq!(app.world().resource::<ChoiceUi>().age, 1.0);
+        }
+        *app.world_mut().resource_mut::<SimPhase>() = SimPhase::LevelUp;
+        for level in [2, 3] {
+            app.world_mut().resource_mut::<Flow>().choice =
+                Some(Choice { offers: vec![Offer::Oil], inspired: false, level, ember: false });
+            app.update();
+            let mut ui = app.world_mut().resource_mut::<ChoiceUi>();
+            assert_eq!(ui.age, 0.0);
+            ui.age = 1.0;
+            ui.waiting = true;
+        }
+        app.world_mut().resource_mut::<Build>().charms.push(0);
+        app.update();
+        // 构筑改变也要刷新描述和输入保护。
+        assert_eq!(app.world().resource::<ChoiceUi>().age, 0.0);
+        assert!(!app.world().resource::<ChoiceUi>().waiting);
     }
 }

@@ -19,7 +19,7 @@ use crate::charms::{Survival, charm_candidates, charm_slots, roll_charms};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes, heal};
 use crate::encounters::Encounters;
 use crate::run::{Progress, RunMode, RunPlan};
-use crate::stats::{Effects, Stats, StatsDirty, collect};
+use crate::stats::{Effects, Stats, StatsDirty, apply_collected, collect};
 use crate::weapons::Arsenal;
 use crate::{
     GameContent, Health, Player, Pos, RunSetup, SimCommand, SimCommands, SimEvent, SimOutbox, SimRng, Tick,
@@ -276,25 +276,10 @@ impl FlowParams<'_, '_> {
     /// 立即重算属性（下一个选项、宝箱的下一项要用到新的构筑）。
     fn refresh(&mut self) {
         let c = &self.content.0;
-        let (stats, mut effects) =
+        let collected =
             collect(c, &self.setup, &self.build, self.encounters.buff.map(|b| b.0), self.progress.level);
-        for t in &mut effects.periodic {
-            if let Some(old) = self.effects.periodic.iter().find(|o| o.key == t.key) {
-                t.elapsed = old.elapsed;
-            }
-        }
-        let prev_max = self.stats.max_hp();
-        *self.stats = stats;
-        *self.effects = effects;
+        apply_collected(collected, &mut self.stats, &mut self.effects, self.player.iter_mut());
         self.dirty.0 = false;
-        let max = self.stats.max_hp();
-        for mut h in &mut self.player {
-            if max > prev_max {
-                h.hp += max - prev_max;
-            }
-            h.max = max;
-            h.hp = h.hp.min(max);
-        }
     }
 
     fn open_level_up(&mut self) {

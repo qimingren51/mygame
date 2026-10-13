@@ -253,8 +253,17 @@ pub(crate) fn refresh_stats(
         return;
     }
     dirty.0 = false;
-    let (new_stats, mut new_effects) =
-        collect(&content.0, &setup, &build, encounters.buff.map(|b| b.0), progress.level);
+    let collected = collect(&content.0, &setup, &build, encounters.buff.map(|b| b.0), progress.level);
+    apply_collected(collected, &mut stats, &mut effects, player.iter_mut());
+}
+
+/// 即时刷新和调度刷新共用：保留周期计时，统一应用生命上限变化。
+pub(crate) fn apply_collected<'a>(
+    (new_stats, mut new_effects): (Stats, Effects),
+    stats: &mut Stats,
+    effects: &mut Effects,
+    player: impl Iterator<Item = Mut<'a, Health>>,
+) {
     for t in &mut new_effects.periodic {
         if let Some(old) = effects.periodic.iter().find(|o| o.key == t.key) {
             t.elapsed = old.elapsed;
@@ -263,12 +272,59 @@ pub(crate) fn refresh_stats(
     let prev_max = stats.max_hp();
     *stats = new_stats;
     *effects = new_effects;
-    for mut h in &mut player {
+    for mut h in player {
         let max = stats.max_hp();
-        if max > prev_max {
+        if h.hp > 0.0 && max > prev_max {
             h.hp += max - prev_max;
         }
         h.max = max;
         h.hp = h.hp.min(max);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applying_stats_preserves_trigger_clocks_and_health_invariants() {
+        let mut stats = Stats { v: [0.0; Stat::COUNT], rules: 0 };
+        stats.v[Stat::MaxHp as usize] = 100.0;
+        let trigger = |key, elapsed| ActiveTrigger {
+            key,
+            chance: 1.0,
+            only: Cond::Always,
+            action: Action::Heal(1.0),
+            period: 10.0,
+            elapsed,
+        };
+        let mut effects = Effects { periodic: vec![trigger(1, 4.0), trigger(2, 8.0)], ..Effects::default() };
+        let mut world = World::new();
+        let living = world.spawn(Health { hp: 60.0, max: 100.0 }).id();
+        let dead = world.spawn(Health { hp: 0.0, max: 100.0 }).id();
+        let mut new_stats = stats.clone();
+        new_stats.v[Stat::MaxHp as usize] = 150.0;
+        let new_effects = Effects { periodic: vec![trigger(1, 0.0), trigger(3, 0.0)], ..Effects::default() };
+        apply_collected(
+            (new_stats, new_effects),
+            &mut stats,
+            &mut effects,
+            world.query::<&mut Health>().iter_mut(&mut world),
+        );
+        assert_eq!(
+            effects.periodic.iter().map(|t| (t.key, t.elapsed)).collect::<Vec<_>>(),
+            [(1, 4.0), (3, 0.0)]
+        );
+        assert_eq!(*world.get::<Health>(living).unwrap(), Health { hp: 110.0, max: 150.0 });
+        assert_eq!(*world.get::<Health>(dead).unwrap(), Health { hp: 0.0, max: 150.0 });
+        let mut new_stats = stats.clone();
+        new_stats.v[Stat::MaxHp as usize] = 80.0;
+        apply_collected(
+            (new_stats, Effects::default()),
+            &mut stats,
+            &mut effects,
+            world.query::<&mut Health>().iter_mut(&mut world),
+        );
+        assert_eq!(*world.get::<Health>(living).unwrap(), Health { hp: 80.0, max: 80.0 });
     }
 }

@@ -34,6 +34,7 @@ export class Screens {
   private readonly pause = section('pause-screen', 'dim');
   private readonly result = section('result-screen', 'dim');
   private shownPhase = '';
+  private shownId = -1;
   private shownChoice: Option[] | null = null;
   private evoTimer = 0;
   private readonly actions: ScreenActions;
@@ -54,8 +55,9 @@ export class Screens {
   sync(w: World, dt: number): void {
     const phase = this.paused ? 'paused' : w.phase;
     if (phase === 'levelup' && w.choice && w.choice.options !== this.shownChoice) this.renderLevelUp(w);
-    if (phase !== this.shownPhase) {
+    if (phase !== this.shownPhase || w.choiceId !== this.shownId) {
       this.shownPhase = phase;
+      this.shownId = w.choiceId;
       this.levelup.hidden = phase !== 'levelup';
       this.chest.hidden = phase !== 'chest';
       this.evo.hidden = phase !== 'evo';
@@ -79,6 +81,7 @@ export class Screens {
 
   hideAll(): void {
     this.shownPhase = '';
+    this.shownId = -1;
     this.shownChoice = null;
     for (const s of [this.levelup, this.chest, this.evo, this.pause, this.result]) s.hidden = true;
   }

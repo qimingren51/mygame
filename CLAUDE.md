@@ -122,6 +122,7 @@ node web/scripts/build-site.mjs   # 组装到 web/_site/（加 --ci 会同时跑
 node web/scripts/serve-site.mjs   # 访问 http://localhost:8000/mygame/
 ```
 
+- **网页检查**：涉及 `web/` 的 PR 运行类型检查、单测、整站构建和 Playwright 浏览器流程；部署仅在检查通过后执行。本地运行浏览器测试前，在 `web/lantern-next/` 执行 `npx playwright install chromium`，组装整站后运行 `npm run e2e`。
 - **自动部署**：推送到 `master` 且 `web/` 有改动时，`.github/workflows/pages.yml` 会组装网页站点并发布到 GitHub Pages。仓库设置里 Pages 的来源必须保持“GitHub Actions”；如果改回“从分支部署”，GitHub 会对仓库根目录另跑一次 Jekyll 部署，把网站覆盖掉。
 - **`build-site.mjs` 的组装规则**：
   - `web/` 根目录的网页文件原样复制，Markdown 不发布。

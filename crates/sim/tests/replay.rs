@@ -30,6 +30,9 @@ fn play(replay: Replay) -> (Vec<(u64, u64)>, Option<u64>) {
     while !sim.playback().unwrap().finished && !sim.is_over() {
         sim.step(InputFrame::default(), &[]);
     }
+    if sim.playback().unwrap().diverged_at.is_none() {
+        sim.playback().unwrap().verification_result(sim.tick()).expect("完整回放应通过校验");
+    }
     let hashes = sim.hashes().iter().map(|c| (c.tick, c.hash)).collect();
     (hashes, sim.playback().unwrap().diverged_at)
 }
@@ -97,4 +100,51 @@ fn replay_finishes_at_death_or_victory_with_inputs_remaining() {
         sim.step(InputFrame::default(), &[]);
         assert_eq!(sim.tick(), tick);
     }
+}
+
+#[test]
+fn malformed_replay_lengths_commands_and_checkpoints_are_rejected() {
+    let (replay, _) = record(11, 3 * 60);
+    let mut cases = Vec::new();
+    let mut r = replay.clone();
+    r.inputs.pop();
+    cases.push(r);
+    let mut r = replay.clone();
+    r.inputs[0].steps = 0;
+    cases.push(r);
+    let mut r = replay.clone();
+    r.commands = vec![(2, SimCommand::Dash), (1, SimCommand::Dash)];
+    cases.push(r);
+    let mut r = replay.clone();
+    r.commands.push((r.steps, SimCommand::Dash));
+    cases.push(r);
+    let mut r = replay.clone();
+    r.hashes.remove(1);
+    cases.push(r);
+    let mut r = replay.clone();
+    r.hashes.swap(0, 1);
+    cases.push(r);
+    let mut r = replay;
+    r.hashes[1] = r.hashes[0];
+    cases.push(r);
+    for r in cases {
+        assert!(Replay::parse(&r.to_ron()).is_err());
+    }
+}
+
+#[test]
+fn verification_requires_all_inputs_ticks_commands_and_hashes() {
+    let (replay, _) = record(11, 3 * 60 + 1);
+    let mut sim = SimHarness::from_replay(content(), replay.clone());
+    while !sim.playback().unwrap().finished {
+        sim.step(InputFrame::default(), &[]);
+    }
+    assert_eq!(sim.tick(), replay.ticks, "输入结束后不多跑一步");
+    assert_eq!(sim.playback().unwrap().verification_result(sim.tick()), Ok(replay.hashes.len()));
+
+    let mut sim = SimHarness::from_replay(content(), replay);
+    sim.flow_mut().won_at = Some(0.0);
+    sim.step(InputFrame::default(), &[]);
+    assert!(sim.playback().unwrap().finished);
+    assert!(sim.playback().unwrap().verification_result(sim.tick()).unwrap_err().contains("不完整"));
 }

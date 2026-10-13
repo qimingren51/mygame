@@ -26,6 +26,8 @@ pub struct Settings {
     pub bloom: bool,
     #[serde(skip)]
     path: Option<PathBuf>,
+    #[serde(skip)]
+    save_error: Option<String>,
 }
 
 impl Default for Settings {
@@ -40,35 +42,74 @@ impl Default for Settings {
             hitstop: true,
             bloom: true,
             path: None,
+            save_error: None,
         }
     }
 }
 
 impl Settings {
-    /// 从数据目录读取。文件不存在或已损坏时用默认值（损坏的文件会先改名保留）。
+    /// 主文件不可用时尝试备份；无法安全恢复时禁止覆盖原文件。
     pub fn load(dir: &Path) -> Settings {
         let path = dir.join("settings.ron");
-        let mut s = match std::fs::read_to_string(&path) {
-            Ok(text) => match ron::from_str::<Settings>(&text) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("设置文件损坏，改用默认值：{e}");
-                    let _ = std::fs::rename(&path, path.with_extension("ron.broken"));
-                    Settings::default()
-                }
-            },
-            Err(_) => Settings::default(),
-        };
+        let (mut s, error) = load_with_backup::<Settings>(&path);
+        s.save_error = error;
         s.version = SETTINGS_VERSION;
         s.path = Some(path);
         s
     }
 
     pub fn save(&self) -> io::Result<()> {
+        if let Some(error) = &self.save_error {
+            return Err(io::Error::other(error.clone()));
+        }
         let Some(path) = &self.path else { return Ok(()) };
         let text =
             ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()).map_err(io::Error::other)?;
         write_atomic(path, text.as_bytes())
+    }
+}
+
+/// 区分首次运行和恢复失败。恢复备份后先保留坏主档，后续写入不会把坏数据复制进备份。
+pub(crate) fn load_with_backup<T: serde::de::DeserializeOwned + Default>(path: &Path) -> (T, Option<String>) {
+    let read = |path: &Path| -> io::Result<T> {
+        let text = std::fs::read_to_string(path)?;
+        ron::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    };
+    let main_error = match read(path) {
+        Ok(value) => return (value, None),
+        Err(e) => e,
+    };
+    let backup = path.with_extension("bak");
+    match read(&backup) {
+        Ok(value) => {
+            eprintln!("{} 读取失败（{main_error}），已读取备份 {}", path.display(), backup.display());
+            let preserved = match main_error.kind() {
+                io::ErrorKind::NotFound => Ok(()),
+                io::ErrorKind::InvalidData => {
+                    let broken = path.with_extension("ron.broken");
+                    if broken.exists() {
+                        Err(io::Error::other("已有损坏文件留档，暂不覆盖"))
+                    } else {
+                        std::fs::rename(path, broken)
+                    }
+                }
+                _ => Err(main_error),
+            };
+            let error =
+                preserved.err().map(|e| format!("无法保留原文件 {}，已禁止保存：{e}", path.display()));
+            if let Some(e) = &error {
+                eprintln!("{e}");
+            }
+            (value, error)
+        }
+        Err(e) if main_error.kind() == io::ErrorKind::NotFound && e.kind() == io::ErrorKind::NotFound => {
+            (T::default(), None)
+        }
+        Err(e) => {
+            let error = format!("{} 及备份均无法读取，已禁止保存：{main_error}；{e}", path.display());
+            eprintln!("{error}");
+            (T::default(), Some(error))
+        }
     }
 }
 
@@ -90,6 +131,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn backup_recovery_preserves_progress_and_blocks_io_failures() {
+        for problem in ["corrupt", "missing", "unreadable", "both_corrupt"] {
+            let dir = std::env::temp_dir().join(format!("lantern-settings-{problem}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let main = dir.join("settings.ron");
+            let backup = dir.join("settings.bak");
+            let good = "(fullscreen: true)";
+            std::fs::write(&backup, if problem == "both_corrupt" { "broken" } else { good }).unwrap();
+            match problem {
+                "unreadable" => std::fs::create_dir(&main).unwrap(),
+                "corrupt" | "both_corrupt" => std::fs::write(&main, "broken").unwrap(),
+                _ => {}
+            }
+            let mut s = Settings::load(&dir);
+            assert_eq!(s.fullscreen, problem != "both_corrupt");
+            s.vsync = false;
+            if problem == "unreadable" || problem == "both_corrupt" {
+                assert!(s.save().is_err());
+                if problem == "unreadable" {
+                    assert!(main.is_dir());
+                } else {
+                    assert_eq!(std::fs::read_to_string(&main).unwrap(), "broken");
+                }
+            } else {
+                s.save().unwrap();
+                assert!(!Settings::load(&dir).vsync);
+                if problem == "corrupt" {
+                    assert_eq!(std::fs::read_to_string(dir.join("settings.ron.broken")).unwrap(), "broken");
+                }
+            }
+            assert_eq!(
+                std::fs::read_to_string(&backup).unwrap(),
+                if problem == "both_corrupt" { "broken" } else { good }
+            );
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn roundtrip_and_recover_from_corruption() {
         let dir = std::env::temp_dir().join(format!("lantern-settings-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -101,8 +182,10 @@ mod tests {
         assert!(Settings::load(&dir).fullscreen);
 
         std::fs::write(dir.join("settings.ron"), "(fullscreen: maybe").unwrap();
-        assert!(!Settings::load(&dir).fullscreen);
-        assert!(dir.join("settings.ron.broken").exists());
+        let broken = Settings::load(&dir);
+        assert!(!broken.fullscreen);
+        assert!(broken.save().is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("settings.ron")).unwrap(), "(fullscreen: maybe");
 
         // 缺字段时用默认值，旧版本的设置文件也能读。
         std::fs::write(dir.join("settings.ron"), "(fullscreen: true)").unwrap();
