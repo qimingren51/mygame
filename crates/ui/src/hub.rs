@@ -533,7 +533,9 @@ pub(crate) fn prep_panel(
                             "玩法",
                             "无尽夜".into(),
                             on_paper(hex("#B07CF0")),
-                            format!("夜主倒下也不天明，每 5 分钟妖潮过后它再来，一次比一次难缠{best}"),
+                            format!(
+                                "不等天明，往梦的深处走：夜主倒下也不天明，每 5 分钟妖潮过后它再来，一次比一次凶{best}"
+                            ),
                             None,
                         )
                     }

@@ -73,6 +73,8 @@ pub(crate) struct FxFrames {
     coin: Option<(FrameId, Option<FrameId>)>,
     /// 九尾扫的扇形预警：轮廓、蓄力填充
     sector: Option<(FrameId, FrameId)>,
+    /// 冲锋预警：车道、箭头
+    charge: Option<(FrameId, FrameId)>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
     zone_lava: Option<(FrameId, Option<FrameId>)>,
     zone_mud: Option<FrameId>,
@@ -125,6 +127,7 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
         sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
+        charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
         zone_mud: db.find("ground/zone_mud"),
         zone_herb: db.find("ground/zone_herb").map(|f| (f, db.find("ground/zone_herb_glow"))),
@@ -714,20 +717,42 @@ pub(crate) fn collect_fx(
             let u = (1.0 - en.charge_t[i] / ch.windup).clamp(0.0, 1.0);
             let at = Vec2::new(en.x[i], en.y[i]);
             let dir = Vec2::new(en.charge_dx[i], en.charge_dy[i]);
-            // 线从妖物脚下画到冲锋的终点（贴图的锚点在右端，放在终点、朝冲锋方向）
             let len = ch.speed * ch.duration + en.r[i];
-            let end = to_screen(at + dir * len);
-            let screen_dir = end - to_screen(at);
+            let start = to_screen(at);
+            let screen_dir = to_screen(at + dir * len) - start;
             let rot = screen_dir.y.atan2(screen_dir.x);
-            let w = db.frame(f.trail).size;
-            let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
-            pools.fx.push(Draw {
-                scale,
-                rot,
-                color: red.with_alpha(0.25 + 0.45 * u),
-                ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
-            });
-            glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
+            let (line_a, glow_a) = (0.25 + 0.45 * u, 0.15 + 0.35 * u);
+            if let Some((line, head)) = f.charge {
+                // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）；车道宽约为妖物直径的 0.8 倍
+                let (lf, hf) = (db.frame(line), db.frame(head));
+                let k = en.r[i] * 1.6 / lf.width.unwrap_or(lf.size.y);
+                let head_len = hf.head_len.unwrap_or(hf.size.x) * k;
+                let body = (screen_dir.length() - head_len).max(0.0);
+                let tip = start + screen_dir.normalize_or_zero() * body;
+                for (id, pos, scale) in
+                    [(line, start, Vec2::new(body / lf.size.x, k)), (head, tip, Vec2::splat(k))]
+                {
+                    pools.fx.push(Draw {
+                        scale,
+                        rot,
+                        color: red.with_alpha(line_a),
+                        ..Draw::new(id, pos.extend(layer::GROUND + 0.97))
+                    });
+                    glow.add(id, pos.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                }
+            } else {
+                // 没有专用贴图时借剑光拖尾：锚点在右端，放在终点、朝冲锋方向
+                let end = start + screen_dir;
+                let w = db.frame(f.trail).size;
+                let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
+                pools.fx.push(Draw {
+                    scale,
+                    rot,
+                    color: red.with_alpha(line_a),
+                    ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
+                });
+                glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+            }
             let pulse = 0.6 + 0.4 * (now * 18.0).sin();
             glow.add(
                 f.glow,

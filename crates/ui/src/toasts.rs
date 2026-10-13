@@ -107,7 +107,7 @@ fn read_events(
             SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
             SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
             SimEvent::BossDefeated { dawn: false, .. } => {
-                msg("夜主退去", "夜还没完：下一次妖潮过后它会再来，更难缠", hex("#FFD98A"), true)
+                msg("夜主退去", "梦太深，光透不上来：下一次妖潮过后它还会回来，更凶", hex("#FFD98A"), true)
             }
             // 夜主登场、伏诛有专门的演出（moments.rs）
             SimEvent::Resonance { element, tier } => {
