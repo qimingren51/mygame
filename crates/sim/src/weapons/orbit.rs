@@ -6,6 +6,7 @@ use lantern_content::{Content, Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::WeaponSlot;
+use crate::bamboo::Bamboo;
 use crate::combat::{HIT_DOT, HIT_NOCRIT, Hit, HitQueue, Source};
 use crate::enemies::Enemies;
 use crate::spatial::Grid;
@@ -20,6 +21,7 @@ pub(crate) fn update(
     t: f32,
     slot: &mut WeaponSlot,
     hits: &mut HitQueue,
+    bamboo: &mut Bamboo,
     found: &mut Vec<u32>,
 ) {
     let WeaponBehavior::Orbit { spin, hit_cooldown, knockback, size, inner } = *slot.behavior(content) else {
@@ -36,6 +38,7 @@ pub(crate) fn update(
     let element = Some(content.weapons[slot.def].element);
     for k in 0..slot.count {
         let c = p + slot.orbit_offset(slot.angle, k);
+        bamboo.circle(c, slot.size, lv.damage);
         found.clear();
         grid.query_circle(en, c.x, c.y, slot.size, found);
         for &i in found.iter() {
@@ -51,6 +54,7 @@ pub(crate) fn update(
         slot.inner_t -= DT;
         if slot.inner_t <= 0.0 {
             slot.inner_t = f.every;
+            bamboo.circle(p, f.radius * area, lv.damage * f.ratio);
             found.clear();
             grid.query_circle(en, p.x, p.y, f.radius * area, found);
             for &i in found.iter() {

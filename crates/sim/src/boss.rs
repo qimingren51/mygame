@@ -357,9 +357,9 @@ pub(crate) fn update_foes(
         f.pos += f.vel * DT;
         let rr = f.radius + reach;
         if f.pos.distance_squared(pos.0) < rr * rr {
-            let dmg = f.damage;
+            let (dmg, from) = (f.damage, f.pos);
             foes.0.remove(k);
-            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Shot, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, (HurtBy::Shot, from), &mut ctx);
             continue;
         }
         if f.life <= 0.0 {
@@ -390,7 +390,7 @@ pub(crate) fn update_foes(
         st.sweeps.swap_remove(k);
         ctx.outbox.0.push(SimEvent::SweepStrike { pos: origin, dir });
         if hit {
-            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Sweep, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, (HurtBy::Sweep, origin), &mut ctx);
         }
     }
     let mut k = 0;
@@ -407,7 +407,7 @@ pub(crate) fn update_foes(
         st.drops.swap_remove(k);
         ctx.outbox.0.push(SimEvent::RainStrike { pos: at });
         if hit {
-            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Rain, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, (HurtBy::Rain, at), &mut ctx);
         }
     }
 }

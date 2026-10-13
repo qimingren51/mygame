@@ -539,7 +539,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
                         ults += 1;
                     }
                 }
-                SimEvent::PlayerHurt { amount, by } => {
+                SimEvent::PlayerHurt { amount, by, .. } => {
                     taken += f64::from(amount);
                     last_hurt = Some(by);
                 }

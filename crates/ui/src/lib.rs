@@ -12,6 +12,7 @@ mod bench;
 mod choice;
 mod describe;
 mod hub;
+mod hub_fx;
 mod hud;
 mod hud_fx;
 mod markers;
@@ -20,6 +21,7 @@ mod pause;
 mod perf;
 mod replay_ui;
 mod results;
+mod scroll;
 mod settings_ui;
 mod skin;
 mod title;
@@ -96,6 +98,7 @@ impl Plugin for UiPlugin {
         toasts::register(app);
         moments::register(app);
         hud_fx::register(app);
+        hub_fx::register(app);
         results::register(app);
         pause::register(app);
     }

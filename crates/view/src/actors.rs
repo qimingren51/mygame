@@ -11,9 +11,14 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use lantern_content::Stat;
-use lantern_sim::{AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, Stats};
+use lantern_sim::bamboo::{Bamboo, ClumpState};
+use lantern_sim::boss::BossState;
+use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP};
+use lantern_sim::{
+    AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox, Stats,
+};
 
-use crate::atlas::{AtlasDb, FrameId};
+use crate::atlas::{AnimMeta, AtlasDb, FrameId};
 use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER};
 use crate::{MainCamera, layer, to_screen};
 
@@ -107,11 +112,81 @@ impl LanternLayer {
     }
 }
 
-struct EnemyFrames {
+/// 妖物的一个动作：普通帧，闪白帧和自发光帧（和普通帧等长，否则为空）。
+struct EnemyAnim {
     normal: Vec<FrameId>,
     flash: Vec<FrameId>,
     emit: Vec<FrameId>,
     fps: f32,
+    /// 前几帧是蓄力
+    windup: usize,
+    /// 播完后从这一帧起循环（loop_from）
+    loop_from: Option<usize>,
+}
+
+impl EnemyAnim {
+    fn load(db: &AtlasDb, asset: &str, name: &str, meta: &AnimMeta) -> Self {
+        let seq = |suffix: &str| {
+            db.anim(&format!("{asset}/{name}_E{suffix}")).map(<[FrameId]>::to_vec).unwrap_or_default()
+        };
+        let normal = seq("");
+        let same_len = |v: Vec<FrameId>| if v.len() == normal.len() { v } else { Vec::new() };
+        EnemyAnim {
+            flash: same_len(seq("_flash")),
+            emit: same_len(seq("_emit")),
+            normal,
+            fps: meta.fps,
+            windup: meta.windup_frames,
+            loop_from: meta.loop_from,
+        }
+    }
+
+    /// 蓄力了 t 秒：播蓄力帧，停在最后一个蓄力帧等预警结束。
+    fn windup_frame(&self, t: f32) -> usize {
+        windup_frame(self.windup, self.fps, t)
+    }
+
+    /// 出手以后 t 秒（going：这一招还没结束）。
+    fn strike_frame(&self, t: f32, going: bool) -> Option<usize> {
+        strike_frame(self.normal.len(), self.windup, self.loop_from, self.fps, t, going)
+    }
+}
+
+fn windup_frame(windup: usize, fps: f32, t: f32) -> usize {
+    ((t.max(0.0) * fps) as usize).min(windup.saturating_sub(1))
+}
+
+/// 出手以后 t 秒的帧号：从蓄力帧之后接着播。播完时，有 loop_from 的从那一帧起循环；
+/// 没有的，这一招还没结束就停在最后一帧，结束了回到平时的动作（None）。
+fn strike_frame(
+    n: usize,
+    windup: usize,
+    loop_from: Option<usize>,
+    fps: f32,
+    t: f32,
+    going: bool,
+) -> Option<usize> {
+    let k = windup + (t.max(0.0) * fps) as usize;
+    if k < n {
+        return Some(k);
+    }
+    if !going || n == 0 {
+        return None;
+    }
+    Some(match loop_from {
+        Some(from) if from < n => from + (k - n) % (n - from),
+        _ => n - 1,
+    })
+}
+
+struct EnemyFrames {
+    /// 平时的动作
+    base: EnemyAnim,
+    /// 冲锋（赤面狐 pounce、青面鬼 charge）
+    charge: Option<EnemyAnim>,
+    /// 九尾扫、召唤（召唤和狐火雨时播）
+    sweep: Option<EnemyAnim>,
+    summon: Option<EnemyAnim>,
     floating: bool,
     shadow_scale: f32,
 }
@@ -126,18 +201,20 @@ pub(crate) struct ActorFrames {
     pub(crate) light: FrameId,
     /// 光环（升级时扩开）
     pub(crate) ring: FrameId,
+    /// 竹丛：立着的、打碎的、影子缩放
+    bamboo: Option<(FrameId, FrameId, f32)>,
 }
 
 impl ActorFrames {
     /// 某种妖物的动画帧（幻身等借用妖物的样子时用）。
     pub(crate) fn enemy_frames(&self, kind: usize) -> &[FrameId] {
-        self.enemies.get(kind).map_or(&[], |f| f.normal.as_slice())
+        self.enemies.get(kind).map_or(&[], |f| f.base.normal.as_slice())
     }
 
     /// 妖物死时化墨用的剪影：白色剪影帧，没有时用普通帧。
     pub(crate) fn enemy_ghost(&self, kind: usize) -> Option<FrameId> {
         let f = self.enemies.get(kind)?;
-        f.flash.first().or(f.normal.first()).copied()
+        f.base.flash.first().or(f.base.normal.first()).copied()
     }
 
     /// 让 light 贴图（径向渐变）画出半径 r 的光所需的缩放。
@@ -192,16 +269,18 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
             let asset = if db.assets.contains_key(&e.sprite) { e.sprite.as_str() } else { fallback };
             let meta = &db.assets[asset];
             let (anim, am) = meta.default_anim().expect("素材至少有一个动作");
-            let seq = |suffix: &str| {
-                db.anim(&format!("{asset}/{anim}_E{suffix}")).map(<[FrameId]>::to_vec).unwrap_or_default()
+            // 出手动作按名字找（DESIGN 第 15 节“妖物动作”）；没画的照旧播平时的动作
+            let named = |names: &[&str]| {
+                names.iter().find_map(|&n| {
+                    let a = meta.anims.get(n)?;
+                    Some(EnemyAnim::load(&db, asset, n, a)).filter(|a| !a.normal.is_empty())
+                })
             };
-            let normal = seq("");
-            let same_len = |v: Vec<FrameId>| if v.len() == normal.len() { v } else { Vec::new() };
             EnemyFrames {
-                flash: same_len(seq("_flash")),
-                emit: same_len(seq("_emit")),
-                normal: normal.clone(),
-                fps: am.fps,
+                base: EnemyAnim::load(&db, asset, anim, am),
+                charge: e.charge.as_ref().and_then(|_| named(&["pounce", "charge"])),
+                sweep: e.boss.as_ref().and_then(|_| named(&["sweep"])),
+                summon: e.boss.as_ref().and_then(|_| named(&["summon"])),
                 floating: meta.floating,
                 shadow_scale: shadow_scale(&db, asset, shadow),
             }
@@ -214,6 +293,10 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         shadow,
         light: need("vfx/light"),
         ring: need("weapons/ring"),
+        bamboo: db
+            .find("bamboo_clump/idle_S_00")
+            .zip(db.find("bamboo_clump_broken/idle_S_00"))
+            .map(|(a, b)| (a, b, shadow_scale(&db, "bamboo_clump", shadow))),
     });
 }
 
@@ -587,6 +670,72 @@ pub(crate) struct Sight<'w> {
     reveal: Option<Res<'w, lantern_sim::reveal::Reveal>>,
 }
 
+/// 九尾最近一次扫击落下、召唤（或狐火雨）的时刻（画面时间）。
+#[derive(Default)]
+pub(crate) struct BossClock {
+    /// （时刻，扫击方向）
+    strike: Option<(f32, f32)>,
+    summon: Option<f32>,
+}
+
+/// 挑妖物的出手动作要读的模拟状态（DESIGN 第 15 节“妖物动作”）。
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct Moves<'w, 's> {
+    content: Res<'w, GameContent>,
+    boss: Option<Res<'w, BossState>>,
+    outbox: Res<'w, SimOutbox>,
+    clock: Local<'s, BossClock>,
+}
+
+impl Moves<'_, '_> {
+    fn update(&mut self, now: f32) {
+        for ev in &self.outbox.0 {
+            match *ev {
+                SimEvent::SweepStrike { dir, .. } => self.clock.strike = Some((now, dir)),
+                SimEvent::BossSummon { .. } | SimEvent::RainWarn { .. } => self.clock.summon = Some(now),
+                _ => {}
+            }
+        }
+    }
+
+    /// 正在出招的妖物：播哪个动作的第几帧，朝不朝左（None：照常朝着主角）。
+    fn pick<'f>(
+        &self,
+        f: &'f EnemyFrames,
+        en: &Enemies,
+        i: usize,
+        now: f32,
+    ) -> Option<(&'f EnemyAnim, usize, Option<bool>)> {
+        // 冲锋：蓄力时停在最后一个蓄力帧，冲出去接着播，停下来以后播完剩下的
+        if let Some(a) = &f.charge
+            && let Some(ch) = &self.content.0.enemies[en.kind[i] as usize].charge
+        {
+            let k = match en.charge[i] {
+                CHARGE_WINDUP => Some(a.windup_frame(ch.windup - en.charge_t[i])),
+                CHARGE_DASH => a.strike_frame(ch.duration - en.charge_t[i], true),
+                CHARGE_RECOVER => a.strike_frame(ch.duration + ch.recover - en.charge_t[i], false),
+                _ => None,
+            };
+            return k.map(|k| (a, k, Some(en.charge_dx[i] < 0.0)));
+        }
+        let left = |dir: f32| Some(dir.cos() < 0.0);
+        // 九尾扫：预警时蓄力，落下时扫过去
+        if let Some(a) = &f.sweep {
+            if let Some(sw) = self.boss.as_ref().and_then(|b| b.sweeps.first()) {
+                return Some((a, a.windup_frame(sw.t), left(sw.dir)));
+            }
+            if let Some((at, dir)) = self.clock.strike
+                && let Some(k) = a.strike_frame(now - at, false)
+            {
+                return Some((a, k, left(dir)));
+            }
+        }
+        let a = f.summon.as_ref()?;
+        let k = a.strike_frame(now - self.clock.summon?, false)?;
+        Some((a, k, None))
+    }
+}
+
 /// 摄像机看得到的范围（世界坐标，留一点边）。
 fn view_rect(cam: &Transform, proj: &Projection) -> Rect {
     let half = match proj {
@@ -605,6 +754,8 @@ pub(crate) fn collect_draws(
     gems: Option<Res<Gems>>,
     arsenal: Option<Res<Arsenal>>,
     sight: Sight,
+    mut moves: Moves,
+    bamboo: Option<Res<Bamboo>>,
     player: Single<(&Pos, &PrevPos), With<Player>>,
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
@@ -623,6 +774,7 @@ pub(crate) fn collect_draws(
     let rect = view_rect(camera.0, camera.1);
     let (ppos, pprev) = *player;
     let player_now = pprev.0.lerp(ppos.0, a);
+    moves.update(t);
 
     // 夜签“无月”：照见圈外完全看不见；“隐”的精英在照见圈外也看不见
     let no_moon = sight.stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
@@ -639,16 +791,18 @@ pub(crate) fn collect_draws(
             continue;
         }
         let f = &frames.enemies[en.kind[i] as usize];
-        let n = f.normal.len();
+        let n = f.base.normal.len();
         if n == 0 {
             continue;
         }
-        let phase = en.wob[i] / TAU * n as f32;
-        let k = ((t * f.fps + phase) as usize) % n;
-        let flashing = en.flash[i] > 0.0 && !f.flash.is_empty();
-        let frame = if flashing { f.flash[k] } else { f.normal[k] };
+        let (anim, k, face) = moves.pick(f, &en, i, t).unwrap_or_else(|| {
+            let phase = en.wob[i] / TAU * n as f32;
+            (&f.base, ((t * f.base.fps + phase) as usize) % n, None)
+        });
+        let flashing = en.flash[i] > 0.0 && !anim.flash.is_empty();
+        let frame = if flashing { anim.flash[k] } else { anim.normal[k] };
         let bob = if f.floating { (t * 2.0 + en.wob[i]).sin() * 1.5 + 4.0 } else { 0.0 };
-        let flip = player_now.x < p.x;
+        let flip = face.unwrap_or(player_now.x < p.x);
         let body = Vec2::new(s.x, s.y + bob);
         // 冰冻发蓝，灼烧发红
         let color = if flashing {
@@ -689,8 +843,35 @@ pub(crate) fn collect_draws(
             color: Color::srgba(1.0, 1.0, 1.0, 0.7 * fade),
             ..Draw::new(frames.shadow, Vec3::new(s.x, s.y, layer::SHADOW))
         });
-        if let Some(&emit) = f.emit.get(k) {
+        if let Some(&emit) = anim.emit.get(k) {
             glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade));
+        }
+    }
+
+    // 竹丛：和角色一起按脚底排序；打碎的换图，烧平的焦黑，挨打时晃一下
+    if let (Some(b), Some((standing, broken, shadow_k))) = (&bamboo, frames.bamboo) {
+        for c in b.near() {
+            let s = to_screen(c.pos);
+            if !rect.contains(s) {
+                continue;
+            }
+            let (frame, color, shake) = match c.state {
+                ClumpState::Standing => (standing, Color::WHITE, c.cd.max(0.0) * 8.0),
+                ClumpState::Broken(_) => (broken, Color::WHITE, 0.0),
+                ClumpState::Burned => (broken, Color::srgb(0.32, 0.27, 0.25), 0.0),
+                ClumpState::Cleared => continue,
+            };
+            let x = s.x + (t * 55.0 + c.pos.x).sin() * shake;
+            pools.fx.push(Draw {
+                color,
+                flip: c.pos.x.rem_euclid(2.0) < 1.0,
+                ..Draw::new(frame, Vec3::new(x, s.y, sort_z(layer::ACTORS, c.pos.y)))
+            });
+            pools.enemy_shadow.push(Draw {
+                scale: Vec2::splat(shadow_k),
+                color: Color::srgba(1.0, 1.0, 1.0, 0.6),
+                ..Draw::new(frames.shadow, Vec3::new(s.x, s.y, layer::SHADOW))
+            });
         }
     }
 
@@ -873,4 +1054,30 @@ pub(crate) fn reset_pools(
     *pools = Pools::default();
     *glow = GlowPool::default();
     *flare = LanternFlare::default();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 出手动作（DESIGN 第 15 节）：蓄力帧停在最后一个，出手后接着播；
+    /// 只播一遍的停在最后一帧，招式结束回到平时；loop_from 的从那一帧循环。
+    #[test]
+    fn attack_frames_follow_windup_and_loop() {
+        // 赤面狐 pounce：6 帧、12 帧每秒、2 帧蓄力
+        assert_eq!(windup_frame(2, 12.0, 0.0), 0);
+        assert_eq!(windup_frame(2, 12.0, 0.09), 1);
+        assert_eq!(windup_frame(2, 12.0, 0.5), 1, "停在最后一个蓄力帧等预警结束");
+        assert_eq!(strike_frame(6, 2, None, 12.0, 0.0, true), Some(2));
+        assert_eq!(strike_frame(6, 2, None, 12.0, 0.4, true), Some(5), "播完停在最后一帧");
+        assert_eq!(strike_frame(6, 2, None, 12.0, 0.4, false), None, "招式结束回到平时的动作");
+        assert_eq!(strike_frame(6, 2, None, 12.0, 0.2, false), Some(4), "停下时没播完的接着播");
+        // 青面鬼 charge：6 帧、10 帧每秒、从第 2 帧循环
+        assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.4, true), Some(2));
+        assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.55, true), Some(3));
+        assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.7, false), None);
+        // 九尾 summon：没有蓄力帧
+        assert_eq!(strike_frame(4, 0, None, 6.0, 0.0, false), Some(0));
+        assert_eq!(strike_frame(4, 0, None, 6.0, 0.7, false), None);
+    }
 }

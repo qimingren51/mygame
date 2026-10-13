@@ -66,9 +66,12 @@ EXPECTED = {
     # M2.5：冲锋预警（车道沿 X 拉伸，锚点在起点；箭头锚点在底边正中）
     "charge_line.png": (sz(128, 20), (0.0, 0.5)),
     "charge_line_head.png": (sz(32, 32), (0.125, 0.5)),
+    # 青丘：竹魅的竹刺（锚点居中，同 foxfire）与尾光（锚点在右端，同 sword_trail）
+    "bamboo_spike.png": (sz(64, 22), (0.5, 0.5)),
+    "bamboo_spike_trail.png": (sz(56, 8), (1.0, 0.5)),
 }
 # 白色、可染色、叠加混合的贴图
-WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3)), "sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png"}
+WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3)), "sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png", "bamboo_spike_trail.png"}
 REVIEW = ["weapons_sheet.png", "weapons_ingame.png"]
 
 WRITTEN: list[Path] = []
@@ -238,6 +241,40 @@ def test_point_right():
             assert np.nonzero(red)[1].mean() > 0.7 * a.shape[1], f"{prefix}_{i} 头（朱砂点）应在右边"
 
 
+def test_bamboo_spike():
+    """竹刺：尖朝 +X、尖比竹竿细；长约 28 世界单位；锚点在竹竿正中；竹皮偏绿、有焦墨轮廓、削面浅色；
+    竹叶在竹竿上方、往后（左）飘。尾光的亮端在右边（锚点 1.0），比剑尾光细。"""
+    a = rgba("bamboo_spike.png").astype(np.float64)
+    al = a[..., 3]
+    h, w = al.shape
+    cy = h // 2
+    band = int(round(2 * D))
+    axis_cols = np.nonzero((al[cy - band : cy + band + 1] > 128).any(0))[0]  # 竹竿那一条（尖在中线略下）
+    x0, x1 = axis_cols.min(), axis_cols.max()
+    length_units = (x1 - x0 + 1) / S.PX_PER_UNIT
+    assert 26.0 <= length_units <= 30.0, f"竹刺长 {length_units:.1f} 世界单位，应约 28"
+    assert x1 > 0.9 * w, "竹刺尖应到右端"
+    ax = EXPECTED["bamboo_spike.png"][1][0] * w
+    frac = (ax - x0) / (x1 - x0)
+    assert 0.46 <= frac <= 0.54, f"锚点应在竹刺正中（实际 {frac:.2f}）"
+    h_mid = (al[:, int(x0 + 0.3 * (x1 - x0))] > 128).sum()
+    h_tip = (al[:, int(x0 + 0.95 * (x1 - x0))] > 128).sum()
+    assert h_tip < 0.6 * h_mid, f"竹刺尖应比竹竿细（{h_tip} vs {h_mid}）"
+    vis = a[al > 200][:, :3]
+    assert (vis[:, 1] > vis[:, 0] + 8).mean() > 0.3, "竹皮应偏绿（石绿兑墨）"
+    assert (vis.sum(1) < 200).mean() > 0.1, "应有焦墨轮廓"
+    tipzone = a[:, int(x0 + 0.65 * (x1 - x0)) : x1][al[:, int(x0 + 0.65 * (x1 - x0)) : x1] > 200][:, :3]
+    assert (tipzone.sum(1) > 480).mean() > 0.12, "斜削面应露出浅色的竹肉"
+    leaf = (al > 128) & (a[..., 1] > a[..., 0] + 8)
+    ys, xs = np.nonzero(leaf[: cy - int(3 * D)])
+    assert len(xs) > 10 * D and xs.mean() < ax, "竹叶应在竹竿上方、往后（左）飘"
+    tr = rgba("bamboo_spike_trail.png")[..., 3].astype(np.float64)
+    xs = np.arange(tr.shape[1])
+    assert (tr.sum(0) * xs).sum() / tr.sum() > 0.6 * tr.shape[1], "竹刺尾光的亮端应在右边（锚点 1.0）"
+    sw = rgba("sword_trail.png")[..., 3].astype(np.float64)
+    assert (tr > 60).sum(0).max() < (sw > 60).sum(0).max(), "竹刺尾光应比剑尾光细"
+
+
 def test_ground_anchor():
     """锚点 y 是落地点：锚点以下只剩很少的内容（阴影、铃舌），锚点所在行有内容。"""
     for name in ("seal.png", "seal_evo.png", "chest.png", "soulbell.png", "lotus.png"):
@@ -392,7 +429,10 @@ def test_pre_m25_unchanged():
     """快照里的 weapons/ 产物（M2.5 之前 + M2.5 第一批）逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
     testkit.check_snapshot(V.ASSETS, ("weapons",), D)
     files = list(meta_files())
-    assert files[-4:] == ["sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png"], "M2.5 的条目应追加在最后"
+    m25 = ["sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png"]
+    qq = ["bamboo_spike.png", "bamboo_spike_trail.png"]
+    assert files[-len(qq) :] == qq, f"青丘的条目应追加在最后：{files[-len(qq):]}"
+    assert files[-len(qq) - len(m25) : -len(qq)] == m25, "M2.5 的条目应紧挨在青丘条目之前"
 
 
 def test_density_1x_unchanged():

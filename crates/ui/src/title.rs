@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use lantern_content::Content;
 use lantern_platform::{Actions, HubNews, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good, omen_name};
-use lantern_sim::{AppState, GameContent, OmenPick};
+use lantern_sim::{AppState, GameContent, OmenPick, RunSetup};
 
 use bevy::ui::widget::NodeImageMode;
 use lantern_view::atlas::AtlasDb;
@@ -37,6 +37,11 @@ pub(crate) enum TitleMode {
     Codex,
     /// 设置
     Settings,
+    /// 开场卷轴：看完用这份设置出发
+    Scroll {
+        setup: Box<RunSetup>,
+        dawn: bool,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -55,7 +60,10 @@ pub(crate) fn register(app: &mut App) {
     app.init_resource::<TitleMode>()
         .init_resource::<TitleUi>()
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
-        .add_systems(Update, (input, redraw, highlight).chain().run_if(in_state(AppState::Title)));
+        .add_systems(
+            Update,
+            (input, redraw, highlight, crate::scroll::animate).chain().run_if(in_state(AppState::Title)),
+        );
 }
 
 fn enter(
@@ -133,8 +141,7 @@ fn input(
                         // 第一局直接出发：一更、初始的灯，不抽夜签、不挂灯坠
                         let setup = profile.run_setup(c, seed);
                         info!("出发，种子 {seed}（第一夜）");
-                        commands.insert_resource(setup);
-                        next.set(AppState::Run);
+                        depart(c, &profile, setup, &mut mode, &mut ui, &mut commands, &mut next);
                     }
                 }
                 // 灯驿在第一夜之后开放
@@ -173,12 +180,19 @@ fn input(
                 let mut setup = profile.run_setup(c, seed);
                 setup.omen = picks.get(i).cloned();
                 info!("出发，种子 {seed}，夜签 {:?}", setup.omen);
-                commands.insert_resource(setup);
-                next.set(AppState::Run);
+                depart(c, &profile, setup, &mut mode, &mut ui, &mut commands, &mut next);
             } else if actions.back {
                 *mode = TitleMode::Prep;
                 ui.selected = hub::prep_rows(c, &profile).len() - 1;
                 ui.dirty = true;
+            }
+        }
+        TitleMode::Scroll { setup, dawn } => {
+            if clicked.is_some() || actions.confirm || actions.back {
+                profile.saw_scroll(crate::scroll::REGION, dawn);
+                save(&profile);
+                commands.insert_resource(*setup);
+                next.set(AppState::Run);
             }
         }
         TitleMode::Prep => match hub::prep_input(&actions, c, &mut profile, &mut ui, clicked) {
@@ -275,6 +289,29 @@ fn input(
             } else if actions.back || actions.meta {
                 back_to_hub(&mut mode, &mut ui, 0);
             }
+        }
+    }
+}
+
+/// 出发：这个地区的开场卷轴还没展开过的，先展开，看完再进入这一局。
+fn depart(
+    c: &Content,
+    profile: &Profile,
+    setup: RunSetup,
+    mode: &mut TitleMode,
+    ui: &mut TitleUi,
+    commands: &mut Commands,
+    next: &mut NextState<AppState>,
+) {
+    match profile.next_scroll(c, crate::scroll::REGION) {
+        Some(dawn) => {
+            *mode = TitleMode::Scroll { setup: Box::new(setup), dawn };
+            ui.selected = 0;
+            ui.dirty = true;
+        }
+        None => {
+            commands.insert_resource(setup);
+            next.set(AppState::Run);
         }
     }
 }
@@ -377,6 +414,8 @@ fn redraw(
     news: Res<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
+    assets: Res<AssetServer>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
 ) {
@@ -398,6 +437,14 @@ fn redraw(
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Settings => settings_panel(&mut commands, &fonts, &skin, &settings),
+        TitleMode::Scroll { dawn, .. } => {
+            if let Some(region) = c.regions.iter().find(|r| r.id == crate::scroll::REGION) {
+                let mut root = commands.spawn(panel());
+                clickable(&mut root, 0);
+                let root = root.id();
+                crate::scroll::spawn(&mut commands, root, &assets, &fonts, region, *dawn, window.width());
+            }
+        }
     }
 }
 

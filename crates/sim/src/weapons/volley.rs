@@ -174,6 +174,7 @@ pub(crate) fn update_shots(
     en: Res<Enemies>,
     mut shots: ResMut<Shots>,
     mut hits: ResMut<HitQueue>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
 ) {
     let list = &mut shots.0;
@@ -207,6 +208,8 @@ pub(crate) fn update_shots(
             }
         }
         s.pos += s.vel * DT;
+        // 穿过竹丛时打它一下，不耗穿透
+        bamboo.circle(s.pos, s.hit_radius, s.damage);
         found.clear();
         grid.query_circle(&en, s.pos.x, s.pos.y, s.hit_radius, &mut found);
         let mut alive = true;

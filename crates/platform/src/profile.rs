@@ -95,6 +95,8 @@ pub struct Profile {
     pub last: LastPick,
     /// 灯驿里已经见过的人物（`hub.ron` 的 ID）
     pub met: BTreeSet<String>,
+    /// 展开过的开场卷轴：地区 ID；天明版写成“ID_dawn”
+    pub scrolls: BTreeSet<String>,
     pub best: Best,
     /// 无尽夜的最长存活（按更；以后加了地区再按地区分开）
     pub endless: BTreeMap<u8, EndlessBest>,
@@ -128,6 +130,7 @@ impl Default for Profile {
             reactions: 0,
             last: LastPick::default(),
             met: BTreeSet::new(),
+            scrolls: BTreeSet::new(),
             best: Best::default(),
             endless: BTreeMap::new(),
             totals: Totals::default(),
@@ -481,6 +484,22 @@ impl Profile {
         idle.get(self.runs as usize % idle.len().max(1)).copied()
     }
 
+    /// 这次出发要不要先展开某个地区的开场卷轴：第一次来展开长夜版（false），拿回烛火以后再来展开一次
+    /// 天明版（true，数据里写了天明的旁白才展开）；都看过了返回 None。
+    pub fn next_scroll(&self, content: &Content, region: &str) -> Option<bool> {
+        let r = content.regions.iter().find(|r| r.id == region)?;
+        if !self.scrolls.contains(region) {
+            return Some(false);
+        }
+        (self.cleared >= 1 && r.dawn.is_some() && !self.scrolls.contains(&format!("{region}_dawn")))
+            .then_some(true)
+    }
+
+    /// 记下展开过的卷轴。
+    pub fn saw_scroll(&mut self, region: &str, dawn: bool) {
+        self.scrolls.insert(if dawn { format!("{region}_dawn") } else { region.to_string() });
+    }
+
     /// 无尽夜：通关青丘一更后开放（docs/GAMEPLAY.md 第 3.4 节）。
     pub fn endless_unlocked(&self) -> bool {
         self.cleared >= 1
@@ -573,6 +592,26 @@ mod tests {
     }
 
     /// 灯驿人物的台词：第一次见面说 First，之后取满足的最后一条，都不满足时轮着说“平时”。
+    #[test]
+    fn scrolls_unroll_once_at_night_and_once_at_dawn() {
+        let mut c = content();
+        let mut p = Profile::default();
+        assert_eq!(p.next_scroll(&c, "qingqiu"), Some(false), "第一次来展开长夜版");
+        assert_eq!(p.next_scroll(&c, "没有的地区"), None);
+        p.saw_scroll("qingqiu", false);
+        assert_eq!(p.next_scroll(&c, "qingqiu"), None);
+        c.regions[0].dawn = Some("天明".into());
+        assert_eq!(p.next_scroll(&c, "qingqiu"), None, "还没天明");
+        p.cleared = 1;
+        assert_eq!(p.next_scroll(&c, "qingqiu"), Some(true));
+        p.saw_scroll("qingqiu", true);
+        assert_eq!(p.next_scroll(&c, "qingqiu"), None);
+        c.regions[0].dawn = None;
+        let mut fresh = Profile { cleared: 1, ..Profile::default() };
+        fresh.saw_scroll("qingqiu", false);
+        assert_eq!(fresh.next_scroll(&c, "qingqiu"), None, "没写天明旁白时不展开");
+    }
+
     #[test]
     fn hub_lines_follow_the_news() {
         let c = content();

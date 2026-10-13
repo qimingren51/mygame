@@ -11,13 +11,15 @@
   - 帧矩形在页内，裁边信息自洽；
   - animations 引用的帧都存在；角色元数据里每个动画、每个方向都有序列；
   - ui/ 开头的帧不裁边（矩形 = 原图大小，界面代码不处理裁边）；
-  - skin/skin.json（九宫格皮肤）与文件一致，slice 合法；screens/ 的图尺寸正确。
+  - skin/skin.json（九宫格皮肤）与文件一致，slice 合法；screens/ 的图尺寸正确；
+  - screens/hub/hub.json（灯驿长卷）文件齐全、坐标在画面内，人物与 hub.ron、心灯与 meta.ron 对得上。
 有错误时退出码为 1。
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -117,8 +119,70 @@ def check(atlas: Path) -> tuple[list[str], list[str]]:
                 info.append(f"screens/{png.name}: {im.size[0]}×{im.size[1]} {im.mode}")
                 if png.name == "title.png" and im.size != (1920, 1080):
                     errors.append(f"screens/title.png 应为 1920×1080，实际 {im.size}")
+    hub = screens / "hub" / "hub.json"
+    if hub.exists():
+        total += check_hub(hub, errors, info)
     info.append(f"合计 {total / 1024 / 1024:.1f} MB（不含 paper.png）")
     return errors, info
+
+
+def ron_ids(path: Path) -> list[str]:
+    """按文件顺序取 RON 里各条目的 id（meta.ron 的心灯节点、hub.ron 的人物）。"""
+    return re.findall(r'\(id: "([a-z0-9_]+)"', path.read_text(encoding="utf-8"))
+
+
+def check_hub(path: Path, errors: list[str], info: list[str]) -> int:
+    """灯驿长卷 screens/hub/hub.json：文件齐全、尺寸一致、坐标在画面内，人物和心灯与内容数据对得上。返回文件总字节数。"""
+    d = path.parent
+    hub = json.loads(path.read_text(encoding="utf-8"))
+    W, H = hub["size"]
+    total = path.stat().st_size
+
+    def inside(what: str, x, y, w=0, h=0):
+        if x < 0 or y < 0 or x + w > W or y + h > H:
+            errors.append(f"hub: {what} 超出 {W}×{H}（{x}, {y}, {w}, {h}）")
+
+    def image(what: str, file: str, pos, mode: str | None = None):
+        nonlocal total
+        png = d / file
+        if not png.exists():
+            errors.append(f"hub: {what} 的 {file} 不存在")
+            return
+        total += png.stat().st_size
+        with Image.open(png) as im:
+            if mode and im.mode != mode:
+                errors.append(f"hub: {file} 应为 {mode}，实际 {im.mode}")
+            inside(f"{what}（{file}）", pos[0], pos[1], *im.size)
+            return im.size
+
+    if image("底图", "hub.png", (0, 0), "RGB") not in (None, (W, H)):
+        errors.append(f"hub: hub.png 尺寸与 size {W}×{H} 不一致")
+    chars = [c["id"] for c in hub.get("characters", [])]
+    want = ron_ids(ROOT / "assets" / "data" / "hub.ron")
+    if chars != want:
+        errors.append(f"hub: characters {chars} 应与 hub.ron 的顺序 {want} 一致")
+    for c in hub.get("characters", []):
+        inside(f"{c['id']} 的 rect", *c["rect"])
+        inside(f"{c['id']} 的 label", *c["label"])
+        inside(f"{c['id']} 的 light", *c["light"][:2])
+    lamps = hub.get("lamps", {})
+    nodes = ron_ids(ROOT / "assets" / "data" / "meta.ron")
+    if sorted(lamps) != sorted(nodes):
+        errors.append(f"hub: lamps 的节点 {sorted(lamps)} 应与 meta.ron {sorted(nodes)} 一致")
+    for lid, lp in lamps.items():
+        image(f"心灯 {lid}", lp["file"], lp["pos"], "RGBA")
+        image(f"心灯 {lid} 的光晕", lp["glow"], lp["glow_pos"])
+    for rid, dp in hub.get("dawn", {}).items():
+        image(f"晨光 {rid}", dp["file"], dp["pos"], "RGBA")
+        if dp.get("blend") not in ("normal", "add"):
+            errors.append(f"hub: 晨光 {rid} 的 blend 应为 normal 或 add")
+        if "glow" in dp:
+            image(f"晨光 {rid} 的辉光", dp["glow"], dp["glow_pos"])
+    for r in hub.get("text_safe", []):
+        inside("text_safe", *r)
+    info.append(f"screens/hub: {len(chars)} 个人物、{len(lamps)} 盏心灯、{len(hub.get('dawn', {}))} 处晨光，"
+                f"{total / 1024 / 1024:.1f} MB")
+    return total
 
 
 def main(argv: list[str]) -> int:

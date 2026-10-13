@@ -5,6 +5,7 @@
     art/.venv/bin/python art/render/produce.py --only shade,wisp  # 只重渲部分素材（审图仍用全部）
     art/.venv/bin/python art/render/produce.py --only hero:dash+death  # 主角只重渲某几个动画（其它帧和 meta 保留）
                                                                     # 灯笼叠层 lantern_<灯> 总是跟着主角一起渲
+    art/.venv/bin/python art/render/produce.py --only fox:pounce,boss:sweep+summon  # 妖物同样可以只重渲新动作
     art/.venv/bin/python art/render/produce.py --review           # 不渲染，只自检 + 重拼审图
 输出：
     art/out/assets/<素材>/    按 style.py 输出约定（PNG、_emit、_flash、meta.json、逐帧挂点）
@@ -52,8 +53,37 @@ BATCH2 = {
     "boss": ("fox", "boss", "boss", 8, 8, 44, {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy"}),
     "toad": ("toad", "toad", "small", 6, 10, 14, {"category": "enemy", "vertical_motion": True}),
 }
+# 第二批妖物的新动作（move 之外；只画 E，loop=false）。(动画, 帧数, fps, 额外 meta)
+# windup_frames：前几帧是蓄力，游戏在 0.6–1.0 秒的地面预警期间停在最后一个蓄力帧（windup_frames-1），预警完再播后面的；
+# loop_from：冲锋持续期间从这一帧起循环（青面鬼 charge 的 2–5 是一个跑步循环）；
+# vertical_motion：动作本身大幅上下（扑击腾空、伏低），自检只查水平配准、不查逐帧身高（九尾的尾扇也是）。
+BATCH2_ACTIONS = {
+    "fox": [("pounce", 6, 12, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
+    "ghoul": [("charge", 6, 10, {"loop": False, "windup_frames": 2, "loop_from": 2, "vertical_motion": True})],
+    "boss": [("sweep", 6, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True}),
+             ("summon", 4, 6, {"loop": False, "vertical_motion": True})],
+}
+# 青丘新妖物（只画 E）：素材 → (模块, 帧尺寸键, [(动画, 帧数, fps, 额外 meta)], 游戏碰撞半径, 额外 meta)
+# 构造 / 姿态函数是 build_<素材> / pose_<素材>；模块里的 PALETTE_EXTRA（调色板外的发光色）写进 meta.palette_extra，
+# SOCKETS（缺省只有 eyes）是逐帧挂点，EYE_HEX 写进 meta.eye_color（妖眼颜色，同 enemies.ron 的 eye）。
+# 有多个动画的妖物在 meta 里写 default_anim（游戏里没有指定动作时播它；不要按字母序挑第一个）。
+QINGQIU = {
+    # 狐火：悬浮的青火狐狸，火身也在发光层里（出图后 fox_wisp.finish_flame：火身吸附火色、发光 alpha 按亮度压暗，眼睛最亮）
+    "fox_wisp": ("fox_wisp", "small", [("float", 8, 10, {}),
+                                       ("pounce", 4, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
+                 10, {"category": "enemy", "floating": True, "default_anim": "float"}),
+    # 竹魅：idle 是藏在竹丛里的样子；shoot 的 muzzle 挂点是竹刺出手的位置（weapons/bamboo_spike）
+    "bamboo_wraith": ("bamboo_wraith", "elite", [("idle", 4, 4, {}), ("move", 6, 8, {}),
+                                                 ("shoot", 5, 10, {"loop": False, "windup_frames": 2})],
+                      12, {"category": "enemy", "default_anim": "move"}),
+    # 讨封狐：disguise（扮人，照见圈外；没有发光的眼）→ reveal（现形，只播一次）→ move（现形后）
+    "taofeng_fox": ("taofeng_fox", "golem", [("disguise", 6, 8, {}), ("move", 6, 10, {}),
+                                             ("reveal", 4, 8, {"loop": False})],
+                    13, {"category": "enemy", "default_anim": "disguise"}),
+}
 ALL += list(BATCH2)
 ALL += ["ancient_lamp", "blood_altar", "merchant", "stone_lantern_dark"]
+ALL += list(QINGQIU)
 HERO_LAMPS = ("red", "mirror", "frost")  # 主角的灯笼叠层（lanterns.LAMP_IDS）；跟着 hero 一起渲
 OVERLAYS = [f"lantern_{lid}" for lid in HERO_LAMPS]
 CHECK = ALL + OVERLAYS  # 自检的素材（叠层不单独渲，只自检）
@@ -100,7 +130,28 @@ def render_hero(jobs, out_root: Path = ASSETS, merge: bool = False, timings: dic
                              "required_sockets": ["lantern"], "shadow_radius_px": round(13 * D), "anim_extra": anim_extra})
 
 
-def produce(name: str, timings: dict, out_root: Path = ASSETS):
+def _split_only(name: str):
+    """"fox:pounce+move" → ("fox", ["pounce", "move"])；不带冒号 → (name, None)。"""
+    if ":" in name:
+        n, a = name.split(":", 1)
+        return n, a.split("+")
+    return name, None
+
+
+def _enemy_jobs(anims, only_anims=None, only_frames=None):
+    """妖物（只画 E）的渲染任务和逐动画 meta。anims = [(动画, 帧数, fps, 额外 meta)]；
+    only_anims 只渲这些动画；only_frames = {动画: [姿态帧号]} 只渲其中几帧（样张用）。"""
+    jobs, extra = [], {}
+    for an, n, fps, ex in anims:
+        if only_anims and an not in only_anims:
+            continue
+        idx = (only_frames or {}).get(an, range(n))
+        jobs += [(an, "E", i, n) for i in idx]
+        extra[an] = {"fps": fps, **ex}
+    return jobs, extra
+
+
+def produce(name: str, timings: dict, out_root: Path = ASSETS, only_frames: dict | None = None):
     import shade as GHOST
     import rock as ROCK
     import stone_lantern as SL
@@ -140,16 +191,41 @@ def produce(name: str, timings: dict, out_root: Path = ASSETS):
                      anchor=S.PROP_ANCHOR, sockets_wanted=(sock,), timings=timings,
                      meta_extra={"category": "prop", "layers": ["emit"], "required_sockets": [sock],
                                  "shadow_radius_px": round(radius * D), "anim_extra": {"idle": {"fps": 1}}})
-    elif name in BATCH2:
+    elif name.split(":")[0] in BATCH2:  # "fox" 全部动作；"fox:pounce" 只重渲这几个动作（其它帧和 meta 保留）
         import importlib
+        name, only_anims = _split_only(name)
         mod, fn, fk, n, fps, radius, extra = BATCH2[name]
         M = importlib.import_module(mod)
         anchor = S.BIG_ENEMY_ANCHOR if extra.get("anchor_kind") == "big_enemy" else S.ANCHOR
-        render_asset(name, S.FRAME[fk], getattr(M, f"build_{fn}"), [("move", "E", i, n) for i in range(n)], ASSETS,
+        anims = [("move", n, fps, {})] + BATCH2_ACTIONS.get(name, [])
+        jobs, anim_extra = _enemy_jobs(anims, only_anims, only_frames)
+        render_asset(name, S.FRAME[fk], getattr(M, f"build_{fn}"), jobs, ASSETS,
                      pose=getattr(M, f"pose_{fn}"), sockets_wanted=("eyes",), flash=True, timings=timings, anchor=anchor,
-                     meta_extra={**extra, "layers": ["emit", "flash"], "required_sockets": ["eyes"],
-                                 "game_radius": radius, "shadow_radius_px": round(radius * S.PX_PER_UNIT * 0.8),
-                                 "anim_extra": {"move": {"fps": fps}}})
+                     merge=bool(only_anims),
+                     meta_extra={**extra, **({"default_anim": "move"} if name in BATCH2_ACTIONS else {}),
+                                 "layers": ["emit", "flash"], "required_sockets": ["eyes"],
+                                                         "game_radius": radius,
+                                                         "shadow_radius_px": round(radius * S.PX_PER_UNIT * 0.8),
+                                                         "anim_extra": anim_extra})
+    elif name.split(":")[0] in QINGQIU:
+        import importlib
+        name, only_anims = _split_only(name)
+        mod, fk, anims, radius, extra = QINGQIU[name]
+        M = importlib.import_module(mod)
+        socks = tuple(getattr(M, "SOCKETS", ("eyes",)))
+        jobs, anim_extra = _enemy_jobs(anims, only_anims, only_frames)
+        shadow = round(12 * D) if extra.get("floating") else round(radius * S.PX_PER_UNIT * 0.8)
+        out = render_asset(name, S.FRAME[fk], getattr(M, f"build_{name}"), jobs, ASSETS, pose=getattr(M, f"pose_{name}"),
+                           sockets_wanted=socks, flash=True, timings=timings, anchor=S.ANCHOR, merge=bool(only_anims),
+                           palette_extra=getattr(M, "PALETTE_EXTRA", ()),
+                           meta_extra={**extra, "eye_color": M.EYE_HEX, "layers": ["emit", "flash"],
+                                       "required_sockets": list(socks),
+                                       "game_radius": radius, "shadow_radius_px": shadow, "anim_extra": anim_extra})
+        if hasattr(M, "finish_flame"):  # 狐火：火身吸附到火色、发光层里火身压暗（只处理这次重渲的动画，不能重复处理）
+            redo = {j[0] for j in jobs}
+            for fp in out.glob("*.png"):
+                if fp.name.split("_")[0] in redo and fp.stem.count("_") == 2:
+                    M.finish_flame(fp)
     else:
         raise SystemExit(f"未知素材 {name}")
 
@@ -444,6 +520,8 @@ def main(argv):
     (REVIEW / "check_report.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     if all((ASSETS / n / "meta.json").exists() for n in ALL):
         build_review_desktop(timings)
+        import qingqiu_review as QR  # 青丘妖物和新动作的审图（动图、夜景比例图、逐帧总表）
+        QR.build_review(timings)
     elif D == 1 and all((ASSETS / n / "meta.json").exists() for n in ALL[:13]):
         build_review(timings)
         build_review_batch2(timings)
