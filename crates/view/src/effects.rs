@@ -12,10 +12,13 @@ use lantern_sim::{AppState, SimEvent, SimOutbox};
 
 use crate::actors::{ActorFrames, GlowRequests};
 use crate::atlas::{AtlasDb, FrameId};
+use crate::feedback::{Feedback, Priority, eviction};
 use crate::{layer, to_screen};
 
 /// 同时显示的伤害数字上限（环形复用，最早的被顶掉）
 const NUMBER_SLOTS: usize = 96;
+const CRIT_SLOTS: usize = 24;
+const FLASH_CAP: usize = 24;
 const NUMBER_LIFE: f32 = 0.7;
 /// 文字按这个字号栅格化，再缩小到世界单位，放大镜头时不糊
 const NUMBER_RASTER: f32 = 28.0;
@@ -65,6 +68,7 @@ pub(crate) struct Ink {
 }
 
 struct Flash {
+    priority: Priority,
     pos: Vec2,
     radius: f32,
     t: f32,
@@ -75,6 +79,7 @@ pub(crate) struct Effects {
     rng: Pcg32,
     numbers: Vec<Entity>,
     next_number: usize,
+    next_crit: usize,
     inks: Vec<Entity>,
     flashes: Vec<Flash>,
     ink_frames: Vec<FrameId>,
@@ -101,6 +106,7 @@ pub(crate) fn setup_effects(mut commands: Commands, db: Res<AtlasDb>, assets: Re
         rng: Pcg32::new(0x1a7e_2026, 7),
         numbers: Vec::new(),
         next_number: 0,
+        next_crit: 0,
         inks: Vec::new(),
         flashes: Vec::new(),
         ink_frames: (0..3).filter_map(|i| db.find(&format!("vfx/ink_{i}"))).collect(),
@@ -131,6 +137,7 @@ pub(crate) fn spawn_number_pool(mut commands: Commands, mut fx: ResMut<Effects>)
         })
         .collect();
     fx.next_number = 0;
+    fx.next_crit = 0;
     let brush = fx.brush.clone();
     fx.words = (0..WORD_SLOTS)
         .map(|_| {
@@ -161,17 +168,28 @@ pub(crate) fn read_events(
     mut commands: Commands,
     content: Res<lantern_sim::GameContent>,
     outbox: Res<SimOutbox>,
+    feedback: Res<Feedback>,
     db: Res<AtlasDb>,
     mut fx: ResMut<Effects>,
     mut numbers: Query<(&mut Text2d, &mut TextFont, &mut TextColor, &mut DamageNumber, &mut Visibility)>,
     mut words: Query<(&mut Text2d, &mut TextColor, &mut FloatWord, &mut Visibility), Without<DamageNumber>>,
 ) {
     let fx = &mut *fx;
-    for ev in &outbox.0 {
+    for &index in &feedback.selected {
+        let ev = &outbox.0[index];
         match *ev {
             SimEvent::Hit { pos, damage, crit, kind, element } => {
-                let Some(&e) = fx.numbers.get(fx.next_number) else { continue };
-                fx.next_number = (fx.next_number + 1) % fx.numbers.len().max(1);
+                // 暴击保留独立槽位，后续普通命中不能覆盖刚盖下的金色大字。
+                let slot = if crit {
+                    let slot = NUMBER_SLOTS - CRIT_SLOTS + fx.next_crit;
+                    fx.next_crit = (fx.next_crit + 1) % CRIT_SLOTS;
+                    slot
+                } else {
+                    let slot = fx.next_number;
+                    fx.next_number = (fx.next_number + 1) % (NUMBER_SLOTS - CRIT_SLOTS);
+                    slot
+                };
+                let Some(&e) = fx.numbers.get(slot) else { continue };
                 let Ok((mut text, mut font, mut color, mut num, mut vis)) = numbers.get_mut(e) else {
                     continue;
                 };
@@ -214,11 +232,21 @@ pub(crate) fn read_events(
             }
             SimEvent::Kill { pos, rank, .. } => {
                 let big = matches!(rank, Rank::Elite | Rank::Boss);
-                fx.flashes.push(Flash {
-                    pos: to_screen(pos),
-                    radius: if big { 140.0 } else { 70.0 },
-                    t: 0.0,
-                });
+                let priority = Priority::of(ev);
+                let limit = if big { FLASH_CAP } else { FLASH_CAP - 4 };
+                if fx.flashes.len() >= limit
+                    && let Some(index) = eviction(&fx.flashes, priority, |f| f.priority)
+                {
+                    fx.flashes.remove(index);
+                }
+                if fx.flashes.len() < limit {
+                    fx.flashes.push(Flash {
+                        priority,
+                        pos: to_screen(pos),
+                        radius: if big { 140.0 } else { 48.0 },
+                        t: 0.0,
+                    });
+                }
                 if fx.ink_frames.is_empty() {
                     continue;
                 }
@@ -254,6 +282,7 @@ pub(crate) fn read_events(
 pub(crate) fn update_effects(
     mut commands: Commands,
     time: Res<Time>,
+    feedback: Res<Feedback>,
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     mut fx: ResMut<Effects>,
@@ -288,7 +317,10 @@ pub(crate) fn update_effects(
             (num.start + Vec2::new(0.0, rise)).extend(layer::NUMBERS + if num.crit { 1.0 } else { 0.0 });
         tf.scale = Vec3::splat(num.scale * pop);
         tf.rotation = if num.crit { Quat::from_rotation_z(-0.08) } else { Quat::IDENTITY };
-        color.0.set_alpha(if k < 0.6 { 1.0 } else { 1.0 - (k - 0.6) / 0.4 });
+        let priority = if num.crit { Priority::Critical } else { Priority::Normal };
+        color
+            .0
+            .set_alpha((if k < 0.6 { 1.0 } else { 1.0 - (k - 0.6) / 0.4 }) * feedback.visibility(priority));
     }
     for (mut w, mut tf, mut color, mut vis) in &mut words {
         if *vis == Visibility::Hidden {
@@ -303,7 +335,9 @@ pub(crate) fn update_effects(
         let pop = 1.0 + 0.6 * (1.0 - (w.t / 0.12).min(1.0)).powi(2);
         tf.translation = (w.start + Vec2::new(0.0, 16.0 * k)).extend(layer::NUMBERS + 2.0);
         tf.scale = Vec3::splat(11.0 / NUMBER_RASTER * pop);
-        color.0.set_alpha(if k < 0.65 { 1.0 } else { 1.0 - (k - 0.65) / 0.35 });
+        color.0.set_alpha(
+            (if k < 0.65 { 1.0 } else { 1.0 - (k - 0.65) / 0.35 }) * feedback.visibility(Priority::Normal),
+        );
     }
     for (e, mut ink, mut sprite) in &mut inks {
         ink.t += dt;
@@ -319,7 +353,9 @@ pub(crate) fn update_effects(
         f.t < FLASH_LIFE
     });
     for f in &fx.flashes {
-        let k = 1.0 - f.t / FLASH_LIFE;
+        let k = (1.0 - f.t / FLASH_LIFE)
+            * feedback.visibility(f.priority)
+            * if f.priority == Priority::Normal { 0.35 } else { 0.8 };
         glow.light(&frames, &db, f.pos, (FLASH_LIGHT.with_alpha(k), f.radius));
     }
     for (prop, tf) in &props {

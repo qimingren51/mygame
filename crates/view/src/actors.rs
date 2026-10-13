@@ -156,6 +156,11 @@ fn windup_frame(windup: usize, fps: f32, t: f32) -> usize {
     ((t.max(0.0) * fps) as usize).min(windup.saturating_sub(1))
 }
 
+/// 本体与幻身共用聚火段，后两帧只用于出手和恢复。
+fn summon_windup_frame(progress: f32) -> usize {
+    usize::from(progress >= 0.5)
+}
+
 /// 出手以后 t 秒的帧号：从蓄力帧之后接着播。播完时，有 loop_from 的从那一帧起循环；
 /// 没有的，这一招还没结束就停在最后一帧，结束了回到平时的动作（None）。
 fn strike_frame(
@@ -214,7 +219,7 @@ impl ActorFrames {
     /// 幻身也保持尾尖聚火动作，进度与本体一样只读模拟蓄力。
     pub(crate) fn charge_frame(&self, kind: usize, progress: f32) -> Option<FrameId> {
         let a = self.enemies.get(kind)?.summon.as_ref()?;
-        let k = ((progress * a.normal.len() as f32) as usize).min(a.normal.len() - 1);
+        let k = summon_windup_frame(progress);
         a.normal.get(k).copied()
     }
 
@@ -687,6 +692,39 @@ pub(crate) struct BossClock {
     summon: Option<f32>,
 }
 
+impl BossClock {
+    fn update(&mut self, events: &[SimEvent], now: f32) {
+        for ev in events {
+            match *ev {
+                SimEvent::SweepStrike { dir, .. } => self.strike = Some((now, dir)),
+                SimEvent::BossSummon { .. }
+                | SimEvent::RainStrike { .. }
+                | SimEvent::BossVolley { illusion: false, .. } => self.summon = Some(now),
+                _ => {}
+            }
+        }
+    }
+
+    fn summon_frame(&self, boss: Option<&BossState>, now: f32) -> Option<usize> {
+        // 出手当帧切到第 2 帧，保持 150ms，再以第 3 帧恢复 150ms。
+        // 同时有另一招蓄力时，先完整交代这次发射。
+        if let Some(at) = self.summon {
+            let elapsed = (now - at).max(0.0);
+            if elapsed < 0.3 {
+                return Some(if elapsed < 0.15 { 2 } else { 3 });
+            }
+        }
+        let boss = boss?;
+        let progress = boss
+            .volley
+            .as_ref()
+            .map(|v| v.t / v.warn)
+            .or_else(|| boss.drops.first().map(|r| r.t / r.warn))?;
+        // 聚火只用 0–1 帧，按模拟预警进度覆盖完整 800ms；暂停不会提前播完。
+        Some(summon_windup_frame(progress))
+    }
+}
+
 /// 挑妖物的出手动作要读的模拟状态（DESIGN 第 15 节“妖物动作”）。
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct Moves<'w, 's> {
@@ -698,15 +736,7 @@ pub(crate) struct Moves<'w, 's> {
 
 impl Moves<'_, '_> {
     fn update(&mut self, now: f32) {
-        for ev in &self.outbox.0 {
-            match *ev {
-                SimEvent::SweepStrike { dir, .. } => self.clock.strike = Some((now, dir)),
-                SimEvent::BossSummon { .. } | SimEvent::RainWarn { .. } | SimEvent::BossVolley { .. } => {
-                    self.clock.summon = Some(now)
-                }
-                _ => {}
-            }
-        }
+        self.clock.update(&self.outbox.0, now);
     }
 
     /// 正在出招的妖物：播哪个动作的第几帧，朝不朝左（None：照常朝着主角）。
@@ -742,14 +772,7 @@ impl Moves<'_, '_> {
             }
         }
         let a = f.summon.as_ref()?;
-        if let Some(progress) = self.boss.as_ref().and_then(|b| {
-            b.volley.as_ref().map(|v| v.t / v.warn).or_else(|| b.drops.first().map(|r| r.t / r.warn))
-        }) {
-            // 尾尖聚火帧保持到模拟蓄力结束，不按渲染帧率提前播完。
-            let k = ((progress * a.normal.len() as f32) as usize).min(a.normal.len() - 1);
-            return Some((a, k, None));
-        }
-        let k = a.strike_frame(now - self.clock.summon?, false)?;
+        let k = self.clock.summon_frame(self.boss.as_deref(), now)?;
         Some((a, k, None))
     }
 }
@@ -1101,8 +1124,87 @@ mod tests {
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.4, true), Some(2));
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.55, true), Some(3));
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.7, false), None);
-        // 九尾 summon：没有蓄力帧
-        assert_eq!(strike_frame(4, 0, None, 6.0, 0.0, false), Some(0));
-        assert_eq!(strike_frame(4, 0, None, 6.0, 0.7, false), None);
+    }
+
+    fn charging_boss(rain: bool) -> BossState {
+        use lantern_sim::boss::{RainDrop, Volley};
+        let mut boss = BossState::default();
+        if rain {
+            boss.drops.push(RainDrop { pos: Vec2::ZERO, radius: 40.0, damage: 16.0, t: 0.0, warn: 0.8 });
+        } else {
+            boss.volley = Some(Volley {
+                origin: Vec2::ZERO,
+                offset: 0.0,
+                count: 12,
+                speed: 115.0,
+                radius: 6.0,
+                damage: 16.0,
+                life: 6.0,
+                t: 0.0,
+                warn: 0.8,
+            });
+        }
+        boss
+    }
+
+    #[test]
+    fn summon_charge_release_and_recovery_never_rewind_at_30_or_60_fps() {
+        for fps in [30, 60] {
+            for rain in [false, true] {
+                let mut boss = charging_boss(rain);
+                let mut clock = BossClock::default();
+                for frame in 0..fps * 4 / 5 {
+                    let t = frame as f32 / fps as f32;
+                    if rain {
+                        boss.drops[0].t = t;
+                    } else {
+                        boss.volley.as_mut().unwrap().t = t;
+                    }
+                    let want = Some(usize::from(t >= 0.4));
+                    assert_eq!(clock.summon_frame(Some(&boss), t), want);
+                    // 模拟暂停或顿帧时，画面时间再长也不能进入发射帧。
+                    assert_eq!(clock.summon_frame(Some(&boss), t + 10.0), want);
+                }
+                let event = if rain {
+                    SimEvent::RainStrike { pos: Vec2::ZERO }
+                } else {
+                    SimEvent::BossVolley { pos: Vec2::ZERO, illusion: false }
+                };
+                clock.update(&[event], 0.0);
+                assert_eq!(clock.summon_frame(Some(&boss), 0.0), Some(2));
+                for frame in 0..=fps * 2 / 5 {
+                    let t = frame as f32 / fps as f32;
+                    let want = if t < 0.15 {
+                        Some(2)
+                    } else if t < 0.3 {
+                        Some(3)
+                    } else {
+                        None
+                    };
+                    assert_eq!(clock.summon_frame(None, t), want);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn simultaneous_illusions_do_not_start_or_restart_the_body_animation() {
+        let illusions = [SimEvent::BossVolley { pos: Vec2::ZERO, illusion: true }; 2];
+        let mut clock = BossClock::default();
+        clock.update(&illusions, 0.0);
+        assert_eq!(clock.summon_frame(None, 0.0), None);
+        let boss = charging_boss(false);
+        assert_eq!(clock.summon_frame(Some(&boss), 0.0), Some(0));
+        clock.update(&[SimEvent::BossVolley { pos: Vec2::ZERO, illusion: false }], 0.0);
+        clock.update(&illusions, 0.2);
+        assert_eq!(clock.summon_frame(None, 0.2), Some(3));
+        assert_eq!(clock.summon_frame(None, 0.31), None);
+        // 雨的起手只读模拟预警，实际落下才接发射与恢复。
+        clock.update(&[SimEvent::RainWarn { count: 5 }], 1.0);
+        assert_eq!(clock.summon_frame(None, 1.0), None);
+        for event in [SimEvent::RainStrike { pos: Vec2::ZERO }, SimEvent::BossSummon { pos: Vec2::ZERO }] {
+            clock.update(&[event], 2.0);
+            assert_eq!(clock.summon_frame(None, 2.0), Some(2));
+        }
     }
 }

@@ -109,6 +109,45 @@ fn dispelling_a_charging_illusion_cancels_its_locked_volley() {
 }
 
 #[test]
+fn simultaneous_body_and_two_illusion_volleys_identify_their_casters() {
+    let (mut sim, i) = arena(true, 1);
+    let hp = sim.enemies().max_hp[i];
+    sim.world_mut().resource_mut::<Enemies>().hp[i] = hp * 0.5;
+    sim.world_mut().resource_mut::<Enemies>().atk_t[i] = 1000.0;
+    sim.step(InputFrame::default(), &[]);
+    {
+        let mut boss = sim.world_mut().resource_mut::<BossState>();
+        assert_eq!(boss.illusions.len(), 2);
+        for illusion in &mut boss.illusions {
+            illusion.volley_t = 0.0;
+        }
+    }
+    start_volley(&mut sim, i);
+    let boss = sim.world().resource::<BossState>();
+    let body = boss.volley.unwrap();
+    let illusions: Vec<_> = boss.illusions.iter().map(|m| m.volley.unwrap()).collect();
+    for _ in 0..60 {
+        sim.step(InputFrame::default(), &[]);
+        let fired: Vec<_> =
+            sim.take_events().into_iter().filter(|e| matches!(e, SimEvent::BossVolley { .. })).collect();
+        if fired.is_empty() {
+            continue;
+        }
+        assert_eq!(fired.len(), 3);
+        assert_eq!(fired[0], SimEvent::BossVolley { pos: body.origin, illusion: false });
+        for (event, volley) in fired[1..].iter().zip(&illusions) {
+            assert_eq!(*event, SimEvent::BossVolley { pos: volley.origin, illusion: true });
+        }
+        assert_eq!(
+            sim.world().resource::<Foes>().0.len(),
+            (body.count + illusions.iter().map(|v| v.count).sum::<u32>()) as usize
+        );
+        return;
+    }
+    panic!("本体和幻身应在完整预警后同时出手");
+}
+
+#[test]
 fn sweep_and_rain_use_the_visible_player_center_boundary() {
     let reach = common::content().player.radius;
     for rain in [false, true] {

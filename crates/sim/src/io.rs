@@ -232,8 +232,10 @@ pub enum SimEvent {
     BossArrived {
         kind: u16,
     },
+    /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,
+        illusion: bool,
     },
     /// 狐火环锁定起手；幻身也发出预警，但音色更轻。
     VolleyWarn {

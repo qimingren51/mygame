@@ -127,7 +127,7 @@ impl Volley {
     }
 }
 
-fn advance_volley(volley: &mut Option<Volley>, foes: &mut Foes, outbox: &mut SimOutbox) {
+fn advance_volley(volley: &mut Option<Volley>, illusion: bool, foes: &mut Foes, outbox: &mut SimOutbox) {
     let Some(v) = volley else { return };
     v.t += DT;
     if v.t < v.warn {
@@ -144,7 +144,7 @@ fn advance_volley(volley: &mut Option<Volley>, foes: &mut Foes, outbox: &mut Sim
             life: v.life,
         });
     }
-    outbox.0.push(SimEvent::BossVolley { pos: v.origin });
+    outbox.0.push(SimEvent::BossVolley { pos: v.origin, illusion });
 }
 
 /// 敌方弹幕。
@@ -342,7 +342,7 @@ pub(crate) fn boss_attacks(
     for r in &mut st.drops {
         r.t += DT;
     }
-    advance_volley(&mut st.volley, &mut foes, &mut outbox);
+    advance_volley(&mut st.volley, false, &mut foes, &mut outbox);
     let pace = if enraged { b.enrage_mult } else { 1.0 };
     let combat = rng.0.get(Stream::Combat);
 
@@ -412,7 +412,7 @@ pub(crate) fn boss_attacks(
                 st.illusions.swap_remove(k);
             } else {
                 // 照散优先于出手；被照散的幻身连同未发出的预警一起消失。
-                advance_volley(&mut m.volley, &mut foes, &mut outbox);
+                advance_volley(&mut m.volley, true, &mut foes, &mut outbox);
                 if m.volley_t <= 0.0 && m.volley.is_none() {
                     m.volley_t = il.volley_every * pace;
                     let off = combat.range_f32(0.0, TAU);
