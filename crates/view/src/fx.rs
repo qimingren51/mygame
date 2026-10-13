@@ -65,6 +65,9 @@ pub(crate) struct FxFrames {
     lamp: Option<(FrameId, Option<FrameId>)>,
     altar: Option<(FrameId, Option<FrameId>)>,
     stone: Option<(FrameId, Option<FrameId>)>,
+    /// 熄灭的石灯笼（和点亮的同尺寸、同锚点，直接换帧）
+    stone_dark: Option<FrameId>,
+    merchant: Option<(FrameId, Option<FrameId>)>,
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
     coin: Option<(FrameId, Option<FrameId>)>,
@@ -117,6 +120,8 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         lamp: prop("ancient_lamp"),
         altar: prop("blood_altar"),
         stone: prop("stone_lantern"),
+        stone_dark: db.find("stone_lantern_dark/idle_S_00"),
+        merchant: prop("merchant"),
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
         sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
@@ -493,10 +498,16 @@ pub(crate) fn collect_fx(
         let def = &content.0.run.lanterns;
         for l in &lanterns.0 {
             let p = to_screen(l.pos);
+            // 没点亮的用熄灭版；没有熄灭版时把点亮的压暗
+            let (body, tint) = match (l.lit, f.stone_dark) {
+                (true, _) => (frame, Color::WHITE),
+                (false, Some(dark)) => (dark, Color::WHITE),
+                (false, None) => (frame, Color::srgb(0.55, 0.55, 0.6)),
+            };
             pools.fx.push(Draw {
                 scale: Vec2::splat(1.25),
-                color: if l.lit { Color::WHITE } else { Color::srgb(0.55, 0.55, 0.6) },
-                ..Draw::new(frame, p.extend(sort_z(layer::ACTORS, l.pos.y)))
+                color: tint,
+                ..Draw::new(body, p.extend(sort_z(layer::ACTORS, l.pos.y)))
             });
             if l.lit {
                 if let Some(emit) = emit {
@@ -1044,12 +1055,29 @@ pub(crate) fn collect_fx(
                     glow.light(&frames, &db, p, (color.with_alpha(0.7), 70.0));
                 }
                 EventKind::Merchant { radius, .. } => {
-                    // 货郎还没有专门的美术：先用一只金边的箱子和一圈金环
-                    pools.fx.push(Draw {
-                        scale: Vec2::splat(1.2),
-                        color: Color::WHITE.with_alpha(fade.max(0.3)),
-                        ..Draw::new(f.chest, p.extend(sort_z(layer::ACTORS, e.pos.y)))
-                    });
+                    // 货郎担；图集里没有时用一只箱子顶着
+                    match f.merchant {
+                        Some((frame, emit)) => {
+                            pools.fx.push(Draw {
+                                color: Color::WHITE.with_alpha(fade.max(0.3)),
+                                ..Draw::new(frame, p.extend(sort_z(layer::ACTORS, e.pos.y)))
+                            });
+                            if let Some(emit) = emit {
+                                glow.add(
+                                    emit,
+                                    p.extend(layer::EMISSIVE),
+                                    Vec2::ONE,
+                                    0.0,
+                                    Color::WHITE.with_alpha(fade),
+                                );
+                            }
+                        }
+                        None => pools.fx.push(Draw {
+                            scale: Vec2::splat(1.2),
+                            color: Color::WHITE.with_alpha(fade.max(0.3)),
+                            ..Draw::new(f.chest, p.extend(sort_z(layer::ACTORS, e.pos.y)))
+                        }),
+                    }
                     let pulse = 0.5 + 0.3 * (now * 3.0).sin();
                     let k = px(f.ring, radius * 2.0);
                     glow.add(

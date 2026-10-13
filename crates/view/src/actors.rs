@@ -22,6 +22,16 @@ const DIRS: [&str; 8] = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
 
 /// 光源颜色与半径（docs/PORTING-NOTES.md 第 7 节）
 pub(crate) const LANTERN_LIGHT: (Color, f32) = (Color::srgb(1.0, 0.878, 0.69), 200.0);
+
+/// 两种颜色按比例混合（t = 0 时是 a）。
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    let (a, b) = (a.to_srgba(), b.to_srgba());
+    Color::srgb(
+        a.red + (b.red - a.red) * t,
+        a.green + (b.green - a.green) * t,
+        a.blue + (b.blue - a.blue) * t,
+    )
+}
 const FLAME_LIGHT: (Color, f32) = (Color::srgba(1.0, 0.66, 0.376, 0.75), 64.0);
 const GEM_LIGHT: Color = Color::srgba(0.75, 0.94, 1.0, 0.5);
 const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
@@ -63,6 +73,38 @@ pub(crate) struct HeroFrames {
     dash: HeroAnim,
     death: HeroAnim,
     shadow_scale: f32,
+    /// 灯笼叠层（按 `lamps.ron` 的下标）：和主角同画布、同锚点的逐帧叠画（docs/DESIGN.md 第 15 节）
+    lanterns: Vec<LanternLayer>,
+}
+
+/// 一盏灯的叠层：按动作名存 [方向][帧] 和自发光，加上光色。
+struct LanternLayer {
+    anims: Vec<(&'static str, Vec<Vec<FrameId>>, Vec<Vec<FrameId>>)>,
+    light: Color,
+}
+
+impl LanternLayer {
+    fn load(db: &AtlasDb, lamp: &str, color: &str) -> Self {
+        let seq = |anim: &str, suffix: &str| -> Vec<Vec<FrameId>> {
+            DIRS.iter()
+                .map(|d| {
+                    db.anim(&format!("lantern_{lamp}/{anim}_{d}{suffix}"))
+                        .map(<[FrameId]>::to_vec)
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
+        let anims =
+            ["idle", "walk", "dash", "death"].into_iter().map(|a| (a, seq(a, ""), seq(a, "_emit"))).collect();
+        LanternLayer { anims, light: crate::fx::hex(color) }
+    }
+
+    fn frame(&self, anim: &str, dir: usize, k: usize) -> (Option<FrameId>, Option<FrameId>) {
+        let Some((_, frames, emit)) = self.anims.iter().find(|(a, ..)| *a == anim) else {
+            return (None, None);
+        };
+        (frames[dir].get(k).copied(), emit[dir].get(k).copied())
+    }
 }
 
 struct EnemyFrames {
@@ -138,6 +180,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         dash: hero_anim(&db, "dash"),
         death: hero_anim(&db, "death"),
         shadow_scale: shadow_scale(&db, "hero", shadow),
+        lanterns: content.0.lamps.iter().map(|l| LanternLayer::load(&db, &l.id, &l.color)).collect(),
     });
     let fallback = "shade";
     let enemies = content
@@ -273,7 +316,13 @@ pub(crate) struct HeroView {
     emit: Option<FrameId>,
     /// 本帧画的图集帧（闪避残影用）
     pub(crate) frame_id: Option<FrameId>,
+    /// 这一局的灯的光色（没有灯笼叠层时用默认的暖光）
+    light: Option<Color>,
 }
+
+/// 叠在主角身上的灯笼（逐帧跟着主角的动作和朝向）。
+#[derive(Component)]
+pub(crate) struct HeroLantern;
 
 #[derive(Component)]
 pub(crate) struct HeroShadow;
@@ -305,6 +354,15 @@ pub(crate) fn dress_player(
         Transform::from_xyz(0.0, 0.0, layer::SHADOW),
         DespawnOnExit(AppState::Run),
     ));
+    let (lantern, lantern_anchor) = db.sprite(first);
+    commands.spawn((
+        HeroLantern,
+        lantern,
+        lantern_anchor,
+        Transform::from_xyz(0.0, 0.0, layer::ACTORS),
+        Visibility::Hidden,
+        DespawnOnExit(AppState::Run),
+    ));
 }
 
 /// 朝向带滞后：偏离当前扇区中心超过 22.5° + 0.12 弧度才切换，避免在两个方向之间来回抖。
@@ -324,14 +382,23 @@ fn pick_dir(current: usize, facing: Vec2) -> usize {
     ((a / FRAC_PI_4).round() as i32).rem_euclid(8) as usize
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn animate_hero(
     time: Res<Time>,
     hero: Res<HeroFrames>,
     db: Res<AtlasDb>,
+    content: Res<GameContent>,
+    setup: Option<Res<lantern_sim::RunSetup>>,
     run: Option<Res<State<RunState>>>,
     mut q: Query<(&Player, &Transform, &mut HeroView, &mut Sprite, &mut Anchor)>,
     mut shadow: Query<&mut Transform, (With<HeroShadow>, Without<Player>)>,
+    mut lantern: Query<
+        (&mut Transform, &mut Sprite, &mut Anchor, &mut Visibility),
+        (With<HeroLantern>, Without<Player>, Without<HeroShadow>),
+    >,
 ) {
+    // 这一局的灯；无灯不画，也不退回红纸灯（docs/DESIGN.md 第 15 节）
+    let layer = setup.and_then(|s| hero.lanterns.get(s.lamp_index(&content.0)));
     let over = run.is_some_and(|s| *s.get() == RunState::Over);
     let dt = time.delta_secs();
     for (player, tf, mut view, mut sprite, mut anchor) in &mut q {
@@ -370,6 +437,24 @@ pub(crate) fn animate_hero(
         for mut s in &mut shadow {
             s.translation = Vec3::new(pos.x, pos.y, layer::SHADOW);
         }
+        // 灯笼叠层：同一动作、同一朝向、同一帧号，画在主角上面一点
+        let (lantern_frame, lantern_emit) = layer.map_or((None, None), |l| l.frame(anim.name, view.dir, k));
+        view.light = layer.filter(|_| lantern_frame.is_some()).map(|l| l.light);
+        if lantern_frame.is_some() {
+            view.emit = lantern_emit;
+        }
+        for (mut t, mut s, mut a, mut vis) in &mut lantern {
+            match lantern_frame {
+                Some(id) => {
+                    db.set(id, &mut s, &mut a);
+                    t.translation = tf.translation + Vec3::new(0.0, 0.0, 1e-5);
+                    vis.set_if_neq(Visibility::Inherited);
+                }
+                None => {
+                    vis.set_if_neq(Visibility::Hidden);
+                }
+            }
+        }
     }
 }
 
@@ -394,9 +479,11 @@ pub(crate) fn hero_glow(
     flare.0 *= (-time.delta_secs() * 5.0).exp();
     let t = time.elapsed_secs();
     let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.0;
-    let (color, base) = LANTERN_LIGHT;
+    let (warm, base) = LANTERN_LIGHT;
     let radius = stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker;
     for (tf, view) in &q {
+        // 灯的光色淡淡地染进暖光里，纸面不至于整片变色
+        let color = view.light.map_or(warm, |c| mix(warm, c, 0.45));
         let pos = tf.translation.truncate();
         let socket = db
             .assets

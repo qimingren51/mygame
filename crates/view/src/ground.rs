@@ -109,24 +109,29 @@ pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
             upright: true,
             light: None,
         },
-        DecorKind {
-            frames: frames(&["stone_lantern/idle_S_00"]),
-            per_chunk: 0.25,
-            upright: true,
-            light: Some(PropLight {
-                // 灯火挂点（图集像素，相对脚底，y 向下）
-                offset: db
-                    .assets
-                    .get("stone_lantern")
-                    .and_then(|a| a.sockets.get("flame"))
-                    .and_then(|s| s.get("idle"))
-                    .and_then(|s| s.get("S"))
-                    .and_then(|s| s.first())
-                    .map_or(Vec2::new(0.0, 20.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit),
-                color: Color::srgba(1.0, 0.784, 0.565, 0.9),
-                radius: 120.0,
-                emit: db.find("stone_lantern/idle_S_00_emit"),
-            }),
+        // 地上装饰的石灯笼默认熄灭（长夜里的石灯笼都熄了，要守灯人去点，docs/LORE.md 11.5）；
+        // 图集里没有熄灭版时用点亮的那张，带光
+        match db.find("stone_lantern_dark/idle_S_00") {
+            Some(dark) => DecorKind { frames: vec![dark], per_chunk: 0.25, upright: true, light: None },
+            None => DecorKind {
+                frames: frames(&["stone_lantern/idle_S_00"]),
+                per_chunk: 0.25,
+                upright: true,
+                light: Some(PropLight {
+                    // 灯火挂点（图集像素，相对脚底，y 向下）
+                    offset: db
+                        .assets
+                        .get("stone_lantern")
+                        .and_then(|a| a.sockets.get("flame"))
+                        .and_then(|s| s.get("idle"))
+                        .and_then(|s| s.get("S"))
+                        .and_then(|s| s.first())
+                        .map_or(Vec2::new(0.0, 20.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit),
+                    color: Color::srgba(1.0, 0.784, 0.565, 0.9),
+                    radius: 120.0,
+                    emit: db.find("stone_lantern/idle_S_00_emit"),
+                }),
+            },
         },
     ];
     commands.insert_resource(Decor {
