@@ -162,6 +162,21 @@ pub struct EndlessDef {
     pub oil_boss: u32,
     /// 10 分钟以后铜钱掉落乘它
     pub gold: f32,
+    pub depth: DepthDef,
+}
+
+/// 夜深（docs/BALANCE.md 第 4.7 节）：无尽夜 10 分钟以后，每过一分钟（m − 10）：
+/// 杂兵、精英生命 = 10 分钟的值 × hp_growth^(m−10)（取代线性的 late.hp）；妖物移速（含冲锋）× (1 + speed × (m−10))；
+/// 魂火 × xp^(m−10)；抗控制 r = min(control_max, control × (m−10))：冻住、击晕、定身的计时每步多减 4r 倍，
+/// 减速和击退 × (1 − r)。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DepthDef {
+    pub hp_growth: f32,
+    pub speed: f32,
+    pub xp: f32,
+    pub control: f32,
+    pub control_max: f32,
 }
 
 /// 时间表的一项：在 at 范围内随机一个时刻出场。

@@ -120,7 +120,9 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
         endless: (setup.mode == RunMode::Endless).then(Endless::default),
         ..Default::default()
     });
-    commands.insert_resource(Enemies::default());
+    let mut enemies = Enemies::default();
+    enemies.endless = setup.mode == RunMode::Endless;
+    commands.insert_resource(enemies);
     commands.insert_resource(Gems::default());
     commands.insert_resource(Grid::default());
     commands.insert_resource(Crowd::default());

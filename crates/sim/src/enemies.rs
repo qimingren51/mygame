@@ -110,6 +110,8 @@ pub struct Enemies {
     free: Vec<u32>,
     /// 累计刷出的血量（平衡统计，不进状态哈希）
     pub spawned_hp: f64,
+    /// 无尽夜：10 分钟以后生命按夜深复利涨（开局设定，见 `spawn::hp_curve`）
+    pub endless: bool,
 }
 
 impl Default for Enemies {
@@ -171,6 +173,7 @@ impl Default for Enemies {
             count: 0,
             free: Vec::with_capacity(ENEMY_CAP),
             spawned_hp: 0.0,
+            endless: false,
         }
     }
 }

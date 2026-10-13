@@ -874,7 +874,7 @@ pub(crate) fn process_deaths(
     let gold_mult = stats.get(Stat::GoldGain) * if late { c.run.endless.gold } else { 1.0 };
     // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次。
     // 更和夜签改了妖物生命、刷怪速度时分母一起乘上，充能节奏不随难度变快（docs/BALANCE.md 第 2.6 节）
-    let clear = crate::spawn::base_spawn_hp(c, minute)
+    let clear = crate::spawn::base_spawn_hp(c, director.endless.is_some(), minute)
         * stats.get(Stat::EnemyHp)
         * stats.get(Stat::SpawnRate)
         * c.player.ult.clear_seconds;
@@ -942,6 +942,11 @@ pub(crate) fn process_deaths(
         };
         if xp > 0.0 {
             let mut value = xp * c.run.gem_value_scale.at(minute) * stats.get(Stat::XpGain);
+            // 夜深：魂火每分钟打折
+            let deep = crate::spawn::depth(c, director.endless.is_some(), minute);
+            if deep > 0.0 {
+                value *= ops::powf(c.run.endless.depth.xp, deep);
+            }
             // 冰魄珠：冰冻中被击杀的妖物魂火翻倍
             if d.iced {
                 value *= frozen_xp;

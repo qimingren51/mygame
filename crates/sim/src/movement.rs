@@ -51,6 +51,12 @@ pub(crate) fn update_enemies(
     let thorn = stats.get(Stat::ThornFreeze);
     let thorn_time = content.player.charms.thorn_freeze * stats.get(Stat::FreezeTime);
     let (px, py) = (pos.0.x, pos.0.y);
+    // 夜深（无尽夜 10 分钟以后）：妖物更快（冲锋也是），越来越不吃冻住、击晕、定身、减速和击退
+    let deep = crate::spawn::depth(content, director.endless.is_some(), tick.secs() / 60.0);
+    let dd = &content.run.endless.depth;
+    let deep_speed = 1.0 + dd.speed * deep;
+    let resist = (dd.control * deep).min(dd.control_max);
+    let held_tick = DT * (1.0 + 4.0 * resist);
     let pr = content.player.radius;
     let t = tick.secs();
     let decay = ops::exp(-8.0 * DT);
@@ -96,8 +102,8 @@ pub(crate) fn update_enemies(
         let (dx, dy) = (px - x, py - y);
         let d = (dx * dx + dy * dy).sqrt().max(1e-3);
 
-        x += en.kx[i] * DT;
-        y += en.ky[i] * DT;
+        x += en.kx[i] * DT * (1.0 - resist);
+        y += en.ky[i] * DT * (1.0 - resist);
         en.kx[i] *= decay;
         en.ky[i] *= decay;
 
@@ -112,20 +118,20 @@ pub(crate) fn update_enemies(
         }
 
         if en.frozen[i] > 0.0 {
-            en.frozen[i] -= DT;
+            en.frozen[i] -= held_tick;
             if en.frozen[i] <= 0.0 {
                 en.blast_frozen[i] = false;
             }
         } else if en.stun[i] > 0.0 {
-            en.stun[i] -= DT;
+            en.stun[i] -= held_tick;
         } else if en.root[i] > 0.0 {
             // 定身：不能移动，但仍会还手
-            en.root[i] -= DT;
+            en.root[i] -= held_tick;
         } else {
-            let mut sp = en.speed[i];
+            let mut sp = en.speed[i] * deep_speed;
             if en.slow_t[i] > 0.0 {
                 en.slow_t[i] -= DT;
-                sp *= 1.0 - en.slow_amount[i];
+                sp *= 1.0 - en.slow_amount[i] * (1.0 - resist);
                 if en.slow_t[i] <= 0.0 {
                     en.slow_amount[i] = 0.0;
                 }

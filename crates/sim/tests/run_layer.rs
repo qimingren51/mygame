@@ -302,7 +302,7 @@ fn ult_charges_by_clear_amount() {
         sim.step(InputFrame::default(), &[]);
     }
     let kills = sim.progress().kills as f32;
-    let per_kill = 10.0 / (lantern_sim::spawn::base_spawn_hp(&c, 0.0) * c.player.ult.clear_seconds);
+    let per_kill = 10.0 / (lantern_sim::spawn::base_spawn_hp(&c, false, 0.0) * c.player.ult.clear_seconds);
     assert!(kills > 10.0);
     assert!((sim.progress().ult - (kills * per_kill).min(1.0)).abs() < 0.05, "{}", sim.progress().ult);
 
@@ -542,4 +542,40 @@ fn endless_oil_counts_late_time_and_bosses_separately() {
     assert!(r.endless && !r.won && r.bosses == 3);
     // 存活 600 + 600 × 0.5；击杀 10000 × 0.05 + 20000 × 0.01；夜主 300 + 2 × 150
     assert_eq!(&r.oil_parts[..3], &[900, 700, 600]);
+}
+
+/// 夜深（docs/BALANCE.md 第 4.7 节）：无尽夜 10 分钟以后，生命按每分钟 × 1.2 复利涨，
+/// 冻住的计时减得更快；普通一夜还是线性的 late.hp，冻住照常。
+#[test]
+fn deep_night_toughens_enemies_only_in_endless() {
+    let c = content();
+    let r = &c.run;
+    let d = r.endless.depth;
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    let at15 = |mode: RunMode| {
+        let mut s = setup(8);
+        s.mode = mode;
+        let mut sim = SimHarness::with_setup(content(), s);
+        sim.quiet();
+        sim.set_build(&[], &[]);
+        sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 15 * 60 * hz;
+        let i = sim.spawn("shade", Vec2::new(400.0, 0.0)).unwrap();
+        sim.world_mut().resource_mut::<lantern_sim::Enemies>().frozen[i] = 1.0;
+        (sim, i)
+    };
+    let shade = &c.enemies[c.enemy_index("shade").unwrap()];
+    let (mut night, i) = at15(RunMode::Normal);
+    let (mut deep, j) = at15(RunMode::Endless);
+    let base = shade.hp * night.stats().get(Stat::EnemyHp);
+    let linear = base * r.late_at(r.enemy_hp_scale, r.late.hp, 15.0);
+    let compound = base * r.enemy_hp_scale.at(r.late.after) * bevy_math::ops::powf(d.hp_growth, 5.0);
+    assert!((night.enemies().max_hp[i] - linear).abs() < linear * 1e-4, "普通一夜照线性");
+    assert!((deep.enemies().max_hp[j] - compound).abs() < compound * 1e-4, "无尽夜按夜深复利");
+    // 抗控制：15 分钟时 r = min(0.9, 0.25 × 5) = 0.9，冻住的计时每步减 DT × (1 + 4r)
+    night.step(InputFrame::default(), &[]);
+    deep.step(InputFrame::default(), &[]);
+    let dt = 1.0 / hz as f32;
+    let resist = (d.control * 5.0).min(d.control_max);
+    assert!((1.0 - night.enemies().frozen[i] - dt).abs() < 1e-4);
+    assert!((1.0 - deep.enemies().frozen[j] - dt * (1.0 + 4.0 * resist)).abs() < 1e-4);
 }
