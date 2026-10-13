@@ -256,7 +256,7 @@ pub(crate) fn spawn_hud(
                 ],
             ),
             bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
-            (UltLabel, text(&fonts.body, 13.0, DIM, "燃灯")),
+            (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
         ],
     ));
     // 左下：操作提示

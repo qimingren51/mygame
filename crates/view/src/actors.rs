@@ -463,12 +463,17 @@ pub(crate) fn animate_hero(
 
 /// 灯焰一跳：拾到魂火时灯笼的光猛地一涨再落回（docs/GAMEPLAY.md 第 14 节）。
 #[derive(Resource, Default)]
-pub(crate) struct LanternFlare(f32);
+pub(crate) struct LanternFlare {
+    flare: f32,
+    /// 开局后过了多久（现实秒）：灯笼从一点火光亮起来，光圈慢慢铺开
+    intro: f32,
+}
 
 /// 主角的灯笼光（在灯笼挂点上）和自发光帧（灯笼窗）。灯光半径 = 200 × √范围 × 灯光倍率。
 /// 灯焰带一点不规则的摇曳，拾魂火时一跳。
 pub(crate) fn hero_glow(
     time: Res<Time>,
+    real: Res<Time<Real>>,
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     stats: Option<Res<Stats>>,
@@ -478,8 +483,15 @@ pub(crate) fn hero_glow(
     mut glow: ResMut<GlowRequests>,
 ) {
     let picked = outbox.0.iter().filter(|e| matches!(e, lantern_sim::SimEvent::GemPicked { .. })).count();
-    flare.0 = (flare.0 + picked as f32 * 0.12).min(1.0);
-    flare.0 *= (-time.delta_secs() * 5.0).exp();
+    flare.flare = (flare.flare + picked as f32 * 0.12).min(1.0);
+    flare.flare *= (-time.delta_secs() * 5.0).exp();
+    flare.intro += real.delta_secs().min(0.1);
+    // 开局点灯：1.4 秒里光圈从一点铺到全亮，起头那一下火光最亮
+    let ignite = {
+        let k = (flare.intro / 1.4).clamp(0.0, 1.0);
+        0.12 + 0.88 * (1.0 - (1.0 - k).powi(3))
+    };
+    let spark = (1.0 - flare.intro / 0.8).clamp(0.0, 1.0);
     let t = time.elapsed_secs();
     // 生命低于三成时灯焰摇曳：光圈忽大忽小（docs/GAMEPLAY.md 第 4.4、14 节）
     let low = q
@@ -488,9 +500,10 @@ pub(crate) fn hero_glow(
         .and_then(|(_, _, h)| h)
         .map_or(0.0, |h| ((0.3 - h.hp / h.max.max(1.0)) / 0.2).clamp(0.0, 1.0));
     let gutter = low * (0.08 * (t * 11.0).sin() + 0.06 * (t * 23.7).sin() - 0.1).min(0.0);
-    let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.0 + gutter;
+    let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.flare + gutter;
     let (warm, base) = LANTERN_LIGHT;
-    let radius = stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker;
+    let radius =
+        stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker * ignite;
     for (tf, view, _) in &q {
         // 灯的光色淡淡地染进暖光里，纸面不至于整片变色
         let color = view.light.map_or(warm, |c| mix(warm, c, 0.45));
@@ -511,9 +524,9 @@ pub(crate) fn hero_glow(
         glow.add(
             frames.light,
             (pos + socket).extend(layer::EMISSIVE + 0.2),
-            Vec2::splat(frames.light_scale(&db, 14.0 + 10.0 * flare.0)),
+            Vec2::splat(frames.light_scale(&db, 14.0 + 10.0 * flare.flare + 22.0 * spark)),
             0.0,
-            Color::srgb(1.0, 0.78, 0.45).with_alpha(0.22 + 0.5 * flare.0),
+            Color::srgb(1.0, 0.78, 0.45).with_alpha((0.22 + 0.5 * flare.flare + 0.7 * spark).min(1.0)),
         );
     }
 }
@@ -852,7 +865,12 @@ pub(crate) fn apply_glow(
 }
 
 /// 一局结束时精灵池跟着清掉，计数归零。
-pub(crate) fn reset_pools(mut pools: ResMut<Pools>, mut glow: ResMut<GlowPool>) {
+pub(crate) fn reset_pools(
+    mut pools: ResMut<Pools>,
+    mut glow: ResMut<GlowPool>,
+    mut flare: ResMut<LanternFlare>,
+) {
     *pools = Pools::default();
     *glow = GlowPool::default();
+    *flare = LanternFlare::default();
 }
