@@ -4,6 +4,7 @@
 //! 夜主的扇形和落点预警、结界边缘。安全时去点石灯笼。快被碰到时闪避。选择阶段交给 `bot::respond`。
 //!
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full] [--lamp <id>]
+//!       [--record <文件>]（把第一局存成回放，可以用 `lantern --replay <文件>` 在游戏里看）
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -221,13 +222,23 @@ fn meta_setup(setup: &mut RunSetup, meta: &str) {
     }
 }
 
-fn kite_one(content: &Content, seed: u64, tier: u8, meta: &str, lamp: Option<&str>) -> KiteRun {
+fn kite_one(
+    content: &Content,
+    seed: u64,
+    tier: u8,
+    meta: &str,
+    lamp: Option<&str>,
+    record: Option<&std::path::Path>,
+) -> KiteRun {
     let mut setup = RunSetup::new(seed, RunMode::Normal);
     setup.tier = tier;
     setup.lamp = lamp.map(str::to_string);
     meta_setup(&mut setup, meta);
     let player_r = content.player.radius;
     let mut sim = SimHarness::with_setup(content.clone(), setup);
+    if record.is_some() {
+        sim.record(env!("CARGO_PKG_VERSION"));
+    }
     let mut k = Kite::default();
     let (mut levels, mut evolutions, mut alive7, mut surge_peak, mut ults) =
         (Vec::new(), Vec::new(), None, 0u32, 0u32);
@@ -261,6 +272,12 @@ fn kite_one(content: &Content, seed: u64, tier: u8, meta: &str, lamp: Option<&st
             }
         }
     }
+    if let (Some(path), Some(replay)) = (record, sim.replay()) {
+        match std::fs::write(path, replay.to_ron()) {
+            Ok(()) => eprintln!("回放已保存：{}", path.display()),
+            Err(e) => eprintln!("保存回放失败：{e}"),
+        }
+    }
     let won = sim.flow().result.as_ref().is_some_and(|r| r.won);
     let secs = sim.tick() as f32 / TICK_HZ as f32;
     let since = sim.world().resource::<Director>().boss_since;
@@ -289,10 +306,15 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
         return Err("--meta 只能是 none、half、full".into());
     }
     let lamp = text("--lamp");
+    let record = text("--record").map(std::path::PathBuf::from);
     let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
     let start = Instant::now();
-    let all: Vec<KiteRun> =
-        (0..runs).map(|k| kite_one(&content, seed0 + k, tier, &meta, lamp.as_deref())).collect();
+    let all: Vec<KiteRun> = (0..runs)
+        .map(|k| {
+            let rec = record.as_deref().filter(|_| k == 0);
+            kite_one(&content, seed0 + k, tier, &meta, lamp.as_deref(), rec)
+        })
+        .collect();
     let n = runs as f32;
     let wins = all.iter().filter(|r| r.won).count();
     let early = all.iter().filter(|r| !r.won && r.secs < 180.0).count();

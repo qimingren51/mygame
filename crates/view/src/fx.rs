@@ -65,9 +65,27 @@ pub(crate) struct FxFrames {
     altar: Option<(FrameId, Option<FrameId>)>,
     stone: Option<(FrameId, Option<FrameId>)>,
     gem: Option<FrameId>,
+    /// 地上的铜钱（普通）和它的微光（叠加）
+    coin: Option<(FrameId, Option<FrameId>)>,
+    /// 九尾扫的扇形预警：轮廓、蓄力填充
+    sector: Option<(FrameId, FrameId)>,
+    /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
+    zone_lava: Option<(FrameId, Option<FrameId>)>,
+    zone_mud: Option<FrameId>,
+    zone_herb: Option<(FrameId, Option<FrameId>)>,
+    /// 精英词缀的小图标（按 `affixes.ron` 的顺序）
+    affix: Vec<Option<FrameId>>,
 }
 
-pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>) {
+/// 区域贴图在缩放 1 时的有效半径（世界单位）：美术脚本里的 radius_px（1 倍像素）× 2 ÷ 每单位 4 像素。
+/// 图集 JSON 里暂时没有导出 radius_px，先写在这里（docs/DESIGN.md 第 15 节）。
+const ZONE_LAVA_R: f32 = 86.0 / 2.0;
+const ZONE_MUD_R: f32 = 91.0 / 2.0;
+const ZONE_HERB_R: f32 = 79.0 / 2.0;
+/// 扇形预警贴图在缩放 1 时的半径（2 倍下 128 像素）
+const SECTOR_R: f32 = 32.0;
+
+pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
     let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
     let seq = |prefix: &str| (0..4).filter_map(|i| db.find(&format!("{prefix}_{i}"))).collect::<Vec<_>>();
     let prop = |asset: &str| {
@@ -101,6 +119,12 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>) {
         altar: prop("blood_altar"),
         stone: prop("stone_lantern"),
         gem: db.find("vfx/gem_0"),
+        coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
+        sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
+        zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
+        zone_mud: db.find("ground/zone_mud"),
+        zone_herb: db.find("ground/zone_herb").map(|f| (f, db.find("ground/zone_herb_glow"))),
+        affix: content.0.affixes.iter().map(|a| db.find(&format!("ui/icon_affix_{}", a.id))).collect(),
     });
 }
 
@@ -354,8 +378,34 @@ pub(crate) fn collect_fx(
         for z in &zones.0 {
             let p = to_screen(z.pos);
             let fade = (z.life / 0.5).min(1.0) * ((z.max_life - z.life) / 0.2).min(1.0);
-            match z.kind {
-                ZoneKind::Lava => {
+            match (z.kind, f.zone_lava, f.zone_mud) {
+                (ZoneKind::Lava, Some((base, glow_frame)), _) => {
+                    let k = z.radius / ZONE_LAVA_R;
+                    pools.fx.push(Draw {
+                        scale: Vec2::splat(k),
+                        color: Color::WHITE.with_alpha(0.85 * fade),
+                        ..Draw::new(base, p.extend(layer::GROUND + 0.88))
+                    });
+                    if let Some(g) = glow_frame {
+                        let pulse = 0.75 + 0.25 * (now * 3.0 + z.pos.x * 0.05).sin();
+                        glow.add(
+                            g,
+                            p.extend(layer::EMISSIVE - 3.0),
+                            Vec2::splat(k),
+                            0.0,
+                            rgb(0xff7a2a).with_alpha(0.8 * fade * pulse),
+                        );
+                    }
+                }
+                (ZoneKind::Mud, _, Some(mud)) => {
+                    pools.fx.push(Draw {
+                        scale: Vec2::splat(z.radius / ZONE_MUD_R),
+                        color: Color::WHITE.with_alpha(0.85 * fade),
+                        ..Draw::new(mud, p.extend(layer::GROUND + 0.87))
+                    });
+                }
+                // 图集里没有区域贴图时的旧画法
+                (ZoneKind::Lava, None, _) => {
                     let k = px(f.crack, z.radius * 2.0);
                     pools.fx.push(Draw {
                         scale: Vec2::new(k, k * 0.75),
@@ -370,7 +420,7 @@ pub(crate) fn collect_fx(
                         rgb(0xff5a1f).with_alpha(0.5 * fade),
                     );
                 }
-                ZoneKind::Mud => {
+                (ZoneKind::Mud, _, None) => {
                     let k = px(f.ring_ink, z.radius * 2.0);
                     pools.fx.push(Draw {
                         scale: Vec2::new(k, k * FLAT),
@@ -404,12 +454,31 @@ pub(crate) fn collect_fx(
             let p = to_screen(h.pos);
             let fade = (h.life / 0.6).min(1.0);
             let sway = (now * 2.4 + h.pos.x * 0.07).sin() * 0.08;
-            pools.fx.push(Draw {
-                scale: Vec2::splat(0.7),
-                rot: sway,
-                color: rgb(0x9cf0b8).with_alpha(fade),
-                ..Draw::new(f.lotus, p.extend(sort_z(layer::WEAPONS, h.pos.y)))
-            });
+            if let Some((base, glow_frame)) = f.zone_herb {
+                // 一小丛灵草，半径和拾取距离差不多
+                let k = 24.0 / ZONE_HERB_R;
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(k),
+                    color: Color::WHITE.with_alpha(fade),
+                    ..Draw::new(base, p.extend(layer::GROUND + 0.89))
+                });
+                if let Some(g) = glow_frame {
+                    glow.add(
+                        g,
+                        p.extend(layer::EMISSIVE - 3.0),
+                        Vec2::splat(k),
+                        0.0,
+                        rgb(0x9cf0b8).with_alpha(fade),
+                    );
+                }
+            } else {
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(0.7),
+                    rot: sway,
+                    color: rgb(0x9cf0b8).with_alpha(fade),
+                    ..Draw::new(f.lotus, p.extend(sort_z(layer::WEAPONS, h.pos.y)))
+                });
+            }
             glow.add(
                 f.glow,
                 (p + Vec2::new(0.0, 6.0)).extend(layer::EMISSIVE),
@@ -469,8 +538,18 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 铜钱：金色的小火珠，被吸住时飞向主角
-    if let (Some(coins), Some(gem)) = (&res.coins, f.gem) {
+    // ---- 铜钱：方孔铜钱，暗处有一点微光；被吸住时飞向主角
+    if let (Some(coins), Some((coin, emit))) = (&res.coins, f.coin) {
+        for c in &coins.0 {
+            let p = lerp(c.prev, c.pos);
+            let bob = (now * 4.0 + c.pos.x * 0.13).sin() * 1.5;
+            let at = p + Vec2::new(0.0, bob);
+            pools.fx.push(Draw::new(coin, at.extend(sort_z(layer::GEMS, c.pos.y))));
+            if let Some(emit) = emit {
+                glow.add(emit, at.extend(layer::EMISSIVE), Vec2::ONE, 0.0, Color::WHITE.with_alpha(0.7));
+            }
+        }
+    } else if let (Some(coins), Some(gem)) = (&res.coins, f.gem) {
         for c in &coins.0 {
             let p = lerp(c.prev, c.pos);
             let bob = (now * 4.0 + c.pos.x * 0.13).sin() * 1.5;
@@ -529,8 +608,37 @@ pub(crate) fn collect_fx(
             }
         }
         let red = rgb(0xff4a3a);
-        for sw in &bs.sweeps {
-            // 扇形预警：沿扇形铺几排光点，越接近落下越亮
+        for sw in bs.sweeps.iter().filter(|_| f.sector.is_some()) {
+            // 扇形预警：轮廓按扇形朝向旋转、地面压扁；填充层从顶点往外放大，填满时落下
+            let Some((outline, fill)) = f.sector else { break };
+            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
+            let o = to_screen(sw.origin);
+            let d = Vec2::new(sw.dir.cos(), sw.dir.sin());
+            let radial = to_screen(sw.origin + d * sw.radius) - o;
+            let radial = Vec2::new(radial.x, radial.y * FLAT);
+            let side = to_screen(sw.origin + d.perp() * sw.radius) - o;
+            let side = Vec2::new(side.x, side.y * FLAT);
+            let rot = radial.y.atan2(radial.x);
+            let across = (radial.normalize_or_zero().perp_dot(side)).abs();
+            // 贴图的扇形张角是 120°；九尾扫的张角写在数据里，横向按比例缩放
+            let open = (sw.angle * 0.5).tan() / (std::f32::consts::FRAC_PI_3).tan();
+            let scale = Vec2::new(radial.length(), across * open) / SECTOR_R;
+            pools.fx.push(Draw {
+                scale,
+                rot,
+                color: red.with_alpha(0.35 + 0.3 * u),
+                ..Draw::new(outline, o.extend(layer::GROUND + 0.95))
+            });
+            pools.fx.push(Draw {
+                scale: scale * u,
+                rot,
+                color: red.with_alpha(0.25 + 0.25 * u),
+                ..Draw::new(fill, o.extend(layer::GROUND + 0.96))
+            });
+            glow.add(outline, o.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
+        }
+        for sw in bs.sweeps.iter().filter(|_| f.sector.is_none()) {
+            // 没有扇形贴图时：沿扇形铺几排光点，越接近落下越亮
             let u = (sw.t / sw.warn).clamp(0.0, 1.0);
             for ring in 1..=4 {
                 let rr = sw.radius * ring as f32 / 4.0;
@@ -558,6 +666,36 @@ pub(crate) fn collect_fx(
                 0.0,
                 red.with_alpha(0.3 + 0.6 * u),
             );
+        }
+    }
+
+    // ---- 精英词缀：头顶一排小图标。画在妖物这一层的最上面、夜色之下，暗处和妖物一起看不见；“隐”着的不画
+    if let Some(en) = &res.enemies
+        && f.affix.iter().any(Option::is_some)
+    {
+        const ICON: f32 = 0.7;
+        const GAP: f32 = 12.0;
+        for i in en.iter_alive() {
+            let bits = en.affix[i];
+            if bits == 0 || en.cloaked[i] {
+                continue;
+            }
+            let p = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
+            let icons: Vec<FrameId> = f
+                .affix
+                .iter()
+                .enumerate()
+                .filter(|&(k, _)| bits & (1 << k) != 0)
+                .filter_map(|(_, f)| *f)
+                .collect();
+            let x0 = -(icons.len() as f32 - 1.0) * GAP * 0.5;
+            for (k, &icon) in icons.iter().enumerate() {
+                let at = p + Vec2::new(x0 + k as f32 * GAP, en.r[i] * 2.0 + 14.0);
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(ICON),
+                    ..Draw::new(icon, at.extend(layer::ACTORS + 50.0))
+                });
+            }
         }
     }
 
@@ -910,6 +1048,7 @@ pub(crate) struct FxSources<'w> {
     coins: Option<Res<'w, Coins>>,
     boss: Option<Res<'w, BossState>>,
     director: Option<Res<'w, Director>>,
+    enemies: Option<Res<'w, lantern_sim::Enemies>>,
 }
 
 pub(crate) fn hex(s: &str) -> Color {
