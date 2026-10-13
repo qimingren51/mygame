@@ -473,6 +473,7 @@ assets/data/
 - **界面皮肤 `skin/`**：给 `ImageNode` + `TextureSlicer` 用的九宫格图，直通 alpha，不裁边。
   - 清单格式：`{"scale": 2, "items": {"<名字>": {"file", "size": [w, h], "slice": [左, 上, 右, 下], "center": "stretch"|"tile", "sides": "stretch"|"tile", "text": "#rrggbb", "note": "用途"}}}`。`slice` 全 0 的是固定尺寸的图（槽位、圆点、箭头），不切；`text` 是建议的文字颜色；`arrow_marker` 另有 `"tint": true`（白色，按奇遇颜色染）。
   - `scale: 2`：按 1080p 逻辑像素的 2 倍画。用 `TextureSlicer` 时设 `max_corner_scale = 0.5`；`tile` 的区域用 `SliceScaleMode::Tile { stretch_value: 0.5 }`。
+  - Bevy 0.20 里要设 `ImageNode.visual_box = BorderBox`，贴图才画满整个边框盒；不设的话会缩进内边距里。
   - 只横向拉伸的条状元素（按钮、条、提示），节点高度不要超过贴图高度的一半（逻辑像素：按钮 56、血条 14、提示 36 / 44），否则两端会被竖着拉伸。
   - 内容：
     - 面板 `panel`（宣纸，毛边）、`panel_dark`（夜色墨底）、`overlay_vignette`（全屏暗角，整张拉伸）；
