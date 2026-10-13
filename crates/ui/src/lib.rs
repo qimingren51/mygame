@@ -14,6 +14,7 @@ mod describe;
 mod hub;
 mod hud;
 mod markers;
+mod moments;
 mod pause;
 mod perf;
 mod replay_ui;
@@ -21,9 +22,11 @@ mod results;
 mod settings_ui;
 mod skin;
 mod title;
+mod title_fx;
 mod toasts;
 
 pub use perf::SimTiming;
+pub use replay_ui::ReplaySeek;
 
 /// 命令行指定的种子（`--seed`）。没有指定时每局随机。
 #[derive(Resource, Default, Clone, Copy, Debug)]
@@ -74,6 +77,7 @@ impl Plugin for UiPlugin {
                 (
                     playing_input.run_if(in_state(RunState::Playing)),
                     settings_ui::refresh_values,
+                    settings_ui::sync_feel,
                     (hud::update_hud, hud::update_slots, hud::update_chips).run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
@@ -84,9 +88,11 @@ impl Plugin for UiPlugin {
         perf::register(app);
         replay_ui::register(app);
         title::register(app);
+        title_fx::register(app);
         choice::register(app);
         markers::register(app);
         toasts::register(app);
+        moments::register(app);
         results::register(app);
         pause::register(app);
     }

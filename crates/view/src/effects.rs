@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use bevy::text::FontSource;
 
 use lantern_content::Rank;
 use lantern_core::Pcg32;
@@ -28,6 +29,18 @@ const CRIT_COLOR: Color = Color::srgb(1.0, 0.82, 0.48);
 const REACT_COLOR: Color = Color::srgb(0.62, 0.92, 0.84);
 const FLASH_LIGHT: Color = Color::srgb(1.0, 0.85, 0.6);
 
+/// 五行给伤害数字上的颜色（和 `elements.ron` 一致）。
+fn element_tint(e: lantern_content::Element) -> Color {
+    use lantern_content::Element::*;
+    match e {
+        Metal => Color::srgb(0.91, 0.85, 0.65),
+        Wood => Color::srgb(0.44, 0.84, 0.63),
+        Water => Color::srgb(0.44, 0.72, 1.0),
+        Fire => Color::srgb(1.0, 0.54, 0.24),
+        Earth => Color::srgb(0.79, 0.57, 0.35),
+    }
+}
+
 /// 场景道具上的光（石灯笼的灯火）。offset 是相对道具脚底的世界坐标（y 向上）。
 #[derive(Component, Clone, Copy)]
 pub(crate) struct PropLight {
@@ -43,6 +56,7 @@ pub(crate) struct DamageNumber {
     t: f32,
     start: Vec2,
     scale: f32,
+    crit: bool,
 }
 
 #[derive(Component)]
@@ -65,6 +79,21 @@ pub(crate) struct Effects {
     flashes: Vec<Flash>,
     ink_frames: Vec<FrameId>,
     font: Handle<Font>,
+    /// 暴击用毛笔字（马善政）
+    brush: Handle<Font>,
+    /// 反应名：在反应发生的地方飘出来的毛笔字（环形复用）
+    words: Vec<Entity>,
+    next_word: usize,
+}
+
+/// 同时飘着的反应名上限
+const WORD_SLOTS: usize = 12;
+const WORD_LIFE: f32 = 1.0;
+
+#[derive(Component)]
+pub(crate) struct FloatWord {
+    t: f32,
+    start: Vec2,
 }
 
 pub(crate) fn setup_effects(mut commands: Commands, db: Res<AtlasDb>, assets: Res<AssetServer>) {
@@ -76,6 +105,9 @@ pub(crate) fn setup_effects(mut commands: Commands, db: Res<AtlasDb>, assets: Re
         flashes: Vec::new(),
         ink_frames: (0..3).filter_map(|i| db.find(&format!("vfx/ink_{i}"))).collect(),
         font: assets.load("fonts/NotoSerifSC-subset.ttf"),
+        brush: assets.load("fonts/MaShanZheng-subset.ttf"),
+        words: Vec::new(),
+        next_word: 0,
     });
 }
 
@@ -90,7 +122,7 @@ pub(crate) fn spawn_number_pool(mut commands: Commands, mut fx: ResMut<Effects>)
                     TextFont::from(font.clone()).with_font_size(NUMBER_RASTER),
                     TextColor(NUMBER_COLOR),
                     Anchor::CENTER,
-                    DamageNumber { t: NUMBER_LIFE, start: Vec2::ZERO, scale: 0.0 },
+                    DamageNumber { t: NUMBER_LIFE, start: Vec2::ZERO, scale: 0.0, crit: false },
                     Transform::default(),
                     Visibility::Hidden,
                     DespawnOnExit(AppState::Run),
@@ -99,38 +131,85 @@ pub(crate) fn spawn_number_pool(mut commands: Commands, mut fx: ResMut<Effects>)
         })
         .collect();
     fx.next_number = 0;
+    let brush = fx.brush.clone();
+    fx.words = (0..WORD_SLOTS)
+        .map(|_| {
+            commands
+                .spawn((
+                    Text2d::new(""),
+                    TextFont::from(brush.clone()).with_font_size(NUMBER_RASTER * 1.4),
+                    TextColor(NUMBER_COLOR),
+                    bevy::sprite::Text2dShadow {
+                        offset: Vec2::new(2.0, -2.0),
+                        color: Color::BLACK.with_alpha(0.7),
+                    },
+                    Anchor::CENTER,
+                    FloatWord { t: WORD_LIFE, start: Vec2::ZERO },
+                    Transform::default(),
+                    Visibility::Hidden,
+                    DespawnOnExit(AppState::Run),
+                ))
+                .id()
+        })
+        .collect();
+    fx.next_word = 0;
     fx.inks.clear();
     fx.flashes.clear();
 }
 
 pub(crate) fn read_events(
     mut commands: Commands,
+    content: Res<lantern_sim::GameContent>,
     outbox: Res<SimOutbox>,
     db: Res<AtlasDb>,
     mut fx: ResMut<Effects>,
-    mut numbers: Query<(&mut Text2d, &mut TextColor, &mut DamageNumber, &mut Visibility)>,
+    mut numbers: Query<(&mut Text2d, &mut TextFont, &mut TextColor, &mut DamageNumber, &mut Visibility)>,
+    mut words: Query<(&mut Text2d, &mut TextColor, &mut FloatWord, &mut Visibility), Without<DamageNumber>>,
 ) {
     let fx = &mut *fx;
     for ev in &outbox.0 {
         match *ev {
-            SimEvent::Hit { pos, damage, crit, kind } => {
+            SimEvent::Hit { pos, damage, crit, kind, element } => {
                 let Some(&e) = fx.numbers.get(fx.next_number) else { continue };
                 fx.next_number = (fx.next_number + 1) % fx.numbers.len().max(1);
-                let Ok((mut text, mut color, mut num, mut vis)) = numbers.get_mut(e) else { continue };
+                let Ok((mut text, mut font, mut color, mut num, mut vis)) = numbers.get_mut(e) else {
+                    continue;
+                };
                 text.0 = format!("{}", damage.round().max(1.0) as u32);
+                // 暴击：金色毛笔大字；其余按五行淡淡上色
+                let want = if crit { &fx.brush } else { &fx.font };
+                if !matches!(&font.font, FontSource::Handle(h) if h == want) {
+                    font.font = FontSource::Handle(want.clone());
+                }
                 color.0 = if crit {
                     CRIT_COLOR
                 } else if kind == lantern_sim::HitKind::Reaction {
                     REACT_COLOR
+                } else if let Some(el) = element {
+                    NUMBER_COLOR.mix(&element_tint(el), 0.5)
                 } else {
                     NUMBER_COLOR
                 };
                 let jitter = Vec2::new(fx.rng.range_f32(-6.0, 6.0), fx.rng.range_f32(-3.0, 3.0));
+                // 越大的数字字越大一点，暴击再大一圈
+                let big = (damage.max(1.0).log10() * 1.2).min(4.0);
                 *num = DamageNumber {
                     t: 0.0,
                     start: to_screen(pos) + jitter,
-                    scale: if crit { 13.0 } else { 9.0 } / NUMBER_RASTER,
+                    scale: if crit { 15.0 + big * 1.5 } else { 8.0 + big } / NUMBER_RASTER,
+                    crit,
                 };
+                *vis = Visibility::Inherited;
+            }
+            // 反应名：在发生的地方飘出毛笔小字（第一次发生由界面盖章）
+            SimEvent::Reaction { kind, pos, first: false, label: true } => {
+                let Some(&e) = fx.words.get(fx.next_word) else { continue };
+                fx.next_word = (fx.next_word + 1) % fx.words.len().max(1);
+                let Ok((mut text, mut color, mut w, mut vis)) = words.get_mut(e) else { continue };
+                let r = &content.0.elements.reactions[kind as usize];
+                text.0.clone_from(&r.name);
+                color.0 = element_tint(r.b).mix(&NUMBER_COLOR, 0.25);
+                *w = FloatWord { t: 0.0, start: to_screen(pos) + Vec2::new(0.0, 18.0) };
                 *vis = Visibility::Inherited;
             }
             SimEvent::Kill { pos, rank, .. } => {
@@ -181,7 +260,11 @@ pub(crate) fn update_effects(
     mut glow: ResMut<GlowRequests>,
     mut numbers: Query<(&mut DamageNumber, &mut Transform, &mut TextColor, &mut Visibility), Without<Ink>>,
     mut inks: Query<(Entity, &mut Ink, &mut Sprite)>,
-    props: Query<(&PropLight, &Transform), (Without<DamageNumber>, Without<Ink>)>,
+    mut words: Query<
+        (&mut FloatWord, &mut Transform, &mut TextColor, &mut Visibility),
+        (Without<DamageNumber>, Without<Ink>),
+    >,
+    props: Query<(&PropLight, &Transform), (Without<DamageNumber>, Without<Ink>, Without<FloatWord>)>,
 ) {
     let dt = time.delta_secs();
     for (mut num, mut tf, mut color, mut vis) in &mut numbers {
@@ -194,11 +277,33 @@ pub(crate) fn update_effects(
             continue;
         }
         let k = num.t / NUMBER_LIFE;
-        // 先弹起再慢慢上浮，最后淡出
-        let pop = 1.0 + 0.35 * (1.0 - (k * 6.0).min(1.0));
-        tf.translation = (num.start + Vec2::new(0.0, 6.0 + 14.0 * k)).extend(layer::NUMBERS);
+        // 先弹起再慢慢上浮，最后淡出；暴击像盖章一样从大砸到小，略微歪一点
+        let (pop, rise) = if num.crit {
+            let s = (num.t / 0.09).min(1.0);
+            (1.0 + 1.1 * (1.0 - s) * (1.0 - s), 4.0 + 8.0 * k)
+        } else {
+            (1.0 + 0.35 * (1.0 - (k * 6.0).min(1.0)), 6.0 + 14.0 * k)
+        };
+        tf.translation =
+            (num.start + Vec2::new(0.0, rise)).extend(layer::NUMBERS + if num.crit { 1.0 } else { 0.0 });
         tf.scale = Vec3::splat(num.scale * pop);
+        tf.rotation = if num.crit { Quat::from_rotation_z(-0.08) } else { Quat::IDENTITY };
         color.0.set_alpha(if k < 0.6 { 1.0 } else { 1.0 - (k - 0.6) / 0.4 });
+    }
+    for (mut w, mut tf, mut color, mut vis) in &mut words {
+        if *vis == Visibility::Hidden {
+            continue;
+        }
+        w.t += dt;
+        if w.t >= WORD_LIFE {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        let k = w.t / WORD_LIFE;
+        let pop = 1.0 + 0.6 * (1.0 - (w.t / 0.12).min(1.0)).powi(2);
+        tf.translation = (w.start + Vec2::new(0.0, 16.0 * k)).extend(layer::NUMBERS + 2.0);
+        tf.scale = Vec3::splat(11.0 / NUMBER_RASTER * pop);
+        color.0.set_alpha(if k < 0.65 { 1.0 } else { 1.0 - (k - 0.65) / 0.35 });
     }
     for (e, mut ink, mut sprite) in &mut inks {
         ink.t += dt;

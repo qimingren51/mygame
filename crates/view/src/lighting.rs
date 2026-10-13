@@ -34,6 +34,9 @@ pub const LIGHT_LAYER: usize = 1;
 /// 光照图的分辨率相对窗口的比例
 const LIGHTMAP_SCALE: f32 = 0.5;
 
+/// 自发光的亮度倍数（主画面是 HDR）。超过 1 的部分由辉光晕开。
+pub const EMIT_HDR: f32 = 1.5;
+
 /// 夜色：没有光照到的地方乘以它
 pub const NIGHT_AMBIENT: Color = Color::srgb(0.086, 0.106, 0.173);
 
@@ -112,7 +115,7 @@ pub type MulMaterial = ExtendedMaterial2d<ColorMaterial, Multiply>;
 #[derive(Resource, Default)]
 pub struct FrameMeshes {
     meshes: HashMap<(FrameId, bool), Handle<Mesh>>,
-    materials: HashMap<(usize, [u8; 4]), Handle<AddMaterial>>,
+    materials: HashMap<(usize, [u8; 4], bool), Handle<AddMaterial>>,
 }
 
 fn quad_mesh(db: &AtlasDb, id: FrameId, flip: bool) -> Mesh {
@@ -141,18 +144,26 @@ impl FrameMeshes {
         self.meshes.entry((id, flip)).or_insert_with(|| meshes.add(quad_mesh(db, id, flip))).clone()
     }
 
-    /// 叠加材质：同一页贴图、同一种颜色（含强度）共用一个。
+    /// 叠加材质：同一页贴图、同一种颜色（含强度）共用一个。hdr：画在主画面上的自发光，
+    /// 亮度乘 [`EMIT_HDR`]，叠起来能超过 1，辉光才晕得开；画进光照图的光源不乘。
     pub fn additive(
         &mut self,
         db: &AtlasDb,
         materials: &mut Assets<AddMaterial>,
         id: FrameId,
         color: Color,
+        hdr: bool,
     ) -> Handle<AddMaterial> {
-        let key = (db.page_of(id), color.to_srgba().to_u8_array());
+        let key = (db.page_of(id), color.to_srgba().to_u8_array(), hdr);
         self.materials
             .entry(key)
             .or_insert_with(|| {
+                let color = if hdr {
+                    let l = color.to_linear();
+                    Color::linear_rgba(l.red * EMIT_HDR, l.green * EMIT_HDR, l.blue * EMIT_HDR, l.alpha)
+                } else {
+                    color
+                };
                 materials.add(AddMaterial {
                     base: ColorMaterial {
                         color,
@@ -257,27 +268,6 @@ pub(crate) fn resize_lightmap(
             depth_or_array_layers: 1,
         });
     }
-}
-
-/// 光照相机和暗层跟着主镜头走；暗层铺满镜头看到的范围。
-pub(crate) fn follow_main_camera(
-    main: Single<
-        (&Transform, &Projection),
-        (With<crate::MainCamera>, Without<LightCamera>, Without<Darkness>),
-    >,
-    mut light_cam: Single<&mut Transform, (With<LightCamera>, Without<Darkness>)>,
-    mut darkness: Single<(&mut Transform, &mut Visibility), With<Darkness>>,
-) {
-    let (main_tf, proj) = *main;
-    light_cam.translation = main_tf.translation;
-    let half = match proj {
-        Projection::Orthographic(o) => o.area.half_size(),
-        _ => Vec2::splat(500.0),
-    };
-    let (dark_tf, dark_vis) = &mut *darkness;
-    dark_tf.translation = Vec3::new(main_tf.translation.x, main_tf.translation.y, crate::layer::DARKNESS);
-    dark_tf.scale = (half * 2.0).extend(1.0);
-    **dark_vis = Visibility::Inherited;
 }
 
 pub(crate) fn hide_darkness(mut darkness: Single<&mut Visibility, With<Darkness>>) {

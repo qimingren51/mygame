@@ -57,7 +57,7 @@ pub(crate) struct RerollLabel;
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<ChoiceUi>().add_systems(OnExit(lantern_sim::AppState::Run), reset).add_systems(
         Update,
-        (sync, input, highlight)
+        (sync, input, highlight, animate_evolve, animate_rise)
             .chain()
             .run_if(in_state(RunState::Playing))
             .run_if(resource_exists::<SimPhase>),
@@ -386,6 +386,7 @@ fn card(
     let el = info.element.map(|e| format!("{} 属性", c.element(e).name)).unwrap_or_default();
     let mut card = commands.spawn((
         Card,
+        Rise::after(0.04 + i as f32 * 0.07),
         Node {
             width: px(240),
             min_height: px(340),
@@ -528,6 +529,7 @@ fn plain_card(
 ) {
     let mut card = row.spawn((
         Card,
+        Rise::after(0.04 + i as f32 * 0.07),
         Node {
             width: px(220),
             min_height: px(260),
@@ -751,34 +753,94 @@ fn spawn_chest(
                             skin.image("divider"),
                         ));
                     }
-                    list.spawn(Node { align_items: AlignItems::Center, column_gap: px(14), ..default() })
-                        .with_children(|row| {
-                            spawn_icon(
-                                row,
-                                db,
-                                fonts,
-                                info.icon.as_deref(),
-                                &info.glyph,
-                                on_paper(info.color),
-                                56.0,
-                            );
-                            row.spawn(Node { flex_direction: FlexDirection::Column, ..default() })
-                                .with_children(|t| {
-                                    t.spawn(text(&fonts.title, 28.0, on_paper(info.color), &info.name));
-                                    t.spawn(text(
-                                        &fonts.body,
-                                        14.0,
-                                        INK_DIM,
-                                        &format!("{}　{kind}", info.rarity.name()),
-                                    ));
-                                });
-                        });
+                    // 和开箱的钟声对上：第 k 声在 0.35 + 0.28k 秒
+                    list.spawn((
+                        Node { align_items: AlignItems::Center, column_gap: px(14), ..default() },
+                        Rise::after(0.3 + k as f32 * 0.28),
+                    ))
+                    .with_children(|row| {
+                        spawn_icon(
+                            row,
+                            db,
+                            fonts,
+                            info.icon.as_deref(),
+                            &info.glyph,
+                            on_paper(info.color),
+                            56.0,
+                        );
+                        row.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(
+                            |t| {
+                                t.spawn(text(&fonts.title, 28.0, on_paper(info.color), &info.name));
+                                t.spawn(text(
+                                    &fonts.body,
+                                    14.0,
+                                    INK_DIM,
+                                    &format!("{}　{kind}", info.rarity.name()),
+                                ));
+                            },
+                        );
+                    });
                 }
             });
             root.spawn(text(&fonts.body, 18.0, PAPER, "Enter / 手柄 A　继续"));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
 }
+
+/// 出场动画：等 delay 秒后从下面弹上来（卡片依次出现，宝箱逐项揭晓）。
+#[derive(Component)]
+pub(crate) struct Rise {
+    delay: f32,
+    t: f32,
+}
+
+impl Rise {
+    pub(crate) fn after(delay: f32) -> (Rise, UiTransform, Visibility) {
+        (
+            Rise { delay, t: 0.0 },
+            UiTransform {
+                translation: bevy::ui::Val2::px(0.0, 46.0),
+                scale: Vec2::splat(0.9),
+                ..UiTransform::IDENTITY
+            },
+            Visibility::Hidden,
+        )
+    }
+}
+
+pub(crate) fn animate_rise(
+    time: Res<Time<Real>>,
+    mut q: Query<(&mut Rise, &mut UiTransform, &mut Visibility)>,
+) {
+    let dt = time.delta_secs().min(0.1);
+    for (mut r, mut tf, mut vis) in &mut q {
+        if r.t >= r.delay + 0.3 {
+            continue;
+        }
+        r.t += dt;
+        let k = ((r.t - r.delay) / 0.3).clamp(0.0, 1.0);
+        if k > 0.0 {
+            vis.set_if_neq(Visibility::Inherited);
+        }
+        let e = ease_out_back(k);
+        tf.translation = bevy::ui::Val2::px(0.0, 46.0 * (1.0 - e));
+        tf.scale = Vec2::splat(0.9 + 0.1 * e);
+    }
+}
+
+/// 进化演出的各部分（docs/FEEL.md 第 5 节）：旧法器化墨淡去，新形态从大到小画出来，
+/// 最后盖上“化”字印，名字和说明淡入。整段在 2 秒内（模拟的进化阶段 2.1 秒后自动关闭）。
+#[derive(Component, Clone, Copy)]
+pub(crate) enum EvoPart {
+    Old,
+    New,
+    Seal,
+    Text,
+}
+
+/// 进化演出的计时（现实秒）。
+#[derive(Component, Default)]
+pub(crate) struct EvoClock(f32);
 
 fn spawn_evolve(
     commands: &mut Commands,
@@ -793,16 +855,114 @@ fn spawn_evolve(
     let Some(evo) = &def.evolution else { return };
     let color = element_color(c, def.element);
     let icon_name = format!("ui/icon_{}_evo", def.id);
+    let old_icon = db.find(&format!("ui/icon_{}", def.id));
+    let new_icon = db.find(&icon_name);
+    let size = 168.0;
     commands
-        .spawn(overlay(skin))
+        .spawn((overlay(skin), EvoClock::default()))
         .with_children(|root| {
             if let Some(seal) = db.find("ui/seal_evo") {
-                root.spawn((Node { width: px(72), height: px(72), ..default() }, db.ui_image(seal)));
+                root.spawn((
+                    EvoPart::Seal,
+                    Node { width: px(72), height: px(72), ..default() },
+                    UiTransform::from_scale(Vec2::splat(2.4)),
+                    db.ui_image(seal).with_color(Color::WHITE.with_alpha(0.0)),
+                ));
             }
-            spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, 168.0);
-            root.spawn(text(&fonts.title, 88.0, color, &evo.name));
-            root.spawn(text(&fonts.body, 20.0, PAPER, &format!("{} → {}", def.name, evo.name)));
-            root.spawn(text(&fonts.body, 18.0, DIM, &evo.desc));
+            match (old_icon, new_icon) {
+                (Some(old), Some(new)) => {
+                    root.spawn(Node { width: px(size), height: px(size), ..default() }).with_children(|b| {
+                        let full = Node {
+                            position_type: PositionType::Absolute,
+                            width: percent(100),
+                            height: percent(100),
+                            ..default()
+                        };
+                        b.spawn((
+                            EvoPart::New,
+                            full.clone(),
+                            UiTransform::from_scale(Vec2::splat(1.35)),
+                            db.ui_image(new).with_color(Color::WHITE.with_alpha(0.0)),
+                        ));
+                        b.spawn((EvoPart::Old, full, UiTransform::default(), db.ui_image(old)));
+                    });
+                }
+                _ => spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, size),
+            }
+            root.spawn((EvoPart::Text, text(&fonts.title, 88.0, color.with_alpha(0.0), &evo.name)));
+            root.spawn((
+                EvoPart::Text,
+                text(&fonts.body, 20.0, PAPER.with_alpha(0.0), &format!("{} → {}", def.name, evo.name)),
+            ));
+            root.spawn((EvoPart::Text, text(&fonts.body, 18.0, DIM.with_alpha(0.0), &evo.desc)));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
+}
+
+fn smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+fn ease_out_back(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    1.0 + 2.70158 * (x - 1.0).powi(3) + 1.70158 * (x - 1.0).powi(2)
+}
+
+/// 推进进化演出。
+pub(crate) fn animate_evolve(
+    time: Res<Time<Real>>,
+    mut clocks: Query<&mut EvoClock>,
+    mut parts: Query<(&EvoPart, Option<&mut UiTransform>, Option<&mut ImageNode>, Option<&mut TextColor>)>,
+) {
+    let Some(mut clock) = clocks.iter_mut().next() else { return };
+    clock.0 += time.delta_secs().min(0.1);
+    let t = clock.0;
+    // 旧图标：先变成墨色，再胀开淡去
+    let ink = smooth(t / 0.45);
+    let gone = smooth((t - 0.35) / 0.4);
+    // 新图标：0.55 秒起从大到小落定
+    let born = (t - 0.55) / 0.4;
+    // 印：0.95 秒砸下
+    let stamp = (t - 0.95) / 0.12;
+    let words = smooth((t - 0.8) / 0.5);
+    for (part, tf, img, txt) in &mut parts {
+        match part {
+            EvoPart::Old => {
+                if let Some(mut img) = img {
+                    let c = Color::WHITE.mix(&Color::srgb(0.06, 0.06, 0.08), ink);
+                    img.color = c.with_alpha(1.0 - gone);
+                }
+                if let Some(mut tf) = tf {
+                    // 化墨前轻轻一颤
+                    let shake = if t < 0.35 { (t * 70.0).sin() * 3.0 * (1.0 - t / 0.35) } else { 0.0 };
+                    tf.translation = bevy::ui::Val2::px(shake, 0.0);
+                    tf.scale = Vec2::splat(1.0 + 0.2 * gone);
+                }
+            }
+            EvoPart::New => {
+                if let Some(mut img) = img {
+                    img.color = Color::WHITE.with_alpha(smooth(born * 1.5));
+                }
+                if let Some(mut tf) = tf {
+                    tf.scale = Vec2::splat(1.35 - 0.35 * ease_out_back(born));
+                }
+            }
+            EvoPart::Seal => {
+                if let Some(mut img) = img {
+                    img.color = Color::WHITE.with_alpha(smooth(stamp * 2.0));
+                }
+                if let Some(mut tf) = tf {
+                    let k = stamp.clamp(0.0, 1.0);
+                    tf.scale = Vec2::splat(2.4 - 1.4 * k * k);
+                    tf.rotation = Rot2::radians(-0.12 * k);
+                }
+            }
+            EvoPart::Text => {
+                if let Some(mut c) = txt {
+                    c.0.set_alpha(words);
+                }
+            }
+        }
+    }
 }

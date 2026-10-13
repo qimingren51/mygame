@@ -350,6 +350,8 @@ fn spawn_background(mut commands: Commands, skin: Res<Skin>) {
             ..default()
         },
         ImageNode::new(skin.title.clone()).with_mode(NodeImageMode::Stretch),
+        crate::title_fx::TitleBg,
+        UiTransform::default(),
     ));
 }
 
@@ -451,6 +453,8 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
             p.spawn((
                 Node { width: px(520), height: px(172), ..default() },
                 ImageNode::new(skin.logo.clone()),
+                crate::title_fx::TitleLogo,
+                UiTransform::default(),
             ));
             p.spawn(Node { height: px(36), ..default() });
             for (i, (label, key)) in MENU.iter().enumerate() {

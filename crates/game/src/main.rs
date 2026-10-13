@@ -14,19 +14,20 @@ use lantern_content::Content;
 use lantern_core::step::{MAX_CATCHUP_TICKS, TICK_HZ};
 use lantern_platform::{PlatformPlugin, Profile, Settings, paths};
 use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
-use lantern_ui::{SeedOverride, UiPlugin};
+use lantern_ui::{ReplaySeek, SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
 
-const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件>]";
+const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]]";
 
 struct Args {
     seed: Option<u64>,
     windowed: bool,
     replay: Option<std::path::PathBuf>,
+    from: Option<u32>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { seed: None, windowed: false, replay: None };
+    let mut args = Args { seed: None, windowed: false, replay: None, from: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -36,6 +37,10 @@ fn parse_args() -> Result<Args, String> {
             }
             "--windowed" => args.windowed = true,
             "--replay" => args.replay = Some(it.next().ok_or("--replay 后面要跟回放文件的路径")?.into()),
+            "--from" => {
+                let v = it.next().ok_or("--from 后面要跟秒数")?;
+                args.from = Some(v.parse().map_err(|_| format!("--from 不是秒数：{v}"))?);
+            }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("不认识的参数：{other}\n{USAGE}")),
         }
@@ -119,6 +124,9 @@ fn main() -> AppExit {
 
     if let Some(p) = playback {
         app.insert_resource(p);
+        if let Some(secs) = args.from {
+            app.insert_resource(ReplaySeek(secs));
+        }
     }
 
     // 一帧最多补 4 步：卡顿时宁可变慢，也不让模拟连续追赶。

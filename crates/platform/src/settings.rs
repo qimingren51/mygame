@@ -18,6 +18,12 @@ pub struct Settings {
     pub music_volume: f32,
     /// 0–1
     pub sfx_volume: f32,
+    /// 震屏和镜头冲击的强度，0–1（0 为关）
+    pub shake: f32,
+    /// 顿帧与慢镜
+    pub hitstop: bool,
+    /// 辉光
+    pub bloom: bool,
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -30,6 +36,9 @@ impl Default for Settings {
             vsync: true,
             music_volume: 0.8,
             sfx_volume: 0.8,
+            shake: 1.0,
+            hitstop: true,
+            bloom: true,
             path: None,
         }
     }

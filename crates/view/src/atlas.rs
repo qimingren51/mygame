@@ -231,6 +231,39 @@ impl AtlasDb {
         Ok(db)
     }
 
+    /// 加一页程序生成的贴图（粒子用的软点、烟、灰……）。帧的锚点在中心，白色可染色，
+    /// 世界尺寸照样是像素 ÷ `px_per_unit`。
+    pub fn add_page(
+        &mut self,
+        image: Handle<Image>,
+        size: UVec2,
+        frames: &[(&str, URect)],
+        layouts: &mut Assets<TextureAtlasLayout>,
+    ) {
+        let mut layout = TextureAtlasLayout::new_empty(size);
+        let page = self.pages.len();
+        let s = size.as_vec2();
+        for &(name, r) in frames {
+            let index = layout.add_texture(r);
+            self.by_name.insert(name.to_string(), FrameId(self.frames.len() as u32));
+            self.frames.push(Frame {
+                page,
+                index,
+                uv: Rect::new(
+                    r.min.x as f32 / s.x,
+                    r.min.y as f32 / s.y,
+                    r.max.x as f32 / s.x,
+                    r.max.y as f32 / s.y,
+                ),
+                size: r.size().as_vec2() / self.px_per_unit,
+                anchor: Anchor::CENTER,
+                blend: Blend::Normal,
+                tint: true,
+            });
+        }
+        self.pages.push(Page { image, layout: layouts.add(layout) });
+    }
+
     pub fn frame(&self, id: FrameId) -> &Frame {
         &self.frames[id.0 as usize]
     }

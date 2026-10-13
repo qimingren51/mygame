@@ -75,12 +75,13 @@ pub enum SimEvent {
     Dash {
         pos: Vec2,
     },
-    /// 命中妖物；pos 是伤害数字的位置
+    /// 命中妖物；pos 是伤害数字的位置，element 是这一击的五行（画面按它上色）
     Hit {
         pos: Vec2,
         damage: f32,
         crit: bool,
         kind: HitKind,
+        element: Option<Element>,
     },
     /// 击杀；kind 是 `enemies.ron` 里的下标
     Kill {

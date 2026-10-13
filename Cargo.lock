@@ -3457,6 +3457,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "kira",
+ "lantern_content",
  "lantern_core",
  "lantern_platform",
  "lantern_sim",

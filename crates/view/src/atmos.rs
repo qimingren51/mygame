@@ -1,0 +1,252 @@
+//! 氛围（docs/FEEL.md 第 4 节）：萤火与夜雾、暗角、受伤与濒死、夜主登场压暗、天明。
+//!
+//! - 萤火和夜雾都叠加在暗层之上：萤火是暗处的小光点，夜雾是暗处泛起的一层冷蓝薄雾。
+//! - 暗角用 Bevy 自带的 `Vignette`，平时很淡；受伤时一跳，生命低于三成时随心跳收紧、泛红。
+//! - 天明：击败夜主后，光照图的底色在 3 秒内从夜色变成晨光，剩下的妖物化成墨烟
+//!   （docs/GAMEPLAY.md 第 4.2、14 节）。只改画面，模拟照常结束。
+
+use std::f32::consts::TAU;
+
+use bevy::post_process::effect_stack::{ChromaticAberration, Vignette};
+use bevy::prelude::*;
+
+use lantern_core::Pcg32;
+use lantern_sim::{Health, Player, SimEvent, SimOutbox};
+
+use crate::actors::{GlowRequests, Pools};
+use crate::lighting::{LightCamera, NIGHT_AMBIENT};
+use crate::particles::{INK, Particles};
+use crate::{MainCamera, layer};
+
+/// 天明用多久（现实秒），从夜主倒下后 DAWN_DELAY 秒开始
+pub const DAWN_LEN: f32 = 3.0;
+const DAWN_DELAY: f32 = 0.8;
+/// 萤火、夜雾的数量
+const MOTES: usize = 40;
+const WISPS: usize = 9;
+
+/// 天明的进度。界面层读它决定结算什么时候浮现。
+#[derive(Resource, Default)]
+pub struct Dawn {
+    /// 夜主倒下后过了多久（现实秒）；None：还是夜里
+    pub t: Option<f32>,
+}
+
+impl Dawn {
+    /// 0..1：夜色褪去的程度
+    pub fn progress(&self) -> f32 {
+        self.t.map_or(0.0, |t| ((t - DAWN_DELAY) / DAWN_LEN).clamp(0.0, 1.0))
+    }
+}
+
+struct Mote {
+    /// 相对镜头的位置
+    off: Vec2,
+    phase: f32,
+    speed: f32,
+    warm: bool,
+}
+
+struct Wisp {
+    off: Vec2,
+    vel: f32,
+    scale: f32,
+    flip: bool,
+}
+
+#[derive(Resource)]
+pub(crate) struct Atmos {
+    rng: Pcg32,
+    motes: Vec<Mote>,
+    wisps: Vec<Wisp>,
+    /// 受伤后的闪红（1 → 0）
+    hurt: f32,
+    /// 夜主登场的压暗（1 → 0）
+    gloom: f32,
+    heart: f32,
+}
+
+impl Default for Atmos {
+    fn default() -> Self {
+        let mut rng = Pcg32::new(0x0a75_0f1e, 9);
+        let motes = (0..MOTES)
+            .map(|_| Mote {
+                off: Vec2::new(rng.range_f32(-420.0, 420.0), rng.range_f32(-240.0, 240.0)),
+                phase: rng.range_f32(0.0, TAU),
+                speed: rng.range_f32(0.4, 1.0),
+                warm: rng.chance(0.6),
+            })
+            .collect();
+        let wisps = (0..WISPS)
+            .map(|_| Wisp {
+                off: Vec2::new(rng.range_f32(-500.0, 500.0), rng.range_f32(-260.0, 260.0)),
+                vel: rng.range_f32(4.0, 10.0),
+                scale: rng.range_f32(1.6, 2.8),
+                flip: rng.chance(0.5),
+            })
+            .collect();
+        Atmos { rng, motes, wisps, hurt: 0.0, gloom: 0.0, heart: 0.0 }
+    }
+}
+
+pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
+    atmos.hurt = 0.0;
+    atmos.gloom = 0.0;
+    dawn.t = None;
+}
+
+/// 平时一层很淡的暗角。
+pub(crate) fn base_vignette() -> Vignette {
+    Vignette {
+        intensity: 0.28,
+        radius: 0.95,
+        smoothness: 3.0,
+        color: Color::srgb(0.02, 0.025, 0.05),
+        ..default()
+    }
+}
+
+pub(crate) fn atmos_events(outbox: Res<SimOutbox>, mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
+    for ev in &outbox.0 {
+        match ev {
+            SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } => atmos.hurt = 1.0,
+            SimEvent::BossArrived { .. } => atmos.gloom = 1.0,
+            SimEvent::BossDefeated { .. } => dawn.t = Some(0.0),
+            _ => {}
+        }
+    }
+}
+
+/// 暗角、色差、光照图底色（夜主登场压暗、天明）、萤火与夜雾、天明时妖物化烟。
+pub(crate) fn update_atmos(
+    real: Res<Time<Real>>,
+    time: Res<Time>,
+    mut atmos: ResMut<Atmos>,
+    mut dawn: ResMut<Dawn>,
+    mut parts: ResMut<Particles>,
+    mut pools: ResMut<Pools>,
+    mut glow: ResMut<GlowRequests>,
+    hero: Single<&Health, With<Player>>,
+    mut cam: Single<(&Transform, Option<&mut Vignette>, Option<&mut ChromaticAberration>), With<MainCamera>>,
+    mut light: Single<&mut Camera, With<LightCamera>>,
+) {
+    let rdt = real.delta_secs().min(0.1);
+    let dt = time.delta_secs();
+    let t = time.elapsed_secs();
+    let atmos = &mut *atmos;
+    atmos.hurt = (atmos.hurt - rdt * 2.5).max(0.0);
+    atmos.gloom = (atmos.gloom - rdt / 3.0).max(0.0);
+    if let Some(dt_dawn) = &mut dawn.t {
+        *dt_dawn += rdt;
+    }
+    let day = dawn.progress();
+
+    // ---- 暗角：受伤一跳；生命低于三成时随心跳收紧、泛红
+    let hp = hero.hp / hero.max.max(1.0);
+    let low = ((0.3 - hp) / 0.2).clamp(0.0, 1.0);
+    let beat_rate = 1.1 + low * 0.6;
+    atmos.heart = (atmos.heart + rdt * beat_rate).fract();
+    // 心跳是“咚、咚”两下
+    let beat = {
+        let h = atmos.heart;
+        let a = (-((h - 0.05) * 18.0).powi(2)).exp();
+        let b = (-((h - 0.28) * 18.0).powi(2)).exp() * 0.7;
+        a + b
+    };
+    let (cam_tf, vignette, chroma) = &mut *cam;
+    if let Some(v) = vignette {
+        let base = base_vignette();
+        v.intensity = (base.intensity + atmos.hurt * 0.35 + low * (0.3 + 0.2 * beat)) * (1.0 - day * 0.7);
+        v.radius = base.radius - low * (0.25 + 0.06 * beat) - atmos.hurt * 0.12;
+        let red = (atmos.hurt * 0.8 + low * 0.7).min(1.0);
+        v.color = base.color.mix(&Color::srgb(0.35, 0.02, 0.03), red);
+    }
+    if let Some(c) = chroma {
+        c.intensity = atmos.hurt * 0.012 + low * beat * 0.006;
+    }
+
+    // ---- 光照图底色：夜色 → 夜主登场时更暗 → 天明时变成晨光
+    let night = NIGHT_AMBIENT.to_linear();
+    // 夜主登场：0.4 秒压暗，停一会儿，最后 1.5 秒慢慢回来
+    let gloom = if atmos.gloom > 0.0 {
+        let (elapsed, left) = ((1.0 - atmos.gloom) * 3.0, atmos.gloom * 3.0);
+        1.0 - 0.45 * smooth(elapsed / 0.4) * smooth(left / 1.5)
+    } else {
+        1.0
+    };
+    let dawn_col = if day < 0.5 {
+        LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (day / 0.5)
+            + LinearRgba::from(NIGHT_AMBIENT) * (1.0 - day / 0.5)
+    } else {
+        let k = (day - 0.5) / 0.5;
+        LinearRgba::from(Color::srgb(1.0, 0.98, 0.94)) * k
+            + LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (1.0 - k)
+    };
+    let ambient = if day > 0.0 {
+        dawn_col
+    } else {
+        LinearRgba::rgb(night.red * gloom, night.green * gloom, night.blue * gloom)
+    };
+    light.clear_color = ClearColorConfig::Custom(Color::LinearRgba(ambient.with_alpha(1.0)));
+
+    // ---- 天明时妖物化烟
+    if day > 0.05 && day < 0.85 && !pools.visible_enemies.is_empty() {
+        let n = pools.visible_enemies.len();
+        for _ in 0..4 {
+            let at = pools.visible_enemies[atmos.rng.below(n as u32) as usize];
+            parts.smoke(at + Vec2::new(0.0, 10.0), 0.7, INK.with_alpha(0.35), 1);
+            parts.ash(at + Vec2::new(0.0, 8.0), 8.0, 2, INK.with_alpha(0.6));
+        }
+    }
+    pools.dissolve = smooth((day - 0.15) / 0.6);
+
+    // ---- 萤火：绕着镜头飘，忽明忽暗；天亮了就散
+    let center = cam_tf.translation.truncate();
+    let night_k = 1.0 - day;
+    if night_k > 0.01 {
+        for m in &mut atmos.motes {
+            let wander =
+                Vec2::new((t * 0.3 * m.speed + m.phase).sin(), (t * 0.23 * m.speed + m.phase * 1.7).cos());
+            m.off += wander * 9.0 * dt * m.speed + Vec2::new(0.0, 3.0 * dt);
+            // 出了范围就绕到另一边
+            if m.off.x.abs() > 440.0 {
+                m.off.x = -m.off.x.signum() * 430.0;
+            }
+            if m.off.y.abs() > 250.0 {
+                m.off.y = -m.off.y.signum() * 240.0;
+            }
+            let blink = (0.5 + 0.5 * (t * 1.7 * m.speed + m.phase * 3.0).sin()).powi(3);
+            let color = if m.warm { Color::srgb(1.0, 0.78, 0.4) } else { Color::srgb(0.65, 1.0, 0.7) };
+            glow.add(
+                parts.f.ember,
+                (center + m.off).extend(layer::EMISSIVE - 1.0),
+                Vec2::splat(0.45),
+                0.0,
+                color.with_alpha(0.15 + 0.6 * blink * night_k),
+            );
+        }
+    }
+
+    // ---- 夜雾：大片冷蓝的薄雾慢慢横移，叠加在暗层之上，暗处泛起一层月色，亮处几乎看不出
+    for w in &mut atmos.wisps {
+        w.off.x += w.vel * dt;
+        if w.off.x > 560.0 {
+            w.off.x = -560.0;
+            w.off.y = atmos.rng.range_f32(-260.0, 260.0);
+        }
+        let edge = 1.0 - (w.off.x.abs() / 560.0).powi(4);
+        glow.add_flipped(
+            parts.f.wisp,
+            (center + w.off).extend(layer::EMISSIVE - 4.0),
+            Vec2::new(w.scale * 1.6, w.scale * 0.8),
+            0.0,
+            Color::srgb(0.5, 0.6, 0.82).with_alpha(0.07 * edge * (1.0 - day)),
+            w.flip,
+        );
+    }
+}
+
+fn smooth(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}

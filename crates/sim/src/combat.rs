@@ -481,7 +481,13 @@ pub(crate) fn resolve_hits(
         } else {
             HitKind::Normal
         };
-        outbox.0.push(SimEvent::Hit { pos: pos - Vec2::new(0.0, en.r[i] + 4.0), damage: dmg, crit, kind });
+        outbox.0.push(SimEvent::Hit {
+            pos: pos - Vec2::new(0.0, en.r[i] + 4.0),
+            damage: dmg,
+            crit,
+            kind,
+            element: hit.element,
+        });
 
         if hit.flags & HIT_DOT == 0 {
             en.hit_n[i] = en.hit_n[i].wrapping_add(1);
@@ -782,6 +788,7 @@ pub(crate) fn burn(
                 damage: en.burn_acc[i],
                 crit: false,
                 kind: HitKind::Dot,
+                element: None,
             });
             en.burn_acc[i] = 0.0;
             en.burn_show[i] = 0.5;

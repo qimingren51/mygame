@@ -1,10 +1,11 @@
-//! 设置项（暂停界面和标题界面共用）：音乐音量、音效音量、全屏。
+//! 设置项（暂停界面和标题界面共用）：音乐音量、音效音量、全屏、震屏、顿帧、辉光。
 //! 左右键调整，改完立即生效并存盘。
 
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use lantern_platform::{Actions, Settings};
+use lantern_view::Feel;
 
 use crate::{Fonts, INK, INK_DIM, text};
 
@@ -13,9 +14,13 @@ pub(crate) enum Item {
     Music,
     Sfx,
     Fullscreen,
+    Shake,
+    Hitstop,
+    Bloom,
 }
 
-pub(crate) const ITEMS: [Item; 3] = [Item::Music, Item::Sfx, Item::Fullscreen];
+pub(crate) const ITEMS: [Item; 6] =
+    [Item::Music, Item::Sfx, Item::Fullscreen, Item::Shake, Item::Hitstop, Item::Bloom];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -26,6 +31,9 @@ fn label(item: Item) -> &'static str {
         Item::Music => "音乐",
         Item::Sfx => "音效",
         Item::Fullscreen => "全屏",
+        Item::Shake => "震屏",
+        Item::Hitstop => "顿帧",
+        Item::Bloom => "辉光",
     }
 }
 
@@ -34,8 +42,15 @@ fn value(item: Item, s: &Settings) -> String {
     match item {
         Item::Music => pct(s.music_volume),
         Item::Sfx => pct(s.sfx_volume),
-        Item::Fullscreen => if s.fullscreen { "开" } else { "关" }.into(),
+        Item::Shake => pct(s.shake),
+        Item::Fullscreen => on_off(s.fullscreen),
+        Item::Hitstop => on_off(s.hitstop),
+        Item::Bloom => on_off(s.bloom),
     }
+}
+
+fn on_off(on: bool) -> String {
+    if on { "开" } else { "关" }.into()
 }
 
 /// 一行设置：名字在左，值在右。
@@ -57,6 +72,18 @@ pub(crate) fn adjust(item: Item, actions: &Actions, settings: &mut Settings, win
         }
         Item::Sfx if step != 0.0 => {
             settings.sfx_volume = ((settings.sfx_volume + step) * 10.0).round().clamp(0.0, 10.0) / 10.0;
+            true
+        }
+        Item::Shake if step != 0.0 => {
+            settings.shake = ((settings.shake + step * 2.5) * 4.0).round().clamp(0.0, 4.0) / 4.0;
+            true
+        }
+        Item::Hitstop if actions.nav.x != 0 || actions.confirm => {
+            settings.hitstop = !settings.hitstop;
+            true
+        }
+        Item::Bloom if actions.nav.x != 0 || actions.confirm => {
+            settings.bloom = !settings.bloom;
             true
         }
         Item::Fullscreen if actions.nav.x != 0 || actions.confirm => {
@@ -83,6 +110,17 @@ pub(crate) fn refresh_values(settings: Res<Settings>, mut q: Query<(&SettingValu
     }
     for (v, mut t) in &mut q {
         t.0 = value(v.0, &settings);
+    }
+}
+
+/// 画面层的手感开关跟着设置走（画面层不依赖平台层，由界面层同步）。
+pub(crate) fn sync_feel(settings: Res<Settings>, mut feel: ResMut<Feel>) {
+    if !settings.is_changed() {
+        return;
+    }
+    let want = Feel { shake: settings.shake, hitstop: settings.hitstop, bloom: settings.bloom };
+    if *feel != want {
+        *feel = want;
     }
 }
 

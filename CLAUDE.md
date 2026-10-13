@@ -7,6 +7,7 @@
 - 架构设计：`docs/DESIGN.md`。改架构或接口约定（图集格式、帧命名、内容数据结构）时，同步更新这份文档。
 - 玩法与数值：`docs/GAMEPLAY.md`、`docs/BALANCE.md`（复现脚本在 `docs/baseline/`）。M2 照搬网页版作为平衡基线，M2.5 起按这两份文档改。
 - 世界观与命名：`docs/LORE.md`。新增或改名先改那里；界面文字迁到 `assets/i18n/` 时，中文名以它为准。
+- 质感（镜头、粒子、光、演出、音效）：`docs/FEEL.md`。
 - 移植参考：`docs/PORTING-NOTES.md`、`web/lantern-next/`（已冻结的 TS 版）、`web/lantern/`（网页旧版，玩法设计见其中的 `DESIGN.md`）。
 
 ### 目录
@@ -39,7 +40,8 @@ cargo run --release -p lantern-tools -- bench  # 模拟跑分（不开窗口，�
 cargo run --release -p lantern-tools -- replay <文件>  # 校验回放：逐秒核对状态哈希
 cargo run --release -p lantern-tools -- balance --runs 20  # 机器人批量跑局看平衡（加 --god 无敌跑完整局）
 cargo run --release -p lantern-tools -- kite --runs 100 --tier 1 --meta none  # 会躲的机器人测胜率（--meta none/half/full）
-cargo run -- --replay <文件>                   # 在游戏里观看回放
+cargo run --release -p lantern-tools -- record --god --out bot.ron  # 机器人打一局存成回放（看后期画面用）
+cargo run -- --replay <文件> [--from <秒>]     # 在游戏里观看回放（--from 跳到第几秒）
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希
 python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）
 ```
@@ -79,7 +81,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
 
 ### 协作
 
-目前有四个 Claude 会话分工合作（架构、美术、玩法与数值、世界观与命名），各自负责的文件见 `docs/DESIGN.md` 第 19 节。改对方负责的文件之前，先发消息商量。推送前先 `git pull --rebase origin master`。
+目前有五个 Claude 会话分工合作（架构、美术、玩法与数值、世界观与命名、质感），各自负责的文件见 `docs/DESIGN.md` 第 19 节。改对方负责的文件之前，先发消息商量。推送前先 `git pull --rebase origin master`。
 
 ## 网页小游戏（`web/`）
 

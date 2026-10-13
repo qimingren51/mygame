@@ -1,5 +1,5 @@
 //! 法器与法术的画面（参照网页版 render/weaponViews.ts）：飞剑、纸鹤、石印与预警、地裂、
-//! 寒波与各种环、连锁爆炸、太极、护盾、拾取物、夜主弹幕、奇遇的道具，以及震屏和闪屏。
+//! 寒波与各种环、连锁爆炸、太极、护盾、拾取物、夜主弹幕、奇遇的道具，以及闪屏。
 //!
 //! 持续存在的东西直接读模拟的资源；一次性的效果（环、印痕、爆炸）收到模拟事件后在这里记下，自己计时淡出。
 //! 纯装饰的随机数用画面层自己的，不影响模拟。
@@ -121,25 +121,18 @@ struct Live {
     rot: f32,
 }
 
-/// 一次性效果、震屏、闪屏。
+/// 一次性效果、闪屏。震屏在 `camera.rs`。
 #[derive(Resource)]
 pub(crate) struct FxState {
     rng: Pcg32,
     live: Vec<Live>,
     time: f32,
-    pub shake: f32,
     pub flash: Color,
 }
 
 impl Default for FxState {
     fn default() -> Self {
-        FxState {
-            rng: Pcg32::new(0xf00d_2026, 3),
-            live: Vec::new(),
-            time: 0.0,
-            shake: 0.0,
-            flash: Color::NONE,
-        }
+        FxState { rng: Pcg32::new(0xf00d_2026, 3), live: Vec::new(), time: 0.0, flash: Color::NONE }
     }
 }
 
@@ -152,10 +145,6 @@ impl FxState {
         }
         let rot = self.rng.range_f32(0.0, TAU);
         self.live.push(Live { kind, pos, r, t: 0.0, life, rot });
-    }
-
-    fn shake(&mut self, amount: f32) {
-        self.shake = self.shake.max(amount);
     }
 
     fn flash(&mut self, color: Color, a: f32) {
@@ -181,7 +170,7 @@ fn element_rgb(e: Element) -> Color {
     }
 }
 
-/// 把模拟事件变成一次性效果、震屏、闪屏。
+/// 把模拟事件变成一次性效果和闪屏。
 pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
     for ev in &outbox.0 {
         match *ev {
@@ -224,7 +213,6 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                             radius * 1.2,
                             0.35,
                         );
-                        fx.shake(if evolved { 7.0 } else { 3.0 });
                     }
                     StrikeFx::Blast(kind) => {
                         let color = if kind == BlastKind::Ice { rgb(0x6fb8ff) } else { rgb(0xff8a3d) };
@@ -237,7 +225,6 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                             radius,
                             0.5,
                         );
-                        fx.shake(8.0);
                     }
                     StrikeFx::Taiji => fx.push(OneShot::Taiji, p, radius, 1.0),
                     StrikeFx::Ult => {
@@ -248,7 +235,6 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                             1.0,
                         );
                         fx.flash(rgb(0xffd98a), 0.55);
-                        fx.shake(12.0);
                     }
                     StrikeFx::None => {}
                 }
@@ -256,7 +242,6 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             SimEvent::SweepStrike { pos, dir } => {
                 let tip = pos + Vec2::new(dir.cos(), dir.sin()) * 110.0;
                 fx.push(OneShot::Blast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
-                fx.shake(6.0);
             }
             // 回光、九转金丹：金色的大环，震屏
             SimEvent::LastStand { pos } | SimEvent::Revived { pos } => {
@@ -268,7 +253,6 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                     0.9,
                 );
                 fx.flash(rgb(0xfff1c2), 0.45);
-                fx.shake(10.0);
             }
             SimEvent::RainStrike { pos } => {
                 fx.push(OneShot::Blast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
@@ -282,16 +266,12 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             SimEvent::LanternLit { .. } => fx.flash(rgb(0xffd98a), 0.25),
             SimEvent::EncircleWarn { .. } => fx.flash(rgb(0x1a1020), 0.35),
             SimEvent::PlayerHurt { .. } => {
-                fx.shake(5.0);
                 fx.flash(rgb(0xff3b30), 0.18);
             }
-            SimEvent::Surge => fx.shake(6.0),
             SimEvent::BossArrived { .. } => {
-                fx.shake(10.0);
                 fx.flash(rgb(0xff6b5a), 0.2);
             }
             SimEvent::BossDefeated { .. } => {
-                fx.shake(12.0);
                 fx.flash(rgb(0xfff1c2), 0.6);
             }
             SimEvent::Pickup { kind: PickupKind::Bell, .. } => fx.flash(rgb(0x5fd4c4), 0.15),
@@ -812,7 +792,7 @@ pub(crate) fn collect_fx(
                 rgb(0xff6b5a).with_alpha(0.9),
             );
             glow.add(f.spark, p.extend(layer::EMISSIVE + 0.1), Vec2::splat(1.2), now * 3.0, rgb(0xffe0c0));
-            glow.light(&frames, &db, p, (rgb(0xff6b5a).with_alpha(0.6), 36.0));
+            glow.light(&frames, &db, p, (rgb(0xff6b5a).with_alpha(0.45), 30.0));
         }
     }
 
@@ -950,24 +930,14 @@ pub(crate) fn spawn_flash(mut commands: Commands) {
     ));
 }
 
-/// 震屏衰减、闪屏淡出。镜头跟随主角之后再加上抖动。
-pub(crate) fn apply_shake_flash(
-    time: Res<Time>,
+/// 闪屏淡出，跟着镜头。
+pub(crate) fn apply_flash(
+    time: Res<Time<Real>>,
     mut fx: ResMut<FxState>,
-    mut cam: Single<&mut Transform, With<MainCamera>>,
+    cam: Single<&Transform, With<MainCamera>>,
     mut flash: Query<(&mut Sprite, &mut Transform), (With<ScreenFlash>, Without<MainCamera>)>,
 ) {
-    let dt = time.delta_secs();
-    if fx.shake > 0.05 {
-        let s = fx.shake;
-        let off = Vec2::new(fx.rng.range_f32(-s, s), fx.rng.range_f32(-s, s)) * 0.6;
-        cam.translation.x += off.x;
-        cam.translation.y += off.y;
-        fx.shake *= (-dt * 10.0).exp();
-    } else {
-        fx.shake = 0.0;
-    }
-    let a = (fx.flash.alpha() - dt * 3.0).max(0.0);
+    let a = (fx.flash.alpha() - time.delta_secs() * 3.0).max(0.0);
     fx.flash.set_alpha(a);
     for (mut sprite, mut tf) in &mut flash {
         sprite.color = fx.flash;

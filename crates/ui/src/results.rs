@@ -7,6 +7,7 @@ use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
 use lantern_platform::{Actions, Profile};
 use lantern_sim::omens::{omen_good, omen_name};
 use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
+use lantern_view::Dawn;
 use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
@@ -15,25 +16,35 @@ use crate::skin::Skin;
 use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(OnEnter(RunState::Over), spawn)
-        .add_systems(Update, input.run_if(in_state(RunState::Over)));
+    app.add_systems(OnEnter(RunState::Over), record)
+        .add_systems(Update, (spawn, slide_in, input).chain().run_if(in_state(RunState::Over)));
 }
 
-fn mmss(secs: f32) -> String {
-    let s = secs.max(0.0) as u32;
-    format!("{:02}:{:02}", s / 60, s % 60)
+/// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
+#[derive(Resource)]
+struct Pending {
+    recorded: Recorded,
+    counts: bool,
+    /// 还要等多久（现实秒）
+    wait: f32,
 }
 
-fn spawn(
+/// 结算界面浮现的动画：底色淡入，纸卷从下面滑上来。
+#[derive(Component)]
+struct SlideIn {
+    t: f32,
+    /// 底色最后的不透明度：天明时浅一些，晨光还看得见
+    alpha: f32,
+}
+
+#[derive(Component)]
+struct SlidePanel;
+
+fn record(
     mut commands: Commands,
     content: Res<GameContent>,
-    fonts: Res<Fonts>,
-    db: Res<AtlasDb>,
-    skin: Res<Skin>,
     flow: Res<Flow>,
     setup: Res<RunSetup>,
-    arsenal: Res<Arsenal>,
-    build: Res<Build>,
     playback: Option<Res<ReplayPlayback>>,
     mut profile: ResMut<Profile>,
 ) {
@@ -51,6 +62,66 @@ fn spawn(
     } else {
         Recorded::default()
     };
+    let bench = matches!(setup.mode, lantern_sim::RunMode::Bench { .. });
+    let wait = if bench {
+        0.0
+    } else if r.won {
+        0.7
+    } else {
+        1.6
+    };
+    commands.insert_resource(Pending { recorded, counts, wait });
+}
+
+fn slide_in(
+    time: Res<Time<Real>>,
+    mut roots: Query<(&mut SlideIn, &mut BackgroundColor)>,
+    mut panels: Query<&mut UiTransform, With<SlidePanel>>,
+) {
+    for (mut s, mut bg) in &mut roots {
+        s.t += time.delta_secs().min(0.1);
+        let k = (s.t / 0.6).min(1.0);
+        let ease = 1.0 - (1.0 - k).powi(3);
+        bg.0.set_alpha(s.alpha * ease);
+        for mut tf in &mut panels {
+            tf.translation = bevy::ui::Val2::px(0.0, 36.0 * (1.0 - ease));
+        }
+    }
+}
+
+fn mmss(secs: f32) -> String {
+    let s = secs.max(0.0) as u32;
+    format!("{:02}:{:02}", s / 60, s % 60)
+}
+
+fn spawn(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    content: Res<GameContent>,
+    fonts: Res<Fonts>,
+    db: Res<AtlasDb>,
+    skin: Res<Skin>,
+    flow: Res<Flow>,
+    setup: Res<RunSetup>,
+    arsenal: Res<Arsenal>,
+    build: Res<Build>,
+    dawn: Res<Dawn>,
+    pending: Option<ResMut<Pending>>,
+    profile: Res<Profile>,
+) {
+    let Some(mut pending) = pending else { return };
+    // 天明：等夜色褪完再开始计时
+    if dawn.t.is_some() && dawn.progress() < 1.0 {
+        return;
+    }
+    pending.wait -= time.delta_secs();
+    if pending.wait > 0.0 {
+        return;
+    }
+    commands.remove_resource::<Pending>();
+    let (recorded, counts) = (std::mem::take(&mut pending.recorded), pending.counts);
+    let c = &content.0;
+    let Some(r) = flow.result.clone() else { return };
     let boss_name = c.enemies.iter().find(|e| e.boss.is_some()).map_or("夜主", |e| e.name.as_str());
     let sub = if r.won {
         format!("存活 {}　·　击败「{boss_name}」", mmss(r.seconds))
@@ -72,7 +143,8 @@ fn spawn(
                 row_gap: px(14),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.8)),
+            BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.0)),
+            SlideIn { t: 0.0, alpha: if r.won { 0.45 } else { 0.8 } },
         ))
         .with_children(|root| {
             root.spawn(overlay_vignette(&skin));
@@ -86,6 +158,8 @@ fn spawn(
                     ..default()
                 },
                 skin.image("panel"),
+                SlidePanel,
+                UiTransform::from_translation(bevy::ui::Val2::px(0.0, 36.0)),
             ))
             .with_children(|p| {
                 results_body(
@@ -285,10 +359,11 @@ fn results_body(
 fn input(
     actions: Res<Actions>,
     playback: Option<Res<ReplayPlayback>>,
+    pending: Option<Res<Pending>>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    // 观看回放时由回放界面处理
-    if playback.is_some() {
+    // 观看回放时由回放界面处理；结算还没浮现时不响应，免得倒下时手上的按键直接跳过
+    if playback.is_some() || pending.is_some() {
         return;
     }
     if actions.confirm || actions.back {

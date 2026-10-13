@@ -4,19 +4,25 @@
 
 use std::path::PathBuf;
 
-use bevy::camera::ScalingMode;
+use bevy::camera::{Hdr, ScalingMode};
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 
 use lantern_sim::{AppState, GameContent, Player, Pos, PrevPos};
 
 mod actors;
 pub mod atlas;
+mod atmos;
+mod camera;
 mod effects;
 mod fx;
 mod ground;
 pub mod lighting;
+mod particles;
 
 use atlas::AtlasDb;
+pub use atmos::{DAWN_LEN, Dawn};
+pub use camera::Feel;
 
 /// 图层的 z 基数（从下到上）。同一图层内再按脚底 y 微调。
 pub mod layer {
@@ -56,11 +62,18 @@ impl Plugin for ViewPlugin {
             .init_resource::<actors::GlowPool>()
             .init_resource::<actors::GlowRequests>()
             .init_resource::<fx::FxState>()
+            .init_resource::<camera::Rig>()
+            .init_resource::<actors::LanternFlare>()
+            .init_resource::<atmos::Atmos>()
+            .init_resource::<Dawn>()
+            .init_resource::<particles::ParticleClock>()
+            .init_resource::<Feel>()
             .add_systems(
                 Startup,
                 (
                     setup_camera,
                     load_atlas,
+                    particles::setup_particles,
                     (
                         actors::build_frames,
                         fx::build_fx_frames,
@@ -73,28 +86,41 @@ impl Plugin for ViewPlugin {
             )
             .add_systems(
                 OnEnter(AppState::Run),
-                (ground::spawn_paper, effects::spawn_number_pool, fx::spawn_flash, fx::reset_fx),
+                (
+                    ground::spawn_paper,
+                    effects::spawn_number_pool,
+                    fx::spawn_flash,
+                    fx::reset_fx,
+                    camera::reset_rig,
+                    particles::reset_particles,
+                    atmos::reset_atmos,
+                ),
             )
             .add_systems(
                 OnExit(AppState::Run),
-                (actors::reset_pools, ground::clear_decor, lighting::hide_darkness),
+                (actors::reset_pools, ground::clear_decor, lighting::hide_darkness, camera::reset_rig),
             )
             .add_observer(actors::dress_player)
-            .add_systems(Update, lighting::resize_lightmap)
+            .add_systems(Update, (lighting::resize_lightmap, apply_bloom))
             .add_systems(
                 Update,
                 (
                     interpolate,
                     actors::animate_hero,
-                    follow_camera,
-                    fx::apply_shake_flash,
-                    lighting::follow_main_camera,
+                    camera::camera_events,
+                    camera::update_rig,
+                    camera::follow_main_camera,
+                    fx::apply_flash,
                     actors::collect_draws,
                     fx::read_fx_events,
                     fx::collect_fx,
                     actors::hero_glow,
                     effects::read_events,
                     effects::update_effects,
+                    particles::particle_events,
+                    atmos::atmos_events,
+                    atmos::update_atmos,
+                    particles::update_particles,
                     actors::apply_pools,
                     actors::apply_glow,
                     ground::scroll_paper,
@@ -109,10 +135,36 @@ impl Plugin for ViewPlugin {
 #[derive(Component)]
 pub struct MainCamera;
 
+/// 辉光：只让比较亮的东西（灯火、法术、自发光）往外晕开，纸面和墨色不受影响。
+fn bloom() -> Bloom {
+    Bloom {
+        intensity: 0.16,
+        low_frequency_boost: 0.5,
+        low_frequency_boost_curvature: 0.9,
+        high_pass_frequency: 1.0,
+        prefilter: BloomPrefilter { threshold: 1.0, threshold_softness: 0.25 },
+        composite_mode: BloomCompositeMode::Additive,
+        ..Bloom::NATURAL
+    }
+}
+
+/// 设置里的辉光开关。
+fn apply_bloom(mut commands: Commands, feel: Res<Feel>, cam: Single<(Entity, Has<Bloom>), With<MainCamera>>) {
+    let (e, has) = *cam;
+    if feel.bloom && !has {
+        commands.entity(e).insert(bloom());
+    } else if !feel.bloom && has {
+        commands.entity(e).remove::<Bloom>();
+    }
+}
+
 fn setup_camera(mut commands: Commands, content: Res<GameContent>) {
     commands.spawn((
         Camera2d,
         MainCamera,
+        Hdr,
+        atmos::base_vignette(),
+        bevy::post_process::effect_stack::ChromaticAberration { intensity: 0.0, ..default() },
         IsDefaultUiCamera,
         bevy::core_pipeline::tonemapping::Tonemapping::None,
         Projection::Orthographic(OrthographicProjection {
@@ -152,12 +204,4 @@ fn interpolate(fixed: Res<Time<Fixed>>, mut q: Query<(&Pos, &PrevPos, &mut Trans
         let s = to_screen(p);
         tf.translation = Vec3::new(s.x, s.y, actors::sort_z(layer::ACTORS, p.y));
     }
-}
-
-fn follow_camera(
-    player: Single<&Transform, (With<Player>, Without<MainCamera>)>,
-    mut cam: Single<&mut Transform, With<MainCamera>>,
-) {
-    cam.translation.x = player.translation.x;
-    cam.translation.y = player.translation.y;
 }

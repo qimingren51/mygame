@@ -21,11 +21,17 @@ pub(crate) struct Toast {
 }
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Run), spawn_stack)
+    app.init_resource::<Muted>()
+        .add_systems(OnEnter(AppState::Run), spawn_stack)
         .add_systems(Update, (read_events, fade).chain().run_if(in_state(AppState::Run)));
 }
 
+/// 天明之后不再出提示。
+#[derive(Resource, Default)]
+struct Muted(bool);
+
 fn spawn_stack(mut commands: Commands) {
+    commands.insert_resource(Muted(false));
     commands.spawn((
         ToastStack,
         DespawnOnExit(AppState::Run),
@@ -61,12 +67,23 @@ fn read_events(
     outbox: Res<SimOutbox>,
     stack: Single<Entity, With<ToastStack>>,
     toasts: Query<(Entity, &Toast)>,
+    mut muted: ResMut<Muted>,
 ) {
     let c = &content.0;
     let mut count = toasts.iter().count();
     let mut oldest: Vec<(Entity, f32)> = toasts.iter().map(|(e, t)| (e, t.t)).collect();
     oldest.sort_by(|a, b| b.1.total_cmp(&a.1));
     for ev in &outbox.0 {
+        // 夜主伏诛之后让给天明的演出，清掉现有的提示，也不再出新的
+        if matches!(ev, SimEvent::BossDefeated { .. }) {
+            for (e, _) in &toasts {
+                commands.entity(e).despawn();
+            }
+            muted.0 = true;
+        }
+        if muted.0 {
+            continue;
+        }
         let m = match *ev {
             SimEvent::Elite { kind, count } => {
                 let e = &c.enemies[kind as usize];
@@ -89,13 +106,7 @@ fn read_events(
             }
             SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
             SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
-            SimEvent::BossArrived { kind } => msg(
-                format!("夜主降临 · {}", c.enemies[kind as usize].name),
-                "击败它，迎来天明",
-                hex("#FF6B5A"),
-                true,
-            ),
-            SimEvent::BossDefeated { .. } => msg("夜主伏诛", "天将破晓", hex("#FFF1C2"), true),
+            // 夜主登场、伏诛有专门的演出（moments.rs）
             SimEvent::Resonance { element, tier } => {
                 let e = c.element(element);
                 let name = ["一阶", "二阶", "三阶", "极境"].get(tier as usize - 1).copied().unwrap_or("");
@@ -111,18 +122,15 @@ fn read_events(
             SimEvent::Reaction { kind, first, label, .. } if label => {
                 let r = &c.elements.reactions[kind as usize];
                 let color = element_color(c, r.b);
-                if first {
-                    msg(format!("反应 · {}", r.name), r.desc.clone(), color, true)
-                } else {
-                    msg(r.name.clone(), "", color, false)
-                }
+                // 之后同种反应的名字在发生的地方飘出来（画面层），不占提示栏
+                if first { msg(format!("反应 · {}", r.name), r.desc.clone(), color, true) } else { None }
             }
             SimEvent::Sheng { index } => {
                 let s = &c.elements.sheng[index as usize];
                 msg(format!("相生 · {}", s.name), s.desc.clone(), element_color(c, s.to), false)
             }
             SimEvent::Taiji => msg(c.elements.taiji.name.clone(), c.elements.taiji.desc.clone(), PAPER, true),
-            SimEvent::Combo { count } => msg(format!("连斩 {count}"), "", hex("#FFD98A"), count >= 500),
+            // 连斩里程碑在屏幕左边竖着题字（moments.rs）
             SimEvent::UltReady => msg("燃灯已满", "E / 手柄 Y　释放", hex("#FFD98A"), false),
             SimEvent::Encounter { kind, .. } => {
                 let k = &c.events.kinds[kind as usize];

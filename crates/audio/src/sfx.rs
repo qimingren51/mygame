@@ -39,6 +39,25 @@ pub struct Sfx {
     pub shield: StaticSoundData,
     pub victory: StaticSoundData,
     pub defeat: StaticSoundData,
+    /// 盖章：朱砂印落下的闷响（共鸣跨阶、反应初见）
+    pub stamp: StaticSoundData,
+    /// 濒死的心跳（“咚、咚”）
+    pub heart: StaticSoundData,
+    /// 夜主倒下：低锣、太鼓、长长的余响
+    pub boss_down: StaticSoundData,
+    /// 天明：编钟和晨鸟
+    pub dawn: StaticSoundData,
+    /// 精英倒下：一声沉的
+    pub elite_down: StaticSoundData,
+}
+
+/// 一声鸟叫：两三个快速上滑的短音。
+fn chirp(b: &mut Buf, t: f32, base: f32, vol: f32) {
+    for k in 0..3 {
+        let t = t + k as f32 * 0.075;
+        let f = base * (1.0 + k as f32 * 0.06);
+        b.osc(Wave::Sine, f, t, 0.055, vol, Some((f * 1.45, 0.045)), 0.004);
+    }
 }
 
 fn noise(kind: FilterKind, freq: f32) -> NoiseOpts {
@@ -61,9 +80,12 @@ impl Sfx {
     pub fn new() -> Self {
         Sfx {
             hit: render(0.1, |b| b.noise(0.0, 0.035, 0.07, noise(FilterKind::High, 3300.0))),
-            crit: render(0.15, |b| {
-                b.noise(0.0, 0.035, 0.08, noise(FilterKind::High, 4200.0));
-                b.wood(0.0, 0.05, 1400.0);
+            // 暴击：清脆的金属声（docs/GAMEPLAY.md 第 14 节）
+            crit: render(0.5, |b| {
+                b.noise(0.0, 0.03, 0.09, noise(FilterKind::High, 5200.0));
+                b.bell(2350.0, 0.0, 0.05, 0.35);
+                b.sine(4980.0, 0.0, 0.12, 0.025);
+                b.wood(0.0, 0.05, 1500.0);
             }),
             kill: render(0.2, |b| b.osc(Wave::Sine, 285.0, 0.0, 0.12, 0.1, Some((85.0, 0.12)), 0.004)),
             gem: render(0.25, |b| {
@@ -199,9 +221,13 @@ impl Sfx {
                 b.bell(pent(14), 0.0, 0.1, 1.2);
                 b.bell(pent(17), 0.08, 0.08, 1.2);
             }),
-            combo: render(1.4, |b| {
-                b.bell(pent(17), 0.0, 0.1, 1.0);
-                b.bell(pent(20), 0.06, 0.08, 1.2);
+            // 连斩：鼓点 + 钟
+            combo: render(1.8, |b| {
+                b.drum(0.0, 0.5, 92.0);
+                b.drum(0.14, 0.42, 92.0);
+                b.drum(0.3, 0.65, 70.0);
+                b.bell(pent(17), 0.3, 0.1, 1.0);
+                b.bell(pent(20), 0.36, 0.08, 1.2);
             }),
             event: render(2.2, |b| {
                 b.bell(pent(13), 0.0, 0.12, 1.6);
@@ -232,6 +258,48 @@ impl Sfx {
                     b.pluck(pent(d), 0.1 + at, 0.18, 1.4);
                 }
                 b.gong(73.4, 2.4, 0.2);
+            }),
+            stamp: render(0.9, |b| {
+                b.drum(0.0, 0.5, 62.0);
+                b.wood(0.0, 0.14, 330.0);
+                b.noise(0.0, 0.07, 0.22, noise(FilterKind::Low, 380.0));
+            }),
+            heart: render(0.6, |b| {
+                b.osc(Wave::Sine, 64.0, 0.0, 0.13, 0.55, Some((42.0, 0.12)), 0.004);
+                b.osc(Wave::Sine, 60.0, 0.2, 0.11, 0.38, Some((40.0, 0.1)), 0.004);
+                b.noise(0.0, 0.05, 0.06, noise(FilterKind::Low, 180.0));
+            }),
+            boss_down: render(6.0, |b| {
+                b.gong(41.2, 0.0, 0.3);
+                b.drum(0.0, 0.5, 52.0);
+                b.drum(0.35, 0.32, 48.0);
+                b.noise(
+                    0.0,
+                    1.6,
+                    0.18,
+                    NoiseOpts { kind: FilterKind::Low, freq: 600.0, slide: Some(60.0), ..Default::default() },
+                );
+            }),
+            dawn: render(6.0, |b| {
+                for (i, d) in [15, 19, 22].into_iter().enumerate() {
+                    b.bell(pent(d), i as f32 * 0.45, 0.17 - i as f32 * 0.025, 3.2);
+                }
+                let birds = [
+                    (1.1, 3400.0),
+                    (1.6, 3900.0),
+                    (1.85, 3600.0),
+                    (2.5, 4200.0),
+                    (3.1, 3500.0),
+                    (3.4, 4000.0),
+                ];
+                for (t, f) in birds {
+                    chirp(b, t, f, 0.045);
+                }
+            }),
+            elite_down: render(1.2, |b| {
+                b.drum(0.0, 0.55, 75.0);
+                b.osc(Wave::Sine, 220.0, 0.0, 0.3, 0.12, Some((70.0, 0.3)), 0.004);
+                b.noise(0.0, 0.25, 0.12, noise(FilterKind::Low, 700.0));
             }),
             defeat: render(4.0, |b| {
                 let notes = [(14, 0.0), (12, 0.45), (11, 0.9), (9, 1.35), (5, 1.9)];
@@ -267,6 +335,39 @@ impl Instruments {
             wood: render(0.15, |b| b.wood(0.0, 1.0, 900.0)),
             drum: render(0.6, |b| b.drum(0.0, 1.0, 100.0)),
             gong: render(3.6, |b| b.gong(49.0, 0.0, 1.0)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 每个音效都要有声音，而且基本不削波（合成时已经夹在 ±1，碰到边就是削波了）。
+    #[test]
+    fn sounds_are_audible_and_not_clipped() {
+        let s = Sfx::new();
+        let all: [(&str, &StaticSoundData); 14] = [
+            ("crit", &s.crit),
+            ("combo", &s.combo),
+            ("stamp", &s.stamp),
+            ("heart", &s.heart),
+            ("boss_down", &s.boss_down),
+            ("dawn", &s.dawn),
+            ("elite_down", &s.elite_down),
+            ("hit", &s.hit),
+            ("kill", &s.kill),
+            ("ult", &s.ult),
+            ("evolution", &s.evolution),
+            ("victory", &s.victory),
+            ("warn_big", &s.warn_big),
+            ("hurt", &s.hurt),
+        ];
+        for (name, sound) in all {
+            let peak = sound.frames.iter().map(|f| f.left.abs()).fold(0.0, f32::max);
+            let clipped = sound.frames.iter().filter(|f| f.left.abs() >= 0.999).count();
+            assert!(peak > 0.01, "{name} 没有声音（峰值 {peak}）");
+            assert!(clipped <= 2, "{name} 削波 {clipped} 个采样（峰值 {peak}）");
         }
     }
 }
