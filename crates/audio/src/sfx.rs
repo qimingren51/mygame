@@ -65,13 +65,22 @@ fn noise(kind: FilterKind, freq: f32) -> NoiseOpts {
 }
 
 fn chest(n: usize) -> StaticSoundData {
-    render(0.6 + n as f32 * 0.3 + 1.5, |b| {
+    let gold = n >= 5;
+    render(0.6 + n as f32 * 0.3 + if gold { 2.6 } else { 1.5 }, |b| {
         for i in 0..6 {
             let i = i as f32;
             b.wood(i * 0.045 * (1.0 - i * 0.08), 0.1, 700.0 + i * 60.0);
         }
         for i in 0..n {
             b.bell(pent(12 + i as i32 * 2), 0.35 + i as f32 * 0.28, 0.14, 1.4);
+        }
+        // 五连：五声之后一记金光，D 和 A 的空五度从低往高扫上去，落定（界面上整卷泛金光）
+        if gold {
+            let t = 0.35 + n as f32 * 0.28;
+            for (j, d) in [10, 13, 15, 18].into_iter().enumerate() {
+                b.bell(pent(d), t + j as f32 * 0.04, 0.09, 2.4);
+            }
+            b.sine(pent(20), t + 0.12, 0.9, 0.025);
         }
     })
 }
@@ -347,7 +356,8 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 14] = [
+        let all: [(&str, &StaticSoundData); 15] = [
+            ("chest5", &s.chest[2]),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),
