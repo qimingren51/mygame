@@ -1,4 +1,4 @@
-//! 地面：宣纸平铺和散落的装饰（草、墨晕、落叶、石子、芦苇、竹、山石、石灯笼）。
+//! 地面：宣纸平铺和散落的装饰（草、墨晕、落叶、石子、芦苇、竹、山石、石灯笼，青丘的竹叶、苔点、狐灯……）。
 //!
 //! 世界按 512 单位分块，每块的装饰由“本局种子 + 块坐标”决定，同一个种子每次看到的地面一样。
 //! 这是纯画面的随机，不消耗模拟的随机流。只保留镜头附近的块。
@@ -70,45 +70,63 @@ pub(crate) struct Decor {
     chunks: HashMap<IVec2, Vec<Entity>>,
 }
 
+/// 道具的挂点（图集像素，相对脚底，y 向下）换算成世界坐标（y 向上）。
+fn socket(db: &AtlasDb, asset: &str, name: &str) -> Option<Vec2> {
+    let &[x, y] = db.assets.get(asset)?.sockets.get(name)?.get("idle")?.get("S")?.first()?;
+    Some(Vec2::new(x, -y) / db.px_per_unit)
+}
+
+/// 自己会发光的道具（狐灯、狐仙祠）：光色、光半径写在素材 meta 里，光放在 glow 挂点。
+fn glowing_prop(db: &AtlasDb, asset: &str, per_chunk: f32) -> Option<DecorKind> {
+    let frame = db.find(&format!("{asset}/idle_S_00"))?;
+    let meta = db.assets.get(asset)?;
+    let color = crate::fx::hex(meta.light_color.as_deref()?);
+    Some(DecorKind {
+        frames: vec![frame],
+        per_chunk,
+        upright: true,
+        light: Some(PropLight {
+            offset: socket(db, asset, "glow").unwrap_or(Vec2::new(0.0, 20.0)),
+            color: color.with_alpha(0.85),
+            radius: meta.light_radius_units.unwrap_or(80.0),
+            emit: db.find(&format!("{asset}/idle_S_00_emit")),
+        }),
+    })
+}
+
 pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
     let frames = |names: &[&str]| names.iter().filter_map(|n| db.find(n)).collect::<Vec<_>>();
-    let kinds = vec![
-        DecorKind {
-            frames: frames(&["ground/grass_0", "ground/grass_1", "ground/grass_2", "ground/grass_3"]),
-            per_chunk: 14.0,
-            upright: false,
-            light: None,
-        },
-        DecorKind {
-            frames: frames(&["ground/wash_0", "ground/wash_1", "ground/wash_2"]),
-            per_chunk: 1.2,
-            upright: false,
-            light: None,
-        },
-        DecorKind {
-            frames: frames(&["ground/leaves_0", "ground/leaves_1", "ground/pebbles_0", "ground/pebbles_1"]),
-            per_chunk: 3.0,
-            upright: false,
-            light: None,
-        },
-        DecorKind {
-            frames: frames(&[
-                "ground/reed_0",
-                "ground/reed_1",
-                "ground/reed_2",
-                "ground/bamboo_0",
-                "ground/bamboo_1",
-            ]),
-            per_chunk: 1.5,
-            upright: true,
-            light: None,
-        },
-        DecorKind {
-            frames: frames(&["rock_a/idle_S_00", "rock_b/idle_S_00", "rock_c/idle_S_00"]),
-            per_chunk: 0.8,
-            upright: true,
-            light: None,
-        },
+    let flat = |names: &[&str], per_chunk: f32| DecorKind {
+        frames: frames(names),
+        per_chunk,
+        upright: false,
+        light: None,
+    };
+    let upright = |names: &[&str], per_chunk: f32| DecorKind {
+        frames: frames(names),
+        per_chunk,
+        upright: true,
+        light: None,
+    };
+    // P0 只有青丘（竹海、狐村，docs/LORE.md 6.1）：通用的草、墨晕之外，铺青丘的落竹叶、苔点、
+    // 青绿晕染、狐爪印、竹笋，偶尔有石狐、狐仙祠和狐灯。加地区时按地区挑
+    let mut kinds = vec![
+        flat(&["ground/grass_0", "ground/grass_1", "ground/grass_2", "ground/grass_3"], 10.0),
+        flat(&["ground/wash_0", "ground/wash_1", "ground/wash_2"], 0.8),
+        flat(&["ground/qq_wash_0", "ground/qq_wash_1"], 1.0),
+        flat(&["ground/leaves_0", "ground/leaves_1", "ground/pebbles_0", "ground/pebbles_1"], 1.5),
+        flat(&["ground/qq_bamboo_leaves_0", "ground/qq_bamboo_leaves_1", "ground/qq_bamboo_leaves_2"], 4.0),
+        flat(&["ground/qq_moss_0", "ground/qq_moss_1"], 2.0),
+        flat(&["ground/qq_fox_tracks"], 0.4),
+        upright(&["ground/reed_0", "ground/reed_1", "ground/reed_2"], 0.6),
+        upright(&["ground/bamboo_0", "ground/bamboo_1"], 1.2),
+        upright(&["ground/qq_shoots_0", "ground/qq_shoots_1"], 1.0),
+        upright(&["stone_fox/idle_S_00"], 0.2),
+    ];
+    kinds.extend(glowing_prop(&db, "fox_shrine", 0.1));
+    kinds.extend(glowing_prop(&db, "fox_lanterns", 0.12));
+    kinds.extend([
+        upright(&["rock_a/idle_S_00", "rock_b/idle_S_00", "rock_c/idle_S_00"], 0.8),
         // 地上装饰的石灯笼默认熄灭（长夜里的石灯笼都熄了，要守灯人去点，docs/LORE.md 11.5）；
         // 图集里没有熄灭版时用点亮的那张，带光
         match db.find("stone_lantern_dark/idle_S_00") {
@@ -118,22 +136,14 @@ pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
                 per_chunk: 0.25,
                 upright: true,
                 light: Some(PropLight {
-                    // 灯火挂点（图集像素，相对脚底，y 向下）
-                    offset: db
-                        .assets
-                        .get("stone_lantern")
-                        .and_then(|a| a.sockets.get("flame"))
-                        .and_then(|s| s.get("idle"))
-                        .and_then(|s| s.get("S"))
-                        .and_then(|s| s.first())
-                        .map_or(Vec2::new(0.0, 20.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit),
+                    offset: socket(&db, "stone_lantern", "flame").unwrap_or(Vec2::new(0.0, 20.0)),
                     color: Color::srgba(1.0, 0.784, 0.565, 0.9),
                     radius: 120.0,
                     emit: db.find("stone_lantern/idle_S_00_emit"),
                 }),
             },
         },
-    ];
+    ]);
     commands.insert_resource(Decor {
         kinds: kinds.into_iter().filter(|k| !k.frames.is_empty()).collect(),
         chunks: HashMap::new(),

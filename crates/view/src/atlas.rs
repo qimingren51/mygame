@@ -78,6 +78,11 @@ pub struct AssetMeta {
     /// 平时循环的动作（有好几个动作的素材才写，DESIGN 第 15 节）
     #[serde(default)]
     pub default_anim: Option<String>,
+    /// 发光道具的光色（#RRGGBB）和建议的光半径（世界单位），例如狐灯、狐仙祠
+    #[serde(default)]
+    pub light_color: Option<String>,
+    #[serde(default)]
+    pub light_radius_units: Option<f32>,
 }
 
 impl AssetMeta {
