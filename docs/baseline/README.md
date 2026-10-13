@@ -13,7 +13,8 @@
 | `m25_kite.patch` | 第一版风筝机器人和燃灯充能修正（已收进 de0af3b；它只扫了妖物池的前 count 个槽位，有 bug，留作记录） | 第 2.6 节 |
 | `m25_p0_tuning.patch` | 第一版的 P0 数据校准（已收进 de0af3b） | 第 2.6、4、9 节 |
 | `m25_kite_skill.patch` | 给 `lantern-tools kite` 加 `--skill novice\|regular\|expert` 三档手法 | 第 2.6 节 |
-| `m25_p0_pressure.patch` | 疾影加快、合围收紧（数据） | 第 2.6 节 |
+| `m25_p0_pressure.patch` | 疾影加快、合围收紧（数据，已收进 d454bb2） | 第 2.6 节 |
+| `m25_p0_tiers.patch` | 第三轮的更倍率：二更伤害 × 1.7；三更生命 × 2、伤害 × 2.4 | 第 2.6、9 节 |
 
 ## 复现原型实测
 
