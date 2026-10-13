@@ -156,6 +156,7 @@ pub(crate) fn burn_trail(
     en: Res<Enemies>,
     mut trail: ResMut<Trail>,
     mut hits: ResMut<HitQueue>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
     mut seen: Local<Vec<u32>>,
 ) {
@@ -176,6 +177,7 @@ pub(crate) fn burn_trail(
     seen.clear();
     let r = c.player.charms.trail_radius;
     for e in &trail.list {
+        bamboo.circle(e.pos, r, dmg);
         found.clear();
         grid.query_circle(&en, e.pos.x, e.pos.y, r, &mut found);
         for &i in found.iter() {
