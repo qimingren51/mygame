@@ -130,6 +130,7 @@ impl Plugin for ViewPlugin {
                         feedback::prepare_feedback,
                         interpolate,
                         actors::animate_hero,
+                        camera::advance_rig_time,
                         camera::camera_events,
                         camera::update_rig,
                         camera::follow_main_camera,

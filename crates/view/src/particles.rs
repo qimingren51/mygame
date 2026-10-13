@@ -243,6 +243,7 @@ pub(crate) struct P {
     pub drag: f32,
     pub accel: Vec2,
     pub t: f32,
+    fresh: bool,
     pub life: f32,
     /// 起止大小（相对贴图原始尺寸）
     pub size: (f32, f32),
@@ -276,6 +277,7 @@ impl P {
             drag: 0.0,
             accel: Vec2::ZERO,
             t: 0.0,
+            fresh: true,
             life,
             size: (1.0, 1.0),
             stretch: 1.0,
@@ -539,6 +541,10 @@ pub(crate) fn update_particles(
     let drop = parts.f.drop;
     let mut landed: Vec<Vec2> = Vec::new();
     parts.list.retain_mut(|p| {
+        // 新生粒子先画接触位置，不能消耗事件到达前已经过去的时间。
+        if p.fresh {
+            return true;
+        }
         p.t += dt;
         if p.t >= p.life {
             return false;
@@ -572,7 +578,9 @@ pub(crate) fn update_particles(
         };
         parts.spawn(p);
     }
-    for p in &parts.list {
+    for p in &mut parts.list {
+        // 落地墨点在本轮推进后生成，也从第一次绘制后开始计时。
+        p.fresh = false;
         let u = p.t / p.life;
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
@@ -849,6 +857,83 @@ const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newborn_particles_keep_initial_age_and_pose_then_follow_virtual_time() {
+        for dt in [1.0 / 60.0, 1.0 / 30.0, 0.8] {
+            let mut app = App::new();
+            let mut parts = pool();
+            let p = P {
+                vel: Vec2::new(100.0, 20.0),
+                accel: Vec2::Y * 10.0,
+                drag: 2.0,
+                h: 5.0,
+                vh: 40.0,
+                rot: 0.3,
+                spin: 3.0,
+                ..P::new(FrameId(0), Vec2::new(10.0, 20.0), 0.3, layer::ACTORS)
+            };
+            parts.spawn(p);
+            app.insert_resource(parts)
+                .init_resource::<Time>()
+                .init_resource::<Feedback>()
+                .init_resource::<Pools>()
+                .init_resource::<GlowRequests>()
+                .add_systems(Update, update_particles);
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+            let first = app.world().resource::<Particles>().list[0];
+            assert_eq!(first.t, 0.0);
+            assert_eq!(first.pos, p.pos);
+            assert_eq!(first.vel, p.vel);
+            assert_eq!((first.h, first.vh, first.rot), (p.h, p.vh, p.rot));
+            let draws = &app.world().resource::<Pools>().fx;
+            assert_eq!(draws.len(), 1);
+            assert_eq!(draws[0].pos, (p.pos + Vec2::Y * p.h).extend(p.z));
+            assert_eq!(draws[0].color.alpha(), 1.0);
+
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::ZERO);
+            app.update();
+            assert_eq!(app.world().resource::<Particles>().list[0].t, 0.0);
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(20));
+            app.update();
+            let next = app.world().resource::<Particles>().list[0];
+            assert!((next.t - 0.02).abs() < 1e-6);
+            assert_ne!(next.pos, p.pos);
+            assert_ne!(next.h, p.h);
+            assert_ne!(next.rot, p.rot);
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+            app.update();
+            assert_eq!(app.world().resource::<Particles>().len(), 0);
+        }
+    }
+
+    #[test]
+    fn splats_created_during_update_start_aging_after_their_first_draw() {
+        let mut app = App::new();
+        let mut parts = pool();
+        parts.spawn(P {
+            fresh: false,
+            splat: true,
+            h: 0.1,
+            vh: -20.0,
+            ..P::new(FrameId(0), Vec2::ZERO, 1.0, layer::ACTORS)
+        });
+        app.insert_resource(parts)
+            .init_resource::<Time>()
+            .init_resource::<Feedback>()
+            .init_resource::<Pools>()
+            .init_resource::<GlowRequests>()
+            .add_systems(Update, update_particles);
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(20));
+        app.update();
+        let parts = app.world().resource::<Particles>();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts.list[0].t, 0.0);
+        assert!(parts.list[0].z < layer::SHADOW);
+        app.update();
+        assert!((app.world().resource::<Particles>().list[0].t - 0.02).abs() < 1e-6);
+    }
 
     fn pool() -> Particles {
         let frame = FrameId(0);
