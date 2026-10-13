@@ -19,6 +19,13 @@ pub fn pent(i: i32) -> f32 {
     ROOT * 2f32.powf(o as f32 + s / 12.0)
 }
 
+/// 青丘 E 角调式（E G A C D）：主音为角，不能把 D 羽调仅改名。
+pub fn jiao(i: i32) -> f32 {
+    const STEPS: [i32; 5] = [0, 3, 5, 8, 10];
+    let semitones = i.div_euclid(5) * 12 + STEPS[i.rem_euclid(5) as usize];
+    164.813_78 * 2f32.powf(semitones as f32 / 12.0)
+}
+
 #[derive(Clone, Copy)]
 pub enum Wave {
     Sine,
@@ -207,6 +214,31 @@ impl Buf {
         self.sine(freq * 3.0, t, decay * 0.25, vol * 0.12);
         let opts = NoiseOpts { freq: (freq * 4.0).min(8000.0), q: 2.0, ..Default::default() };
         self.noise(t, 0.03, vol * 0.25, opts);
+    }
+
+    /// 箫式长音：柔和吹口、弱偶次泛音、滤过的气息和延迟进入的微颤音。
+    /// 独立的持续/释音包络让长句真正唱出来，不用把拨弦拉长冒充吹管。
+    pub fn flute(&mut self, freq: f32, t0: f32, dur: f32, vol: f32) {
+        let start = (t0 * SR) as usize;
+        let mut breath = Biquad::new();
+        breath.set(FilterKind::Band, freq * 2.8, 0.65);
+        let mut phase = 0.0;
+        let attack = 0.09f32.min(dur * 0.22);
+        let release = 0.24f32.min(dur * 0.35);
+        for k in 0..(dur * SR) as usize {
+            let i = start + k;
+            if i >= self.data.len() {
+                break;
+            }
+            let t = k as f32 / SR;
+            let vibrato = (t / 0.6).min(1.0) * (TAU * 4.7 * t).sin() * 0.0018;
+            phase = (phase + freq / SR * (1.0 + vibrato)).fract();
+            let p = phase * TAU;
+            let tone = p.sin() + 0.16 * (2.0 * p).sin() + 0.055 * (3.0 * p).sin();
+            let air = breath.run(self.noise.next()) * 0.09;
+            let envelope = (t / attack).min(1.0) * ((dur - t) / release).min(1.0);
+            self.data[i] += (tone + air) * vol * envelope * envelope;
+        }
     }
 
     /// 编钟：非整数倍泛音。
