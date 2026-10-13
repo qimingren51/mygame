@@ -324,9 +324,15 @@ pub(crate) fn update_effects(
     }
     for (prop, tf) in &props {
         let base = tf.translation.truncate();
-        glow.light(&frames, &db, base + prop.offset, (prop.color, prop.radius));
+        let scale = tf.scale.truncate();
+        glow.light(
+            &frames,
+            &db,
+            base + prop.offset * scale,
+            (prop.color, prop.radius * scale.max_element().sqrt()),
+        );
         if let Some(emit) = prop.emit {
-            glow.emit(emit, base, false, Color::WHITE);
+            glow.add(emit, base.extend(layer::EMISSIVE), scale, 0.0, Color::WHITE);
         }
     }
 }

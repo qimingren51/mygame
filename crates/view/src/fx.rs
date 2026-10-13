@@ -359,7 +359,9 @@ pub(crate) fn collect_fx(
     mut fx: ResMut<FxState>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
+    mut foreground: ResMut<crate::foreground::Safety>,
 ) {
+    foreground.clear();
     let dt = time.delta_secs();
     fx.time += dt;
     let now = fx.time;
@@ -715,6 +717,9 @@ pub(crate) fn collect_fx(
             }
         }
         let red = rgb(0xff4a3a);
+        for sw in &bs.sweeps {
+            foreground.protect(to_screen(sw.origin), sw.radius);
+        }
         for sw in bs.sweeps.iter().filter(|_| f.sector.is_some()) {
             // 扇形预警：轮廓按扇形朝向旋转、地面压扁；填充层从顶点往外放大，填满时落下
             let Some((outline, fill)) = f.sector else { break };
@@ -735,7 +740,7 @@ pub(crate) fn collect_fx(
                 scale,
                 rot,
                 color: red.with_alpha(0.35 + 0.3 * u),
-                ..Draw::new(outline, o.extend(layer::GROUND + 0.95))
+                ..Draw::new(outline, o.extend(layer::DANGER))
             });
             pools.fx.push(Draw {
                 scale: scale * u,
@@ -743,7 +748,7 @@ pub(crate) fn collect_fx(
                 color: red.with_alpha(0.25 + 0.25 * u),
                 ..Draw::new(fill, o.extend(layer::GROUND + 0.96))
             });
-            glow.add(outline, o.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
+            glow.add(outline, o.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(0.15 + 0.35 * u));
         }
         for sw in bs.sweeps.iter().filter(|_| f.sector.is_none()) {
             // 没有扇形贴图时：沿扇形铺几排光点，越接近落下越亮
@@ -756,7 +761,7 @@ pub(crate) fn collect_fx(
                     let w = sw.origin + Vec2::new(a.cos(), a.sin()) * rr;
                     glow.add(
                         f.glow,
-                        to_screen(w).extend(layer::EMISSIVE - 2.0),
+                        to_screen(w).extend(layer::DANGER + 0.01),
                         Vec2::splat(0.35),
                         0.0,
                         red.with_alpha(0.25 + 0.5 * u),
@@ -765,11 +770,12 @@ pub(crate) fn collect_fx(
             }
         }
         for d in &bs.drops {
+            foreground.protect(to_screen(d.pos), d.radius + 12.0);
             let u = (d.t / d.warn).clamp(0.0, 1.0);
             let k = px(f.ring, d.radius * 2.0);
             glow.add(
                 f.ring,
-                to_screen(d.pos).extend(layer::EMISSIVE - 2.0),
+                to_screen(d.pos).extend(layer::DANGER + 0.01),
                 Vec2::new(k, k * FLAT) * (1.2 - 0.2 * u),
                 0.0,
                 red.with_alpha(0.3 + 0.6 * u),
@@ -792,6 +798,7 @@ pub(crate) fn collect_fx(
             let len = ch.speed * ch.duration + en.r[i];
             let start = to_screen(at);
             let screen_dir = to_screen(at + dir * len) - start;
+            foreground.protect(start + screen_dir * 0.5, len * 0.5 + en.r[i]);
             let rot = screen_dir.y.atan2(screen_dir.x);
             // 锁定以后线停下、变亮，给玩家躲的信号
             let locked = en.charge_t[i] <= ch.lock;
@@ -810,9 +817,9 @@ pub(crate) fn collect_fx(
                         scale,
                         rot,
                         color: red.with_alpha(line_a),
-                        ..Draw::new(id, pos.extend(layer::GROUND + 0.97))
+                        ..Draw::new(id, pos.extend(layer::DANGER))
                     });
-                    glow.add(id, pos.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                    glow.add(id, pos.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
                 }
             } else {
                 // 没有专用贴图时借剑光拖尾：锚点在右端，放在终点、朝冲锋方向
@@ -823,9 +830,9 @@ pub(crate) fn collect_fx(
                     scale,
                     rot,
                     color: red.with_alpha(line_a),
-                    ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
+                    ..Draw::new(f.trail, end.extend(layer::DANGER))
                 });
-                glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                glow.add(f.trail, end.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
             }
             let pulse = 0.6 + 0.4 * (now * 18.0).sin();
             glow.add(

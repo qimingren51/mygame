@@ -19,7 +19,7 @@ use lantern_sim::{
 };
 
 use crate::atlas::{AnimMeta, AtlasDb, FrameId};
-use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER};
+use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER, SceneLights, SurfaceDraws, contact_shadow};
 use crate::{MainCamera, layer, to_screen};
 
 /// 8 个方向，顺序与图集一致：E SE S SW W NW N NE（y 向下，角度顺时针增加）。
@@ -405,6 +405,21 @@ pub(crate) struct HeroView {
     light: Option<Color>,
 }
 
+impl HeroView {
+    /// 受光、影子和光照图共用同一个逐帧挂点。
+    pub(crate) fn lamp(&self, db: &AtlasDb) -> (Vec2, Color) {
+        let socket = db
+            .assets
+            .get("hero")
+            .and_then(|a| a.sockets.get("lantern"))
+            .and_then(|s| s.get(self.anim))
+            .and_then(|s| s.get(DIRS[self.dir]))
+            .and_then(|s| s.get(self.frame))
+            .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
+        (socket, self.light.map_or(LANTERN_LIGHT.0, |c| mix(LANTERN_LIGHT.0, c, 0.45)))
+    }
+}
+
 /// 叠在主角身上的灯笼（逐帧跟着主角的动作和朝向）。
 #[derive(Component)]
 pub(crate) struct HeroLantern;
@@ -564,6 +579,7 @@ pub(crate) fn hero_glow(
     q: Query<(&Transform, &HeroView, Option<&lantern_sim::Health>)>,
     mut flare: ResMut<LanternFlare>,
     mut glow: ResMut<GlowRequests>,
+    mut surfaces: ResMut<SurfaceDraws>,
 ) {
     let picked = outbox.0.iter().filter(|e| matches!(e, lantern_sim::SimEvent::GemPicked { .. })).count();
     flare.flare = (flare.flare + picked as f32 * 0.12).min(1.0);
@@ -584,21 +600,16 @@ pub(crate) fn hero_glow(
         .map_or(0.0, |h| ((0.3 - h.hp / h.max.max(1.0)) / 0.2).clamp(0.0, 1.0));
     let gutter = low * (0.08 * (t * 11.0).sin() + 0.06 * (t * 23.7).sin() - 0.1).min(0.0);
     let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.flare + gutter;
-    let (warm, base) = LANTERN_LIGHT;
+    let (_, base) = LANTERN_LIGHT;
     let radius =
         stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker * ignite;
     for (tf, view, _) in &q {
         // 灯的光色淡淡地染进暖光里，纸面不至于整片变色
-        let color = view.light.map_or(warm, |c| mix(warm, c, 0.45));
+        let (socket, color) = view.lamp(&db);
         let pos = tf.translation.truncate();
-        let socket = db
-            .assets
-            .get("hero")
-            .and_then(|a| a.sockets.get("lantern"))
-            .and_then(|s| s.get(view.anim))
-            .and_then(|s| s.get(DIRS[view.dir]))
-            .and_then(|s| s.get(view.frame))
-            .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
+        if let Some(frame) = view.frame_id {
+            surfaces.0.push(Draw::new(frame, tf.translation));
+        }
         glow.light(&frames, &db, pos + socket, (color, radius));
         if let Some(emit) = view.emit {
             glow.emit(emit, pos, false, Color::WHITE);
@@ -760,6 +771,8 @@ pub(crate) fn collect_draws(
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
+    lights: Res<SceneLights>,
+    mut surfaces: ResMut<SurfaceDraws>,
 ) {
     glow.0.clear();
     let pools = &mut *pools;
@@ -832,16 +845,31 @@ pub(crate) fn collect_draws(
         } else {
             Vec2::ONE
         };
+        if moves.content.0.enemies[en.kind[i] as usize].boss.is_some() && !flashing {
+            surfaces.0.push(Draw {
+                flip,
+                color,
+                scale: squash,
+                ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
+            });
+        }
         pools.enemy.push(Draw {
             flip,
             color,
             scale: squash,
             ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
         });
+        let radius = db.frame(frames.shadow).size.x * f.shadow_scale * 0.5;
+        let source = if moves.content.0.enemies[en.kind[i] as usize].boss.is_some() {
+            lights.dominant(s)
+        } else {
+            lights.sources[0]
+        };
+        let (offset, stretch) = contact_shadow(s, source, radius);
         pools.enemy_shadow.push(Draw {
-            scale: Vec2::splat(f.shadow_scale),
-            color: Color::srgba(1.0, 1.0, 1.0, 0.7 * fade),
-            ..Draw::new(frames.shadow, Vec3::new(s.x, s.y, layer::SHADOW))
+            scale: stretch * f.shadow_scale,
+            color: Color::srgba(1.0, 1.0, 1.0, if f.floating { 0.42 } else { 0.62 } * fade),
+            ..Draw::new(frames.shadow, (s + offset).extend(layer::SHADOW))
         });
         if let Some(&emit) = anim.emit.get(k) {
             glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade));
@@ -917,6 +945,24 @@ pub(crate) fn collect_draws(
             lights += 1;
             glow.light(&frames, &db, pos, (gem_light, 24.0 + 6.0 * size as f32));
         }
+    }
+}
+
+/// 主角的影子独立于身体动画：原地翻身或闪避不会把贴地椭圆一起抬起。
+pub(crate) fn update_hero_shadow(
+    lights: Res<SceneLights>,
+    hero: Res<HeroFrames>,
+    frames: Res<ActorFrames>,
+    db: Res<AtlasDb>,
+    player: Single<&Transform, With<Player>>,
+    mut q: Query<(&mut Transform, &mut Sprite), (With<HeroShadow>, Without<Player>)>,
+) {
+    let pos = player.translation.truncate();
+    let size = db.frame(frames.shadow).size * hero.shadow_scale;
+    let (offset, stretch) = contact_shadow(pos, lights.dominant(pos), size.x * 0.5);
+    for (mut tf, mut sprite) in &mut q {
+        tf.translation = (pos + offset).extend(layer::SHADOW);
+        sprite.custom_size = Some(size * stretch);
     }
 }
 
