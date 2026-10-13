@@ -40,6 +40,7 @@ cargo run --release -p lantern-tools -- bench  # 模拟跑分（不开窗口，�
 cargo run --release -p lantern-tools -- replay <文件>  # 校验回放：逐秒核对状态哈希
 cargo run --release -p lantern-tools -- balance --runs 20  # 机器人批量跑局看平衡（加 --god 无敌跑完整局）
 cargo run --release -p lantern-tools -- kite --runs 100 --tier 1 --meta none  # 会躲的机器人测胜率（--meta none/half/full）
+cargo run --release -p lantern-tools -- kite --runs 200 --meta half --school all --csv out/  # 流派机器人对照（--combo all 跑反应组合），写 CSV
 cargo run --release -p lantern-tools -- record --god --out bot.ron  # 机器人打一局存成回放（看后期画面用）
 cargo run -- --replay <文件> [--from <秒>]     # 在游戏里观看回放（--from 跳到第几秒）
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希

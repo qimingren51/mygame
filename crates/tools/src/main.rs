@@ -5,6 +5,7 @@
 //!   cargo run --release -p lantern-tools -- replay <回放文件>
 //!   cargo run --release -p lantern-tools -- balance [--runs 20] [--seed 1] [--god]
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--tier 1] [--meta none|half|full] [--lamp <id>]
+//!       [--skill novice|regular|expert|circle] [--school <流派>|all] [--combo <反应>|all] [--csv <目录>]
 //!   cargo run --release -p lantern-tools -- record [--seed 1] [--god] [--out bot.ron]
 
 use std::path::PathBuf;
@@ -28,14 +29,19 @@ const USAGE: &str = "用法：
       机器人自动选卡、绕圈走位打整局，统计等级曲线、击杀、进化时间、伤害来源占比、存活时间
       （--god：主角无敌，看成长曲线和夜主战）
   lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full]
-      [--skill novice|regular|expert] [--lamp <灯>] [--record <文件>]
-      会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、夜主战、
-      场上妖物数、燃灯间隔、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
+      [--skill novice|regular|expert|circle] [--lamp <灯>] [--school <流派>|all] [--combo <反应>|all]
+      [--csv <目录>] [--jobs <线程数>] [--record <文件>]
+      会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、共鸣、夜主战、
+      清场时间、场上妖物数、燃灯间隔、死因、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
+      --skill circle：不躲，绕圈走；--school：流派机器人（剑修、百鸟、寒川、星火、不动、身法、照夜、太极）；
+      --combo：组合机器人，凑某个反应（反应的 ID 或名字）；all 表示全部跑一遍，最后打一张对照表
+      --csv：写出 timeline.csv（每 30 秒一行）和 runs.csv（每局一行）
   lantern-tools record [--seed <种子>] [--god] [--out <文件>]
       机器人打一局，存成回放；用 lantern --replay <文件> --from <秒> 在游戏里看任意时刻的画面
 环境变量 LANTERN_DATA 可以换一份数据目录（比较两套数值时用）";
 
 mod kite;
+mod school;
 
 fn data_dir() -> PathBuf {
     std::env::var_os("LANTERN_DATA")

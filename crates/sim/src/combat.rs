@@ -29,7 +29,7 @@ use crate::run::{Director, Progress, SimView};
 use crate::spatial::Grid;
 use crate::stats::{ActiveTrigger, Effects, Stats};
 use crate::weapons::volley::Shots;
-use crate::{GameContent, Health, HitKind, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
+use crate::{GameContent, Health, HitKind, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 const TAU: f32 = std::f32::consts::TAU;
 
@@ -944,8 +944,7 @@ pub(crate) fn process_deaths(
                 if let Some(i) = crate::spawn::spawn_enemy(c, &stats, &mut en, sp, d.kind, at.x, at.y, minute)
                 {
                     en.tags[i] |= TAG_CHILD;
-                    en.hp[i] = d.max_hp * hp;
-                    en.max_hp[i] = en.hp[i];
+                    en.set_hp(i, d.max_hp * hp);
                     en.r[i] = d.radius * radius;
                 }
             }
@@ -1029,6 +1028,7 @@ pub(crate) fn hurt_player(
     health: &mut Health,
     pos: Vec2,
     amount: f32,
+    by: HurtBy,
     ctx: &mut HurtCtx,
 ) -> bool {
     if player.iframe > 0.0 || player.dash_t > 0.0 || health.hp <= 0.0 {
@@ -1063,7 +1063,7 @@ pub(crate) fn hurt_player(
     ctx.survival.hurts += 1;
     ctx.survival.taken += dmg.min(health.hp);
     health.hp = (health.hp - dmg).max(0.0);
-    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg });
+    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg, by });
     if health.hp <= 0.0 && !try_rescue(ctx.content, s, ctx.survival, player, health, pos, ctx.outbox) {
         ctx.outbox.0.push(SimEvent::PlayerDied);
     }

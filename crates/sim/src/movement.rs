@@ -14,7 +14,7 @@ use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{Effects, Stats};
-use crate::{GameContent, Health, Player, Pos, SimOutbox, SimRng, Tick};
+use crate::{GameContent, Health, HurtBy, Player, Pos, SimOutbox, SimRng, Tick};
 
 /// 以玩家为中心重建空间网格。
 pub(crate) fn build_grid(
@@ -197,13 +197,16 @@ pub(crate) fn update_enemies(
             en.cloaked[i] = !reveal.covers(Vec2::new(x, y));
         }
 
-        let contact = match &def.charge {
-            Some(ch) if en.charge[i] == CHARGE_DASH => en.damage[i] * ch.damage_mult,
-            _ => en.damage[i],
+        let kind = en.kind[i];
+        let (contact, by) = match &def.charge {
+            Some(ch) if en.charge[i] == CHARGE_DASH => {
+                (en.damage[i] * ch.damage_mult, HurtBy::Charge { kind })
+            }
+            _ => (en.damage[i], HurtBy::Contact { kind }),
         };
         if d < en.r[i] + pr
             && contact > 0.0
-            && hurt_player(&mut player, &mut health, pos.0, contact, &mut ctx)
+            && hurt_player(&mut player, &mut health, pos.0, contact, by, &mut ctx)
             && thorn > 0.0
             && ctx.rng.chance(thorn)
         {

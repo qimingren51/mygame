@@ -50,6 +50,7 @@ pub fn spawn_enemy(
     en.r[i] = def.radius;
     en.hp[i] = def.hp * hp_scale;
     en.max_hp[i] = en.hp[i];
+    en.spawned_hp += f64::from(en.hp[i]);
     en.speed[i] = def.speed * rng.range_f32(lo, hi) * speed_scale;
     en.damage[i] = def.damage * run.enemy_damage_scale.at(minute) * stats.get(Stat::EnemyDamage);
     en.wob[i] = rng.range_f32(0.0, TAU);
@@ -270,8 +271,8 @@ pub(crate) fn update_spawns(
                 if let Some(i) = spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m) {
                     // 灯阵完整：夜主少两成生命
                     if lanterns.complete() {
-                        en.hp[i] *= content.run.lanterns.boss_hp;
-                        en.max_hp[i] = en.hp[i];
+                        let hp = en.hp[i] * content.run.lanterns.boss_hp;
+                        en.set_hp(i, hp);
                     }
                     director.boss = Some(en.handle(i));
                     director.boss_mult = *spawn_mult;
