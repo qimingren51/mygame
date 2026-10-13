@@ -28,7 +28,8 @@
         (when: Cleared(1), text: "狐狸也怕黑吗？那它们现在有灯了吗？"),
     ]),
     (id: "teller", name: "说书人", lines: [
-        (when: Idle, text: "坐。白泽图缺了好些页，你路上见着什么妖，回来讲给我听。"),
+        (when: Idle, text: "白泽说，天下的妖物有一万一千五百二十种。我这儿才记了几页。"),
+        (when: Idle, text: "妖怕两样：一是光，二是被人叫出名字。"),
         (when: First, text: "坐。白泽图缺了好些页，你路上见着什么妖，回来讲给我听。"),
         (when: Reaction, text: "两系一撞，就有新花样。见得多了，自然就懂。"),
         (when: Cleared(1), text: "梦有深有浅。你要往深处走，就别等天明。"),
