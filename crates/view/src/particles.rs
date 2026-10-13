@@ -20,14 +20,13 @@ use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
+use crate::atmos::Atmos;
 use crate::fx::hex;
+use crate::palette::{self, GOLD, INK};
 use crate::{Feel, layer, to_screen};
 
 /// 同时存在的粒子上限；满了就不再生成（先来的先演完）
 const CAP: usize = 1800;
-
-/// 墨色（普通混合的粒子）
-pub(crate) const INK: Color = Color::srgb(0.07, 0.075, 0.1);
 
 // ---------------------------------------------------------------------------
 // 程序生成的贴图
@@ -469,6 +468,8 @@ impl Particles {
 pub(crate) fn update_particles(
     time: Res<Time>,
     feel: Res<Feel>,
+    atmos: Res<Atmos>,
+    dawn: Res<crate::Dawn>,
     mut parts: ResMut<Particles>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
@@ -517,7 +518,14 @@ pub(crate) fn update_particles(
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
         let fade_out = if u > 0.5 { 1.0 - (u - 0.5) / 0.5 } else { 1.0 };
-        let alpha = p.color.alpha() * fade_in * fade_out * fade_out.sqrt();
+        // 只收装饰粒子的光；攻击预警在 fx 中绘制，不受此处衰减影响。
+        let gain = if p.glow {
+            (1.0 - (1.0 - palette::TIDE_PARTICLE_GAIN) * atmos.tide())
+                * (1.0 - (1.0 - palette::DAWN_PARTICLE_GAIN) * dawn.progress())
+        } else {
+            1.0 - dawn.progress()
+        };
+        let alpha = p.color.alpha() * fade_in * fade_out * fade_out.sqrt() * gain;
         if alpha <= 0.01 {
             continue;
         }
@@ -547,19 +555,18 @@ pub(crate) fn reset_particles(mut parts: ResMut<Particles>) {
 // 模拟事件 → 粒子
 // ---------------------------------------------------------------------------
 
-/// 五行的光色（火星、余烬）。
+/// 五行光色来自国画颜料及灯光的兑色，比例见 style.py 的运行时色板。
 pub(crate) fn element_glow(e: Option<Element>) -> Color {
     match e {
-        Some(Element::Metal) => Color::srgb(1.0, 0.93, 0.7),
-        Some(Element::Wood) => Color::srgb(0.5, 1.0, 0.7),
-        Some(Element::Water) => Color::srgb(0.5, 0.78, 1.0),
-        Some(Element::Fire) => Color::srgb(1.0, 0.6, 0.25),
-        Some(Element::Earth) => Color::srgb(0.95, 0.72, 0.42),
-        None => Color::srgb(1.0, 0.9, 0.72),
+        Some(Element::Metal) => GOLD,
+        Some(Element::Wood) => palette::WOOD_GLOW,
+        Some(Element::Water) => palette::WATER_GLOW,
+        Some(Element::Fire) => palette::FLAME_LIGHT,
+        Some(Element::Earth) => palette::EARTH_GLOW,
+        None => palette::LANTERN_LIGHT,
     }
 }
 
-const GOLD: Color = Color::srgb(1.0, 0.82, 0.42);
 /// 一帧里最多为多少次命中、击杀放粒子（其余照样有伤害数字和墨点）
 const HIT_BUDGET: u32 = 28;
 const KILL_BUDGET: u32 = 32;
@@ -693,7 +700,7 @@ pub(crate) fn particle_events(
                 match fx {
                     StrikeFx::Seal { evolved } => {
                         let k = if evolved { 1.6 } else { 1.0 };
-                        parts.dust(at, (10.0 * k) as u32, radius / 40.0 * k, DUST);
+                        parts.dust(at, (10.0 * k) as u32, radius / 40.0 * k, palette::DUST.with_alpha(0.4));
                         parts.ink(at, (6.0 * k) as u32, 1.3 * k);
                     }
                     StrikeFx::Blast(b) => {
@@ -701,7 +708,7 @@ pub(crate) fn particle_events(
                         parts.sparks(at, c, 8, 200.0, Vec2::ZERO);
                         parts.embers(at, radius * 0.4, c, 4);
                     }
-                    StrikeFx::Quake => parts.dust(at, 18, radius / 40.0, DUST),
+                    StrikeFx::Quake => parts.dust(at, 18, radius / 40.0, palette::DUST.with_alpha(0.4)),
                     StrikeFx::Ult => {
                         for _ in 0..60 {
                             let d = Vec2::from_angle(parts.rng.range_f32(0.0, TAU));
@@ -720,13 +727,13 @@ pub(crate) fn particle_events(
                     at + d * 80.0,
                     d.y.atan2(d.x) - PI * 0.5,
                     1.4,
-                    Color::srgb(1.0, 0.3, 0.22).with_alpha(0.8),
+                    palette::WARNING.with_alpha(0.8),
                     true,
                 );
-                parts.dust(at + d * 90.0, 16, 2.0, DUST);
+                parts.dust(at + d * 90.0, 16, 2.0, palette::DUST.with_alpha(0.4));
             }
             SimEvent::Dash { .. } => {
-                parts.dust(hero_at, 6, 0.8, DUST);
+                parts.dust(hero_at, 6, 0.8, palette::DUST.with_alpha(0.4));
                 clock.trail_cd = 0.0;
             }
             SimEvent::LevelUp { .. } => {
@@ -751,7 +758,7 @@ pub(crate) fn particle_events(
         clock.stride += moved;
         if clock.stride > 26.0 {
             clock.stride = 0.0;
-            parts.dust(hero_at + Vec2::new(0.0, 2.0), 2, 0.45, DUST.with_alpha(0.3));
+            parts.dust(hero_at + Vec2::new(0.0, 2.0), 2, 0.45, palette::DUST.with_alpha(0.3));
         }
     }
     // 灯火飘火星
@@ -777,7 +784,7 @@ pub(crate) fn particle_events(
         && let Some(f) = view.frame_id
     {
         clock.trail_cd = 0.028;
-        let tint = Color::srgb(0.55, 0.78, 1.0).with_alpha(0.4);
+        let tint = palette::WATER_GLOW.with_alpha(0.4);
         // 主角和灯笼叠层是同画布、同锚点的两帧，残影两张一起画
         for frame in std::iter::once(f).chain(view.lantern_id) {
             parts.ghost(frame, hero_at, false, tint, 0.3, true, layer::EMISSIVE - 0.3);
@@ -785,5 +792,5 @@ pub(crate) fn particle_events(
     }
 }
 
-const DUST: Color = Color::srgba(0.42, 0.38, 0.32, 0.4);
-const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
+// 火线和灯火余烬同用美术火焰色，不再另设偏橙的亮色。
+const FIRE: Color = palette::FLAME_LIGHT;

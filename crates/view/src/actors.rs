@@ -20,13 +20,13 @@ use lantern_sim::{
 
 use crate::atlas::{AnimMeta, AtlasDb, FrameId};
 use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER};
-use crate::{MainCamera, layer, to_screen};
+use crate::{Dawn, MainCamera, layer, palette, to_screen};
 
 /// 8 个方向，顺序与图集一致：E SE S SW W NW N NE（y 向下，角度顺时针增加）。
 const DIRS: [&str; 8] = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
 
 /// 光源颜色与半径（docs/PORTING-NOTES.md 第 7 节）
-pub(crate) const LANTERN_LIGHT: (Color, f32) = (Color::srgb(1.0, 0.878, 0.69), 200.0);
+pub(crate) const LANTERN_LIGHT: (Color, f32) = (palette::LANTERN_LIGHT, 200.0);
 
 /// 两种颜色按比例混合（t = 0 时是 a）。
 fn mix(a: Color, b: Color, t: f32) -> Color {
@@ -37,9 +37,9 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
         a.blue + (b.blue - a.blue) * t,
     )
 }
-const FLAME_LIGHT: (Color, f32) = (Color::srgba(1.0, 0.66, 0.376, 0.75), 64.0);
-const GEM_LIGHT: Color = Color::srgba(0.75, 0.94, 1.0, 0.5);
-const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
+const FLAME_LIGHT: (Color, f32) = (palette::FLAME_LIGHT, 64.0);
+const GEM_LIGHT: Color = palette::SOUL_LIGHT;
+const GEM_COLOR: Color = palette::SOUL_LIGHT;
 const FROZEN_TINT: Color = Color::srgb(0.62, 0.82, 1.0);
 /// 五行印记的颜色，按 金、木、水、火、土
 const MARK_TINT: [Color; 5] = [
@@ -557,6 +557,7 @@ pub(crate) struct LanternFlare {
 pub(crate) fn hero_glow(
     time: Res<Time>,
     real: Res<Time<Real>>,
+    dawn: Res<Dawn>,
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     stats: Option<Res<Stats>>,
@@ -571,7 +572,7 @@ pub(crate) fn hero_glow(
     flare.intro += real.delta_secs().min(0.1);
     // 开局点灯：1.4 秒里光圈从一点铺到全亮，起头那一下火光最亮
     let ignite = {
-        let k = (flare.intro / 1.4).clamp(0.0, 1.0);
+        let k = (flare.intro / palette::IGNITE_LEN).clamp(0.0, 1.0);
         0.12 + 0.88 * (1.0 - (1.0 - k).powi(3))
     };
     let spark = (1.0 - flare.intro / 0.8).clamp(0.0, 1.0);
@@ -585,6 +586,7 @@ pub(crate) fn hero_glow(
     let gutter = low * (0.08 * (t * 11.0).sin() + 0.06 * (t * 23.7).sin() - 0.1).min(0.0);
     let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.flare + gutter;
     let (warm, base) = LANTERN_LIGHT;
+    let day_gain = 1.0 - (1.0 - palette::DAWN_LANTERN_GAIN) * dawn.progress();
     let radius =
         stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker * ignite;
     for (tf, view, _) in &q {
@@ -599,9 +601,9 @@ pub(crate) fn hero_glow(
             .and_then(|s| s.get(DIRS[view.dir]))
             .and_then(|s| s.get(view.frame))
             .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
-        glow.light(&frames, &db, pos + socket, (color, radius));
+        glow.light(&frames, &db, pos + socket, (color.with_alpha(day_gain), radius));
         if let Some(emit) = view.emit {
-            glow.emit(emit, pos, false, Color::WHITE);
+            glow.emit(emit, pos, false, Color::WHITE.with_alpha(day_gain));
         }
         // 灯笼周围一团暖光晕，拾魂火时更亮
         glow.add(
@@ -609,7 +611,7 @@ pub(crate) fn hero_glow(
             (pos + socket).extend(layer::EMISSIVE + 0.2),
             Vec2::splat(frames.light_scale(&db, 14.0 + 10.0 * flare.flare + 22.0 * spark)),
             0.0,
-            Color::srgb(1.0, 0.78, 0.45).with_alpha((0.22 + 0.5 * flare.flare + 0.7 * spark).min(1.0)),
+            palette::LANTERN_LIGHT.with_alpha((0.22 + 0.5 * flare.flare + 0.7 * spark).min(1.0) * day_gain),
         );
     }
 }
@@ -889,14 +891,14 @@ pub(crate) fn collect_draws(
                 scale: Vec2::splat(slot.size / 10.0),
                 ..Draw::new(frames.flames[fk], s.extend(sort_z(layer::WEAPONS, p.y)))
             });
-            glow.light(&frames, &db, s, FLAME_LIGHT);
+            glow.light(&frames, &db, s, (FLAME_LIGHT.0.with_alpha(0.75), FLAME_LIGHT.1));
         }
     }
 
     // 魂火：自发光，靠近的同时是光源。满地魂火时每颗的光弱一些，免得画面糊成一片光斑
     let mut lights = 0;
     let crowd = (60.0 / gems.n.max(1) as f32).clamp(0.3, 1.0);
-    let gem_light = GEM_LIGHT.with_alpha(GEM_LIGHT.alpha() * crowd);
+    let gem_light = GEM_LIGHT.with_alpha(0.5 * crowd);
     for i in 0..gems.n {
         let p = Vec2::new(gems.px[i], gems.py[i]).lerp(Vec2::new(gems.x[i], gems.y[i]), a);
         let s = to_screen(p);

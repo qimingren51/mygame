@@ -28,7 +28,7 @@ use lantern_sim::{
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
-use crate::{MainCamera, layer, to_screen};
+use crate::{MainCamera, layer, palette, to_screen};
 
 /// 透视：地面上的圆画成扁圆
 const FLAT: f32 = 0.62;
@@ -319,7 +319,7 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                 fx.flash(rgb(0xffd98a), if count >= 5 { 0.3 } else { 0.15 })
             }
             SimEvent::EncircleWarn { warn } => {
-                fx.flash(rgb(0x1a1020), 0.35);
+                fx.flash(palette::INK, 0.35);
                 fx.mist = Some((0.0, warn.max(0.3), None));
             }
             SimEvent::Encircle { .. } => {
@@ -354,12 +354,14 @@ pub(crate) fn collect_fx(
     frames: Res<ActorFrames>,
     f: Res<FxFrames>,
     res: FxSources,
+    atmos: Res<crate::atmos::Atmos>,
     player: Single<(&Pos, &PrevPos, &Player)>,
     cam: Single<(&Transform, &Projection), With<MainCamera>>,
     mut fx: ResMut<FxState>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
 ) {
+    let decor_gain = 1.0 - (1.0 - palette::TIDE_PARTICLE_GAIN) * atmos.tide();
     let dt = time.delta_secs();
     fx.time += dt;
     let now = fx.time;
@@ -409,7 +411,7 @@ pub(crate) fn collect_fx(
                 pools.fx.push(Draw {
                     scale,
                     rot,
-                    color: rgb(0x0b0710).with_alpha(0.85 * a),
+                    color: palette::INK.with_alpha(0.85 * a),
                     ..Draw::new(id, pos.extend(layer::NUMBERS - 10.0))
                 });
                 glow.add(
@@ -417,7 +419,7 @@ pub(crate) fn collect_fx(
                     pos.extend(layer::EMISSIVE),
                     Vec2::splat(blob * 1.2 / db.frame(f.glow).size.x),
                     0.0,
-                    rgb(0xff4a3a).with_alpha(0.12 * a),
+                    palette::WARNING.with_alpha(0.12 * a),
                 );
             }
         }
@@ -426,6 +428,7 @@ pub(crate) fn collect_fx(
         }
     }
 
+    let decor_start = glow.0.len();
     // ---- 照见圈：地上一圈淡淡的墨线；灯芯的灯焰带在圈边跳动
     if let Some(reveal) = &res.reveal
         && reveal.radius > 0.0
@@ -585,6 +588,11 @@ pub(crate) fn collect_fx(
         }
     }
 
+    // 妖潮时收低玩家地面装饰光；灯与后面绘制的敌方预警不在这段范围内。
+    for g in &mut glow.0[decor_start..] {
+        g.color = g.color.with_alpha(g.color.alpha() * decor_gain);
+    }
+
     // ---- 石灯笼：没点亮的暗着，站在旁边时一圈进度；点亮后成为光区
     if let (Some(lanterns), Some((frame, emit))) = (&res.lanterns, f.stone) {
         let def = &content.0.run.lanterns;
@@ -714,7 +722,7 @@ pub(crate) fn collect_fx(
                 }
             }
         }
-        let red = rgb(0xff4a3a);
+        let red = palette::WARNING;
         for sw in bs.sweeps.iter().filter(|_| f.sector.is_some()) {
             // 扇形预警：轮廓按扇形朝向旋转、地面压扁；填充层从顶点往外放大，填满时落下
             let Some((outline, fill)) = f.sector else { break };
@@ -780,7 +788,7 @@ pub(crate) fn collect_fx(
     // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮，锁定后最亮）
     if let Some(en) = &res.enemies {
         let c = &content.0;
-        let red = rgb(0xff4a3a);
+        let red = palette::WARNING;
         for i in en.iter_alive() {
             if en.charge[i] != CHARGE_WINDUP {
                 continue;
@@ -957,6 +965,7 @@ pub(crate) fn collect_fx(
         }
     }
 
+    let decor_start = glow.0.len();
     // ---- 石印：预警和下落
     if let Some(seals) = &res.seals {
         for s in &seals.0 {
@@ -1062,6 +1071,10 @@ pub(crate) fn collect_fx(
         );
     }
 
+    for g in &mut glow.0[decor_start..] {
+        g.color = g.color.with_alpha(g.color.alpha() * decor_gain);
+    }
+
     // ---- 拾取物
     if let Some(pickups) = &res.pickups {
         for it in &pickups.0 {
@@ -1124,6 +1137,8 @@ pub(crate) fn collect_fx(
                     glow.light(&frames, &db, p, (color.with_alpha(0.7 * fade), radius * 2.2));
                 }
                 EventKind::Rift { .. } => {
+                    // 裂隙沿用白色发光遮罩，朱砂借火焰提亮；不再染成内容提示用的紫色。
+                    let color = palette::WARNING;
                     if let Some(frame) = f.rift {
                         pools.fx.push(Draw {
                             color: Color::WHITE.with_alpha(fade),
@@ -1131,7 +1146,8 @@ pub(crate) fn collect_fx(
                         });
                     }
                     if let Some(frame) = f.rift_glow {
-                        let pulse = 0.6 + 0.3 * (now * 3.0).sin();
+                        let pulse = palette::WARNING_ALPHA_MIN
+                            + (1.0 - palette::WARNING_ALPHA_MIN) * (0.5 + 0.5 * (now * 3.0).sin());
                         glow.add(
                             frame,
                             p.extend(layer::EMISSIVE - 3.0),

@@ -11,23 +11,25 @@ use bevy::post_process::bloom::Bloom;
 use bevy::post_process::effect_stack::{ChromaticAberration, Vignette};
 use bevy::prelude::*;
 
+use lantern_content::EventKind;
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{Director, Enemies, Health, HurtBy, Player, Pos, SimEvent, SimOutbox};
+use lantern_sim::encounters::Encounters;
+use lantern_sim::{Director, Enemies, GameContent, Health, HurtBy, Player, Pos, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
-use crate::particles::{INK, Particles};
+use crate::palette::{self, DAWN_DELAY, INK};
+use crate::particles::Particles;
 use crate::{Feel, MainCamera, layer};
+
+pub use crate::palette::DAWN_LEN;
 
 /// 无尽夜：夜主每退去一次夜色暗多少、最多几层
 const DEPTH_STEP: f32 = 0.06;
 const MAX_DEPTH: u32 = 4;
 /// 辉光平时的强度（`lib.rs` 的 `bloom()` 也用它）
 pub(crate) const BLOOM_BASE: f32 = 0.16;
-/// 天明用多久（现实秒），从夜主倒下后 DAWN_DELAY 秒开始
-pub const DAWN_LEN: f32 = 3.0;
-const DAWN_DELAY: f32 = 0.8;
 /// 萤火、夜雾的数量
 const MOTES: usize = 40;
 const WISPS: usize = 9;
@@ -72,6 +74,9 @@ pub(crate) struct Atmos {
     flare: f32,
     /// 夜主登场的压暗（1 → 0）
     gloom: f32,
+    /// 妖潮强度及合围收束余量；只读模拟，控制画面主次。
+    tide: f32,
+    encircle_tail: f32,
     /// 无尽夜：夜主每退去一次，夜就深一层（目标层数和当前过渡到的深度）
     deeper: u32,
     depth: f32,
@@ -106,6 +111,8 @@ impl Default for Atmos {
             hurt: 0.0,
             flare: 0.0,
             gloom: 0.0,
+            tide: 0.0,
+            encircle_tail: 0.0,
             deeper: 0,
             depth: 0.0,
             heart: 0.0,
@@ -114,11 +121,19 @@ impl Default for Atmos {
     }
 }
 
+impl Atmos {
+    pub(crate) fn tide(&self) -> f32 {
+        self.tide
+    }
+}
+
 pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.hurt = 0.0;
     atmos.hurt_dir = Vec2::ZERO;
     atmos.flare = 0.0;
     atmos.gloom = 0.0;
+    atmos.tide = 0.0;
+    atmos.encircle_tail = 0.0;
     atmos.deeper = 0;
     atmos.depth = 0.0;
     dawn.t = None;
@@ -159,6 +174,9 @@ fn hurt_from(by: HurtBy, hero: Vec2, enemies: &Enemies, director: Option<&Direct
 }
 
 pub(crate) fn atmos_events(
+    real: Res<Time<Real>>,
+    content: Res<GameContent>,
+    encounters: Option<Res<Encounters>>,
     outbox: Res<SimOutbox>,
     mut atmos: ResMut<Atmos>,
     mut dawn: ResMut<Dawn>,
@@ -168,6 +186,7 @@ pub(crate) fn atmos_events(
 ) {
     for ev in &outbox.0 {
         match ev {
+            SimEvent::Encircle { .. } => atmos.encircle_tail = 1.5,
             SimEvent::PlayerHurt { by, .. } => {
                 atmos.hurt = 1.0;
                 atmos.hurt_dir = match (hero.single(), &enemies) {
@@ -200,6 +219,18 @@ pub(crate) fn atmos_events(
             _ => {}
         }
     }
+    // 时间表里的妖潮实际名为 Surge；裂隙读存活状态，合围读预警队列并保留 1.5 秒收束。
+    // 回放跳转后也能从状态恢复妖潮，无需重放所有装饰事件。
+    let danger = director.as_ref().is_some_and(|d| d.surge_t > 0.0 || !d.encircle.is_empty())
+        || encounters.as_ref().is_some_and(|enc| {
+            enc.list.iter().any(|e| matches!(content.0.events.kinds[e.kind].kind, EventKind::Rift { .. }))
+        })
+        || atmos.encircle_tail > 0.0;
+    let dt = real.delta_secs().min(0.1);
+    atmos.encircle_tail = (atmos.encircle_tail - dt).max(0.0);
+    let target = if danger && dawn.t.is_none() { 1.0 } else { 0.0 };
+    let step = dt / if target > atmos.tide { 0.4 } else { 1.5 };
+    atmos.tide += (target - atmos.tide).clamp(-step, step);
 }
 
 /// 暗角、色差、光照图底色（夜主登场压暗、天明）、萤火与夜雾、天明时妖物化烟。
@@ -272,18 +303,12 @@ pub(crate) fn update_atmos(
     } else {
         1.0
     };
-    let dawn_col = if day < 0.5 {
-        LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (day / 0.5)
-            + LinearRgba::from(NIGHT_AMBIENT) * (1.0 - day / 0.5)
-    } else {
-        let k = (day - 0.5) / 0.5;
-        LinearRgba::from(Color::srgb(1.0, 0.98, 0.94)) * k
-            + LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (1.0 - k)
-    };
     let ambient = if day > 0.0 {
-        dawn_col
+        palette::dawn_ambient(day)
     } else {
-        let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth);
+        let deep = gloom
+            * (1.0 - DEPTH_STEP * atmos.depth)
+            * (1.0 - (1.0 - palette::TIDE_AMBIENT_GAIN) * atmos.tide);
         LinearRgba::rgb(night.red * deep, night.green * deep, night.blue * deep)
     };
     light.clear_color = ClearColorConfig::Custom(Color::LinearRgba(ambient.with_alpha(1.0)));
@@ -293,15 +318,15 @@ pub(crate) fn update_atmos(
         let n = pools.visible_enemies.len();
         for _ in 0..4 {
             let at = pools.visible_enemies[atmos.rng.below(n as u32) as usize];
-            parts.smoke(at + Vec2::new(0.0, 10.0), 0.7, INK.with_alpha(0.35), 1);
-            parts.ash(at + Vec2::new(0.0, 8.0), 8.0, 2, INK.with_alpha(0.6));
+            parts.smoke(at + Vec2::new(0.0, 10.0), 0.7, INK.with_alpha(0.35 * (1.0 - day)), 1);
+            parts.ash(at + Vec2::new(0.0, 8.0), 8.0, 2, INK.with_alpha(0.6 * (1.0 - day)));
         }
     }
     pools.dissolve = smooth((day - 0.15) / 0.6);
 
     // ---- 萤火：绕着镜头飘，忽明忽暗；天亮了就散
     let center = cam_tf.translation.truncate();
-    let night_k = 1.0 - day;
+    let night_k = (1.0 - day) * (1.0 - (1.0 - palette::TIDE_DECOR_GAIN) * atmos.tide);
     // 精简特效：萤火和夜雾都不画
     if feel.lite {
         return;
@@ -319,13 +344,13 @@ pub(crate) fn update_atmos(
                 m.off.y = -m.off.y.signum() * 240.0;
             }
             let blink = (0.5 + 0.5 * (t * 1.7 * m.speed + m.phase * 3.0).sin()).powi(3);
-            let color = if m.warm { Color::srgb(1.0, 0.78, 0.4) } else { Color::srgb(0.65, 1.0, 0.7) };
+            let color = if m.warm { palette::GOLD } else { palette::WOOD_GLOW };
             glow.add(
                 parts.f.ember,
                 (center + m.off).extend(layer::EMISSIVE - 1.0),
                 Vec2::splat(0.45),
                 0.0,
-                color.with_alpha(0.15 + 0.6 * blink * night_k),
+                color.with_alpha((0.15 + 0.6 * blink) * night_k),
             );
         }
     }
@@ -343,7 +368,7 @@ pub(crate) fn update_atmos(
             (center + w.off).extend(layer::EMISSIVE - 4.0),
             Vec2::new(w.scale * 1.6, w.scale * 0.8),
             0.0,
-            Color::srgb(0.5, 0.6, 0.82).with_alpha(0.07 * edge * (1.0 - day)),
+            palette::WATER_GLOW.with_alpha(0.07 * edge * night_k),
             w.flip,
         );
     }
@@ -357,6 +382,70 @@ fn smooth(x: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tide_recovers_from_sim_state_and_yields_to_dawn() {
+        let content = lantern_content::Content::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"),
+        )
+        .unwrap();
+        let rift =
+            content.events.kinds.iter().position(|e| matches!(e.kind, EventKind::Rift { .. })).unwrap();
+        let mut app = App::new();
+        app.insert_resource(GameContent(std::sync::Arc::new(content)))
+            .init_resource::<Time<Real>>()
+            .init_resource::<Atmos>()
+            .init_resource::<Dawn>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<Encounters>()
+            .insert_resource(Director { surge_t: 30.0, ..default() })
+            .add_systems(Update, atmos_events);
+        let advance = |app: &mut App, frames: usize| {
+            for _ in 0..frames {
+                app.world_mut()
+                    .resource_mut::<Time<Real>>()
+                    .advance_by(std::time::Duration::from_millis(100));
+                app.update();
+                app.world_mut().resource_mut::<SimOutbox>().0.clear();
+            }
+        };
+        // 不发 Surge 事件也能恢复回放中的妖潮；画面不能推进模拟的剩余时间。
+        advance(&mut app, 4);
+        assert_eq!(app.world().resource::<Atmos>().tide(), 1.0);
+        assert_eq!(app.world().resource::<Director>().surge_t, 30.0);
+        app.world_mut().resource_mut::<Director>().surge_t = 0.0;
+        app.world_mut().resource_mut::<Encounters>().list.push(lantern_sim::encounters::Encounter {
+            kind: rift,
+            pos: Vec2::ZERO,
+            t: 1.0,
+            enemy: None,
+        });
+        advance(&mut app, 20);
+        assert_eq!(app.world().resource::<Atmos>().tide(), 1.0);
+        // 无尽夜的倒下不触发天明；普通夜天明优先，即使裂隙资源尚在。
+        app.world_mut()
+            .resource_mut::<SimOutbox>()
+            .0
+            .push(SimEvent::BossDefeated { pos: Vec2::ZERO, dawn: false });
+        advance(&mut app, 1);
+        assert!(app.world().resource::<Dawn>().t.is_none());
+        assert_eq!(app.world().resource::<Atmos>().tide(), 1.0);
+        app.world_mut()
+            .resource_mut::<SimOutbox>()
+            .0
+            .push(SimEvent::BossDefeated { pos: Vec2::ZERO, dawn: true });
+        advance(&mut app, 16);
+        assert_eq!(app.world().resource::<Atmos>().tide(), 0.0);
+        assert!(app.world().resource::<Dawn>().t.is_some());
+    }
+
+    #[test]
+    fn dawn_keeps_delay_and_three_second_transition() {
+        assert_eq!(Dawn { t: None }.progress(), 0.0);
+        assert_eq!(Dawn { t: Some(DAWN_DELAY) }.progress(), 0.0);
+        assert!((Dawn { t: Some(DAWN_DELAY + DAWN_LEN * 0.5) }.progress() - 0.5).abs() < 1e-6);
+        assert_eq!(Dawn { t: Some(DAWN_DELAY + DAWN_LEN + 1.0) }.progress(), 1.0);
+    }
 
     fn spawn(en: &mut Enemies, kind: u16, x: f32, y: f32) -> usize {
         let i = en.alloc().unwrap();

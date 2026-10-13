@@ -19,6 +19,7 @@ mod fx;
 mod ground;
 pub mod lighting;
 mod mist;
+mod palette;
 mod particles;
 mod stats;
 
@@ -46,7 +47,7 @@ pub mod layer {
 }
 
 /// 夜色，也是画面清屏色。
-pub const NIGHT: Color = Color::srgb(0.086, 0.106, 0.173);
+pub const NIGHT: Color = palette::NIGHT_AMBIENT;
 
 pub struct ViewPlugin {
     /// 资源根目录（图集 JSON 在 `<asset_root>/atlas/`）
@@ -128,6 +129,7 @@ impl Plugin for ViewPlugin {
                     )
                         .chain(),
                     (
+                        atmos::atmos_events,
                         actors::collect_draws,
                         fx::read_fx_events,
                         fx::collect_fx,
@@ -135,7 +137,6 @@ impl Plugin for ViewPlugin {
                         effects::read_events,
                         effects::update_effects,
                         particles::particle_events,
-                        atmos::atmos_events,
                         atmos::update_atmos,
                         mist::update_mist,
                         particles::update_particles,

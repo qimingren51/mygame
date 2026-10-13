@@ -27,6 +27,8 @@ use bevy::sprite_render::{
 use bevy::window::{PrimaryWindow, WindowResized};
 
 use crate::atlas::{AtlasDb, FrameId};
+// 保留原来的公开路径，底色只在共享色板定义。
+pub use crate::palette::NIGHT_AMBIENT;
 
 /// 光照相机画的图层
 pub const LIGHT_LAYER: usize = 1;
@@ -36,9 +38,6 @@ const LIGHTMAP_SCALE: f32 = 0.5;
 
 /// 自发光的亮度倍数（主画面是 HDR）。超过 1 的部分由辉光晕开。
 pub const EMIT_HDR: f32 = 1.5;
-
-/// 夜色：没有光照到的地方乘以它
-pub const NIGHT_AMBIENT: Color = Color::srgb(0.086, 0.106, 0.173);
 
 // ---------------------------------------------------------------------------
 // 混合方式扩展
