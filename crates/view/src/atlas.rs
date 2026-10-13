@@ -49,6 +49,19 @@ pub struct AnimMeta {
     /// 走完一整轮动画对应的移动距离（世界单位）
     #[serde(default)]
     pub stride_units: Option<f32>,
+    /// 出手动作的前几帧是蓄力（DESIGN 第 15 节“妖物动作”）
+    #[serde(default)]
+    pub windup_frames: usize,
+    /// false：播一遍停在最后一帧；没写时循环
+    #[serde(default = "yes", rename = "loop")]
+    pub looping: bool,
+    /// 播完后从这一帧起循环，直到这一招结束
+    #[serde(default)]
+    pub loop_from: Option<usize>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// 一个素材（角色、道具）的元数据。
