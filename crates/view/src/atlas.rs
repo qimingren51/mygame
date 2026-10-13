@@ -33,6 +33,8 @@ pub struct Frame {
     pub blend: Blend,
     /// 纯白贴图，用时乘以颜色
     pub tint: bool,
+    /// 缩放为 1 时的有效半径（世界单位）：反应区域、扇形等按它缩放到想要的半径（图集 meta 的 radius_px）
+    pub radius: Option<f32>,
 }
 
 /// 一个素材的一个动作。
@@ -114,6 +116,8 @@ struct FrameJson {
 struct FrameMetaJson {
     blend: String,
     tint: bool,
+    #[serde(default)]
+    radius_px: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -204,6 +208,7 @@ impl AtlasDb {
                     anchor,
                     blend: if meta.is_some_and(|m| m.blend == "add") { Blend::Add } else { Blend::Normal },
                     tint: meta.is_some_and(|m| m.tint),
+                    radius: meta.and_then(|m| m.radius_px).map(|r| r / ppu),
                 };
                 db.by_name.insert(name.clone(), FrameId(db.frames.len() as u32));
                 db.frames.push(frame);
@@ -259,6 +264,7 @@ impl AtlasDb {
                 anchor: Anchor::CENTER,
                 blend: Blend::Normal,
                 tint: true,
+                radius: None,
             });
         }
         self.pages.push(Page { image, layout: layouts.add(layout) });

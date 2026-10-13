@@ -78,12 +78,10 @@ pub(crate) struct FxFrames {
     affix: Vec<Option<FrameId>>,
 }
 
-/// 区域贴图在缩放 1 时的有效半径（世界单位）：美术脚本里的 radius_px（1 倍像素）× 2 ÷ 每单位 4 像素。
-/// 图集 JSON 里暂时没有导出 radius_px，先写在这里（docs/DESIGN.md 第 15 节）。
-const ZONE_LAVA_R: f32 = 86.0 / 2.0;
-const ZONE_MUD_R: f32 = 91.0 / 2.0;
-const ZONE_HERB_R: f32 = 79.0 / 2.0;
-/// 扇形预警贴图在缩放 1 时的半径（2 倍下 128 像素）
+/// 区域、扇形贴图在缩放 1 时的有效半径（世界单位）；图集 meta 里有 radius_px 时以它为准，这里是没有时的后备值。
+const ZONE_LAVA_R: f32 = 43.0;
+const ZONE_MUD_R: f32 = 45.5;
+const ZONE_HERB_R: f32 = 39.5;
 const SECTOR_R: f32 = 32.0;
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
@@ -381,7 +379,7 @@ pub(crate) fn collect_fx(
             let fade = (z.life / 0.5).min(1.0) * ((z.max_life - z.life) / 0.2).min(1.0);
             match (z.kind, f.zone_lava, f.zone_mud) {
                 (ZoneKind::Lava, Some((base, glow_frame)), _) => {
-                    let k = z.radius / ZONE_LAVA_R;
+                    let k = z.radius / db.frame(base).radius.unwrap_or(ZONE_LAVA_R);
                     pools.fx.push(Draw {
                         scale: Vec2::splat(k),
                         color: Color::WHITE.with_alpha(0.85 * fade),
@@ -400,7 +398,7 @@ pub(crate) fn collect_fx(
                 }
                 (ZoneKind::Mud, _, Some(mud)) => {
                     pools.fx.push(Draw {
-                        scale: Vec2::splat(z.radius / ZONE_MUD_R),
+                        scale: Vec2::splat(z.radius / db.frame(mud).radius.unwrap_or(ZONE_MUD_R)),
                         color: Color::WHITE.with_alpha(0.85 * fade),
                         ..Draw::new(mud, p.extend(layer::GROUND + 0.87))
                     });
@@ -457,7 +455,7 @@ pub(crate) fn collect_fx(
             let sway = (now * 2.4 + h.pos.x * 0.07).sin() * 0.08;
             if let Some((base, glow_frame)) = f.zone_herb {
                 // 一小丛灵草，半径和拾取距离差不多
-                let k = 24.0 / ZONE_HERB_R;
+                let k = 24.0 / db.frame(base).radius.unwrap_or(ZONE_HERB_R);
                 pools.fx.push(Draw {
                     scale: Vec2::splat(k),
                     color: Color::WHITE.with_alpha(fade),
@@ -623,7 +621,8 @@ pub(crate) fn collect_fx(
             let across = (radial.normalize_or_zero().perp_dot(side)).abs();
             // 贴图的扇形张角是 120°；九尾扫的张角写在数据里，横向按比例缩放
             let open = (sw.angle * 0.5).tan() / (std::f32::consts::FRAC_PI_3).tan();
-            let scale = Vec2::new(radial.length(), across * open) / SECTOR_R;
+            let scale =
+                Vec2::new(radial.length(), across * open) / db.frame(outline).radius.unwrap_or(SECTOR_R);
             pools.fx.push(Draw {
                 scale,
                 rot,
