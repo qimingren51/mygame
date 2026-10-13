@@ -97,8 +97,57 @@ def build_ghoul():
     return root, parts, sockets
 
 
+# 冲撞（charge，6 帧不循环）：0–1 低头蓄力（第 1 帧最低：上身前压、双角朝前、后腿往后刨地，游戏在预警期间停在这一帧），
+# 2–5 低头猛冲的跑步循环（冲锋持续时 2–5 可以循环：meta loop_from=2）。
+# 蓄力帧：(骨盆高, 上身前倾 deg, 头俯仰 deg, 左髋, 左膝, 右髋, 右膝, 左臂, 右臂, 风)
+GHOUL_WINDUP = [
+    (0.98, 36, 12, -14, 22, 18, 26, -10, 4, 0.30),
+    (0.92, 46, 20, -22, 34, 30, 34, -18, -2, 0.40),  # 蓄力到底
+]
+
+
+def _rest_ghoul(parts):
+    parts["torso"].rotation_euler = (math.radians(22), 0, 0)
+    parts["head"].rotation_euler = (math.radians(-24), 0, math.radians(-22))
+
+
+def _pose_ghoul_charge(parts, frame):
+    if frame < 2:
+        z, lean, head, hl, kl, hr, kr, al, ar, wind = GHOUL_WINDUP[frame]
+        ph = 0.5 * frame
+        parts["pelvis"].location.z = z
+        parts["pelvis"].rotation_euler = (0, 0, 0)
+        parts["torso"].rotation_euler = (math.radians(lean), 0, 0)
+        parts["head"].rotation_euler = (math.radians(-24 + head - (lean - 22) * 0.35), 0, math.radians(-22))  # 低头、角朝前
+        for nm, h, k, a in (("L", hl, kl, al), ("R", hr, kr, ar)):
+            parts[f"hip_{nm}"].rotation_euler = (math.radians(h), 0, 0)
+            parts[f"knee_{nm}"].rotation_euler = (math.radians(k), 0, 0)
+            parts[f"arm_{nm}"].rotation_euler = (math.radians(a), 0, 0)
+    else:  # 冲：4 帧一个跑步循环（相位 0, 90, 180, 270°），步子大、身子压低前冲、双臂大摆
+        ph = 2 * math.pi * (frame - 2) / 4 + 0.6
+        wind = 0.75
+        parts["pelvis"].location.z = 0.97 + 0.05 * math.cos(2 * ph)
+        parts["pelvis"].rotation_euler = (0, math.radians(1.5 * math.sin(ph)), math.radians(3 * math.sin(ph)))
+        parts["torso"].rotation_euler = (math.radians(42 + 3 * math.cos(2 * ph)), 0, 0)
+        parts["head"].rotation_euler = (math.radians(-24 + 14), 0, math.radians(-22))
+        for nm, sgn in (("L", 1), ("R", -1)):
+            s_ = sgn * math.sin(ph)
+            c_ = sgn * math.cos(ph)
+            parts[f"hip_{nm}"].rotation_euler = (math.radians(-34 * s_ - 6), 0, 0)
+            parts[f"knee_{nm}"].rotation_euler = (math.radians(12 + 40 * max(0.0, c_)), 0, 0)
+            parts[f"arm_{nm}"].rotation_euler = (math.radians(30 * s_ + 14), 0, 0)
+    for ob, c, w, i in parts["rags"]:
+        K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, 0.36, 0.10, 0.62, phase=ph, wind=wind, seed=i + 7,
+                                                         tatter=0.4)))
+    bpy.context.view_layer.update()
+
+
 def pose_ghoul(parts, anim, frame, n):
-    """move：沉重大步——腿交替前后（膝随摆动屈伸），上身随步左右晃、微起伏，双臂与同侧腿反向摆，破袍飘。"""
+    """move：沉重大步——腿交替前后（膝随摆动屈伸），上身随步左右晃、微起伏，双臂与同侧腿反向摆，破袍飘。
+    charge：见 GHOUL_WINDUP 和 _pose_ghoul_charge。"""
+    _rest_ghoul(parts)
+    if anim == "charge":
+        return _pose_ghoul_charge(parts, frame)
     ph = 2 * math.pi * (frame % n) / n
     parts["pelvis"].location.z = 1.05 + 0.010 * math.cos(2 * ph)
     parts["pelvis"].rotation_euler = (0, math.radians(0.8 * math.sin(ph)), math.radians(1.5 * math.sin(ph)))

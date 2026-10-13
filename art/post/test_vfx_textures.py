@@ -55,6 +55,8 @@ EXPECTED_VFX = {
     # M2.5
     "coin.png": (sz(32, 26), (0.5, 0.5)),
     "coin_emit.png": (sz(32, 26), (0.5, 0.5)),
+    # 青丘：可平铺的迷雾
+    **{f"mist_{i}.png": (sz(256, 256), (0.5, 0.5)) for i in range(2)},
 }
 EXPECTED_GROUND = {
     "paper.png": (sz(512, 512), (0.0, 0.0)),
@@ -75,12 +77,26 @@ EXPECTED_GROUND = {
     "zone_mud.png": (sz(240, 152), (0.5, 0.5)),
     "zone_herb.png": (sz(208, 132), (0.5, 0.5)),
     "zone_herb_glow.png": (sz(208, 132), (0.5, 0.5)),
+    # 青丘（帧名前缀 qq_）
+    "qq_bamboo_leaves_0.png": (sz(72, 44), (0.5, 0.5)),
+    "qq_bamboo_leaves_1.png": (sz(56, 36), (0.5, 0.5)),
+    "qq_bamboo_leaves_2.png": (sz(96, 40), (0.5, 0.5)),
+    "qq_shoots_0.png": (sz(44, 44), (0.5, 1.0)),
+    "qq_shoots_1.png": (sz(32, 40), (0.5, 1.0)),
+    "qq_moss_0.png": (sz(56, 36), (0.5, 0.5)),
+    "qq_moss_1.png": (sz(44, 30), (0.5, 0.5)),
+    "qq_wash_0.png": (sz(320, 200), (0.5, 0.5)),
+    "qq_wash_1.png": (sz(288, 192), (0.5, 0.5)),
+    "qq_fox_tracks.png": (sz(128, 40), (0.5, 0.5)),
 }
-BOTTOM_ANCHORED = ("grass", "reed", "bamboo")  # 锚点在底边，底边允许有根
-WHITE_TEXTURES = ["light.png", "glow.png", "eyes.png", "spark.png", "gem_0.png", "gem_1.png", "gem_2.png"]
+BOTTOM_ANCHORED = ("grass", "reed", "bamboo", "qq_shoots")  # 锚点在底边，底边允许有根
+WHITE_TEXTURES = ["light.png", "glow.png", "eyes.png", "spark.png", "gem_0.png", "gem_1.png", "gem_2.png", "mist_0.png", "mist_1.png"]
 WHITE_GROUND = ["rift_glow.png", "zone_lava_glow.png", "zone_herb_glow.png"]
 M25_VFX = ["coin.png", "coin_emit.png"]
 M25_GROUND = ["zone_lava.png", "zone_lava_glow.png", "zone_mud.png", "zone_herb.png", "zone_herb_glow.png"]
+QQ_VFX = ["mist_0.png", "mist_1.png"]
+QQ_GROUND = [n for n in EXPECTED_GROUND if n.startswith("qq_")]
+TILEABLE = ("mist_0.png", "mist_1.png")  # 四边无缝的平铺贴图：边上不透明，另测接缝
 REVIEW = ["vfx_sheet.png", "paper_tile_2x2.png", "light_test.png"]
 
 
@@ -146,7 +162,7 @@ def test_sprite_borders_transparent():
     """非平铺贴图四周一圈必须全透明（草的锚点在底边，底边允许有根部）。"""
     for folder, expected in ((V.VFX_DIR, EXPECTED_VFX), (V.GROUND_DIR, EXPECTED_GROUND)):
         for name in expected:
-            if name == "paper.png":
+            if name == "paper.png" or name in TILEABLE:
                 continue
             al = rgba(folder, name)[..., 3]
             bottom = name.startswith(BOTTOM_ANCHORED)
@@ -164,6 +180,10 @@ def test_white_textures_are_white():
             assert (a[..., :3] == 255).all(), f"{name} 应为纯白 RGB（游戏里染色）"
 
 
+def meta_px_per_unit(folder: Path) -> float:
+    return json.loads((folder / "meta.json").read_text(encoding="utf-8"))["px_per_unit"]
+
+
 def test_meta_density_and_blend():
     for folder in (V.VFX_DIR, V.GROUND_DIR):
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
@@ -176,12 +196,21 @@ def test_meta_density_and_blend():
     for name, e in gm.items():
         if name in WHITE_GROUND:
             assert e["blend"] == "add" and e["tint"] is True, f"{name} 应为白色、染色、叠加"
-        elif name.split("_")[0] in ("spring", "rift", "reed", "leaves", "pebbles", "puddle", "bamboo", "zone"):
+        elif name.split("_")[0] in ("spring", "rift", "reed", "leaves", "pebbles", "puddle", "bamboo", "zone", "qq"):
             assert e["blend"] == "normal" and e["tint"] is False, f"{name} 应为正常混合、不染色"
     assert vm["coin.png"]["blend"] == "normal" and vm["coin.png"]["tint"] is False and vm["coin.png"]["color"] == "full", "金币应全彩、正常混合"
     assert vm["coin_emit.png"]["blend"] == "add" and vm["coin_emit.png"]["tint"] is False, "金币的自发光应叠加、不染色（自带暖金色）"
     for name in ("zone_lava.png", "zone_mud.png", "zone_herb.png"):
         assert isinstance(gm[name]["radius_px"], int) and gm[name]["radius_px"] > 0, f"{name} meta 应有 radius_px"
+    for name in TILEABLE:
+        e = vm[name]
+        assert e["blend"] == "normal" and e["tint"] is True and e["color"] == "white", f"{name} 应为白色、可染色、正常混合"
+        assert "tile" not in e and e["tileable"] is True, f"{name} 不写 tile 键（进图集），要标 tileable: true"
+        assert e["tile_units"] == e["size"][0] / meta_px_per_unit(V.VFX_DIR) == 128, f"{name} 的 tile_units 应是图宽 / px_per_unit = 128"
+        assert e["size"][0] == e["size"][1], f"{name} 应是正方形"
+        assert 0.1 <= e["alpha_hint"] <= 0.5, f"{name} 的 alpha_hint 不对"
+    for name in QQ_GROUND:
+        assert gm[name].get("region") == "qingqiu" and gm[name]["kind"] == "decor", f"{name} 应标 region: qingqiu、kind: decor"
 
 
 def test_ground_decor_content():
@@ -371,6 +400,97 @@ def test_flame_frames():
     assert all((x == np.asarray(Image.open(V.VFX_DIR / f"flame_{i}.png"))).all() for i, x in enumerate(again)), "火焰两次生成不一致"
 
 
+# ---------------------------------------------------------------- 青丘：迷雾、地面装饰
+
+
+def seam_local(a: np.ndarray, axis: int, k: int = 4) -> float:
+    """平铺 2×2 后跨接缝那一行（列）的平均差，与接缝两侧各 k 行（列）的平均差之比。无缝时≈1，有缝时远大于 1。
+    雾是低频的，整行的平均差本身起伏大，所以只和接缝附近比。"""
+    t = np.tile(a, (2, 2))
+    d = np.abs(np.diff(t, axis=axis)).mean(axis=1 - axis)
+    n = a.shape[axis]
+    seam = d[n - 1]
+    near = np.concatenate([d[n - 1 - k : n - 1], d[n : n + k]]).mean()
+    return seam / max(near, 1e-6)
+
+
+def test_mist_tileable():
+    """迷雾四边无缝：接缝处的跳变与附近一致（含一阶导数：接缝两侧的斜率接得上）；边上不透明（不是透明边的精灵）。"""
+    for name in TILEABLE:
+        al = rgba(V.VFX_DIR, name)[..., 3].astype(np.float64)
+        for axis in (0, 1):
+            r = seam_local(al, axis)
+            assert 0.5 <= r <= 1.6, f"{name} 轴 {axis} 接缝处跳变是附近的 {r:.2f} 倍（应≈1）"
+            t = np.tile(al, (2, 2))
+            n = al.shape[axis]
+            g = np.diff(np.take(t, np.arange(n - 3, n + 3), axis=axis), n=2, axis=axis)  # 接缝两侧的二阶差分
+            inner = np.abs(np.diff(al, n=2, axis=axis)).mean()
+            assert np.abs(g).mean() <= 2.5 * inner + 0.5, f"{name} 轴 {axis} 接缝处斜率接不上"
+        border = np.concatenate([al[0], al[-1], al[:, 0], al[:, -1]])
+        assert border.mean() > 5, f"{name} 是平铺贴图，边上不应全透明"
+
+
+def test_mist_density():
+    """迷雾的浓淡：有透亮的空隙、有浓的雾心，平均不太浓；不出现一团独大（四个象限的平均 alpha 差不多），两张不一样。"""
+    alphas = []
+    for name in TILEABLE:
+        al = rgba(V.VFX_DIR, name)[..., 3].astype(np.float64) / 255.0
+        alphas.append(al)
+        assert 0.2 <= al.mean() <= 0.5, f"{name} 平均 alpha {al.mean():.2f} 不在 0.2–0.5"
+        assert (al < 0.05).mean() > 0.08, f"{name} 没有透亮的空隙"
+        assert al.max() >= 0.95 and (al > 0.8).mean() < 0.25, f"{name} 雾心太少或太满"
+        h, w = al.shape
+        quads = [al[: h // 2, : w // 2].mean(), al[: h // 2, w // 2 :].mean(), al[h // 2 :, : w // 2].mean(), al[h // 2 :, w // 2 :].mean()]
+        assert max(quads) - min(quads) < 0.25, f"{name} 四个象限浓淡差太大（平铺时看得出重复）：{np.round(quads, 2)}"
+    assert np.abs(alphas[0] - alphas[1]).mean() > 0.1, "两张迷雾太像"
+
+
+def test_qq_ground_content():
+    """青丘地面：落竹叶以枯黄、赭、灰为主（不是鲜绿）；竹笋偏赭、尖上一点墨绿；苔点有焦墨的点和兑石绿的底；
+    晕是淡的、柔边、偏青；狐狸脚印是一串分开的小印，从左下往右上，越往右越浓。"""
+    for i in range(3):
+        a = rgba(V.GROUND_DIR, f"qq_bamboo_leaves_{i}.png").astype(np.float64)
+        vis = a[a[..., 3] > 200][:, :3]
+        assert len(vis) > 50, f"qq_bamboo_leaves_{i} 叶子太少"
+        sat = vis.max(1) - vis.min(1)
+        assert np.median(sat) < 90, f"qq_bamboo_leaves_{i} 颜色太艳（长夜里以墨为主）"
+        lum_ = vis.sum(1)
+        assert (lum_ < np.median(lum_) - 90).mean() > 0.05, f"qq_bamboo_leaves_{i} 应有墨线（比叶色深得多的勾边）"
+    for i in range(2):
+        a = rgba(V.GROUND_DIR, f"qq_shoots_{i}.png").astype(np.float64)
+        vis = a[a[..., 3] > 200][:, :3]
+        assert (vis[:, 0] > vis[:, 2] + 15).mean() > 0.4, f"qq_shoots_{i} 笋壳应偏赭"
+        green = (a[..., 3] > 150) & (a[..., 1] > a[..., 0] + 5)
+        top = np.nonzero((a[..., 3] > 150).any(1))[0].min()
+        assert green[top : top + int(0.15 * a.shape[0])].any(), f"qq_shoots_{i} 最高那根笋的尖上应有墨绿的箨叶"
+    for i in range(2):
+        a = rgba(V.GROUND_DIR, f"qq_moss_{i}.png").astype(np.float64)
+        dots = (a[..., 3] > 200) & (a[..., :3].sum(-1) < 160)
+        assert dots.sum() > 20 * D * D, f"qq_moss_{i} 苔点太少"
+        wash = (a[..., 3] > 30) & (a[..., 3] < 140)
+        assert wash.mean() > 0.1 and (a[wash][:, 1] >= a[wash][:, 0]).mean() > 0.5, f"qq_moss_{i} 底下应有兑石绿的淡墨"
+    for i in range(2):
+        a = rgba(V.GROUND_DIR, f"qq_wash_{i}.png").astype(np.float64)
+        al = a[..., 3] / 255.0
+        assert 0.12 <= al.max() <= 0.31, f"qq_wash_{i} 最大 alpha {al.max():.2f} 应≈0.3 以内（淡）"
+        vis = a[al > 0.08][:, :3]
+        assert vis[:, 2].mean() > vis[:, 0].mean() - 4 and vis[:, 1].mean() > vis[:, 0].mean(), f"qq_wash_{i} 应偏青（花青、石绿），不是暖灰"
+        g = np.hypot(*np.gradient(al))
+        assert np.percentile(g[al > 0.02], 99.5) < 0.05 / D, f"qq_wash_{i} 边太硬（应是湿接湿的柔边）"
+    a = rgba(V.GROUND_DIR, "qq_fox_tracks.png").astype(np.float64)
+    ink = a[..., 3] > 120
+    cols = ink.any(0)
+    runs = np.count_nonzero(np.diff(cols.astype(int)) == 1) + int(cols[0])
+    assert runs >= 6, f"狐狸脚印应是一串分开的印（只数出 {runs} 个）"
+    xs = np.nonzero(ink)[1]
+    ys = np.nonzero(ink)[0]
+    assert np.corrcoef(xs, ys)[0, 1] < -0.5, "脚印应从左下往右上走"
+    w = a.shape[1]
+    left = a[..., 3][:, : w // 3].max()
+    right = a[..., 3][:, 2 * w // 3 :].max()
+    assert right > left + 20, "越往右（越新）的脚印应越浓"
+
+
 # ---------------------------------------------------------------- 体积与检查图
 
 
@@ -393,9 +513,10 @@ def test_review_images():
 def test_pre_m25_unchanged():
     """快照里的 vfx/、ground/ 产物（M2.5 之前 + M2.5 第一批）逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
     testkit.check_snapshot(V.ASSETS, ("vfx", "ground"), D)
-    for folder, new in (("vfx", M25_VFX), ("ground", M25_GROUND)):
+    for folder, m25, qq in (("vfx", M25_VFX, QQ_VFX), ("ground", M25_GROUND, QQ_GROUND)):
         files = list(json.loads((V.ASSETS / folder / "meta.json").read_text(encoding="utf-8"))["files"])
-        assert files[-len(new) :] == new, f"{folder}/meta.json 的 M2.5 条目应追加在最后：{files[-len(new):]}"
+        assert files[-len(qq) :] == qq, f"{folder}/meta.json 的青丘条目应追加在最后：{files[-len(qq):]}"
+        assert files[-len(qq) - len(m25) : -len(qq)] == m25, f"{folder}/meta.json 的 M2.5 条目应紧挨在青丘条目之前"
 
 
 def test_density_1x_unchanged():

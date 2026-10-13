@@ -170,8 +170,32 @@ def _fox_tail(root, ang, ln, phase, tph, xo=0.0):
     return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + tph, 0.05, curl=0.5)
 
 
+# 扑击（pounce，6 帧不循环）：0–1 伏低蓄力（第 1 帧最低，游戏在预警期间停在这一帧），2–4 腾空扑出，5 落地。
+# (身体抬高 m, 身体前后 m, 整体前倾 deg, 上身前倾 deg, 髋 deg, 膝 deg, 手臂 deg, 头俯仰 deg, 尾巴仰角倍数, 尾巴加角 deg, 风)
+FOX_POUNCE = [
+    (-0.10, 0.06, 6, 46, -22, 30, 34, 12, 1.00, 12, 0.15),
+    (-0.20, 0.12, 10, 58, -34, 46, 48, 20, 1.00, 24, 0.20),  # 伏到底（预警）
+    (0.16, -0.04, 30, 36, 30, -6, -72, -6, 0.45, -2, 0.70),  # 蹬地扑出：后腿蹬直，前爪前探
+    (0.30, -0.10, 36, 32, 38, -2, -84, -10, 0.30, -6, 0.90),  # 最高、身体拉平
+    (0.12, -0.06, 26, 38, 10, 10, -66, -4, 0.45, 0, 0.70),  # 下落
+    (-0.12, 0.00, 10, 46, -26, 36, -40, 2, 0.85, 8, 0.30),  # 落地：前爪按地
+]
+
+
+def _rest_fox(parts):
+    """每次摆姿态前把会被改动的变换复位（同一个会话里先渲 move 再渲 pounce，互不影响）。"""
+    parts["body"].location = (0, 0, 0)
+    parts["body"].rotation_euler = (0, 0, 0)
+    parts["head"].rotation_euler = (math.radians(-8), 0, math.radians(-25))
+    parts["head"].location = (0, -0.58, 1.70)
+
+
 def pose_fox(parts, anim, frame, n):
-    """move：潜行小跑——两腿交替（髋前后摆、膝随之屈伸），身体轻微起伏，前爪交替探出，尾巴波动，破袍飘。"""
+    """move：潜行小跑——两腿交替（髋前后摆、膝随之屈伸），身体轻微起伏，前爪交替探出，尾巴波动，破袍飘。
+    pounce：见 FOX_POUNCE。"""
+    _rest_fox(parts)
+    if anim == "pounce":
+        return _pose_fox_pounce(parts, frame)
     ph = 2 * math.pi * (frame % n) / n
     parts["body"].location.z = 0.006 * math.cos(2 * ph)
     parts["torso"].rotation_euler.x = math.radians(30)
@@ -185,6 +209,32 @@ def pose_fox(parts, anim, frame, n):
         K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))
     for ob, c, w, i, ln, r, fl in parts["rags"]:
         K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, phase=ph, wind=0.12, seed=i,
+                                                         tatter=0.10, flare=fl)))
+    bpy.context.view_layer.update()
+
+
+def _pose_fox_pounce(parts, frame):
+    z, dy, pitch, lean, hip, knee, arm, head, tk, ta, wind = FOX_POUNCE[frame % len(FOX_POUNCE)]
+    ph = 2 * math.pi * frame / len(FOX_POUNCE)
+    body = parts["body"]
+    # 整体前倾绕髋（离地约 1 米处）转，不绕脚底转，头不会一下子甩出画面
+    pivot = Vector((0, 0.18, 0.96))
+    R = Matrix.Rotation(math.radians(pitch), 3, "X")
+    body.rotation_euler = (math.radians(pitch), 0, 0)
+    body.location = pivot - R @ pivot + Vector((0, dy, z))
+    parts["torso"].rotation_euler.x = math.radians(lean)
+    parts["head"].rotation_euler = (math.radians(-8 + head - pitch * 0.6), 0, math.radians(-25))  # 正角 = 低头
+    low = max(0.0, lean - 30) / 28  # 上身越往前压，头跟着越低、越往前
+    parts["head"].location = (0, -0.58 - 0.06 * low, 1.70 - 0.12 * low)
+    for nm, sgn in (("L", 1), ("R", -1)):
+        stag = 4 * sgn  # 两腿略错开，不叠成一条
+        parts[f"hip_{nm}"].rotation_euler = (math.radians(hip + stag), 0, 0)
+        parts[f"knee_{nm}"].rotation_euler = (math.radians(knee + 4 - stag * 0.5), 0, 0)
+        parts[f"arm_{nm}"].rotation_euler = (math.radians(arm + 6 * sgn), 0, 0)
+    for ob, troot, ang, ln, tph, xo in parts["tails"]:
+        K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang * tk + ta, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))
+    for ob, c, w, i, ln, r, fl in parts["rags"]:
+        K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, phase=ph, wind=wind, seed=i,
                                                          tatter=0.10, flare=fl)))
     bpy.context.view_layer.update()
 
@@ -481,6 +531,13 @@ def build_boss():
                  tail_mat, "outer", body, sharp_deg=0)
         B.set_point_attr(ob, "fade", fades)
         parts["tails"].append((ob, troot, i))
+    # 尾尖狐火（只在 summon 里显示）：每条尾尖一团朱红的火苗（发光，颜色同夜主弹幕 foxfire 的建议染色）
+    fire = B.emissive_material("BossTipFire", S.EYE["fox"], 1.0)
+    parts["tip_fires"] = []
+    for i in range(BOSS_TAILS):
+        ob = obj(f"BossTipFire{i}", lambda bm: None, fire, "thin", body, sharp_deg=0)
+        ob.hide_render = True
+        parts["tip_fires"].append(ob)
     sockets = {"eyes": sock, "feet": B.empty("BossFeet", root)}
     parts["sockets"] = sockets
     bpy.context.view_layer.update()
@@ -497,9 +554,127 @@ def _boss_tail(root, i, phase):
     return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + i * 0.7, 0.10, curl=0.5)
 
 
+def _boss_tail_dir(root, i, phase, az_deg, el_deg, ln_k=1.0, amp=0.10, curl=0.5, xo_k=1.0):
+    """第 i 条尾巴，按方位 az（0 = 正后方 +Y，90 = 镜头一侧 -X，180 = 正前方 -Y）和仰角 el 指向；
+    长度同 _boss_tail（中间的最长）× ln_k。"""
+    f = i / (BOSS_TAILS - 1)
+    xo = 0.12 * math.sin(i * 2.1) * xo_k
+    a, e = math.radians(az_deg), math.radians(el_deg)
+    d = Vector((-math.sin(a) * math.cos(e) + xo * 0.3, math.cos(a) * math.cos(e), math.sin(e)))
+    ln = (2.35 - 0.6 * abs(f - 0.45) * 2) * ln_k
+    return _tail_points(Vector(root) + Vector((xo, 0, 0)), d, ln, phase + i * 0.7, amp, curl=curl)
+
+
+# 九尾扫（sweep，6 帧不循环）：原地（绕锚点）转一圈，九尾扇开、贴着地面横扫一周（游戏里是身前 120° 的扇形）。
+# 0 九尾拢成一束竖起；1 身子往回拧、伏低，尾束往远侧后方拉满（蓄力到底，游戏在预警期间停在这一帧）；
+# 2 转过来（屁股甩向镜头一侧），尾巴边甩边扇开；3 转到背朝前方：九条尾巴扇形贴地扫过身前（最宽）；4 继续转；5 转回来，尾巴收回身后。
+# 每帧：(转角 deg（绕锚点，正 = 从上往下看逆时针）, 尾巴方位起点, 方位跨度, 仰角起点, 仰角跨度, 长度倍数,
+#        身体后坐 m, 头俯仰 deg, 前腿 deg, 后腿 deg)。尾巴方位：0 = 身后 +Y，90 = 身体左侧 -X（见 _boss_tail_dir）
+BOSS_SWEEP = [
+    (0, -34, 14, 52, 22, 0.92, 0.08, 10, -4, 6),
+    (-24, -56, 12, 30, 16, 0.86, 0.15, 16, -10, 12),  # 拧到底（预警时停在这）
+    (95, -52, 84, 18, 8, 0.88, 0.0, 2, 8, -6),
+    (180, -62, 124, 12, 6, 0.74, -0.04, 4, 10, -8),  # 背朝前方：扇面贴地扫过身前
+    (268, -40, 96, 18, 10, 0.84, 0.0, 2, 4, -4),
+    (352, -18, 46, 30, 64, 0.95, 0.0, 2, 0, 0),
+]
+# 召唤 / 放狐火环（summon，4 帧不循环）：抬头长啸，九尾高高扇开，尾尖燃起狐火。
+# (仰角起点, 仰角跨度, 横向张开倍数, 抬头 deg, 前身抬高 m, 尾尖火苗大小)
+BOSS_SUMMON = [
+    (30, 110, 1.6, -18, 0.08, 0.45),
+    (22, 136, 2.4, -40, 0.16, 1.00),
+    (20, 140, 2.6, -42, 0.16, 0.90),
+    (26, 120, 2.0, -26, 0.10, 0.60),
+]
+
+
+def _rest_boss(parts):
+    """每次摆姿态前复位会被改动的变换和显示（同一个会话里连渲 move / sweep / summon 互不影响）。"""
+    parts["body"].location = (0, BODY_SHIFT, 0)
+    parts["body"].rotation_euler = (0, 0, 0)
+    parts["head"].location = (0, -1.44, 2.12)
+    for ob in parts.get("tip_fires", []):
+        ob.hide_render = True
+
+
+def _set_boss_tails(parts, pts_of):
+    for ob, troot, i in parts["tails"]:
+        fades: list = []
+        K.replace_mesh(ob, K.tube_build(pts_of(troot, i), _brush, 12, flat=0.62, fades=fades))
+        B.set_point_attr(ob, "fade", fades)
+
+
+def _pose_boss_legs(parts, front_deg, hind_deg):
+    for nm in ("FL", "FR", "HL", "HR"):
+        leg = parts["legs"][nm]
+        front = nm[0] == "F"
+        leg.rotation_euler.x = math.radians(front_deg if front else hind_deg)
+        leg.location.z = (FRONT_HIP if front else HIND_HIP)[2]
+
+
+def _pose_boss_sweep(parts, frame):
+    spin, az0, azs, el0, els, lk, sit, head, fl, hl = BOSS_SWEEP[frame % len(BOSS_SWEEP)]
+    ph = 0.8 * frame
+    # 绕锚点转：锚点在身体坐标 (0, -BODY_SHIFT) 处，转的时候它不动；后坐沿身体自己的 +Y
+    R = Matrix.Rotation(math.radians(spin), 3, "Z")
+    c = Vector((0, -BODY_SHIFT - sit, 0))
+    parts["body"].rotation_euler = (0, 0, math.radians(spin))
+    parts["body"].location = -(R @ c) + Vector((0, 0, -0.25 * max(0.0, sit)))
+    parts["head"].rotation_euler = (math.radians(6 + head), 0, math.radians(-8))
+    _pose_boss_legs(parts, fl, hl)
+
+    def pts_of(troot, i):
+        f = i / (BOSS_TAILS - 1)
+        return _boss_tail_dir(troot, i, ph, az0 + azs * f, el0 + els * math.sin(math.pi * f) * 0.5 + els * f * 0.5,
+                              lk * (1 - 0.12 * abs(2 * f - 1)), amp=0.06, curl=0.35, xo_k=0.5)
+
+    _set_boss_tails(parts, pts_of)
+    bpy.context.view_layer.update()
+
+
+def _pose_boss_summon(parts, frame):
+    el0, els, spread, head, rise, fire = BOSS_SUMMON[frame % len(BOSS_SUMMON)]
+    ph = 0.9 * frame
+    parts["body"].location = (0, BODY_SHIFT, 0)
+    # 前身抬起：绕后髋转（负角 = 头抬高）
+    pivot = Vector((0, 0.62, 1.86))
+    ang = -math.degrees(math.atan2(rise, 1.9))
+    R = Matrix.Rotation(math.radians(ang), 3, "X")
+    parts["body"].rotation_euler = (math.radians(ang), 0, 0)
+    parts["body"].location = Vector((0, BODY_SHIFT, 0)) + pivot - R @ pivot
+    parts["head"].rotation_euler = (math.radians(6 + head), 0, math.radians(-8))
+    _pose_boss_legs(parts, -6 - 4 * fire, 4 - ang)
+    tips = []
+
+    def pts_of(troot, i):
+        f = i / (BOSS_TAILS - 1)
+        pts = _boss_tail_dir(troot, i, ph, 0, el0 + els * f, 1.0, amp=0.08, curl=0.45, xo_k=spread)
+        tips.append((pts[-1], (pts[-1] - pts[-3]).normalized()))
+        return pts
+
+    _set_boss_tails(parts, pts_of)
+    for k, ob in enumerate(parts["tip_fires"]):  # 尾尖狐火：一团往上窜的火苗
+        p, d = tips[k]
+        ob.hide_render = fire <= 0.01
+        if ob.hide_render:
+            continue
+        up = (d * 0.35 + Vector((0, 0.15, 1.0))).normalized()
+        L = 0.42 * fire * (0.85 + 0.15 * math.sin(k * 1.9 + frame))
+        side = up.cross(Vector((1, 0, 0))).normalized()
+        path = [p - up * 0.06 + side * 0.03 * t * math.sin(5 * t + k + frame) + up * (L * t) for t in
+                (i_ / 7 for i_ in range(8))]
+        K.replace_mesh(ob, K.tube_build(path, lambda t: 0.11 * fire * (1 - t) ** 0.8 * (0.7 + 0.6 * math.sin(math.pi * min(1.0, t * 1.6))), 10))
+    bpy.context.view_layer.update()
+
+
 def pose_boss(parts, anim, frame, n):
     """move：潜行——头前伸、略低于肩线；对角两腿同步交替（肩/髋绕横轴摆，向前摆的那条抬爪），
-    身体微起伏，九尾依次波动。"""
+    身体微起伏，九尾依次波动。sweep：见 BOSS_SWEEP；summon：见 BOSS_SUMMON。"""
+    _rest_boss(parts)
+    if anim == "sweep":
+        return _pose_boss_sweep(parts, frame)
+    if anim == "summon":
+        return _pose_boss_summon(parts, frame)
     ph = 2 * math.pi * (frame % n) / n
     parts["body"].location.z = 0.015 * math.cos(2 * ph)
     lp = ph + math.pi / 2  # 第 0 帧就是迈开的步子（审图用第 0 帧）
