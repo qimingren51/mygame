@@ -1,0 +1,38 @@
+// 灯驿人物的台词（docs/LORE-TEXT.md 第 1 节，世界观会话定稿）。顺序对应灯驿里的四个位置。
+// 几条同时满足时取排在最后的那条；都不满足时说 Idle（平时）的，几句按回来的次数轮着说。
+// 条件：First 第一次见到；MetaLit 刚点亮心灯；MetaFull 心灯全亮；Lamp("灯") 刚解锁那盏灯；Cleared(更) 刚通关；
+// Refunded 刚全部退还属性；AttributesFull 属性买满；Achievement 刚达成成就；Charm("灯坠") 出发时挂着它；
+// Reaction 五行谱多了一种；EndlessBack 刚从无尽夜回来。标“以后”的台词等内容做出来再加。
+[
+    (id: "smith", name: "老灯匠", lines: [
+        (when: Idle, text: "灯身破了我再糊，人回来就行。"),
+        (when: Idle, text: "树上每亮一盏，就有一户人家等你回来。"),
+        (when: First, text: "回来了？灯还亮着就好。油不多，先点一盏。"),
+        (when: MetaLit, text: "这一盏，是东街几户人家凑的油。"),
+        (when: Lamp("mirror"), text: "你回来了两次，我就知道你还会回来。给你打了面镜子。"),
+        (when: Cleared(1), text: "霜瓷灯给你。丹穴的火凶，带盏凉的去。"),
+        (when: MetaFull, text: "树都亮了。灯驿从来没这么亮过。"),
+    ]),
+    (id: "peddler", name: "货郎", lines: [
+        (when: Idle, text: "这双靴子过过奈何桥，跑得快着呢。"),
+        (when: Idle, text: "别问我打哪来。夜里赶路的，谁身后没点影子。"),
+        (when: First, text: "铜钱？鬼市里也认。要什么，自己挑。"),
+        (when: Refunded, text: "退就退，钱又不会跑。跑的是金蟾。"),
+        (when: AttributesFull, text: "货都让你买光了，我得再去鬼市进一趟。"),
+    ]),
+    (id: "child", name: "灯童", lines: [
+        (when: Idle, text: "你看，墙上这几道，是你回来的次数。"),
+        (when: First, text: "你就是守灯人？我以后也要提灯！"),
+        (when: Achievement, text: "这个我记下了！（墙上又多了一道）"),
+        (when: Charm("longevity"), text: "长命锁借你的，回来要还我。"),
+        (when: Cleared(1), text: "狐狸也怕黑吗？那它们现在有灯了吗？"),
+    ]),
+    (id: "teller", name: "说书人", lines: [
+        (when: Idle, text: "白泽说，天下的妖物有一万一千五百二十种。我这儿才记了几页。"),
+        (when: Idle, text: "妖怕两样：一是光，二是被人叫出名字。"),
+        (when: First, text: "坐。白泽图缺了好些页，你路上见着什么妖，回来讲给我听。"),
+        (when: Reaction, text: "两系一撞，就有新花样。见得多了，自然就懂。"),
+        (when: Cleared(1), text: "梦有深有浅。你要往深处走，就别等天明。"),
+        (when: EndlessBack, text: "走了多深？深处的魂，比上面多吧。"),
+    ]),
+]

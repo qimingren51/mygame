@@ -15,7 +15,7 @@
 输出：
   art/out/<A>/weapons/      sword sword_evo sword_trail crane_0..3 crane_evo_0..3 ring ring_ink seal seal_evo
                             seal_mark crack warn taiji blast shield chest soulbell lotus foxfire_0..2
-                            + M2.5：sector sector_fill（扇形预警）+ meta.json
+                            + M2.5：sector sector_fill（扇形预警）charge_line charge_line_head（冲锋预警）+ meta.json
                             （<A> = style.ASSETS_DIR_NAME：assets / assets@2x）
   art/out/review/（2 倍：review@2x/）  weapons_sheet.png（纸色底 / 夜色底）  weapons_ingame.png（游戏比例的模拟场景）
 
@@ -1329,6 +1329,87 @@ def make_sector_fill() -> Image.Image:
     return white_image(a_ss, ss, dither_seed=3102)
 
 
+# ============================================================== 冲锋预警（M2.5）
+#
+# 精英扑击 / 冲撞的地面预警：车道 charge_line 的锚点在起点（左端、竖向居中），沿 +X 伸出去，游戏按冲锋长度沿 X 拉伸、再旋转；
+# 车道沿 X 的透明度一致（只在起点淡入），横向的笔丝只随 y 变，所以怎么拉都不走样；最右一列不清零，接上箭头不留缝。
+# 箭头 charge_line_head 单独一帧，锚点在箭头底边的正中，接在车道的末端；箭头里先接着画一小段同样的车道，再收成箭尖。
+
+CHARGE_W, CHARGE_H = 128, 20  # 车道画布（1 倍像素；2 倍 256×40）
+CHARGE_HW = 7.0  # 车道半宽：宽 14 像素（1 倍）= 2 倍 28 像素
+HEAD_W, HEAD_H = 32, 32  # 箭头画布（2 倍 64×64）
+HEAD_BASE, HEAD_TIP, HEAD_HH = 4.0, 29.5, 12.5  # 箭头底边、箭尖的 x，底边的半高
+
+
+def lane_alpha(v: np.ndarray, rim_mod) -> np.ndarray:
+    """车道的横截面：v 是到中线的距离（1 倍像素）。中间一层淡的、顺着冲锋方向的笔丝（只随 v 变），两侧一道稍亮的边，
+    边外一圈很淡的洇痕。rim_mod 调两侧边的浓淡（车道里沿 X 缓慢起伏，箭头里取 1）。"""
+    rng = np.random.default_rng(3200)
+    vs = np.linspace(-CHARGE_HW - 3, CHARGE_HW + 3, 96)
+    silk = np.interp(v, vs, 0.62 + 0.7 * rank01(V.noise(rng, (1, 96), (1.6, 0.0)))[0])
+    rim_w = np.interp(v, vs, 0.8 + 0.35 * rank01(V.noise(rng, (1, 96), (3.0, 0.0)))[0])
+    va = np.abs(v)
+    fill = 0.27 * smoothstep(CHARGE_HW + 0.4, CHARGE_HW - 1.4, va) * silk
+    rim = 1.0 * np.exp(-(((va - (CHARGE_HW - 1.3)) / (0.9 * rim_w)) ** 2)) * rim_mod * (0.75 + 0.25 * silk)
+    bleed = 0.1 * np.exp(-np.maximum(va - CHARGE_HW + 0.6, 0) / 0.9) * (va > CHARGE_HW - 0.6)
+    return np.clip(np.maximum.reduce([fill, rim, bleed]), 0, 1)
+
+
+def make_charge_line() -> Image.Image:
+    """冲锋预警的车道：一条压在地上的淡光带，顺着冲锋方向的笔丝、两侧的边稍亮（浓淡沿 X 缓慢起伏），边外一圈淡淡的洇痕，
+    起点一小段淡入；其余沿 X 一致，拉多长都不走样。白色，染色叠加（游戏里染红）。"""
+    ss = 6
+    X, Y = V.grid1(CHARGE_H, CHARGE_W, ss)
+    v = Y - CHARGE_H / 2
+    rng = np.random.default_rng(3201)
+    wav = sample1(pnoise1(rng, 256, 14.0), X / CHARGE_W * 0.999)
+    rim_mod = 1.0 - 0.18 * smoothstep(-0.2, 1.4, wav) * smoothstep(CHARGE_W - 4.0, CHARGE_W - 24.0, X)  # 末端回到 1，与箭头接上
+    a = lane_alpha(v, rim_mod) * smoothstep(0.0, 7.0, X)
+    a8 = np.clip(V.downsample(a, ss), 0, 1)
+    a8[0, :] = a8[-1, :] = 0
+    a8[:, 0] = 0  # 起点那一列清零；最右一列保留（拉伸后接箭头）
+    return V.to_rgba8(WHITE, a8)
+
+
+def make_charge_line_head() -> Image.Image:
+    """冲锋预警的箭头：接着车道画一小段，收成一个干笔勾边的箭尖（两条斜边重、底下淡淡一层），里面再一道小的折笔。"""
+    ss = 6
+    X, Y = V.grid1(HEAD_H, HEAD_W, ss)
+    v = Y - HEAD_H / 2
+    rng = np.random.default_rng(3202)
+    span = HEAD_TIP - HEAD_BASE
+    u = (X - HEAD_BASE) / span  # 0 底边 .. 1 箭尖
+    half = HEAD_HH * np.clip(1.0 - u, 0, 1)
+    inside = smoothstep(0.4, -0.4, np.abs(v) - half) * (u >= 0) * (u <= 1)
+    # 车道接进来：底边处与 charge_line 最右一列相同，往里几像素淡进箭头的填色
+    lane = lane_alpha(v, 1.0) * (X >= HEAD_BASE) * smoothstep(HEAD_BASE + 7.0, HEAD_BASE + 1.0, X)
+    fill = (0.24 + 0.14 * u) * inside
+    tex = ptex(rng, ns=12, nt=256, along=6.0, across=0.6)
+    edges = np.zeros_like(X)
+    for sgn in (-1.0, 1.0):
+        p0 = np.array([HEAD_BASE, HEAD_H / 2 + sgn * HEAD_HH])
+        p1 = np.array([HEAD_TIP, HEAD_H / 2])
+        d = p1 - p0
+        L = float(np.hypot(*d))
+        t = np.clip(((X - p0[0]) * d[0] + (Y - p0[1]) * d[1]) / L**2, 0, 1)
+        perp = np.hypot(X - p0[0] - d[0] * t, Y - p0[1] - d[1] * t)
+        hw = 1.35 * (0.45 + 0.55 * smoothstep(0.0, 0.25, t)) * (1.0 - 0.35 * t)
+        b = sample_ptex(tex, np.clip(perp / np.maximum(hw, 0.3), -1, 1), t * 0.999)
+        dry = 0.55 * smoothstep(0.55, 1.0, t)  # 往箭尖去笔越干，带飞白
+        edges = np.maximum(edges, smoothstep(hw + 0.4, hw - 0.4, perp) * smoothstep(dry - 0.08, dry + 0.08, b) * (0.7 + 0.3 * b))
+    # 里面一道小折笔
+    chev = np.zeros_like(X)
+    for sgn in (-1.0, 1.0):
+        p0 = np.array([HEAD_BASE + 8.0, HEAD_H / 2 + sgn * 6.0])
+        p1 = np.array([HEAD_BASE + 15.5, HEAD_H / 2])
+        d = p1 - p0
+        t = np.clip(((X - p0[0]) * d[0] + (Y - p0[1]) * d[1]) / float(d @ d), 0, 1)
+        perp = np.hypot(X - p0[0] - d[0] * t, Y - p0[1] - d[1] * t)
+        chev = np.maximum(chev, smoothstep(1.05, 0.45, perp))
+    a = np.clip(np.maximum.reduce([np.maximum(lane, fill), edges, 0.7 * chev * inside]), 0, 1)
+    return white_image(a, ss)
+
+
 # ============================================================== 汇总
 
 WHITE_ADD = {"color": "white", "blend": "add", "tint": True}
@@ -1368,6 +1449,12 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
                                                     "note": "扇形预警：120°，锚点在扇顶、开口朝 +X；radius_px 是半径，按需要的半径缩放；建议染红 #FF4A3A"})
     out["sector_fill"] = (make_sector_fill(), sector_anchor, {**WHITE_ADD, "kind": "fx", "points": "+x", "radius_px": V.dpx(SECTOR_R), "angle_deg": 120,
                                                               "note": "扇形预警的蓄力层：与 sector 同尺寸同锚点，按蓄力进度从扇顶往外缩放（0→1），外沿一道亮带"})
+    head_len = V.dpx(HEAD_TIP - HEAD_BASE)
+    out["charge_line"] = (make_charge_line(), (0.0, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "stretch": "x", "width_px": V.dpx(2 * CHARGE_HW),
+                                                         "note": f"冲锋预警的车道：锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − 箭头长 {head_len} 像素”再旋转；"
+                                                                 "沿 X 透明度一致（只有起点淡入），拉多长都不走样；末端接 charge_line_head；建议染红 #FF4A3A"})
+    out["charge_line_head"] = (make_charge_line_head(), (HEAD_BASE / HEAD_W, 0.5), {**WHITE_ADD, "kind": "fx", "points": "+x", "width_px": V.dpx(2 * CHARGE_HW), "head_len_px": head_len,
+                                                                                    "note": "冲锋预警的箭头：锚点在箭头底边正中，放在车道末端、同样旋转，不拉伸；箭尖比锚点远 head_len_px"})
     return out
 
 
@@ -1384,6 +1471,8 @@ TINTS = {
     "shield": "#C9925A",
     "sector": "#FF4A3A",
     "sector_fill": "#FF4A3A",
+    "charge_line": "#FF4A3A",
+    "charge_line_head": "#FF4A3A",
 }
 
 

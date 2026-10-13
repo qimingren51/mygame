@@ -1,0 +1,149 @@
+diff --git a/assets/data/difficulty.ron b/assets/data/difficulty.ron
+index c402f83..5cf9fbc 100644
+--- a/assets/data/difficulty.ron
++++ b/assets/data/difficulty.ron
+@@ -2,12 +2,12 @@
+ // P0 只做一更到三更。灯油和铜钱的倍率乘在结算上。
+ [
+     (name: "一更", desc: "标准", effects: []),
+-    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.4、伤害 ×1.45", effects: [
+-        Mul(EnemyHp, 0.4), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.45), Add(Affixes, 1.0), Mul(BossHp, 0.2),
++    (name: "二更", desc: "精英带 1 个词缀；妖物生命 ×1.5、伤害 ×1.9", effects: [
++        Mul(EnemyHp, 0.5), Mul(SpawnRate, 0.1), Mul(EnemyDamage, 0.9), Add(Affixes, 1.0), Mul(BossHp, 0.2),
+         Mul(OilGain, 0.25), Mul(GoldGain, 0.25),
+     ]),
+-    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×1.8、伤害 ×1.7", effects: [
+-        Mul(EnemyHp, 0.8), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 0.7), Add(Affixes, 1.0), Mul(BossHp, 0.4),
++    (name: "三更", desc: "夜主多一招；回复 -25%；妖物生命 ×2.2、伤害 ×2.8", effects: [
++        Mul(EnemyHp, 1.2), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 1.8), Add(Affixes, 1.0), Mul(BossHp, 0.4),
+         Mul(Healing, -0.25), Rule(BossExtra),
+         Mul(OilGain, 0.5), Mul(GoldGain, 0.5),
+     ]),
+diff --git a/assets/data/elements.ron b/assets/data/elements.ron
+index f6d5fe6..dcbd1a6 100644
+--- a/assets/data/elements.ron
++++ b/assets/data/elements.ron
+@@ -96,7 +96,7 @@
+         (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%",
+          effect: Spread(count: 3, radius: 60.0, mult: 1.5, duration: 3.0, burn_ratio: 0.2)),
+         (a: Fire, b: Earth, id: "rongyan", name: "赤地", desc: "地面烧红 3 秒，持续伤害",
+-         effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 0.6, slow: 0.0, knock_mult: 1.0)),
++         effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 1.0, slow: 0.0, knock_mult: 1.0)),
+         (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透",
+          effect: Blades(count: 3, ratio: 0.5, pierce: 2, speed: 320.0, life: 0.8, hit_radius: 7.0)),
+         (a: Metal, b: Water, id: "ningshuang", name: "凝霜", desc: "冻结 1 秒，周围减速",
+diff --git a/assets/data/lamps.ron b/assets/data/lamps.ron
+index b31974a..ee894d9 100644
+--- a/assets/data/lamps.ron
++++ b/assets/data/lamps.ron
+@@ -5,8 +5,8 @@
+      good: "灼烧伤害 +20%", bad: "无（入门灯）", effects: [Add(BurnDamage, 0.2)], initial: true),
+     (id: "mirror", name: "铜镜灯", school: "剑修", element: Metal, start_weapon: "sword", color: "#F0E6C8",
+      good: "暴击率 +10%，暴击伤害 +20%", bad: "生命上限 -15%",
+-     effects: [Add(CritChance, 0.10), Add(CritMult, 0.20), Mul(MaxHp, -0.15)]),
++     effects: [Add(CritChance, 0.10), Add(CritMult, 0.20), Mul(MaxHp, -0.08)]),
+     (id: "frost", name: "霜瓷灯", school: "寒川", element: Water, start_weapon: "bell", color: "#9FD4FF",
+-     good: "减速、冰冻时长 +30%；受击时 25% 冻住攻击者", bad: "伤害 -10%",
+-     effects: [Add(SlowTime, 0.3), Add(FreezeTime, 0.3), Add(ThornFreeze, 0.25), Add(Damage, -0.10)]),
++     good: "减速、冰冻时长 +30%；受击时 25% 冻住攻击者", bad: "移速 -5%",
++     effects: [Add(SlowTime, 0.3), Add(FreezeTime, 0.3), Add(ThornFreeze, 0.25), Mul(Speed, -0.05)]),
+ ]
+diff --git a/assets/data/weapons.ron b/assets/data/weapons.ron
+index 35f8e03..ea5ea0e 100644
+--- a/assets/data/weapons.ron
++++ b/assets/data/weapons.ron
+@@ -8,14 +8,14 @@
+         // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
+         behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
+         levels: [
+-            (count: 3, radius: 54.0, damage: 15.0),
+-            (count: 3, radius: 58.0, damage: 18.0),
+-            (count: 4, radius: 62.0, damage: 21.0),
+-            (count: 4, radius: 66.0, damage: 24.0),
+-            (count: 5, radius: 70.0, damage: 27.0),
+-            (count: 5, radius: 74.0, damage: 30.0),
+-            (count: 6, radius: 78.0, damage: 33.0),
+-            (count: 6, radius: 82.0, damage: 36.0),
++            (count: 3, radius: 54.0, damage: 12.8),
++            (count: 3, radius: 58.0, damage: 15.3),
++            (count: 4, radius: 62.0, damage: 17.8),
++            (count: 4, radius: 66.0, damage: 20.4),
++            (count: 5, radius: 70.0, damage: 22.9),
++            (count: 5, radius: 74.0, damage: 25.5),
++            (count: 6, radius: 78.0, damage: 28.1),
++            (count: 6, radius: 82.0, damage: 30.6),
+         ],
+         evolution: Some((
+             name: "不夜城", passive: "changming",
+@@ -23,7 +23,7 @@
+             // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
+             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
+                             inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
+-            level: (count: 10, radius: 92.0, damage: 72.0),
++            level: (count: 10, radius: 92.0, damage: 61.2),
+         )),
+     ),
+     (
+@@ -33,21 +33,21 @@
+         behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 6.0,
+                          knockback: 30.0, spread: 0.14, retry: 0.2),
+         levels: [
+-            (cooldown: 1.09, count: 1, damage: 16.0, pierce: 1),
+-            (cooldown: 1.03, count: 1, damage: 20.0, pierce: 1),
+-            (cooldown: 0.97, count: 2, damage: 24.0, pierce: 2),
+-            (cooldown: 0.91, count: 2, damage: 28.0, pierce: 2),
+-            (cooldown: 0.85, count: 2, damage: 32.0, pierce: 2),
+-            (cooldown: 0.79, count: 3, damage: 36.0, pierce: 3),
+-            (cooldown: 0.73, count: 3, damage: 40.0, pierce: 3),
+-            (cooldown: 0.67, count: 3, damage: 44.0, pierce: 3),
++            (cooldown: 1.09, count: 1, damage: 19.0, pierce: 1),
++            (cooldown: 1.03, count: 1, damage: 24.0, pierce: 1),
++            (cooldown: 0.97, count: 2, damage: 29.0, pierce: 2),
++            (cooldown: 0.91, count: 2, damage: 34.0, pierce: 2),
++            (cooldown: 0.85, count: 2, damage: 38.0, pierce: 2),
++            (cooldown: 0.79, count: 3, damage: 43.0, pierce: 3),
++            (cooldown: 0.73, count: 3, damage: 48.0, pierce: 3),
++            (cooldown: 0.67, count: 3, damage: 53.0, pierce: 3),
+         ],
+         evolution: Some((
+             name: "万剑归宗", passive: "jianyi",
+             desc: "飞剑连发，无限穿透。",
+             behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
+                              knockback: 30.0, spread: 0.14, retry: 0.2),
+-            level: (cooldown: 0.42, count: 3, damage: 70.4, pierce: 999),
++            level: (cooldown: 0.42, count: 3, damage: 84.5, pierce: 999),
+         )),
+     ),
+     (
+@@ -56,14 +56,14 @@
+         // 寒波击退 40，减速 35% 持续 1.5 秒
+         behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5),
+         levels: [
+-            (cooldown: 2.85, radius: 79.0, damage: 9.0),
+-            (cooldown: 2.70, radius: 88.0, damage: 12.0),
+-            (cooldown: 2.55, radius: 97.0, damage: 15.0),
+-            (cooldown: 2.40, radius: 106.0, damage: 18.0),
+-            (cooldown: 2.25, radius: 115.0, damage: 21.0),
+-            (cooldown: 2.10, radius: 124.0, damage: 24.0),
+-            (cooldown: 1.95, radius: 133.0, damage: 27.0),
+-            (cooldown: 1.80, radius: 142.0, damage: 30.0),
++            (cooldown: 1.99, radius: 79.0, damage: 12.0),
++            (cooldown: 1.89, radius: 88.0, damage: 16.0),
++            (cooldown: 1.78, radius: 97.0, damage: 20.0),
++            (cooldown: 1.68, radius: 106.0, damage: 23.0),
++            (cooldown: 1.57, radius: 115.0, damage: 27.0),
++            (cooldown: 1.47, radius: 124.0, damage: 31.0),
++            (cooldown: 1.36, radius: 133.0, damage: 35.0),
++            (cooldown: 1.26, radius: 142.0, damage: 39.0),
+         ],
+         evolution: Some((
+             name: "寒山钟", passive: "jingxin",
+@@ -71,7 +71,7 @@
+             // 每 6 秒（乘以冷却）全屏钟鸣：冻结 1.5 秒（夜主除外）、伤害 90（对夜主单次封顶 400）
+             behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5,
+                             toll: Some((period: 6.0, damage: 90.0, freeze: 1.5, boss_cap: 400.0))),
+-            level: (cooldown: 1.80, radius: 184.6, damage: 45.0),
++            level: (cooldown: 1.26, radius: 184.6, damage: 58.0),
+         )),
+     ),
+     (

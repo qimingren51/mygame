@@ -51,8 +51,10 @@ fn spawn_in_pool(
     let run = &content.run;
     let hp_scale = match def.rank {
         Rank::Boss => stats.get(Stat::BossHp),
-        Rank::Elite => run.elite_hp_scale.at(minute) * stats.get(Stat::EnemyHp),
-        Rank::Normal | Rank::Critter => run.enemy_hp_scale.at(minute) * stats.get(Stat::EnemyHp),
+        Rank::Elite => run.late_at(run.elite_hp_scale, run.late.hp, minute) * stats.get(Stat::EnemyHp),
+        Rank::Normal | Rank::Critter => {
+            run.late_at(run.enemy_hp_scale, run.late.hp, minute) * stats.get(Stat::EnemyHp)
+        }
     };
     let speed_scale = if def.rank == Rank::Critter { 1.0 } else { stats.get(Stat::EnemySpeed) };
     let (lo, hi) = run.spawn.speed_jitter;
@@ -64,6 +66,7 @@ fn spawn_in_pool(
     en.r[i] = def.radius;
     en.hp[i] = def.hp * hp_scale;
     en.max_hp[i] = en.hp[i];
+    en.spawned_hp += f64::from(en.hp[i]);
     en.speed[i] = def.speed * rng.range_f32(lo, hi) * speed_scale;
     en.damage[i] = def.damage * run.enemy_damage_scale.at(minute) * stats.get(Stat::EnemyDamage);
     en.wob[i] = rng.range_f32(0.0, TAU);
@@ -105,7 +108,11 @@ pub(crate) fn soft_cap(s: &SpawnDef, minute: f32) -> usize {
 pub fn base_spawn_hp(content: &Content, minute: f32) -> f32 {
     let s = &content.run.spawn;
     let base = content.enemy_index(&s.base).map_or(10.0, |k| content.enemies[k].hp);
-    s.rate.at(minute) * s.scale * base * content.run.enemy_hp_scale.at(minute)
+    let run = &content.run;
+    run.late_at(s.rate, run.late.spawn, minute)
+        * s.scale
+        * base
+        * run.late_at(run.enemy_hp_scale, run.late.hp, minute)
 }
 
 /// 视野外一圈上的随机位置。
@@ -149,7 +156,8 @@ pub(crate) fn update_spawns(
         return;
     }
 
-    let mut rate = s.rate.at(m) * s.scale * stats.get(Stat::SpawnRate);
+    let mut rate =
+        content.run.late_at(s.rate, content.run.late.spawn, m) * s.scale * stats.get(Stat::SpawnRate);
     if director.surge_t > 0.0 {
         director.surge_t -= DT;
         rate *= director.surge_mult;
@@ -233,13 +241,42 @@ pub(crate) fn update_spawns(
         }
     }
 
-    // 按本局时间表出场
+    // 按本局时间表出场；无尽夜在 10 分钟以后再按间隔补上妖潮和夜主
     let elites = stats.get(Stat::EliteCount).round().max(0.0) as u32;
     let affixes = stats.get(Stat::Affixes).round().max(0.0) as u32;
-    for step in &mut plan.schedule {
-        if step.done || t < step.at {
-            continue;
+    let schedule = &content.run.schedule;
+    // 这一步要发生的事件：时间表里的下标，以及它来自本局时间表的第几项（无尽夜补上的是 None）
+    let mut due: Vec<(usize, Option<usize>)> = Vec::new();
+    for (pos, step) in plan.schedule.iter_mut().enumerate() {
+        if !step.done && t >= step.at {
+            step.done = true;
+            due.push((step.index, Some(pos)));
         }
+    }
+    if let Some(mut e) = director.endless {
+        let ed = &content.run.endless;
+        let find = |f: fn(&PlanEvent) -> bool| schedule.iter().position(|s| f(&s.event));
+        let next = (content.run.late.after + ed.every * (e.wave + 1) as f32) * 60.0;
+        if t >= next
+            && let Some(k) = find(|ev| matches!(ev, PlanEvent::Surge { .. }))
+        {
+            e.wave += 1;
+            due.push((k, None));
+            if let PlanEvent::Surge { duration, .. } = schedule[k].event {
+                e.boss_due = Some(t + duration);
+            }
+        }
+        // 上一个夜主还在场就等它倒下
+        if e.boss_due.is_some_and(|at| t >= at)
+            && director.boss.is_none()
+            && let Some(k) = find(|ev| matches!(ev, PlanEvent::Boss { .. }))
+        {
+            e.boss_due = None;
+            due.push((k, None));
+        }
+        director.endless = Some(e);
+    }
+    for (index, from) in due {
         let spawn_elite = |pool: &[String],
                            rng: &mut Pcg32,
                            en: &mut Enemies,
@@ -256,7 +293,7 @@ pub(crate) fn update_spawns(
             }
             outbox.0.push(SimEvent::Elite { kind, count: elites as u8 });
         };
-        match &content.run.schedule[step.index].event {
+        match &schedule[index].event {
             PlanEvent::Elite(pool) => spawn_elite(pool, rng, &mut en, &mut outbox, &mut survival),
             PlanEvent::Surge { duration, rate_mult, elites: pool } => {
                 director.surge_t = *duration;
@@ -274,18 +311,23 @@ pub(crate) fn update_spawns(
                 outbox.0.push(SimEvent::Elite { kind, count: 1 });
             }
             PlanEvent::Encircle { warn, .. } => {
-                director.encircle.push(PendingEncircle { at: t + warn, index: step.index });
+                director.encircle.push(PendingEncircle { at: t + warn, index });
                 outbox.0.push(SimEvent::EncircleWarn { warn: *warn });
             }
             PlanEvent::Boss { enemy, spawn_mult, barrier } => {
                 let kind = content.enemy_index(enemy).expect("内容校验保证引用存在") as u16;
                 let (x, y) = ring_pos(rng, &view, p.x, p.y, s.ring_extra);
                 if let Some(i) = spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m) {
-                    // 灯阵完整：夜主少两成生命
+                    // 灯阵完整：夜主少两成生命；无尽夜第 k 次再来 × boss_growth^k
+                    let mut hp = en.hp[i];
                     if lanterns.complete() {
-                        en.hp[i] *= content.run.lanterns.boss_hp;
-                        en.max_hp[i] = en.hp[i];
+                        hp *= content.run.lanterns.boss_hp;
                     }
+                    if let Some(e) = &mut director.endless {
+                        hp *= (0..e.arrivals).fold(1.0, |a, _| a * content.run.endless.boss_growth);
+                        e.arrivals += 1;
+                    }
+                    en.set_hp(i, hp);
                     director.boss = Some(en.handle(i));
                     director.boss_mult = *spawn_mult;
                     director.boss_since = t;
@@ -294,11 +336,17 @@ pub(crate) fn update_spawns(
                     }
                     outbox.0.push(SimEvent::BossArrived { kind });
                 } else {
-                    // 满员时保留夜主事件，腾出槽位后重试。
-                    continue;
+                    // 满员时保留夜主事件，腾出槽位后重试
+                    match from {
+                        Some(pos) => plan.schedule[pos].done = false,
+                        None => {
+                            if let Some(e) = &mut director.endless {
+                                e.boss_due = Some(t);
+                            }
+                        }
+                    }
                 }
             }
         }
-        step.done = true;
     }
 }

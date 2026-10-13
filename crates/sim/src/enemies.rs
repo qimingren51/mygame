@@ -108,6 +108,8 @@ pub struct Enemies {
     pub hi: usize,
     pub count: usize,
     free: Vec<u32>,
+    /// 累计刷出的血量（平衡统计，不进状态哈希）
+    pub spawned_hp: f64,
 }
 
 impl Default for Enemies {
@@ -168,6 +170,7 @@ impl Default for Enemies {
             hi: 0,
             count: 0,
             free: Vec::with_capacity(ENEMY_CAP),
+            spawned_hp: 0.0,
         }
     }
 }
@@ -228,6 +231,13 @@ impl Enemies {
         self.hard_n[i] = 0;
         self.soft_n[i] = 0;
         Some(i)
+    }
+
+    /// 刚刷出的妖物改生命（分裂、灯阵削弱夜主），刷出血量的统计跟着改。
+    pub fn set_hp(&mut self, i: usize, hp: f32) {
+        self.spawned_hp += f64::from(hp - self.max_hp[i]);
+        self.hp[i] = hp;
+        self.max_hp[i] = hp;
     }
 
     pub fn kill(&mut self, i: usize) {

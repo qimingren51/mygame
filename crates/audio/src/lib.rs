@@ -376,13 +376,15 @@ fn play_sim_events(
                 let s = a.sfx.kill.clone();
                 a.play_at(&s, rate, 0.0, place(pos));
             }
-            // 夜主倒下：全场静半拍，一声低锣；天明时编钟和晨鸟
-            SimEvent::BossDefeated { .. } => {
+            // 夜主倒下：全场静半拍，一声低锣；天明时编钟和晨鸟（无尽夜不天明）
+            SimEvent::BossDefeated { dawn, .. } => {
                 a.duck(0.55);
                 let s = a.sfx.boss_down.clone();
                 a.play_later(&s, 0.6);
-                let s = a.sfx.dawn.clone();
-                a.play_later(&s, 1.6);
+                if dawn {
+                    let s = a.sfx.dawn.clone();
+                    a.play_later(&s, 1.6);
+                }
             }
             SimEvent::GemPicked { .. } if a.can("gem", 0.05) => {
                 a.gem_last = a.now;

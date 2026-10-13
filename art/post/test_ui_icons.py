@@ -265,10 +265,10 @@ def test_m25_meta_matches_data():
 
 
 def test_pre_m25_unchanged():
-    """M2.5 之前的全部图标、印章逐字节不变，meta.json 已有条目与顶层字段不变、新条目只追加在后面（post/golden_m25.json）。"""
+    """快照里的图标、印章（M2.5 之前 + M2.5 第一批）逐字节不变，meta.json 已有条目与顶层字段不变、新条目只追加在后面（post/golden_m25.json）。"""
     n = testkit.check_snapshot(V.ASSETS, ("ui",), D)
-    assert n == len(ICONS) + len(SEALS), f"快照里应有 {len(ICONS) + len(SEALS)} 个原有的 PNG，实际核对了 {n} 个"
-    assert list(meta()["files"])[: n] == ICONS + SEALS
+    assert n == len(ALL), f"快照里应有 {len(ALL)} 个 PNG，实际核对了 {n} 个"
+    assert list(meta()["files"])[: len(ICONS) + len(SEALS)] == ICONS + SEALS
 
 
 def test_old_unchanged():

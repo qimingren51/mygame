@@ -73,12 +73,16 @@ pub(crate) struct FxFrames {
     coin: Option<(FrameId, Option<FrameId>)>,
     /// 九尾扫的扇形预警：轮廓、蓄力填充
     sector: Option<(FrameId, FrameId)>,
+    /// 冲锋预警：车道、箭头
+    charge: Option<(FrameId, FrameId)>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
     zone_lava: Option<(FrameId, Option<FrameId>)>,
     zone_mud: Option<FrameId>,
     zone_herb: Option<(FrameId, Option<FrameId>)>,
     /// 精英词缀的小图标（按 `affixes.ron` 的顺序）
     affix: Vec<Option<FrameId>>,
+    /// 墨点（合围预警的墨雾）
+    ink: Vec<FrameId>,
 }
 
 /// 区域、扇形贴图在缩放 1 时的有效半径（世界单位）；图集 meta 里有 radius_px 时以它为准，这里是没有时的后备值。
@@ -125,6 +129,8 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
         sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
+        charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
+        ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
         zone_mud: db.find("ground/zone_mud"),
         zone_herb: db.find("ground/zone_herb").map(|f| (f, db.find("ground/zone_herb_glow"))),
@@ -158,6 +164,8 @@ pub(crate) struct FxState {
     /// 石灯笼点亮的时刻（按下标），光区从小慢慢铺开
     lamp_lit: Vec<(u8, f32)>,
     pub flash: Color,
+    /// 合围预警的墨雾：已经起了多久、预警多长、合拢后散了多久
+    mist: Option<(f32, f32, Option<f32>)>,
 }
 
 impl Default for FxState {
@@ -168,6 +176,7 @@ impl Default for FxState {
             time: 0.0,
             lamp_lit: Vec::new(),
             flash: Color::NONE,
+            mist: None,
         }
     }
 }
@@ -309,7 +318,15 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             SimEvent::ChestOpened { count, .. } if count >= 3 => {
                 fx.flash(rgb(0xffd98a), if count >= 5 { 0.3 } else { 0.15 })
             }
-            SimEvent::EncircleWarn { .. } => fx.flash(rgb(0x1a1020), 0.35),
+            SimEvent::EncircleWarn { warn } => {
+                fx.flash(rgb(0x1a1020), 0.35);
+                fx.mist = Some((0.0, warn.max(0.3), None));
+            }
+            SimEvent::Encircle { .. } => {
+                if let Some(m) = &mut fx.mist {
+                    m.2 = Some(0.0);
+                }
+            }
             SimEvent::PlayerHurt { .. } => {
                 fx.flash(rgb(0xff3b30), 0.18);
             }
@@ -338,6 +355,7 @@ pub(crate) fn collect_fx(
     f: Res<FxFrames>,
     res: FxSources,
     player: Single<(&Pos, &PrevPos, &Player)>,
+    cam: Single<(&Transform, &Projection), With<MainCamera>>,
     mut fx: ResMut<FxState>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
@@ -350,6 +368,63 @@ pub(crate) fn collect_fx(
     let hero = to_screen(pprev.0.lerp(ppos.0, a));
     let lerp = |prev: Vec2, cur: Vec2| to_screen(prev.lerp(cur, a));
     let px = |frame: FrameId, world: f32| world / db.frame(frame).size.x;
+
+    // ---- 合围预警：屏幕四边起墨雾，预警期间往里压；合拢后 1.5 秒散去
+    if let Some((t, warn, closing)) = &mut fx.mist {
+        *t += dt;
+        let a = match closing {
+            Some(c) => {
+                *c += dt;
+                1.0 - *c / 1.5
+            }
+            None => (*t / *warn).min(1.0),
+        };
+        let (tf, proj) = *cam;
+        if let (Projection::Orthographic(o), false) = (proj, f.ink.is_empty())
+            && a > 0.0
+        {
+            let center = tf.translation.truncate();
+            let half = o.area.half_size();
+            let blob = half.y * 0.8;
+            // 沿四边均匀放一圈墨团，随 a 往里压一点
+            let (nx, ny) = (10, 6);
+            let mut spots = Vec::with_capacity(2 * (nx + ny));
+            for k in 0..nx {
+                let x = -half.x + (k as f32 + 0.5) * 2.0 * half.x / nx as f32;
+                spots.push(Vec2::new(x, half.y));
+                spots.push(Vec2::new(-x, -half.y));
+            }
+            for k in 0..ny {
+                let y = -half.y + (k as f32 + 0.5) * 2.0 * half.y / ny as f32;
+                spots.push(Vec2::new(half.x, -y));
+                spots.push(Vec2::new(-half.x, y));
+            }
+            let squeeze = 1.0 - 0.08 * a;
+            for (k, spot) in spots.into_iter().enumerate() {
+                let id = f.ink[k % f.ink.len()];
+                let wobble = 1.0 + 0.15 * (k as f32 * 2.3 + now * 0.7).sin();
+                let pos = center + spot * squeeze;
+                let scale = Vec2::splat(blob * wobble / db.frame(id).size.x);
+                let rot = k as f32 * 1.7 + now * 0.08;
+                pools.fx.push(Draw {
+                    scale,
+                    rot,
+                    color: rgb(0x0b0710).with_alpha(0.85 * a),
+                    ..Draw::new(id, pos.extend(layer::NUMBERS - 10.0))
+                });
+                glow.add(
+                    f.glow,
+                    pos.extend(layer::EMISSIVE),
+                    Vec2::splat(blob * 1.2 / db.frame(f.glow).size.x),
+                    0.0,
+                    rgb(0xff4a3a).with_alpha(0.12 * a),
+                );
+            }
+        }
+        if a <= 0.0 && closing.is_some() {
+            fx.mist = None;
+        }
+    }
 
     // ---- 照见圈：地上一圈淡淡的墨线；灯芯的灯焰带在圈边跳动
     if let Some(reveal) = &res.reveal
@@ -702,7 +777,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮）
+    // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮，锁定后最亮）
     if let Some(en) = &res.enemies {
         let c = &content.0;
         let red = rgb(0xff4a3a);
@@ -714,20 +789,44 @@ pub(crate) fn collect_fx(
             let u = (1.0 - en.charge_t[i] / ch.windup).clamp(0.0, 1.0);
             let at = Vec2::new(en.x[i], en.y[i]);
             let dir = Vec2::new(en.charge_dx[i], en.charge_dy[i]);
-            // 线从妖物脚下画到冲锋的终点（贴图的锚点在右端，放在终点、朝冲锋方向）
             let len = ch.speed * ch.duration + en.r[i];
-            let end = to_screen(at + dir * len);
-            let screen_dir = end - to_screen(at);
+            let start = to_screen(at);
+            let screen_dir = to_screen(at + dir * len) - start;
             let rot = screen_dir.y.atan2(screen_dir.x);
-            let w = db.frame(f.trail).size;
-            let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
-            pools.fx.push(Draw {
-                scale,
-                rot,
-                color: red.with_alpha(0.25 + 0.45 * u),
-                ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
-            });
-            glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
+            // 锁定以后线停下、变亮，给玩家躲的信号
+            let locked = en.charge_t[i] <= ch.lock;
+            let (line_a, glow_a) = if locked { (0.95, 0.75) } else { (0.2 + 0.35 * u, 0.12 + 0.25 * u) };
+            if let Some((line, head)) = f.charge {
+                // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）；车道宽约为妖物直径的 0.8 倍
+                let (lf, hf) = (db.frame(line), db.frame(head));
+                let k = en.r[i] * 1.6 / lf.width.unwrap_or(lf.size.y);
+                let head_len = hf.head_len.unwrap_or(hf.size.x) * k;
+                let body = (screen_dir.length() - head_len).max(0.0);
+                let tip = start + screen_dir.normalize_or_zero() * body;
+                for (id, pos, scale) in
+                    [(line, start, Vec2::new(body / lf.size.x, k)), (head, tip, Vec2::splat(k))]
+                {
+                    pools.fx.push(Draw {
+                        scale,
+                        rot,
+                        color: red.with_alpha(line_a),
+                        ..Draw::new(id, pos.extend(layer::GROUND + 0.97))
+                    });
+                    glow.add(id, pos.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                }
+            } else {
+                // 没有专用贴图时借剑光拖尾：锚点在右端，放在终点、朝冲锋方向
+                let end = start + screen_dir;
+                let w = db.frame(f.trail).size;
+                let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
+                pools.fx.push(Draw {
+                    scale,
+                    rot,
+                    color: red.with_alpha(line_a),
+                    ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
+                });
+                glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+            }
             let pulse = 0.6 + 0.4 * (now * 18.0).sin();
             glow.add(
                 f.glow,

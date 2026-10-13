@@ -109,6 +109,9 @@ def main() -> int:
         sub = subset.Subsetter(opts)
         sub.populate(text=text)
         sub.subset(font)
+        # 不写当前时间：字没变时输出逐字节相同，免得每次都改出二进制差异（合并时还会冲突）
+        font.recalcTimestamp = False
+        font["head"].modified = font["head"].created
         font.save(OUT / name)
         print(f"{name}: {(OUT / name).stat().st_size / 1024:.0f} KB")
     MANIFEST.write_text(text, encoding="utf-8")

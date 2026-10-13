@@ -64,6 +64,21 @@ pub enum HitKind {
     Reaction,
 }
 
+/// 主角是被什么打伤的（平衡统计、死因）。kind 是 `enemies.ron` 里的下标。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HurtBy {
+    /// 碰到妖物
+    Contact { kind: u16 },
+    /// 冲锋撞上
+    Charge { kind: u16 },
+    /// 弹幕
+    Shot,
+    /// 九尾扫
+    Sweep,
+    /// 狐火雨
+    Rain,
+}
+
 /// 等待下一步处理的命令。
 #[derive(Resource, Default, Debug)]
 pub struct SimCommands(pub Vec<SimCommand>);
@@ -94,6 +109,7 @@ pub enum SimEvent {
     },
     PlayerHurt {
         amount: f32,
+        by: HurtBy,
     },
     PlayerHealed {
         amount: f32,
@@ -216,8 +232,10 @@ pub enum SimEvent {
     BossSummon {
         pos: Vec2,
     },
+    /// 夜主倒下；dawn：这一下迎来天明（无尽夜里是 false，夜续下去）
     BossDefeated {
         pos: Vec2,
+        dawn: bool,
     },
     Pickup {
         kind: PickupKind,

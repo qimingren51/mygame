@@ -5,7 +5,8 @@
     上半：全部 M2.5 界面图标与五行反应印——原大（1 倍放大 2×，2 倍 1×）+ 32 + 24 像素（印章 48 / 28 像素宽），
           左半纸色底、右半夜色底 #161B2C，每组前面放几个原有的图标作对照；
     下半：游戏比例（1 贴图像素 = 1 画面像素）的地面场景，左白天（宣纸、不打光）、右夜里（世界 × 光照图 + 自发光叠加）：
-          金币挨着一颗魂火、放大 4 倍的金币，染红的扇形预警（蓄力到六成），熔岩、淤泥、灵草按反应的半径摆在纸上。
+          金币挨着一颗魂火、放大 4 倍的金币，染红的扇形预警（蓄力到六成）与冲锋预警（长 200 世界单位），
+          熔岩、淤泥、灵草按反应的半径摆在纸上。
 
 先跑 vfx_textures.py、weapon_textures.py、ui_icons.py（同一密度），再跑本脚本：
   LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/review_m25.py
@@ -127,6 +128,7 @@ def scene(f_lab):
     gm, wm, vm = R.meta("ground"), R.meta("weapons"), R.meta("vfx")
     G = {n: R.load("ground", n) for n in ("zone_lava", "zone_lava_glow", "zone_mud", "zone_herb", "zone_herb_glow")}
     sec, sec_fill = R.load("weapons", "sector"), R.load("weapons", "sector_fill")
+    cl, cl_head = R.load("weapons", "charge_line"), R.load("weapons", "charge_line_head")
     coin, coin_emit, gem, shadow, light = (R.load("vfx", n) for n in ("coin", "coin_emit", "gem_1", "shadow", "light"))
     hero, hero_k = R.optional_prop("hero")
 
@@ -141,6 +143,7 @@ def scene(f_lab):
     s_scale = s_rad * S.PX_PER_UNIT / wm["sector"]["radius_px"]
     s_ang = math.radians(-12.0)
     coins = [(150, 420), (175, 432), (200, 418)]
+    cx0, cy0, c_len, c_ang = 300, 505, 200.0, math.radians(-4.0)  # 冲锋预警：起点、长度（世界单位）、方向
 
     def world(canvas):
         for n, x, y in zones:
@@ -156,6 +159,11 @@ def scene(f_lab):
         al = 1.0 if mode == "add" else 0.55
         put(canvas, sec, sx, sy, anchor=tuple(wm["sector"]["anchor"]), angle=s_ang, scale=s_scale, mode=mode, tint=red, alpha=al)
         put(canvas, sec_fill, sx, sy, anchor=tuple(wm["sector_fill"]["anchor"]), angle=s_ang, scale=s_scale * 0.6, mode=mode, tint=red * 0.85, alpha=al)
+        # 冲锋预警：车道拉到“长度 − 箭头长”，箭头接在末端（坐标按 1 倍像素，长度换成当前密度的像素再除回去）
+        body_px = c_len * S.PX_PER_UNIT - wm["charge_line_head"]["head_len_px"]
+        put(canvas, cl, cx0, cy0, anchor=tuple(wm["charge_line"]["anchor"]), angle=c_ang, scale=(body_px / cl.width, 1.0), mode=mode, tint=red, alpha=al)
+        ex, ey = cx0 + body_px / D * math.cos(c_ang), cy0 + body_px / D * math.sin(c_ang)
+        put(canvas, cl_head, ex, ey, anchor=tuple(wm["charge_line_head"]["anchor"]), angle=c_ang, mode=mode, tint=red, alpha=al)
         if mode == "add":
             put(canvas, G["zone_lava_glow"], 170, 150, anchor=tuple(gm["zone_lava_glow"]["anchor"]), scale=zk("zone_lava"), mode="add", tint=col(LAVA_TINT))
             put(canvas, G["zone_herb_glow"], 800, 150, anchor=tuple(gm["zone_herb_glow"]["anchor"]), scale=zk("zone_herb"), mode="add", tint=col(HERB_TINT))
@@ -196,6 +204,7 @@ def scene(f_lab):
         texts.append((ox + int(130 * D), top + int(380 * D), "金币 ×3、魂火 gem_1", side, f_lab))
         texts.append((ox + int(20 * D), top + Hm - (coin.height * 4 + 8) - V.dpx(8) - V.dpx(16), "金币 ×4（最近邻放大）", side, f_lab))
         texts.append((ox + int((sx + 20) * D), top + int((sy + 70) * D), f"扇形预警（半径 {s_rad:g}，蓄力六成）", side, f_lab))
+        texts.append((ox + int(cx0 * D), top + int((cy0 + 14) * D), f"冲锋预警 charge_line + charge_line_head（长 {c_len:g}）", side, f_lab))
     return out, texts
 
 
