@@ -189,11 +189,11 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → o
 |---|---|---|
 | `bamboo_clump` | 320² | 土丘上八竿墨竹，叶尖约 2.9 米（主角的 1.3 倍）。前排浓墨、后排淡彩石绿；竹叶是不描线的笔触。`broken_variant` |
 | `bamboo_clump_broken` | 320² | 同画布、同锚点、同纸纹：斜劈的竹桩、倒地的断竹、落叶。打碎竹丛时直接换图。`intact_variant` |
-| `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。挂点 `glow` |
-| `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光 |
+| `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。约 1.3 米（地标：和石灯笼差不多高，宽得多）。挂点 `glow` |
+| `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光。约 1.2 米 |
 | `fox_lanterns` | 192² | 木柱、竹梁、翘角瓦檐，三盏带竹篾的青纸灯（`_emit`），柱上一条朱砂纸符。挂点 `glow`（中心）和 `glow_0..2` |
 
-发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 70，世界单位）；meta 里还有 `region: "qingqiu"`。
+发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90，世界单位）；meta 里还有 `region: "qingqiu"`。
 
 ## 青丘妖物与新动作（render/produce.py、render/qingqiu_review.py）
 

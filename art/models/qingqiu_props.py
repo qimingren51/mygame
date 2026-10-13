@@ -7,9 +7,9 @@
 竹丛（砍倒）bamboo_clump_broken：同一个土丘、同一个画布和锚点（游戏里直接换图），八根斜劈的竹桩
   （切口淡藤黄、中间空心浓墨，口沿翘着竹刺），四竿倒在地上的断竹（梢头带枝叶），满地落叶（有几片枯黄）。
 狐仙祠 fox_shrine：两级石台上的小石龛，朱砂立柱，四坡翘角瓦顶（淡墨瓦、细檐边，翼角轻挑）；龛里坐一只白石狐
-  （朱砂围嘴），台阶上供一碟白团子、一碗果子；檐角挂一盏小青灯（发光）。约 1.15 米。挂点 glow（青灯灯芯）。
+  （朱砂围嘴），台阶上供一碟白团子、一碗果子；檐角挂一盏小青灯（发光）。约 1.3 米（当地标用：和石灯笼差不多高，宽得多）。挂点 glow（青灯灯芯）。
 石狐 stone_fox：方石座上蹲坐的石狐，侧身朝左前（尖嘴、竖耳看得出是狐），大尾巴绕到前爪、尾尖白；
-  风化的石头带苔，脖子上一块褪色的红围嘴，不发光。约 0.8 米。
+  风化的石头带苔，脖子上一块褪色的红围嘴，不发光。约 1.2 米。
 狐灯 fox_lanterns：两根木柱、一根竹梁撑起一段四坡翘角瓦檐，檐下拉一根绳，挂三盏青纸灯（青火，发光；
   窗开得小，看得见青纸和竹篾），左柱贴一条朱砂纸符，
   狐村的光源。约 1.5 米。挂点 glow（三盏灯的中心，放一盏大光用）、glow_0..2（每盏灯芯，放小光用）。
@@ -503,17 +503,22 @@ def _stone_fox(prefix, parent, mats, bib, moss=None, loc=(0, 0, 0), scale=1.0, y
     return piv
 
 
+STONE_FOX_K = 1.5  # 整体放大（石座 + 石狐，比例不变）：原来在灯光里只有石子大
+
+
 def build_stone_fox():
     m = _mats()
     root = B.empty("StoneFox")
+    sc = B.empty("StoneFoxScale", root)  # 几何都挂在放大的空物体下，挂点 feet 仍挂在根上
+    sc.scale = (STONE_FOX_K,) * 3
     obj = B.mesh_object
     # 方石座：两层，略转一点角度，露出两个侧面
-    seat = B.empty("StoneFoxSeat", root, rot=(0, 0, math.radians(-14)))
+    seat = B.empty("StoneFoxSeat", sc, rot=(0, 0, math.radians(-14)))
     for nm, build in (("StoneFoxBase", _prism(0.31, 0.30, 0.0, 0.07, seg=4, rot=math.radians(45))),
                       ("StoneFoxBase2", _prism(0.27, 0.26, 0.07, 0.14, seg=4, rot=math.radians(45)))):
         obj(nm, build, m["stone"], "outer", seat, smooth=False, scale=(1.0, 0.8, 1.0))
         obj(nm + "Moss", build, m["moss_thin"], "none", seat, smooth=False, scale=(1.015, 0.81, 1.02), contour=True)
-    _stone_fox("Fox", root, {"stone": m["stone"], "tip": m["white"], "eye": m["eye"], "dark": m["dark"]},
+    _stone_fox("Fox", sc, {"stone": m["stone"], "tip": m["white"], "eye": m["eye"], "dark": m["dark"]},
                m["bib_faded"], moss=m["moss"], loc=(0.0, 0.02, 0.14), scale=1.22)
     sockets = {"feet": B.empty("StoneFoxFeet", root)}
     bpy.context.view_layer.update()
@@ -602,7 +607,8 @@ def _roof(prefix, parent, m, hx, hy, y_c, z_eave, rise, curl, nf=16, tile="tile"
 
 
 # ================================================================ 狐仙祠
-SHRINE_K = 1.12  # 整体放大（按 1 米左右建的，放大一点在游戏里更好认）
+SHRINE_GROW = 1.3  # 进游戏后再放大：灯光外只剩青灯和屋顶时也要像个地标（比石灯笼大）
+SHRINE_K = 1.12 * SHRINE_GROW  # 整体放大（按 1 米左右建的；1.12 是原来的，好认一点）
 
 
 def build_fox_shrine():

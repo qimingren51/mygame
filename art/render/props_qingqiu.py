@@ -39,7 +39,7 @@ TMP = OUT / "_tmp_qq"
 ALL = ["bamboo_clump", "bamboo_clump_broken", "fox_shrine", "stone_fox", "fox_lanterns"]
 QING_GLOW = "#8FE3C8"  # 与 models/qingqiu_props.QING_GLOW 相同（这里不 import 模型，免得审图也要 bpy）
 # 建议的光半径（世界单位，写进 meta.light_radius_units；游戏里石灯笼的光是 120）
-LIGHT_RADIUS_UNITS = {"fox_lanterns": 140, "fox_shrine": 70}
+LIGHT_RADIUS_UNITS = {"fox_lanterns": 140, "fox_shrine": 90}  # 狐仙祠放大 1.3 倍后光也跟着大一点
 STONE_LANTERN_UNITS = 120  # 审图按“石灯笼的火光半径 × 本道具 / 120”换算，和石灯笼放在一起比例对
 
 
@@ -67,11 +67,11 @@ def specs() -> dict:
             "intact_variant": "bamboo_clump",
             "note": "砍倒的竹丛：和 bamboo_clump 同画布、同锚点、同纸纹，直接换图"}),
             "sockets": (), "grain": "bamboo_clump"},
-        "fox_shrine": {**_common("fox_shrine", S.FRAME["prop"], 22, {
+        "fox_shrine": {**_common("fox_shrine", S.FRAME["prop"], 22 * Q.SHRINE_GROW, {
             **glow("fox_shrine"), "required_sockets": ["glow"],
             "note": "狐仙祠：檐角一盏小青灯，glow 挂点是灯芯；光色 light_color、建议光半径 light_radius_units（世界单位）"}),
             "sockets": ("glow",), "grain": None},
-        "stone_fox": {**_common("stone_fox", S.FRAME["prop"], 13, {"note": "石狐：不发光"}),
+        "stone_fox": {**_common("stone_fox", S.FRAME["prop"], 13 * Q.STONE_FOX_K, {"note": "石狐：不发光"}),
                       "sockets": (), "grain": None},
         "fox_lanterns": {**_common("fox_lanterns", S.FRAME["prop"], 30, {
             **glow("fox_lanterns"), "required_sockets": ["glow", "glow_0", "glow_1", "glow_2"],

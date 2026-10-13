@@ -492,7 +492,7 @@ assets/data/
   - **九尾**：`sweep` 6 帧是原地转身一圈、尾巴扫过身前（第 3 帧尾巴在 E 方向铺开，配扇形预警）；`summon` 4 帧九条尾尖各亮一团狐火（`_emit`，同狐火弹幕的颜色），召唤或狐火雨时用。幻身没有单独的帧，用 `boss` 的帧画（建议半透明、不画 `_emit`）。
 - **青丘道具**：
   - `bamboo_clump`（竹丛，可打碎的软障碍）和 `bamboo_clump_broken` 同画布、同锚点，打碎时直接换图；meta 里互相用 `broken_variant` / `intact_variant` 指向对方。2 倍下 320²，比别的道具大。
-  - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 70）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。
+  - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。按游戏里的反馈放大过：狐仙祠高约 38 个世界单位（和石灯笼差不多高、更宽，好当地标），石狐约 32。
 - **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
 - **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15）。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
 - **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。
