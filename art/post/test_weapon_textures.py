@@ -63,9 +63,12 @@ EXPECTED = {
     # M2.5：扇形预警（锚点在扇顶）
     "sector.png": (sz(76, 124), (0.0625, 0.5)),
     "sector_fill.png": (sz(76, 124), (0.0625, 0.5)),
+    # M2.5：冲锋预警（车道沿 X 拉伸，锚点在起点；箭头锚点在底边正中）
+    "charge_line.png": (sz(128, 20), (0.0, 0.5)),
+    "charge_line_head.png": (sz(32, 32), (0.125, 0.5)),
 }
 # 白色、可染色、叠加混合的贴图
-WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3)), "sector.png", "sector_fill.png"}
+WHITE_TINT = {"sword_trail.png", "ring.png", "warn.png", "blast.png", "shield.png", *(f"foxfire_{i}.png" for i in range(3)), "sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png"}
 REVIEW = ["weapons_sheet.png", "weapons_ingame.png"]
 
 WRITTEN: list[Path] = []
@@ -185,10 +188,13 @@ def test_alpha_not_empty():
         assert frac > 0.03, f"{name} 可见像素太少（{frac:.3f}）"
 
 
+STRETCH_X = {"charge_line.png"}  # 沿 X 拉伸的车道：最右一列故意不清零（接箭头不留缝）
+
+
 def test_borders_transparent():
     for name in EXPECTED:
         al = rgba(name)[..., 3]
-        border = np.concatenate([al[0], al[-1], al[:, 0], al[:, -1]])
+        border = np.concatenate([al[0], al[-1], al[:, 0]] + ([] if name in STRETCH_X else [al[:, -1]]))
         assert border.max() == 0, f"{name} 最外一圈像素必须全透明（最大 {border.max()}）"
 
 
@@ -272,6 +278,41 @@ def test_sector_shape():
         assert a[(r > rad + 4 * D)].max() < 0.05, f"{name} 半径外应透明"
 
 
+def test_charge_line():
+    """冲锋预警：车道锚点在起点、沿 X 一致（只在起点淡入；中线一行完全一致、两侧的边起伏不大），最右一列不透明、
+    宽度与 meta 的 width_px 相符；箭头的箭尖在右边，底边那一列与车道最右一列接得上。"""
+    meta = meta_files()
+    a = rgba("charge_line.png")[..., 3].astype(np.float64) / 255.0
+    h, w = a.shape
+    e = meta["charge_line.png"]
+    assert e["stretch"] == "x" and e["points"] == "+x"
+    x0 = int(round(8 * D))
+    mid = a[h // 2 - 1 : h // 2 + 1, x0:]
+    assert (mid.max(1) - mid.min(1)).max() <= 2.5 / 255, "车道中线沿 X 应完全一致（拉伸不走样）"
+    body = a[:, x0:]
+    assert (body.max(1) - body.min(1)).max() < 0.25, "车道沿 X 的起伏太大"
+    assert a[:, 0].max() == 0 and a[h // 2, 1] < 0.5 * a[h // 2, x0] and (np.diff(a[h // 2, :x0]) >= -1.5 / 255).all(), "起点应淡入"
+    assert np.abs(a[:, -1] - a[:, -int(4 * D)]).max() < 0.03 and a[:, -1].max() > 0.6, "最右一列应与车道一致、不透明（接箭头）"
+    rows = np.nonzero(a[:, w // 2] > 0.2)[0]
+    width = rows.max() - rows.min() + 1
+    assert abs(width - e["width_px"]) <= 2 * D, f"车道宽 {width} 像素与 width_px {e['width_px']} 不符"
+    assert a[h // 2, w // 2] < a[rows.min() + int(1 * D), w // 2], "两侧的边应比中间亮"
+    hd = rgba("charge_line_head.png")[..., 3].astype(np.float64) / 255.0
+    hh, hw_ = hd.shape
+    ax = int(round(EXPECTED["charge_line_head.png"][1][0] * hw_))
+    xs = np.arange(hw_)
+    assert (hd.sum(0) * xs).sum() / hd.sum() > ax, "箭头应朝 +X"
+    cols = np.nonzero((hd > 0.2).any(0))[0]
+    assert abs((cols.max() - ax) - meta["charge_line_head.png"]["head_len_px"]) <= 2 * D, "head_len_px 与箭尖位置不符"
+    off = (hh - h) // 2
+    # 只比车道宽度以内：箭头底边本来就比车道宽（两侧的箭翼），翼不算接缝
+    band = a[:, -1] > 0.05
+    seam = np.abs(hd[off : off + h, ax][band] - a[:, -1][band]).mean()
+    assert seam < 0.06, f"箭头底边与车道末端接不上（车道宽度内平均差 {seam:.3f}）"
+    wing = hd[:, ax][(np.arange(hh) < off + np.argmax(band)) | (np.arange(hh) >= off + h - np.argmax(band[::-1]))]
+    assert wing.max() > 0.15, "箭头底边应比车道宽（两侧有箭翼）"
+
+
 def test_crane_flap():
     frames = [rgba(f"crane_{i}.png")[..., 3].astype(np.float64) for i in range(4)]
     area = [f.sum() for f in frames]
@@ -348,10 +389,10 @@ def test_meta_px_per_unit():
 
 
 def test_pre_m25_unchanged():
-    """M2.5 之前的 weapons/ 产物逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
+    """快照里的 weapons/ 产物（M2.5 之前 + M2.5 第一批）逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
     testkit.check_snapshot(V.ASSETS, ("weapons",), D)
     files = list(meta_files())
-    assert files[-2:] == ["sector.png", "sector_fill.png"], "M2.5 的条目应追加在最后"
+    assert files[-4:] == ["sector.png", "sector_fill.png", "charge_line.png", "charge_line_head.png"], "M2.5 的条目应追加在最后"
 
 
 def test_density_1x_unchanged():
