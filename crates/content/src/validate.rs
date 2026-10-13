@@ -570,6 +570,7 @@ impl Content {
                     "enemies.ron",
                     &[
                         ("boss.volley_every", b.volley_every),
+                        ("boss.volley_warn", b.volley_warn),
                         ("boss.summon_every", b.summon_every),
                         ("boss.shot_speed", b.shot_speed),
                         ("boss.shot_life", b.shot_life),
@@ -591,9 +592,14 @@ impl Content {
                         &[
                             ("sweep.every", sw.every),
                             ("sweep.radius", sw.radius),
+                            ("sweep.warn", sw.warn),
+                            ("sweep.angle", sw.angle),
                             ("sweep.volley_every", sw.volley_every),
                         ],
                     )?;
+                    if sw.angle > std::f32::consts::TAU {
+                        return c.fail("enemies.ron", "sweep.angle 不能超过一周".into());
+                    }
                 }
                 if let Some(l) = &b.lines
                     && [&l.arrive, &l.phase2, &l.phase3, &l.defeat, &l.retreat, &l.again]
@@ -603,7 +609,10 @@ impl Content {
                     return c.fail("enemies.ron", format!("{} 的台词不能留空", e.id));
                 }
                 if let Some(rn) = &b.rain {
-                    c.positive("enemies.ron", &[("rain.every", rn.every), ("rain.radius", rn.radius)])?;
+                    c.positive(
+                        "enemies.ron",
+                        &[("rain.every", rn.every), ("rain.radius", rn.radius), ("rain.warn", rn.warn)],
+                    )?;
                 }
             }
             if let Some(l) = &e.loot {

@@ -211,6 +211,13 @@ impl ActorFrames {
         self.enemies.get(kind).map_or(&[], |f| f.base.normal.as_slice())
     }
 
+    /// 幻身也保持尾尖聚火动作，进度与本体一样只读模拟蓄力。
+    pub(crate) fn charge_frame(&self, kind: usize, progress: f32) -> Option<FrameId> {
+        let a = self.enemies.get(kind)?.summon.as_ref()?;
+        let k = ((progress * a.normal.len() as f32) as usize).min(a.normal.len() - 1);
+        a.normal.get(k).copied()
+    }
+
     /// 妖物死时化墨用的剪影：白色剪影帧，没有时用普通帧。
     pub(crate) fn enemy_ghost(&self, kind: usize) -> Option<FrameId> {
         let f = self.enemies.get(kind)?;
@@ -564,6 +571,7 @@ pub(crate) fn hero_glow(
     q: Query<(&Transform, &HeroView, Option<&lantern_sim::Health>)>,
     mut flare: ResMut<LanternFlare>,
     mut glow: ResMut<GlowRequests>,
+    readability: Res<crate::telegraphs::Readability>,
 ) {
     let picked = outbox.0.iter().filter(|e| matches!(e, lantern_sim::SimEvent::GemPicked { .. })).count();
     flare.flare = (flare.flare + picked as f32 * 0.12).min(1.0);
@@ -609,7 +617,8 @@ pub(crate) fn hero_glow(
             (pos + socket).extend(layer::EMISSIVE + 0.2),
             Vec2::splat(frames.light_scale(&db, 14.0 + 10.0 * flare.flare + 22.0 * spark)),
             0.0,
-            Color::srgb(1.0, 0.78, 0.45).with_alpha((0.22 + 0.5 * flare.flare + 0.7 * spark).min(1.0)),
+            Color::srgb(1.0, 0.78, 0.45)
+                .with_alpha((0.22 + 0.5 * flare.flare + 0.7 * spark).min(1.0) * readability.gain),
         );
     }
 }
@@ -692,7 +701,9 @@ impl Moves<'_, '_> {
         for ev in &self.outbox.0 {
             match *ev {
                 SimEvent::SweepStrike { dir, .. } => self.clock.strike = Some((now, dir)),
-                SimEvent::BossSummon { .. } | SimEvent::RainWarn { .. } => self.clock.summon = Some(now),
+                SimEvent::BossSummon { .. } | SimEvent::RainWarn { .. } | SimEvent::BossVolley { .. } => {
+                    self.clock.summon = Some(now)
+                }
                 _ => {}
             }
         }
@@ -731,6 +742,13 @@ impl Moves<'_, '_> {
             }
         }
         let a = f.summon.as_ref()?;
+        if let Some(progress) = self.boss.as_ref().and_then(|b| {
+            b.volley.as_ref().map(|v| v.t / v.warn).or_else(|| b.drops.first().map(|r| r.t / r.warn))
+        }) {
+            // 尾尖聚火帧保持到模拟蓄力结束，不按渲染帧率提前播完。
+            let k = ((progress * a.normal.len() as f32) as usize).min(a.normal.len() - 1);
+            return Some((a, k, None));
+        }
         let k = a.strike_frame(now - self.clock.summon?, false)?;
         Some((a, k, None))
     }
@@ -760,6 +778,7 @@ pub(crate) fn collect_draws(
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
+    readability: Res<crate::telegraphs::Readability>,
 ) {
     glow.0.clear();
     let pools = &mut *pools;
@@ -887,9 +906,15 @@ pub(crate) fn collect_draws(
             let fk = ((t * 10.0) as usize + k as usize) % frames.flames.len();
             pools.fx.push(Draw {
                 scale: Vec2::splat(slot.size / 10.0),
+                color: Color::WHITE.with_alpha(readability.gain),
                 ..Draw::new(frames.flames[fk], s.extend(sort_z(layer::WEAPONS, p.y)))
             });
-            glow.light(&frames, &db, s, FLAME_LIGHT);
+            glow.light(
+                &frames,
+                &db,
+                s,
+                (FLAME_LIGHT.0.with_alpha(FLAME_LIGHT.0.alpha() * readability.gain), FLAME_LIGHT.1),
+            );
         }
     }
 

@@ -72,6 +72,8 @@ pub struct Audio {
     /// 管理器被丢掉时声音就停了，一直留着
     _manager: Option<AudioManager>,
     sfx_track: Option<TrackHandle>,
+    /// 干声预警轨：不经过打击压缩与长混响，繁忙战斗中仍有清楚的起音。
+    warning_track: Option<TrackHandle>,
     music_track: Option<TrackHandle>,
     /// 混响发送轨（一直留着，否则发送就断了）
     _reverb: Option<SendTrackHandle>,
@@ -141,7 +143,7 @@ impl Audio {
         Self::play_on(self.sfx_track.as_mut(), s);
     }
 
-    /// 全场静 secs 秒（音效和音乐一起；混响的余音还在大殿里回荡）。
+    /// 战斗声与音乐静 secs 秒；危险预警干声保留，混响的余音仍在回荡。
     fn duck(&mut self, secs: f64) {
         let tween = Tween { duration: Duration::from_millis(60), ..default() };
         if let Some(t) = &mut self.sfx_track {
@@ -191,7 +193,8 @@ fn init_audio(world: &mut World) {
             None
         }
     };
-    let (mut sfx_track, mut music_track, mut music_filter, mut reverb) = (None, None, None, None);
+    let (mut sfx_track, mut warning_track, mut music_track, mut music_filter, mut reverb) =
+        (None, None, None, None, None);
     if let Some(m) = &mut manager {
         // 一个大殿般的混响：余音长、高频收一点
         reverb = m
@@ -214,11 +217,13 @@ fn init_audio(world: &mut World) {
             music = music.with_send(id, Decibels(-9.0));
         }
         sfx_track = m.add_sub_track(sfx).ok();
+        warning_track = m.add_sub_track(TrackBuilder::new().volume(sfx_db(settings.sfx_volume))).ok();
         music_track = m.add_sub_track(music).ok();
     }
     world.insert_non_send(Audio {
         _manager: manager,
         sfx_track,
+        warning_track,
         music_track,
         _reverb: reverb,
         sfx_vol: settings.sfx_volume,
@@ -245,6 +250,9 @@ fn apply_settings(settings: Option<Res<Settings>>, mut audio: NonSendMut<Audio>)
     }
     audio.sfx_vol = s.sfx_volume;
     audio.music_vol = s.music_volume;
+    if let Some(t) = &mut audio.warning_track {
+        t.set_volume(sfx_db(s.sfx_volume), Tween { duration: Duration::from_millis(100), ..default() });
+    }
     if audio.duck_until.is_some() {
         return;
     }
@@ -446,9 +454,17 @@ fn play_sim_events(
                 let s = a.sfx.warn_big.clone();
                 a.play(&s);
             }
-            SimEvent::SweepWarn { .. } | SimEvent::RainWarn { .. } if a.can("bwarn", 0.3) => {
-                let s = a.sfx.warn.clone();
-                a.play(&s);
+            SimEvent::VolleyWarn { illusion, .. } if a.can(if illusion { "iwarn" } else { "vwarn" }, 0.1) => {
+                let s = a.sfx.volley_warn.clone().volume(Decibels(if illusion { -5.0 } else { 0.0 }));
+                Audio::play_on(a.warning_track.as_mut(), s);
+            }
+            SimEvent::SweepWarn { .. } if a.can("swarn", 0.1) => {
+                let s = a.sfx.sweep_warn.clone();
+                Audio::play_on(a.warning_track.as_mut(), s);
+            }
+            SimEvent::RainWarn { .. } if a.can("rwarn", 0.1) => {
+                let s = a.sfx.rain_warn.clone();
+                Audio::play_on(a.warning_track.as_mut(), s);
             }
             SimEvent::LastStand { .. } | SimEvent::Revived { .. } => {
                 let s = a.sfx.big_bell.clone();

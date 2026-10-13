@@ -37,6 +37,7 @@ pub(crate) fn update_enemies(
     effects: Res<Effects>,
     reveal: Res<Reveal>,
     director: Res<Director>,
+    boss: Res<crate::boss::BossState>,
     mut rng: ResMut<SimRng>,
     mut en: ResMut<Enemies>,
     mut queue: ResMut<ActionQueue>,
@@ -201,6 +202,14 @@ pub(crate) fn update_enemies(
             y = py + s * r;
             en.px[i] = x;
             en.py[i] = y;
+        }
+        // 狐火蓄力时钉住施法位置，尾尖聚火与地面弹道始终来自同一个原点。
+        if def.boss.is_some()
+            && let Some(v) = &boss.volley
+            && director.boss == Some(en.handle(i))
+        {
+            x = v.origin.x;
+            y = v.origin.y;
         }
         en.x[i] = x;
         en.y[i] = y;

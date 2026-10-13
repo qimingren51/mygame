@@ -235,6 +235,11 @@ pub enum SimEvent {
     BossVolley {
         pos: Vec2,
     },
+    /// 狐火环锁定起手；幻身也发出预警，但音色更轻。
+    VolleyWarn {
+        pos: Vec2,
+        illusion: bool,
+    },
     BossSummon {
         pos: Vec2,
     },

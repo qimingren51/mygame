@@ -71,8 +71,6 @@ pub(crate) struct FxFrames {
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
     coin: Option<(FrameId, Option<FrameId>)>,
-    /// 九尾扫的扇形预警：轮廓、蓄力填充
-    sector: Option<(FrameId, FrameId)>,
     /// 冲锋预警：车道、箭头
     charge: Option<(FrameId, FrameId)>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
@@ -89,7 +87,6 @@ pub(crate) struct FxFrames {
 const ZONE_LAVA_R: f32 = 43.0;
 const ZONE_MUD_R: f32 = 45.5;
 const ZONE_HERB_R: f32 = 39.5;
-const SECTOR_R: f32 = 32.0;
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
     let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
@@ -128,7 +125,6 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         merchant: prop("merchant"),
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
-        sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
         charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
         ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
@@ -143,6 +139,7 @@ enum OneShot {
     Ring { color: Color, ink: bool, light: bool, strong: bool },
     Mark { evolved: bool },
     Blast { color: Color },
+    HostileBlast { color: Color },
     Taiji,
 }
 
@@ -286,7 +283,7 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
             }
             SimEvent::SweepStrike { pos, dir } => {
                 let tip = pos + Vec2::new(dir.cos(), dir.sin()) * 110.0;
-                fx.push(OneShot::Blast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
+                fx.push(OneShot::HostileBlast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
             }
             // 回光、九转金丹：金色的大环，震屏
             SimEvent::LastStand { pos } | SimEvent::Revived { pos } => {
@@ -300,7 +297,7 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                 fx.flash(rgb(0xfff1c2), 0.45);
             }
             SimEvent::RainStrike { pos } => {
-                fx.push(OneShot::Blast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
+                fx.push(OneShot::HostileBlast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
             }
             SimEvent::IllusionDispelled { pos } => fx.push(
                 OneShot::Ring { color: rgb(0xd8c8ff), ink: false, light: true, strong: false },
@@ -426,6 +423,7 @@ pub(crate) fn collect_fx(
         }
     }
 
+    let personal_start = (pools.fx.len(), glow.0.len());
     // ---- 照见圈：地上一圈淡淡的墨线；灯芯的灯焰带在圈边跳动
     if let Some(reveal) = &res.reveal
         && reveal.radius > 0.0
@@ -468,6 +466,8 @@ pub(crate) fn collect_fx(
             }
         }
     }
+
+    dim_personal(&mut pools, &mut glow, personal_start, res.readability.gain);
 
     // ---- 反应留下的区域：赤地（橙红的裂纹）、淤泥（暗褐的泥圈）
     if let Some(zones) = &res.zones {
@@ -675,7 +675,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 夜主：结界、幻身、九尾扫与狐火雨的预警
+    // ---- 夜主：结界、幻身；危险区统一交给 telegraphs.rs 描摹模拟几何
     if let Some(dir) = &res.director
         && let Some((c, r)) = dir.barrier
     {
@@ -704,7 +704,11 @@ pub(crate) fn collect_fx(
             if !ef.is_empty() {
                 for (k, m) in bs.illusions.iter().enumerate() {
                     let p = lerp(m.prev, m.pos);
-                    let frame = ef[((now * 8.0) as usize + k * 3) % ef.len()];
+                    let frame = m
+                        .volley
+                        .as_ref()
+                        .and_then(|v| frames.charge_frame(kind, v.t / v.warn))
+                        .unwrap_or(ef[((now * 8.0) as usize + k * 3) % ef.len()]);
                     let flicker = 0.45 + 0.15 * (now * 6.0 + k as f32).sin();
                     pools.fx.push(Draw {
                         flip: m.pos.x > ppos.0.x,
@@ -713,67 +717,6 @@ pub(crate) fn collect_fx(
                     });
                 }
             }
-        }
-        let red = rgb(0xff4a3a);
-        for sw in bs.sweeps.iter().filter(|_| f.sector.is_some()) {
-            // 扇形预警：轮廓按扇形朝向旋转、地面压扁；填充层从顶点往外放大，填满时落下
-            let Some((outline, fill)) = f.sector else { break };
-            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
-            let o = to_screen(sw.origin);
-            let d = Vec2::new(sw.dir.cos(), sw.dir.sin());
-            let radial = to_screen(sw.origin + d * sw.radius) - o;
-            let radial = Vec2::new(radial.x, radial.y * FLAT);
-            let side = to_screen(sw.origin + d.perp() * sw.radius) - o;
-            let side = Vec2::new(side.x, side.y * FLAT);
-            let rot = radial.y.atan2(radial.x);
-            let across = (radial.normalize_or_zero().perp_dot(side)).abs();
-            // 贴图的扇形张角是 120°；九尾扫的张角写在数据里，横向按比例缩放
-            let open = (sw.angle * 0.5).tan() / (std::f32::consts::FRAC_PI_3).tan();
-            let scale =
-                Vec2::new(radial.length(), across * open) / db.frame(outline).radius.unwrap_or(SECTOR_R);
-            pools.fx.push(Draw {
-                scale,
-                rot,
-                color: red.with_alpha(0.35 + 0.3 * u),
-                ..Draw::new(outline, o.extend(layer::GROUND + 0.95))
-            });
-            pools.fx.push(Draw {
-                scale: scale * u,
-                rot,
-                color: red.with_alpha(0.25 + 0.25 * u),
-                ..Draw::new(fill, o.extend(layer::GROUND + 0.96))
-            });
-            glow.add(outline, o.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
-        }
-        for sw in bs.sweeps.iter().filter(|_| f.sector.is_none()) {
-            // 没有扇形贴图时：沿扇形铺几排光点，越接近落下越亮
-            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
-            for ring in 1..=4 {
-                let rr = sw.radius * ring as f32 / 4.0;
-                let steps = 3 + ring * 2;
-                for j in 0..=steps {
-                    let a = sw.dir - sw.angle * 0.5 + sw.angle * j as f32 / steps as f32;
-                    let w = sw.origin + Vec2::new(a.cos(), a.sin()) * rr;
-                    glow.add(
-                        f.glow,
-                        to_screen(w).extend(layer::EMISSIVE - 2.0),
-                        Vec2::splat(0.35),
-                        0.0,
-                        red.with_alpha(0.25 + 0.5 * u),
-                    );
-                }
-            }
-        }
-        for d in &bs.drops {
-            let u = (d.t / d.warn).clamp(0.0, 1.0);
-            let k = px(f.ring, d.radius * 2.0);
-            glow.add(
-                f.ring,
-                to_screen(d.pos).extend(layer::EMISSIVE - 2.0),
-                Vec2::new(k, k * FLAT) * (1.2 - 0.2 * u),
-                0.0,
-                red.with_alpha(0.3 + 0.6 * u),
-            );
         }
     }
 
@@ -888,6 +831,7 @@ pub(crate) fn collect_fx(
         l.t < l.life
     });
     for l in &fx.live {
+        let personal_start = (pools.fx.len(), glow.0.len());
         let u = l.t / l.life;
         match l.kind {
             OneShot::Ring { color, ink, light, strong } => {
@@ -925,7 +869,7 @@ pub(crate) fn collect_fx(
                     ..Draw::new(f.seal_mark, l.pos.extend(layer::GROUND + 0.93))
                 });
             }
-            OneShot::Blast { color } => {
+            OneShot::Blast { color } | OneShot::HostileBlast { color } => {
                 let k = px(f.blast, l.r * 2.0 * (0.5 + u * 0.7));
                 glow.add(
                     f.blast,
@@ -955,8 +899,12 @@ pub(crate) fn collect_fx(
                 );
             }
         }
+        if !matches!(l.kind, OneShot::HostileBlast { .. }) {
+            dim_personal(&mut pools, &mut glow, personal_start, res.readability.gain);
+        }
     }
 
+    let personal_start = (pools.fx.len(), glow.0.len());
     // ---- 石印：预警和下落
     if let Some(seals) = &res.seals {
         for s in &seals.0 {
@@ -1061,6 +1009,8 @@ pub(crate) fn collect_fx(
             rgb(0xc9925a).with_alpha(alpha),
         );
     }
+
+    dim_personal(&mut pools, &mut glow, personal_start, res.readability.gain);
 
     // ---- 拾取物
     if let Some(pickups) = &res.pickups {
@@ -1218,6 +1168,7 @@ pub(crate) fn collect_fx(
 /// 用到的模拟资源（开局前都不存在）。
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct FxSources<'w> {
+    readability: Res<'w, crate::telegraphs::Readability>,
     shots: Option<Res<'w, Shots>>,
     seals: Option<Res<'w, Seals>>,
     fissures: Option<Res<'w, Fissures>>,
@@ -1268,5 +1219,15 @@ pub(crate) fn apply_flash(
         sprite.color = fx.flash;
         tf.translation.x = cam.translation.x;
         tf.translation.y = cam.translation.y;
+    }
+}
+
+/// 压低当前一段玩家特效请求；只动本帧颜色，不改模拟状态或永久材质。
+fn dim_personal(pools: &mut Pools, glow: &mut GlowRequests, start: (usize, usize), gain: f32) {
+    for draw in &mut pools.fx[start.0..] {
+        draw.color = draw.color.with_alpha(draw.color.alpha() * gain);
+    }
+    for draw in &mut glow.0[start.1..] {
+        draw.color = draw.color.with_alpha(draw.color.alpha() * gain);
     }
 }

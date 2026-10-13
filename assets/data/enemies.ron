@@ -30,7 +30,7 @@
     // 登场 120 秒后狂暴：所有攻击间隔 ×0.6。三更起全程多一招狐火雨。
     (id: "jiuwei", name: "夜主 · 九尾", rank: Boss, movement: Chase,
      radius: 44.0, hp: 40000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
-     boss: Some((volley_every: 2.6, volley_first: 2.0, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
+     boss: Some((volley_every: 2.6, volley_first: 2.0, volley_warn: 0.8, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
                  shot_damage: 14.0, shot_life: 6.0, summon_every: 7.0, summon: "shade", summon_count: 6,
                  summon_radius: 70.0,
                  illusions: Some((at: 0.6, count: 2, distance: 200.0, spin: 0.6, volley_every: 3.5,
