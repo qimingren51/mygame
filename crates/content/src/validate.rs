@@ -556,6 +556,13 @@ impl Content {
                         ],
                     )?;
                 }
+                if let Some(l) = &b.lines
+                    && [&l.arrive, &l.phase2, &l.phase3, &l.defeat, &l.retreat, &l.again]
+                        .iter()
+                        .any(|t| t.is_empty())
+                {
+                    return c.fail("enemies.ron", format!("{} 的台词不能留空", e.id));
+                }
                 if let Some(rn) = &b.rain {
                     c.positive("enemies.ron", &[("rain.every", rn.every), ("rain.radius", rn.radius)])?;
                 }

@@ -486,6 +486,21 @@ pub struct BossDef {
     /// 三更起多的一招（“夜主多一招”）
     #[serde(default)]
     pub rain: Option<RainDef>,
+    /// 台词（docs/LORE.md 第 7 节）
+    #[serde(default)]
+    pub lines: Option<BossLines>,
+}
+
+/// 夜主的台词：登场、第二阶段、第三阶段、倒下；无尽夜里倒下改说“退去”，再来时说“再来”。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BossLines {
+    pub arrive: String,
+    pub phase2: String,
+    pub phase3: String,
+    pub defeat: String,
+    pub retreat: String,
+    pub again: String,
 }
 
 /// 幻身：没有影子、打不死；在照见圈里待满 dispel 秒就散；每 refill 秒补满。
