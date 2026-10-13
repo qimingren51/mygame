@@ -30,11 +30,11 @@
         band_per_rank: 0.25,
     ),
     // 灯坠的局内机制（docs/GAMEPLAY.md 第 5.7 节）。
-    // 风火轮：闪避每走 14 留一段火痕，半径 18、持续 2 秒，每秒伤害 = TrailDamage × 最强法器的基础伤害。
+    // 风火轮：闪避每走 14 留一段火痕，半径 24、持续 2 秒，每秒伤害 = TrailDamage（1.5）× 最强法器的基础伤害。
     charms: (
         still_after: 1.0,
         trail_gap: 14.0,
-        trail_radius: 18.0,
+        trail_radius: 24.0,
         trail_life: 2.0,
         thorn_freeze: 1.0,
     ),

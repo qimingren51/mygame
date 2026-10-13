@@ -21,12 +21,13 @@ use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 enum Shown {
     #[default]
     None,
-    LevelUp(Vec<Offer>, bool),
+    /// 选项、灵光一闪、余烬（开局心法要到的等级）
+    LevelUp(Vec<Offer>, bool, u32),
     Chest(usize, ChestSource),
     Evolve(usize),
     Lamp(Vec<LampReward>),
-    /// 货郎：宝箱价、灯坠价
-    Shop(u32, u32),
+    /// 货郎：宝箱价、灯坠价、有没有能给的灯坠
+    Shop(u32, u32, bool),
     /// 灯坠三选一：选项、满格时选中的那一个、挂着的灯坠
     Charm(Vec<usize>, Option<usize>, Vec<usize>),
 }
@@ -69,13 +70,15 @@ fn reset(mut ui: ResMut<ChoiceUi>) {
 
 fn current(phase: SimPhase, flow: &Flow, build: &Build) -> Shown {
     match phase {
-        SimPhase::LevelUp => {
-            flow.choice.as_ref().map_or(Shown::None, |c| Shown::LevelUp(c.offers.clone(), c.inspired))
-        }
+        SimPhase::LevelUp => flow.choice.as_ref().map_or(Shown::None, |c| {
+            Shown::LevelUp(c.offers.clone(), c.inspired, if c.ember { flow.ember } else { 0 })
+        }),
         SimPhase::Chest => flow.chest.as_ref().map_or(Shown::None, |c| Shown::Chest(c.items.len(), c.source)),
         SimPhase::Evolve => flow.evolving.map_or(Shown::None, Shown::Evolve),
         SimPhase::Lantern => flow.lamp.clone().map_or(Shown::None, Shown::Lamp),
-        SimPhase::Shop => flow.shop.map_or(Shown::None, |s| Shown::Shop(s.chest_cost, s.charm_cost)),
+        SimPhase::Shop => {
+            flow.shop.map_or(Shown::None, |s| Shown::Shop(s.chest_cost, s.charm_cost, s.charm_ok))
+        }
         SimPhase::Charm => flow
             .charm
             .as_ref()
@@ -97,7 +100,6 @@ fn sync(
     arsenal: Res<Arsenal>,
     build: Res<Build>,
     progress: Res<lantern_sim::Progress>,
-    setup: Res<lantern_sim::RunSetup>,
     mut ui: ResMut<ChoiceUi>,
     roots: Query<Entity, With<ChoiceRoot>>,
 ) {
@@ -121,7 +123,7 @@ fn sync(
     let c = &content.0;
     match now {
         Shown::None => {}
-        Shown::LevelUp(offers, inspired) => {
+        Shown::LevelUp(offers, inspired, ember) => {
             let level = flow.choice.as_ref().map_or(0, |ch| ch.level);
             spawn_level_up(
                 &mut commands,
@@ -134,6 +136,7 @@ fn sync(
                 &offers,
                 inspired,
                 level,
+                ember,
                 flow.rerolls,
                 flow.banishes,
             )
@@ -145,9 +148,8 @@ fn sync(
         }
         Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, k),
         Shown::Lamp(rewards) => spawn_lamp(&mut commands, c, &fonts, &db, &skin, &rewards),
-        Shown::Shop(chest, charm) => {
+        Shown::Shop(chest, charm, charms) => {
             let gold = progress.gold.floor() as u32;
-            let charms = !setup.charm_pool.is_empty();
             spawn_shop(&mut commands, &fonts, &db, &skin, chest, charm, gold, charms)
         }
         Shown::Charm(offers, picked, worn) => {
@@ -459,6 +461,7 @@ fn spawn_level_up(
     offers: &[Offer],
     inspired: bool,
     level: u32,
+    ember: u32,
     rerolls: u32,
     banishes: u32,
 ) {
@@ -469,8 +472,10 @@ fn spawn_level_up(
             ..default()
         })
         .with_children(|head| {
-            head.spawn(text(&fonts.title, 64.0, PAPER, "升级"));
-            let sub = if inspired {
+            head.spawn(text(&fonts.title, 64.0, PAPER, if ember > 0 { "余烬" } else { "升级" }));
+            let sub = if ember > 0 {
+                format!("开局心法三选一　·　选中的那门直接到 Lv{ember}")
+            } else if inspired {
                 format!("Lv {} → {}　·　灵光一闪，多一个选项", level - 1, level)
             } else {
                 format!("Lv {} → {}", level - 1, level)
@@ -496,12 +501,12 @@ fn spawn_level_up(
                     &format!("C / 手柄 LB　封印选中项（剩 {banishes} 次）"),
                 ));
             }
-            foot.spawn(text(
-                &fonts.body,
-                16.0,
-                DIM,
-                &format!("X / 手柄 X　跳过（灯油 +{}）", c.run.choices.skip_oil),
-            ));
+            let skip = if ember > 0 {
+                "X / 手柄 X　跳过".to_string()
+            } else {
+                format!("X / 手柄 X　跳过（灯油 +{}）", c.run.choices.skip_oil)
+            };
+            foot.spawn(text(&fonts.body, 16.0, DIM, &skip));
         });
     });
 }
@@ -636,7 +641,11 @@ fn spawn_shop(
                 "坠",
                 hex("#B07CF0"),
                 "灯坠",
-                &format!("{charm} 金币　三选一"),
+                &if charms {
+                    format!("{charm} 金币　三选一")
+                } else {
+                    "解锁的灯坠都挂上了".to_string()
+                },
                 charms && gold >= charm,
             );
             plain_card(row, fonts, db, skin, 2, None, "走", PAPER, "离开", "不买了", true);

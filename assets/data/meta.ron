@@ -15,7 +15,7 @@
          base_cost: 300.0, per_level: [Add(UltCharge, 0.08), Mul(Reveal, 0.04)]),
         (id: "afterglow", name: "回光", icon: "回", desc: "1 级：每局第一次受到致命伤害时留 1 点生命并震退周围；2 级：同时回复 30% 生命",
          max_level: 2, base_cost: 1600.0, per_level: [Add(LastStand, 1.0)]),
-        (id: "ember", name: "余烬", icon: "烬", desc: "开局自带一门随机心法，等级等于节点等级", max_level: 3,
+        (id: "ember", name: "余烬", icon: "烬", desc: "开局心法三选一（可以跳过），选中的直接到节点等级", max_level: 3,
          base_cost: 600.0, per_level: [Add(StartPassive, 1.0)]),
         (id: "slot", name: "灯坠栏", icon: "栏", desc: "第 4 个灯坠栏", max_level: 1,
          base_cost: 6000.0, per_level: [Add(CharmSlots, 1.0)]),

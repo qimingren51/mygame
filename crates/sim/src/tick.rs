@@ -76,13 +76,6 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     let arsenal = Arsenal(vec![WeaponSlot::new(start_weapon)]);
     let mut build = Build::new(c, &setup);
     build.max_weapons = 1;
-    // 余烬：开局自带一门随机心法，等级等于节点等级
-    let ember = collect(c, &setup, &build, None, 1).0.get(Stat::StartPassive).round().max(0.0) as u32;
-    if ember > 0 && !c.passives.is_empty() {
-        let d = rng.get(Stream::Start).below(c.passives.len() as u32) as usize;
-        let level = ember.min(c.passives[d].max_level);
-        build.passives.push(crate::build::PassiveSlot { def: d, level });
-    }
     build.compute_resonance(c, &arsenal);
     let (stats, effects) = collect(c, &setup, &build, None, 1);
     let max_hp = stats.max_hp();
@@ -104,6 +97,8 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     let flow = Flow {
         rerolls: stats.get(Stat::Rerolls).round().max(0.0) as u32,
         banishes: stats.get(Stat::Banishes).round().max(0.0) as u32,
+        // 余烬：开局心法三选一，选中的直接到节点等级（第一步结束时打开）
+        ember: stats.get(Stat::StartPassive).round().max(0.0) as u32,
         ..Default::default()
     };
     commands.insert_resource(ids);

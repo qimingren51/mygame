@@ -242,15 +242,13 @@ pub fn charm_slots(stats: &Stats) -> usize {
     stats.get(Stat::CharmSlots).round().max(0.0) as usize
 }
 
-/// 局内灯坠三选一的选项：从已解锁的灯坠里抽，不重复、不出已经挂着的、不出这一局碎掉的；
-/// 法器太多时不出断剑。
-pub fn roll_charms(
+/// 局内灯坠三选一能抽的灯坠：已解锁的，不出已经挂着的、不出这一局碎掉的；法器太多时不出断剑。
+pub fn charm_candidates(
     content: &Content,
     setup: &RunSetup,
     build: &Build,
     survival: &Survival,
     weapons: usize,
-    rng: &mut Pcg32,
 ) -> Vec<usize> {
     let mut pool: Vec<usize> = setup
         .charm_pool
@@ -265,6 +263,19 @@ pub fn roll_charms(
         .collect();
     pool.sort_unstable();
     pool.dedup();
+    pool
+}
+
+/// 局内灯坠三选一的选项：从 [`charm_candidates`] 里不放回地抽。
+pub fn roll_charms(
+    content: &Content,
+    setup: &RunSetup,
+    build: &Build,
+    survival: &Survival,
+    weapons: usize,
+    rng: &mut Pcg32,
+) -> Vec<usize> {
+    let mut pool = charm_candidates(content, setup, build, survival, weapons);
     let n = (content.run.choices.charm_offers as usize).min(pool.len());
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {

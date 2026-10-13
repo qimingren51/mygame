@@ -3,7 +3,7 @@
 // 风火轮、定海神针、长命锁、冰魄珠一开始就有，其余靠成就解锁（achievements.ron）。P0 做这 8 枚。
 [
     (id: "wind_wheel", name: "风火轮", good: "闪避距离 +40%，闪避路线留下 2 秒火痕", bad: "闪避冷却 +0.4 秒",
-     effects: [Mul(DashDistance, 0.4), Add(TrailDamage, 0.5), Add(DashCooldown, 0.4)], initial: true),
+     effects: [Mul(DashDistance, 0.4), Add(TrailDamage, 1.5), Add(DashCooldown, 0.4)], initial: true),
     (id: "pillar", name: "定海神针", good: "站定 1 秒后伤害 +25%、受伤 -25%", bad: "移动时伤害 -10%",
      effects: [Add(StillDamage, 0.25), Add(StillReduction, 0.25), Add(MovingDamage, -0.10)], initial: true),
     (id: "night_pearl", name: "照夜珠", good: "照见圈 +30%，照见易伤 +15%", bad: "照见圈外的妖物移速 +25%",

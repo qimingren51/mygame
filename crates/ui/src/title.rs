@@ -15,7 +15,7 @@ use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
 use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
-use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, SeedOverride, bench, on_paper, text};
+use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, SeedOverride, bench, hub, on_paper, text};
 
 /// 标题界面上打开的面板。
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
@@ -23,20 +23,29 @@ pub(crate) enum TitleMode {
     #[default]
     Main,
     /// 夜签三选一：这一局的种子和抽到的夜签
-    Omen { seed: u64, picks: Vec<OmenPick> },
-    /// 心灯
+    Omen {
+        seed: u64,
+        picks: Vec<OmenPick>,
+    },
+    /// 出发前：选更、择灯、挂灯坠、选悟、开关属性
+    Prep,
+    /// 灯驿和里面的四处
+    Hub,
     Meta,
+    Shop,
+    Achievements,
+    Codex,
     /// 设置
     Settings,
 }
 
 #[derive(Resource, Default)]
 pub(crate) struct TitleUi {
-    selected: usize,
-    clicked: Option<usize>,
-    hovered: Option<usize>,
+    pub(crate) selected: usize,
+    pub(crate) clicked: Option<usize>,
+    pub(crate) hovered: Option<usize>,
     /// 面板变了，需要重画
-    dirty: bool,
+    pub(crate) dirty: bool,
 }
 
 #[derive(Component)]
@@ -104,7 +113,7 @@ fn input(
             if actions.nav.y != 0 {
                 ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(MENU.len() as i32) as usize;
             }
-            // 菜单：0 出发、1 心灯、2 设置、3 跑分、4 退出；快捷键直接对应
+            // 菜单：0 出发、1 灯驿、2 设置、3 跑分、4 退出；快捷键直接对应
             let act = clicked
                 .or(actions.confirm.then_some(ui.selected))
                 .or(actions.meta.then_some(1))
@@ -114,8 +123,11 @@ fn input(
                 Some(0) => {
                     let seed = seed.0.unwrap_or_else(random_seed);
                     if profile.basics {
-                        *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
-                        open(&mut ui);
+                        hub::normalize_last(c, &mut profile);
+                        *mode = TitleMode::Prep;
+                        // 光标默认停在“出发”上
+                        ui.selected = hub::prep_rows(c, &profile).len() - 1;
+                        ui.dirty = true;
                     } else {
                         // 第一局直接出发：一更、初始的灯，不抽夜签、不挂灯坠
                         let setup = profile.run_setup(c, seed);
@@ -124,8 +136,9 @@ fn input(
                         next.set(AppState::Run);
                     }
                 }
-                Some(1) => {
-                    *mode = TitleMode::Meta;
+                // 灯驿在第一夜之后开放
+                Some(1) if profile.basics => {
+                    *mode = TitleMode::Hub;
                     open(&mut ui);
                 }
                 Some(2) => {
@@ -162,8 +175,59 @@ fn input(
                 commands.insert_resource(setup);
                 next.set(AppState::Run);
             } else if actions.back {
+                *mode = TitleMode::Prep;
+                ui.selected = hub::prep_rows(c, &profile).len() - 1;
+                ui.dirty = true;
+            }
+        }
+        TitleMode::Prep => match hub::prep_input(&actions, c, &mut profile, &mut ui, clicked) {
+            hub::PrepAction::Go => {
+                save(&profile);
+                let seed = seed.0.unwrap_or_else(random_seed);
+                *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
+                open(&mut ui);
+            }
+            hub::PrepAction::Back => {
+                save(&profile);
                 *mode = TitleMode::Main;
                 open(&mut ui);
+            }
+            hub::PrepAction::None => {}
+        },
+        TitleMode::Hub => {
+            let n = hub::HUB.len();
+            if let Some(i) = list_nav(&mut ui, &actions, clicked, n, n) {
+                *mode =
+                    [TitleMode::Meta, TitleMode::Shop, TitleMode::Achievements, TitleMode::Codex][i].clone();
+                open(&mut ui);
+            } else if actions.back || actions.meta {
+                *mode = TitleMode::Main;
+                ui.selected = 1;
+                ui.dirty = true;
+            }
+        }
+        TitleMode::Shop => {
+            let n = c.attributes.list.len() + 1;
+            if let Some(i) = list_nav(&mut ui, &actions, clicked, n, hub::SHOP_COLUMNS) {
+                let changed = match c.attributes.list.get(i) {
+                    Some(a) => {
+                        let id = a.id.clone();
+                        profile.buy_attribute(c, &id)
+                    }
+                    None => profile.refund_attributes() > 0,
+                };
+                if changed {
+                    save(&profile);
+                }
+                ui.dirty = true;
+            } else if actions.back {
+                back_to_hub(&mut mode, &mut ui, 1);
+            }
+        }
+        TitleMode::Achievements | TitleMode::Codex => {
+            if actions.back || actions.confirm || clicked.is_some() {
+                let i = if *mode == TitleMode::Codex { 3 } else { 2 };
+                back_to_hub(&mut mode, &mut ui, i);
             }
         }
         TitleMode::Settings => {
@@ -190,40 +254,64 @@ fn input(
         }
         TitleMode::Meta => {
             let n = c.meta.nodes.len();
-            if ui.selected >= n {
-                ui.selected = 0;
-            }
-            if let Some(h) = ui.hovered.take()
-                && actions.pointer_moved
-            {
-                ui.selected = h;
-            }
-            // 两列：上下跨一行，左右换一列
-            let step = actions.nav.y * META_COLUMNS as i32 + actions.nav.x;
-            if step != 0 && n > 0 {
-                ui.selected = (ui.selected as i32 + step).rem_euclid(n as i32) as usize;
-            }
-            let chosen = actions
-                .pick
-                .map(usize::from)
-                .filter(|&i| i < n)
-                .or(clicked)
-                .or(actions.confirm.then_some(ui.selected));
-            if let Some(i) = chosen {
-                ui.selected = i;
+            if let Some(i) = list_nav(&mut ui, &actions, clicked, n, META_COLUMNS) {
                 let id = c.meta.nodes[i].id.clone();
-                if profile.buy_meta(c, &id)
-                    && let Err(e) = profile.save()
-                {
-                    warn!("保存存档失败：{e}");
+                if profile.buy_meta(c, &id) {
+                    save(&profile);
                 }
                 ui.dirty = true;
             } else if actions.back || actions.meta {
-                *mode = TitleMode::Main;
-                open(&mut ui);
+                back_to_hub(&mut mode, &mut ui, 0);
             }
         }
     }
+}
+
+fn save(profile: &Profile) {
+    if let Err(e) = profile.save() {
+        warn!("保存存档失败：{e}");
+    }
+}
+
+fn back_to_hub(mode: &mut TitleMode, ui: &mut TitleUi, i: usize) {
+    *mode = TitleMode::Hub;
+    ui.selected = i;
+    ui.dirty = true;
+}
+
+/// 网格导航（cols 列）：悬停、方向键移动；返回这一帧选中的项（数字键、点击、Enter）。
+fn list_nav(
+    ui: &mut TitleUi,
+    actions: &Actions,
+    clicked: Option<usize>,
+    n: usize,
+    cols: usize,
+) -> Option<usize> {
+    if n == 0 {
+        return None;
+    }
+    if ui.selected >= n {
+        ui.selected = 0;
+    }
+    if let Some(h) = ui.hovered.take()
+        && actions.pointer_moved
+    {
+        ui.selected = h.min(n - 1);
+    }
+    let step = actions.nav.y * cols as i32 + if cols > 1 { actions.nav.x } else { 0 };
+    if step != 0 {
+        ui.selected = (ui.selected as i32 + step).rem_euclid(n as i32) as usize;
+    }
+    let chosen = actions
+        .pick
+        .map(usize::from)
+        .filter(|&i| i < n)
+        .or(clicked)
+        .or(actions.confirm.then_some(ui.selected));
+    if let Some(i) = chosen {
+        ui.selected = i;
+    }
+    chosen
 }
 
 /// 心灯面板的列数。
@@ -231,9 +319,9 @@ const META_COLUMNS: usize = 2;
 
 /// 标题菜单：(文字, 快捷键)
 const MENU: [(&str, &str); 5] =
-    [("出发", "Enter"), ("心灯", "M"), ("设置", ""), ("跑分", "B"), ("退出", "Esc")];
+    [("出发", "Enter"), ("灯驿", "M"), ("设置", ""), ("跑分", "B"), ("退出", "Esc")];
 
-fn panel() -> impl Bundle {
+pub(crate) fn panel() -> impl Bundle {
     (
         TitlePanel,
         DespawnOnExit(AppState::Title),
@@ -289,6 +377,11 @@ fn redraw(
         TitleMode::Main => main_panel(&mut commands, &fonts, &skin, &profile),
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
+        TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
+        TitleMode::Hub => hub::hub_panel(&mut commands, &fonts, &skin, &db, &profile),
+        TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
+        TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
+        TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Settings => settings_panel(&mut commands, &fonts, &skin, &settings),
     }
 }
@@ -303,13 +396,13 @@ fn highlight(ui: Res<TitleUi>, mut q: Query<(&FocusMark, &mut Visibility)>) {
     }
 }
 
-fn clickable(e: &mut EntityCommands, i: usize) {
+pub(crate) fn clickable(e: &mut EntityCommands, i: usize) {
     e.observe(move |_: On<PointerClick>, mut ui: ResMut<TitleUi>| ui.clicked = Some(i));
     e.observe(move |_: On<PointerOver>, mut ui: ResMut<TitleUi>| ui.hovered = Some(i));
 }
 
 /// 盖住父节点的焦点框（默认隐藏）。
-fn focus(skin: &Skin, name: &str, i: usize, pad: f32) -> impl Bundle {
+pub(crate) fn focus(skin: &Skin, name: &str, i: usize, pad: f32) -> impl Bundle {
     (
         FocusMark(i),
         Visibility::Hidden,
@@ -371,13 +464,14 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
                 });
                 item.with_children(|it| {
                     it.spawn(focus(skin, "menu_hl", i, 0.0));
-                    it.spawn(text(&fonts.title, 40.0, PAPER, label));
-                    it.spawn(text(&fonts.body, 15.0, DIM, key));
+                    let locked = i == 1 && !profile.basics;
+                    it.spawn(text(&fonts.title, 40.0, if locked { DIM } else { PAPER }, label));
+                    it.spawn(text(&fonts.body, 15.0, DIM, if locked { "第一夜之后开放" } else { key }));
                 });
                 clickable(&mut item, i);
             }
             p.spawn(Node { flex_grow: 1.0, ..default() });
-            p.spawn(text(&fonts.body, 18.0, hex("#FFD98A"), &format!("灯油 {}", profile.oil)));
+            p.spawn(text(&fonts.body, 18.0, hex("#FFD98A"), &hub::purses(profile)));
             p.spawn(text(&fonts.body, 15.0, DIM, &record));
             p.spawn(text(
                 &fonts.body,
@@ -388,7 +482,7 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
         });
 }
 
-fn dim_layer() -> impl Bundle {
+pub(crate) fn dim_layer() -> impl Bundle {
     (
         Node {
             position_type: PositionType::Absolute,

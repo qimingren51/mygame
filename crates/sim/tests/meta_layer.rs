@@ -7,7 +7,9 @@ use lantern_content::Stat;
 use lantern_sim::charms::{Survival, Trail};
 use lantern_sim::combat::Source;
 use lantern_sim::flow::Shop;
-use lantern_sim::{HitKind, InputFrame, RunMode, RunSetup, SimCommand, SimEvent, SimHarness, SimPhase};
+use lantern_sim::{
+    HitKind, InputFrame, Offer, RunMode, RunSetup, SimCommand, SimEvent, SimHarness, SimPhase,
+};
 
 use common::content;
 
@@ -50,12 +52,39 @@ fn lamp_sets_start_weapon_and_trait() {
 }
 
 #[test]
-fn ember_gives_a_random_starting_passive() {
+fn ember_offers_a_starting_passive_choice() {
+    let c = content();
     let mut s = setup(3);
     s.meta.insert("ember".into(), 2);
-    let sim = SimHarness::with_setup(content(), s);
+    s.meta.insert("luck".into(), 1);
+    let mut sim = quiet(s);
+    idle(&mut sim, 1);
+    assert_eq!(sim.phase(), SimPhase::LevelUp);
+    let choice = sim.flow().choice.clone().unwrap();
+    assert!(choice.ember && choice.offers.len() == 3);
+    assert!(choice.offers.iter().all(|o| matches!(o, Offer::NewPassive(_))), "只出心法：{:?}", choice.offers);
+    // 重抽也只出心法；不算升级、时间不走
+    sim.step(InputFrame::default(), &[SimCommand::Reroll]);
+    let choice = sim.flow().choice.clone().unwrap();
+    assert!(choice.ember && choice.offers.iter().all(|o| matches!(o, Offer::NewPassive(_))));
+    assert_eq!(sim.tick(), 1);
+    let Offer::NewPassive(d) = choice.offers[0] else { unreachable!() };
+    sim.step(InputFrame::default(), &[SimCommand::Choose(0)]);
+    assert_eq!(sim.phase(), SimPhase::Play);
     assert_eq!(sim.build().passives.len(), 1);
-    assert_eq!(sim.build().passives[0].level, 2);
+    assert_eq!(sim.build().passives[0].def, d);
+    assert_eq!(sim.build().passives[0].level, 2.min(c.passives[d].max_level));
+    assert_eq!(sim.flow().ember, 0);
+
+    // 跳过什么也不给
+    let mut s = setup(3);
+    s.meta.insert("ember".into(), 1);
+    let mut sim = quiet(s);
+    idle(&mut sim, 1);
+    sim.step(InputFrame::default(), &[SimCommand::Skip]);
+    assert_eq!(sim.phase(), SimPhase::Play);
+    assert!(sim.build().passives.is_empty());
+    assert_eq!(sim.flow().oil_bonus, 0);
 }
 
 #[test]
@@ -127,12 +156,42 @@ fn miniboss_chest_and_merchant_give_charm_choices() {
     assert_eq!(sim.phase(), SimPhase::Play);
 
     sim.progress_mut().gold = 100.0;
-    sim.flow_mut().shop = Some(Shop { chest_cost: 40, charm_cost: 80 });
+    sim.flow_mut().shop = Some(Shop { chest_cost: 40, charm_cost: 80, charm_ok: false });
     idle(&mut sim, 1);
     assert_eq!(sim.phase(), SimPhase::Shop);
+    assert!(sim.flow().shop.unwrap().charm_ok);
     sim.step(InputFrame::default(), &[SimCommand::Choose(1)]);
     assert_eq!(sim.phase(), SimPhase::Charm);
     assert_eq!(sim.progress().gold, 20.0);
+}
+
+#[test]
+fn no_charm_to_give_means_gold_instead() {
+    // 解锁的只有一枚，而且已经挂上了
+    let mut s = setup(9);
+    s.charm_pool = vec!["longevity".into()];
+    s.charms = vec!["longevity".into()];
+    let mut sim = quiet(s);
+    sim.flow_mut().chest_queue.push_back(lantern_sim::flow::ChestSource::MiniBoss);
+    idle(&mut sim, 1);
+    let gold = sim.progress().gold;
+    assert!(gold >= 10.0 + 20.0, "宝箱附带 10–20，灯坠改给 20：{gold}");
+    assert_eq!(sim.flow().charm_queue, 0);
+    // 货郎不卖灯坠，买了也不扣钱
+    for _ in 0..20 {
+        if sim.phase() == SimPhase::Play {
+            break;
+        }
+        let cmds = common::respond(&sim);
+        sim.step(InputFrame::default(), &cmds);
+    }
+    sim.progress_mut().gold = 100.0;
+    sim.flow_mut().shop = Some(Shop { chest_cost: 40, charm_cost: 80, charm_ok: true });
+    idle(&mut sim, 1);
+    assert!(!sim.flow().shop.unwrap().charm_ok);
+    sim.step(InputFrame::default(), &[SimCommand::Choose(1)]);
+    assert_eq!(sim.phase(), SimPhase::Shop);
+    assert_eq!(sim.progress().gold, 100.0);
 }
 
 /// 让主角挨一下致命伤：在身上摆一只妖物，把它的接触伤害调到很高。

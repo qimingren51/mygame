@@ -15,7 +15,7 @@ use lantern_core::Stream;
 
 use crate::boss::Foes;
 use crate::build::{Awaken, Build, Offer, apply_offer, offers, pick_weighted, roll_choices};
-use crate::charms::{Survival, charm_slots, roll_charms};
+use crate::charms::{Survival, charm_candidates, charm_slots, roll_charms};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes, heal};
 use crate::encounters::Encounters;
 use crate::run::{Progress, RunMode, RunPlan};
@@ -106,6 +106,8 @@ pub enum LampReward {
 pub struct Shop {
     pub chest_cost: u32,
     pub charm_cost: u32,
+    /// 有没有能给的灯坠（解锁的都挂上了就不卖）；打开摊子时算
+    pub charm_ok: bool,
 }
 
 /// 灯坠三选一。
@@ -125,6 +127,8 @@ pub struct Choice {
     pub inspired: bool,
     /// 这次升到的等级
     pub level: u32,
+    /// 余烬：开局心法三选一（只出心法，选中的直接到节点等级）
+    pub ember: bool,
 }
 
 /// 宝箱里开出的一项。`level` 是生效后的等级（新法器、新心法为 1，补给为 0）。
@@ -195,6 +199,8 @@ pub struct Flow {
     pub lamp: Option<Vec<LampReward>>,
     /// 正在逛的货郎
     pub shop: Option<Shop>,
+    /// 余烬：还没选的开局心法要到的等级（0 表示没有）
+    pub ember: u32,
     /// 排队的灯坠三选一与当前的一次
     pub charm_queue: u32,
     pub charm: Option<CharmChoice>,
@@ -251,6 +257,12 @@ impl FlowParams<'_, '_> {
             Offer::Oil => self.flow.oil_bonus += c.run.choices.oil,
             _ => {}
         }
+        self.awaken();
+    }
+
+    /// 构筑变了：重算共鸣（发出点亮的提示）和属性。
+    fn awaken(&mut self) {
+        let c = &self.content.0;
         for a in self.build.compute_resonance(c, &self.arsenal) {
             self.outbox.0.push(match a {
                 Awaken::Tier { element, tier } => SimEvent::Resonance { element, tier },
@@ -299,8 +311,45 @@ impl FlowParams<'_, '_> {
             true,
         );
         let level = self.progress.level - self.progress.pending_levels;
-        self.flow.choice = Some(Choice { offers, inspired, level });
+        self.flow.choice = Some(Choice { offers, inspired, level, ember: false });
         *self.phase = SimPhase::LevelUp;
+    }
+
+    /// 余烬的选项：只出新心法，权重同升级。
+    fn ember_offers(&mut self, exclude: &[Offer], n: usize) -> Vec<Offer> {
+        let c = &self.content.0;
+        let pool: Vec<_> = offers(c, &self.arsenal, &self.build, 0.0)
+            .into_iter()
+            .filter(|(o, _)| matches!(o, Offer::NewPassive(_)) && !exclude.contains(o))
+            .collect();
+        pick_weighted(self.rng.0.get(Stream::Choice), &pool, n)
+    }
+
+    /// 余烬：开局心法三选一。没有能给的心法时直接跳过。
+    fn open_ember(&mut self) {
+        let n = self.stats.get(Stat::Choices).round().max(1.0) as usize;
+        let offers = self.ember_offers(&[], n);
+        if offers.is_empty() {
+            self.flow.ember = 0;
+            self.next_pending();
+            return;
+        }
+        let level = self.progress.level;
+        self.flow.choice = Some(Choice { offers, inspired: false, level, ember: true });
+        *self.phase = SimPhase::LevelUp;
+    }
+
+    /// 选中了余烬给的心法：直接到节点等级。
+    fn take_ember(&mut self, offer: Offer) {
+        let c = &self.content.0;
+        let lv = std::mem::take(&mut self.flow.ember);
+        apply_offer(c, &mut self.arsenal, &mut self.build, offer);
+        if let Offer::NewPassive(d) = offer
+            && let Some(p) = self.build.passives.iter_mut().find(|p| p.def == d)
+        {
+            p.level = lv.clamp(1, c.passives[d].max_level);
+        }
+        self.awaken();
     }
 
     fn open_chest(&mut self) {
@@ -313,7 +362,7 @@ impl FlowParams<'_, '_> {
         if source == ChestSource::MiniBoss {
             n = n.max(miniboss_chest_min(c));
         }
-        // 灯坠三选一：小头目按时间表必给，精英宝箱有一定概率附带
+        // 灯坠三选一：小头目按时间表必给，精英宝箱有一定概率附带；没有能给的灯坠时改给金币
         if !self.setup.charm_pool.is_empty() {
             let charm = match source {
                 ChestSource::MiniBoss => miniboss_charm(c),
@@ -321,7 +370,11 @@ impl FlowParams<'_, '_> {
                 _ => false,
             };
             if charm {
-                self.flow.charm_queue += 1;
+                if self.charms_available() {
+                    self.flow.charm_queue += 1;
+                } else {
+                    self.progress.gold += c.run.choices.charm_gold as f32 * self.stats.get(Stat::GoldGain);
+                }
             }
         }
         // 每个宝箱附带金币
@@ -376,7 +429,9 @@ impl FlowParams<'_, '_> {
 
     /// 打开排队中的下一个选择；都没有就回到 Play。
     fn next_pending(&mut self) {
-        if self.progress.pending_levels > 0 {
+        if self.flow.ember > 0 {
+            self.open_ember();
+        } else if self.progress.pending_levels > 0 {
             self.open_level_up();
         } else if !self.flow.chest_queue.is_empty() {
             self.open_chest();
@@ -387,6 +442,12 @@ impl FlowParams<'_, '_> {
         } else {
             *self.phase = SimPhase::Play;
         }
+    }
+
+    /// 现在有没有能给的灯坠。
+    fn charms_available(&self) -> bool {
+        let c = &self.content.0;
+        !charm_candidates(c, &self.setup, &self.build, &self.survival, self.arsenal.0.len()).is_empty()
     }
 
     /// 灯坠三选一；没有可给的灯坠时直接跳过。
@@ -579,7 +640,11 @@ pub(crate) fn handle_commands(
                 else {
                     continue;
                 };
-                fp.apply(offer);
+                if fp.flow.choice.as_ref().is_some_and(|c| c.ember) {
+                    fp.take_ember(offer);
+                } else {
+                    fp.apply(offer);
+                }
                 fp.after_choice();
             }
             (SimPhase::LevelUp, SimCommand::Reroll) => {
@@ -587,6 +652,15 @@ pub(crate) fn handle_commands(
                     continue;
                 }
                 fp.flow.rerolls -= 1;
+                if let Some(old) = fp.flow.choice.clone().filter(|c| c.ember) {
+                    let offers = fp.ember_offers(&[], old.offers.len());
+                    if let Some(choice) = &mut fp.flow.choice
+                        && !offers.is_empty()
+                    {
+                        choice.offers = offers;
+                    }
+                    continue;
+                }
                 let c = &fp.content.0;
                 let secs = fp.secs();
                 let (offers, inspired) = roll_choices(
@@ -614,14 +688,19 @@ pub(crate) fn handle_commands(
                 }
                 fp.flow.banishes -= 1;
                 fp.build.banished.push(ban);
-                // 被封印的那一项换成新抽的一项，其余不变
+                // 被封印的那一项换成新抽的一项，其余不变（余烬只换心法）
                 let content = fp.content.0.clone();
                 let c = &*content;
-                let pool: Vec<_> = offers(c, &fp.arsenal, &fp.build, fp.secs())
-                    .into_iter()
-                    .filter(|(o, _)| fp.flow.choice.as_ref().is_none_or(|ch| !ch.offers.contains(o)))
-                    .collect();
-                let new = pick_weighted(fp.rng.0.get(Stream::Choice), &pool, 1).first().copied();
+                let shown = fp.flow.choice.as_ref().map(|ch| ch.offers.clone()).unwrap_or_default();
+                let new = if fp.flow.choice.as_ref().is_some_and(|ch| ch.ember) {
+                    fp.ember_offers(&shown, 1).first().copied()
+                } else {
+                    let pool: Vec<_> = offers(c, &fp.arsenal, &fp.build, fp.secs())
+                        .into_iter()
+                        .filter(|(o, _)| !shown.contains(o))
+                        .collect();
+                    pick_weighted(fp.rng.0.get(Stream::Choice), &pool, 1).first().copied()
+                };
                 if let Some(choice) = &mut fp.flow.choice {
                     match new {
                         Some(o) => choice.offers[i as usize] = o,
@@ -636,7 +715,12 @@ pub(crate) fn handle_commands(
                 fp.outbox.0.push(SimEvent::Banished);
             }
             (SimPhase::LevelUp, SimCommand::Skip) => {
-                fp.flow.oil_bonus += fp.content.0.run.choices.skip_oil;
+                // 跳过余烬什么也不给
+                if fp.flow.choice.as_ref().is_some_and(|c| c.ember) {
+                    fp.flow.ember = 0;
+                } else {
+                    fp.flow.oil_bonus += fp.content.0.run.choices.skip_oil;
+                }
                 fp.after_choice();
             }
             (SimPhase::Chest | SimPhase::Evolve, SimCommand::Ack) => fp.after_choice(),
@@ -659,7 +743,7 @@ pub(crate) fn handle_commands(
             }
             (SimPhase::Shop, SimCommand::Choose(1)) => {
                 let Some(shop) = fp.flow.shop else { continue };
-                if fp.progress.gold < shop.charm_cost as f32 || fp.setup.charm_pool.is_empty() {
+                if fp.progress.gold < shop.charm_cost as f32 || !fp.charms_available() {
                     continue;
                 }
                 fp.progress.gold -= shop.charm_cost as f32;
@@ -722,6 +806,10 @@ pub(crate) fn check_flow(mut fp: FlowParams) {
     if fp.flow.won_at.is_some_and(|t| fp.secs() >= t) {
         fp.end(true);
     } else if fp.flow.shop.is_some() {
+        let ok = fp.charms_available();
+        if let Some(shop) = &mut fp.flow.shop {
+            shop.charm_ok = ok;
+        }
         *fp.phase = SimPhase::Shop;
         fp.outbox.0.push(SimEvent::ShopOpened);
     } else {

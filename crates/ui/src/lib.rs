@@ -11,6 +11,7 @@ use lantern_sim::{AppState, RunState};
 mod bench;
 mod choice;
 mod describe;
+mod hub;
 mod hud;
 mod markers;
 mod pause;

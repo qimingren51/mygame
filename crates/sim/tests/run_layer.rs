@@ -279,7 +279,7 @@ fn boss_barrier_keeps_the_player_inside() {
 fn merchant_sells_a_chest_for_gold() {
     let mut sim = quiet(8);
     sim.progress_mut().gold = 100.0;
-    sim.flow_mut().shop = Some(lantern_sim::flow::Shop { chest_cost: 40, charm_cost: 80 });
+    sim.flow_mut().shop = Some(lantern_sim::flow::Shop { chest_cost: 40, charm_cost: 80, charm_ok: false });
     sim.step(InputFrame::default(), &[]);
     assert_eq!(sim.phase(), SimPhase::Shop);
     sim.step(InputFrame::default(), &[SimCommand::Choose(0)]);

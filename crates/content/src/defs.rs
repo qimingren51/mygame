@@ -235,9 +235,10 @@ pub struct ChoicesDef {
     pub skip_oil: u32,
     /// 宝箱：随机数（加上运气）超过阈值时开出的个数，从高到低
     pub chest_odds: Vec<(f32, u32)>,
-    /// 局内灯坠三选一给几个选项；精英宝箱附带一次的概率
+    /// 局内灯坠三选一给几个选项；精英宝箱附带一次的概率；没有可给的灯坠时改给的金币
     pub charm_offers: u32,
     pub elite_charm: f32,
+    pub charm_gold: u32,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；

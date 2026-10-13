@@ -996,6 +996,9 @@ fn split_affix(c: &Content, affix: u16) -> Option<(u32, f32, f32)> {
     })
 }
 
+/// 主角减伤的合计上限。
+const REDUCTION_CAP: f32 = 0.6;
+
 /// 主角受伤需要的东西。
 pub(crate) struct HurtCtx<'a> {
     pub content: &'a Content,
@@ -1025,7 +1028,8 @@ pub(crate) fn hurt_player(
     if player.still_t >= ctx.content.player.charms.still_after {
         reduction += s.get(Stat::StillReduction);
     }
-    let mut dmg = (amount * (1.0 - reduction.min(0.9)) - s.get(Stat::Armor)).max(1.0);
+    // 减伤合计（含站定减伤）最多 60%（docs/BALANCE.md 第 3.2 节）
+    let mut dmg = (amount * (1.0 - reduction.min(REDUCTION_CAP)) - s.get(Stat::Armor)).max(1.0);
     if player.shield > 0.0 {
         let absorbed = player.shield.min(dmg);
         player.shield -= absorbed;
