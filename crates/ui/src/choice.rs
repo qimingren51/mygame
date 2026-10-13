@@ -68,7 +68,7 @@ pub(crate) struct RerollLabel;
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<ChoiceUi>().add_systems(OnExit(lantern_sim::AppState::Run), reset).add_systems(
         Update,
-        (sync, input, highlight, animate_evolve, animate_rise)
+        (sync, input, highlight, animate_evolve, animate_rise, animate_chest)
             .chain()
             .run_if(in_state(RunState::Playing))
             .run_if(resource_exists::<SimPhase>),
@@ -725,22 +725,43 @@ fn spawn_chest(
         (_, 5) => "宝箱 · 五连".to_string(),
         (_, n) => format!("宝箱 · {n} 连"),
     };
+    let n = chest.items.len();
+    // 三连以上标题盖下来；五连每件亮得更足，最后一声钟后整卷泛起金光
+    let big = n >= 3;
+    let gold = n >= 5;
     commands
         .spawn(overlay(skin))
         .with_children(|root| {
-            root.spawn(text(&fonts.title, 64.0, hex("#FFD98A"), &title));
+            let mut title = root.spawn(text(&fonts.title, 64.0, CHEST_GOLD, &title));
+            if big {
+                // 先藏着、放大，第一帧就从大到小砸下来
+                title.insert((
+                    ChestGlow { part: ChestPart::Title, t: 0.0 },
+                    TextColor(CHEST_GOLD.with_alpha(0.0)),
+                    TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.0) },
+                    UiTransform::from_scale(Vec2::splat(1.7)),
+                ));
+            }
             // 卷轴：展开的纸上一行一件
-            root.spawn((
+            let mut scroll = root.spawn((
                 Node {
                     width: px(480),
                     flex_direction: FlexDirection::Column,
                     row_gap: px(6),
                     padding: UiRect::axes(px(40), px(36)),
+                    // 金光是按节点的方框画的，圆角让它贴着纸边、不显得方
+                    border_radius: BorderRadius::all(px(18)),
                     ..default()
                 },
                 skin.image("panel"),
-            ))
-            .with_children(|list| {
+            ));
+            if gold {
+                scroll.insert((
+                    ChestGlow { part: ChestPart::Halo { at: CHIME_AT + n as f32 * CHIME_GAP }, t: 0.0 },
+                    BoxShadow::new(CHEST_GOLD.with_alpha(0.0), px(0), px(0), px(6), px(44)),
+                ));
+            }
+            scroll.with_children(|list| {
                 for (k, item) in chest.items.iter().enumerate() {
                     // 物品已经生效，按生效前的样子描述（升级显示“Lv a → a+1”）
                     let info = offer_info(c, arsenal, build, item.offer);
@@ -758,10 +779,19 @@ fn spawn_chest(
                             skin.image("divider"),
                         ));
                     }
-                    // 和开箱的钟声对上：第 k 声在 0.35 + 0.28k 秒
+                    // 和开箱的钟声对上：第 k 声在 0.35 + 0.28k 秒，那一行跟着亮一下
+                    let at = CHIME_AT + k as f32 * CHIME_GAP;
                     list.spawn((
-                        Node { align_items: AlignItems::Center, column_gap: px(14), ..default() },
-                        Rise::after(0.3 + k as f32 * 0.28),
+                        Node {
+                            align_items: AlignItems::Center,
+                            column_gap: px(14),
+                            padding: UiRect::axes(px(8), px(2)),
+                            border_radius: BorderRadius::all(px(6)),
+                            ..default()
+                        },
+                        Rise::after(at - 0.05),
+                        BackgroundColor(CHEST_GOLD.with_alpha(0.0)),
+                        ChestGlow { part: ChestPart::Row { at, peak: if gold { 0.5 } else { 0.3 } }, t: 0.0 },
                     ))
                     .with_children(|row| {
                         spawn_icon(
@@ -790,6 +820,91 @@ fn spawn_chest(
             root.spawn(text(&fonts.body, 18.0, PAPER, "Enter / 手柄 A　继续"));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
+}
+
+/// 开箱钟声的时刻（和 `lantern_audio` 的 chest 音效对上）：第 k 声在 CHIME_AT + k × CHIME_GAP 秒。
+const CHIME_AT: f32 = 0.35;
+const CHIME_GAP: f32 = 0.28;
+const CHEST_GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
+
+/// 宝箱的金光（docs/FEEL.md 第 5 节）。
+#[derive(Component)]
+pub(crate) struct ChestGlow {
+    part: ChestPart,
+    t: f32,
+}
+
+#[derive(Clone, Copy)]
+enum ChestPart {
+    /// 三连以上的标题：从大到小砸下来
+    Title,
+    /// 一行：钟响时亮一下再暗下去；peak 是最亮时底色的不透明度
+    Row { at: f32, peak: f32 },
+    /// 五连：最后一声钟后卷轴外圈泛起金光，留一圈淡的
+    Halo { at: f32 },
+}
+
+pub(crate) fn animate_chest(
+    time: Res<Time<Real>>,
+    mut q: Query<(
+        &mut ChestGlow,
+        Option<&mut BackgroundColor>,
+        Option<&mut BoxShadow>,
+        &mut UiTransform,
+        Option<&mut TextColor>,
+        Option<&mut TextShadow>,
+    )>,
+) {
+    let dt = time.delta_secs().min(0.1);
+    for (mut g, bg, shadow, mut tf, color, text_shadow) in &mut q {
+        g.t += dt;
+        let t = g.t;
+        match g.part {
+            ChestPart::Title => {
+                if t > 0.6 {
+                    continue;
+                }
+                let k = (t / 0.16).min(1.0);
+                let s = if t < 0.16 {
+                    1.7 - 0.7 * k * k
+                } else {
+                    1.0 + 0.06 * (-(t - 0.16) * 14.0).exp() * ((t - 0.16) * 40.0).cos()
+                };
+                tf.scale = Vec2::splat(s);
+                let a = (t / 0.08).min(1.0);
+                if let Some(mut c) = color {
+                    c.0.set_alpha(a);
+                }
+                if let Some(mut sh) = text_shadow {
+                    sh.color.set_alpha(0.8 * a);
+                }
+            }
+            ChestPart::Row { at, peak } => {
+                let k = t - at;
+                if !(0.0..=1.6).contains(&k) {
+                    continue;
+                }
+                let a = peak * (k / 0.05).min(1.0) * (-(k - 0.05).max(0.0) * 3.5).exp();
+                if let Some(mut bg) = bg {
+                    bg.0.set_alpha(a);
+                }
+            }
+            ChestPart::Halo { at } => {
+                let k = t - at;
+                if !(0.0..=3.0).contains(&k) {
+                    continue;
+                }
+                // 猛地亮起，慢慢退到一圈淡金
+                let a = 0.95 * (k / 0.06).min(1.0) * (-k * 2.2).exp() + 0.3 * (k / 0.4).min(1.0);
+                if let Some(mut sh) = shadow {
+                    for st in &mut sh.0 {
+                        st.color.set_alpha(a);
+                        st.spread_radius = px(6.0 + 10.0 * (-k * 3.0).exp());
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// 出场动画：等 delay 秒后从下面弹上来（卡片依次出现，宝箱逐项揭晓）。

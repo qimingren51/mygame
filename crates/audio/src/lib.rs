@@ -515,6 +515,11 @@ fn play_sim_events(
                 let s = a.sfx.warn_big.clone();
                 a.play(&s);
             }
+            // 无尽夜夜深一层：和妖潮的警报同时来，晚半拍沉下去
+            SimEvent::NightDeeper { .. } => {
+                let s = a.sfx.deeper.clone();
+                a.play_later(&s, 0.5);
+            }
             SimEvent::Pickup { kind: PickupKind::Bell, .. } => {
                 let s = a.sfx.soul_bell.clone();
                 a.play(&s);

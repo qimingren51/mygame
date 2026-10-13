@@ -49,6 +49,8 @@ pub struct Sfx {
     pub dawn: StaticSoundData,
     /// 精英倒下：一声沉的
     pub elite_down: StaticSoundData,
+    /// 无尽夜夜深一层：低处一声锣，一个音慢慢往下沉
+    pub deeper: StaticSoundData,
 }
 
 /// 一声鸟叫：两三个快速上滑的短音。
@@ -65,13 +67,22 @@ fn noise(kind: FilterKind, freq: f32) -> NoiseOpts {
 }
 
 fn chest(n: usize) -> StaticSoundData {
-    render(0.6 + n as f32 * 0.3 + 1.5, |b| {
+    let gold = n >= 5;
+    render(0.6 + n as f32 * 0.3 + if gold { 2.6 } else { 1.5 }, |b| {
         for i in 0..6 {
             let i = i as f32;
             b.wood(i * 0.045 * (1.0 - i * 0.08), 0.1, 700.0 + i * 60.0);
         }
         for i in 0..n {
             b.bell(pent(12 + i as i32 * 2), 0.35 + i as f32 * 0.28, 0.14, 1.4);
+        }
+        // 五连：五声之后一记金光，D 和 A 的空五度从低往高扫上去，落定（界面上整卷泛金光）
+        if gold {
+            let t = 0.35 + n as f32 * 0.28;
+            for (j, d) in [10, 13, 15, 18].into_iter().enumerate() {
+                b.bell(pent(d), t + j as f32 * 0.04, 0.09, 2.4);
+            }
+            b.sine(pent(20), t + 0.12, 0.9, 0.025);
         }
     })
 }
@@ -269,6 +280,18 @@ impl Sfx {
                 b.osc(Wave::Sine, 60.0, 0.2, 0.11, 0.38, Some((40.0, 0.1)), 0.004);
                 b.noise(0.0, 0.05, 0.06, noise(FilterKind::Low, 180.0));
             }),
+            deeper: render(5.0, |b| {
+                b.gong(36.7, 0.0, 0.2);
+                b.bell(pent(0), 0.0, 0.05, 3.5);
+                // 从 D4 沉到 D3
+                b.osc(Wave::Sine, pent(5), 0.05, 3.0, 0.07, Some((pent(0), 2.6)), 0.08);
+                b.noise(
+                    0.0,
+                    2.4,
+                    0.08,
+                    NoiseOpts { kind: FilterKind::Low, freq: 400.0, slide: Some(80.0), ..Default::default() },
+                );
+            }),
             boss_down: render(6.0, |b| {
                 b.gong(41.2, 0.0, 0.3);
                 b.drum(0.0, 0.5, 52.0);
@@ -347,7 +370,9 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 14] = [
+        let all: [(&str, &StaticSoundData); 16] = [
+            ("chest5", &s.chest[2]),
+            ("deeper", &s.deeper),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),
