@@ -16,22 +16,37 @@ pub(crate) enum Priority {
     Critical,
     Ultimate,
     Finale,
+    /// 玩家危险反馈走保护通道，不参与攻击高光的压暗。
+    Hurt,
+    Death,
 }
 
 impl Priority {
-    pub const ALL: [Self; 6] =
-        [Self::Finale, Self::Ultimate, Self::Critical, Self::Impact, Self::Normal, Self::Ambient];
+    pub const ALL: [Self; 8] = [
+        Self::Death,
+        Self::Hurt,
+        Self::Finale,
+        Self::Ultimate,
+        Self::Critical,
+        Self::Impact,
+        Self::Normal,
+        Self::Ambient,
+    ];
+
+    pub fn protected(self) -> bool {
+        matches!(self, Self::Hurt | Self::Death)
+    }
 
     pub fn of(event: &SimEvent) -> Self {
         match event {
+            SimEvent::PlayerDied => Self::Death,
+            SimEvent::PlayerHurt { .. } => Self::Hurt,
             SimEvent::BossDefeated { .. } | SimEvent::Kill { rank: Rank::Boss, .. } => Self::Finale,
             SimEvent::Strike { fx: StrikeFx::Ult, .. }
             | SimEvent::LastStand { .. }
             | SimEvent::Revived { .. } => Self::Ultimate,
             SimEvent::Hit { crit: true, .. } => Self::Critical,
             SimEvent::Kill { rank: Rank::Elite, .. }
-            | SimEvent::PlayerHurt { .. }
-            | SimEvent::PlayerDied
             | SimEvent::BossArrived { .. }
             | SimEvent::BossPhase { .. }
             | SimEvent::SweepStrike { .. }
@@ -140,7 +155,7 @@ impl Feedback {
                     self.candidates.push(self.selected.len());
                 }
                 self.selected.push(index);
-                if priority >= Priority::Critical && priority >= self.focus {
+                if !priority.protected() && priority >= Priority::Critical && priority >= self.focus {
                     self.focus = priority;
                     self.hold = match priority {
                         Priority::Finale => 0.9,
@@ -154,7 +169,7 @@ impl Feedback {
 
     /// 在高光期间压低已经在场的小特效；危险信息不经过这个系数。
     pub fn visibility(&self, priority: Priority) -> f32 {
-        if self.hold <= 0.0 || priority >= self.focus {
+        if priority.protected() || self.hold <= 0.0 || priority >= self.focus {
             1.0
         } else if priority >= Priority::Critical {
             0.65
@@ -241,5 +256,29 @@ mod tests {
         assert_eq!(f.selected, vec![1]);
         f.prepare(&[strong, weak], 0.016, false);
         assert_eq!(f.selected, vec![0]);
+    }
+
+    #[test]
+    fn player_feedback_is_preserved_without_changing_attack_highlights() {
+        let hurt = SimEvent::PlayerHurt { amount: 10.0, by: lantern_sim::HurtBy::Shot, from: Vec2::X };
+        for lite in [false, true] {
+            for highlight in [
+                hit(0.0, true),
+                SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult },
+                SimEvent::BossDefeated { pos: Vec2::ZERO, dawn: true },
+            ] {
+                let mut f = Feedback::default();
+                f.prepare(&[highlight, hurt, SimEvent::PlayerDied], 0.016, lite);
+                assert_eq!(f.selected, vec![2, 1, 0]);
+                assert_eq!(f.focus, Priority::of(&highlight));
+                f.prepare(&[hurt, SimEvent::PlayerDied], 0.016, lite);
+                assert_eq!(f.selected, vec![1, 0]);
+                assert!(f.visibility(Priority::Normal) < 1.0);
+                assert_eq!(f.visibility(Priority::Hurt), 1.0);
+                assert_eq!(f.visibility(Priority::Death), 1.0);
+                f.prepare(&[], 1.0, lite);
+                assert_eq!(f.visibility(Priority::Normal), 1.0);
+            }
+        }
     }
 }

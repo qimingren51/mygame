@@ -27,7 +27,8 @@ use crate::{Feel, layer, to_screen};
 /// 总量固定，其中 480 个位置留给暴击、燃灯和夜主死亡。
 const CAP: usize = 1800;
 const RESERVE: usize = 480;
-const FRAME_BUDGET: [u32; 6] = [32, 120, 180, 64, 128, 320];
+// 保护类别单独计数，避免攻击耗尽其预算。
+const FRAME_BUDGET: [u32; Priority::ALL.len()] = [32, 120, 180, 64, 128, 320, 180, 320];
 
 /// 墨色（普通混合的粒子）
 pub(crate) const INK: Color = Color::srgb(0.07, 0.075, 0.1);
@@ -209,7 +210,7 @@ pub(crate) fn setup_particles(
         rng: Pcg32::new(0x0b1a_5e20, 5),
         lite: false,
         priority: Priority::Ambient,
-        spawned: [0; 6],
+        spawned: [0; Priority::ALL.len()],
         f: PFrames {
             streak: f("fx/streak"),
             smoke: f("fx/smoke"),
@@ -296,13 +297,13 @@ pub(crate) struct Particles {
     /// 精简特效：成团的粒子减半，上限减半
     pub lite: bool,
     priority: Priority,
-    spawned: [u32; 6],
+    spawned: [u32; Priority::ALL.len()],
 }
 
 impl Particles {
     fn begin_frame(&mut self, lite: bool) {
         self.lite = lite;
-        self.spawned = [0; 6];
+        self.spawned = [0; Priority::ALL.len()];
         self.priority = Priority::Ambient;
         let cap = if lite { CAP / 2 } else { CAP };
         if self.list.len() > cap {
@@ -339,7 +340,7 @@ impl Particles {
 
     pub fn clear(&mut self) {
         self.list.clear();
-        self.spawned = [0; 6];
+        self.spawned = [0; Priority::ALL.len()];
         self.priority = Priority::Ambient;
     }
 
@@ -833,7 +834,7 @@ mod tests {
             rng: Pcg32::new(1, 2),
             lite: false,
             priority: Priority::Ambient,
-            spawned: [0; 6],
+            spawned: [0; Priority::ALL.len()],
             f: PFrames {
                 streak: frame,
                 smoke: frame,

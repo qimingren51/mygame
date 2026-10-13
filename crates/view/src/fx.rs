@@ -214,6 +214,7 @@ impl FxState {
 
     fn flash(&mut self, color: Color, a: f32) {
         let cap: f32 = match self.priority {
+            Priority::Hurt | Priority::Death => 0.18,
             Priority::Finale => 0.3,
             Priority::Ultimate => 0.24,
             Priority::Critical => 0.18,
@@ -337,7 +338,7 @@ pub(crate) fn read_fx_events(
                     m.2 = Some(0.0);
                 }
             }
-            SimEvent::PlayerHurt { .. } => {
+            SimEvent::PlayerHurt { .. } | SimEvent::PlayerDied => {
                 fx.flash(rgb(0xff3b30), 0.18);
             }
             SimEvent::BossArrived { .. } => {
@@ -1451,5 +1452,30 @@ mod tests {
         fx.flash.set_alpha(0.0);
         fx.flash(Color::BLACK, 1.0);
         assert_eq!(fx.flash.alpha(), 0.06);
+    }
+
+    #[test]
+    fn protected_flash_overrides_attacks_and_only_death_can_replace_hurt() {
+        let red = rgb(0xff3b30);
+        for priority in [Priority::Hurt, Priority::Death] {
+            let mut fx = FxState { priority: Priority::Finale, ..default() };
+            fx.flash(Color::WHITE, 0.6);
+            fx.priority = priority;
+            fx.flash(red, 0.18);
+            assert_eq!(fx.flash, red.with_alpha(0.18));
+            for attack in Priority::ALL.into_iter().filter(|p| !p.protected()) {
+                fx.priority = attack;
+                fx.flash(Color::WHITE, 1.0);
+                assert_eq!(fx.flash, red.with_alpha(0.18));
+            }
+            fx.priority = Priority::Hurt;
+            fx.flash(Color::BLACK, 0.18);
+            if priority == Priority::Death {
+                assert_eq!(fx.flash, red.with_alpha(0.18));
+            }
+            fx.priority = Priority::Death;
+            fx.flash(Color::WHITE, 0.18);
+            assert_eq!(fx.flash, Color::WHITE.with_alpha(0.18));
+        }
     }
 }
