@@ -56,22 +56,22 @@
         // 寒波击退 40，减速 35% 持续 1.5 秒
         behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5),
         levels: [
-            (cooldown: 1.99, radius: 79.0, damage: 12.0),
-            (cooldown: 1.89, radius: 88.0, damage: 16.0),
-            (cooldown: 1.78, radius: 97.0, damage: 20.0),
-            (cooldown: 1.68, radius: 106.0, damage: 23.0),
-            (cooldown: 1.57, radius: 115.0, damage: 27.0),
-            (cooldown: 1.47, radius: 124.0, damage: 31.0),
-            (cooldown: 1.36, radius: 133.0, damage: 35.0),
-            (cooldown: 1.26, radius: 142.0, damage: 39.0),
+            (cooldown: 1.99, radius: 79.0, damage: 14.0),
+            (cooldown: 1.89, radius: 88.0, damage: 18.0),
+            (cooldown: 1.78, radius: 97.0, damage: 23.0),
+            (cooldown: 1.68, radius: 106.0, damage: 26.0),
+            (cooldown: 1.57, radius: 115.0, damage: 31.0),
+            (cooldown: 1.47, radius: 124.0, damage: 36.0),
+            (cooldown: 1.36, radius: 133.0, damage: 40.0),
+            (cooldown: 1.26, radius: 142.0, damage: 45.0),
         ],
         evolution: Some((
             name: "寒山钟", passive: "jingxin",
             desc: "每 6 秒钟鸣全屏，冻结所有妖物。",
             // 每 6 秒（乘以冷却）全屏钟鸣：冻结 1.5 秒（夜主除外）、伤害 90（对夜主单次封顶 400）
             behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5,
-                            toll: Some((period: 6.0, damage: 90.0, freeze: 1.5, boss_cap: 400.0))),
-            level: (cooldown: 1.26, radius: 184.6, damage: 58.0),
+                            toll: Some((period: 6.0, damage: 105.0, freeze: 1.5, boss_cap: 400.0))),
+            level: (cooldown: 1.26, radius: 184.6, damage: 67.0),
         )),
     ),
     (

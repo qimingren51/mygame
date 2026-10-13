@@ -141,16 +141,17 @@ art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 L
 ```bash
 A=art/out/assets@2x
 art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out assets/atlas
-art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/lantern_red $A/lantern_mirror $A/lantern_frost $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant
+art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns
+art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
 art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons
-mkdir -p assets/atlas/screens && cp art/out/screens/title.png art/out/screens/logo.png assets/atlas/screens/
+mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn}.png assets/atlas/screens/
 art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规则检查 assets/atlas
 ```
 
-格式约定见 `docs/DESIGN.md` 第 15 节。界面图集要加 `--no-trim`（不裁边）。
+格式约定见 `docs/DESIGN.md` 第 15 节。界面图集要加 `--no-trim`（不裁边）。灯笼叠层单独打成 `lanterns`，不要放进 actors。
 
 ## 界面九宫格皮肤（post/ui_skin.py）
 
@@ -188,11 +189,50 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → o
 |---|---|---|
 | `bamboo_clump` | 320² | 土丘上八竿墨竹，叶尖约 2.9 米（主角的 1.3 倍）。前排浓墨、后排淡彩石绿；竹叶是不描线的笔触。`broken_variant` |
 | `bamboo_clump_broken` | 320² | 同画布、同锚点、同纸纹：斜劈的竹桩、倒地的断竹、落叶。打碎竹丛时直接换图。`intact_variant` |
-| `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。挂点 `glow` |
-| `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光 |
+| `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。约 1.3 米（地标：和石灯笼差不多高，宽得多）。挂点 `glow` |
+| `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光。约 1.2 米 |
 | `fox_lanterns` | 192² | 木柱、竹梁、翘角瓦檐，三盏带竹篾的青纸灯（`_emit`），柱上一条朱砂纸符。挂点 `glow`（中心）和 `glow_0..2` |
 
-发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 70，世界单位）；meta 里还有 `region: "qingqiu"`。
+发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90，世界单位）；meta 里还有 `region: "qingqiu"`。
+
+## 青丘妖物与新动作（render/produce.py、render/qingqiu_review.py）
+
+```bash
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only fox_wisp,bamboo_wraith,taofeng_fox   # 新妖物
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only fox:pounce,ghoul:charge,boss:sweep+summon  # 只渲新动作，原有 move 帧不动
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py review   # 审图和动图 → review@2x/qq_enemies_*、qq_gif_*（--diag 另渲九尾扫的 SE 斜向）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/qingqiu_review.py sample   # 样张：每个动作几帧到 out/qq_sample@2x/
+```
+
+只出 2 倍，妖物只画 E。批次表在 `produce.py` 的 `QINGQIU`（新妖物）和 `BATCH2_ACTIONS`（老妖物的新动作）；`--only 素材:动作+动作` 只重渲这几个动作，其他帧和 meta 保留。
+
+| 素材 | 动作（帧 @ fps） | 说明 |
+|---|---|---|
+| `fox_wisp` 狐火 | `float` 8@10（平时）、`pounce` 4@10 | 青白火身、背上一排火舌、尾巴散成三缕；悬浮（`floating`）。出图后 `fox_wisp.finish_flame` 把火身吸附到火色，发光层里火身按亮度压暗，眼睛最亮 |
+| `bamboo_wraith` 竹魅 | `idle` 4@4（藏在竹丛里）、`move` 6@8（平时）、`shoot` 5@10 | 竹节面具，竹枝甩出竹刺；`muzzle` 挂点是竹刺出手的位置 |
+| `taofeng_fox` 讨封狐 | `disguise` 6@8（平时）、`move` 6@10、`reveal` 4@8 | 伪装是斗笠蓑衣的路人，`_emit` 是空的；`reveal` 甩掉蓑衣，眼睛亮起 |
+| `fox` 赤面狐 | 新增 `pounce` 6@12 | 伏低蓄力后腾空扑出 |
+| `ghoul` 青面鬼 | 新增 `charge` 6@10 | 0–1 蓄力，2–5 是冲锋的跑步循环（`loop_from: 2`） |
+| `boss` 九尾 | 新增 `sweep` 6@10、`summon` 4@6 | 扫尾是原地转身一圈；召唤时九条尾尖各点一团狐火（其他动作里藏起来） |
+
+meta：出手动作写 `loop: false` 和 `windup_frames: 2`（蓄力帧数），多个动作的素材写 `default_anim`，新妖物写 `eye_color`（狐火 #F2FFFC、竹魅 #9BF5C9、讨封狐 #FFD23F）。
+自检对新动作会报“剪影高和全素材中位数不同”的警告（扑击腾空、伏低、尾扇高），属正常。渲染器在剪影边缘有少量逐次不同的像素，
+所以只重渲新动作（`--only 素材:动作`），不要重渲原有的 `move`。
+
+## 青丘地面、迷雾、竹刺、开场卷轴（post/ground_decor.py、vfx_textures.py、weapon_textures.py、scroll_qingqiu.py）
+
+`make_2d.py` 会一起生成前三样（1 倍、2 倍各一遍）。另外：
+
+```bash
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/ground_decor.py --sample   # 审图 review@2x/qq_2d_sample.png（宣纸上和夜里、迷雾 2×2 平铺）
+art/.venv/bin/python art/post/scroll_qingqiu.py                               # 开场卷轴 → out/screens/scroll_qingqiu{,_dawn}.png，审图 review@2x/scroll_qingqiu_review.png
+art/.venv/bin/python art/post/test_scroll_qingqiu.py                          # 卷轴自检（尺寸、旁白区够空、长夜版只有墨色、两张是同一幅画、确定性）
+```
+
+- `ground/qq_*`：落竹叶 `qq_bamboo_leaves_0..2`、竹笋 `qq_shoots_0..1`（锚点在底边）、苔点 `qq_moss_0..1`、青绿晕染 `qq_wash_0..1`（`max_alpha: 0.3`）、狐爪印 `qq_fox_tracks`（`flat: 0.7`）。
+- `vfx/mist_0..1`：白色、可染色的无缝平铺雾（大团、碎团），2 倍 512²；meta 写 `tileable: true`、`tile_units: 128`、`alpha_hint`（0.2、0.15），**不写 `tile`**（写了打包会跳过）。建议染 #DDD9CF。
+- `weapons/bamboo_spike`：竹刺，锚点居中、朝 +X，`length_units: 28`；`bamboo_spike_trail`：拖尾，叠加、可染色（建议 #A8E6B8），锚点在右端。
+- 卷轴：2400×800 不透明，同一幅画两种天光（长夜只有墨色，天明上色）；左上留给旁白，文字由游戏画。
 
 ## 正式管线
 
@@ -216,12 +256,14 @@ art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自
 | `post/contact_sheet.py` | 拼图、放大、夜景合成、游戏大小对比、动图 |
 | `models/hero.py` | 白衣墨氅剑仙：idle 6、walk 8、dash 4、hurt 2、death 6（不循环），8 向 |
 | `models/shade.py` | 影妖、疾影（墨烟幽灵，float） |
-| `models/golem.py` `fox.py` `ghoul.py` `stonelord.py` `toad.py` | 石妖、赤面狐与夜主九尾、青面鬼、石将（翁仲）、金蟾（move，只画 E） |
+| `models/golem.py` `fox.py` `ghoul.py` `stonelord.py` `toad.py` | 石妖、赤面狐与夜主九尾、青面鬼、石将（翁仲）、金蟾（move，只画 E；赤面狐、青面鬼、九尾另有出手动作） |
+| `models/fox_wisp.py` `bamboo_wraith.py` `taofeng_fox.py` | 青丘的狐火、竹魅、讨封狐 |
 | `models/kit.py` | 妖物建模公共件（石块、管状尾、毛笔形尾、分段晕染材质、破布片、发光眼） |
 | `models/lanterns.py` | 主角的灯笼头：红纸灯 red、铜镜灯 mirror、霜瓷灯 frost（id 和光色取自 `assets/data/lamps.ron`） |
 | `models/rock.py` `stone_lantern.py` `event_props.py` | 山石 a/b/c、石灯笼（亮 / 未点亮 `stone_lantern_dark`）、古灯、血祭坛、货郎担 `merchant` |
 | `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（出图脚本共用）；可以每个姿态连渲几层（variants） |
 | `render/produce.py` | 正式出图 + 自检 + 审图 |
+| `render/qingqiu_review.py` | 青丘妖物的样张、审图和动图 |
 | `render/lantern_review.py` | 灯笼拆层的样张和审图（合成、旧帧对比热图、道具）；`full` 出正式素材的 8 向动图、三灯夜景、全帧对比 |
 | `render/lamp_icons.py` | 灯的界面图标 `ui/icon_lamp_<灯>`（灯笼头单独渲染，装进图标圆框） |
 | `render/style_frame.py` | 风格样张（早期） |

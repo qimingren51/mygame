@@ -129,6 +129,14 @@ impl Streams {
         self.seed
     }
 
+    /// 由种子和键派生一个独立的随机数（地图分块用）：只取决于种子和键，和各条流抽了多少次无关，
+    /// 同一个种子每次生成的地图一样。
+    pub fn derive(&self, key: u64) -> Pcg32 {
+        let mut sm = self.seed ^ key.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+        let a = splitmix64(&mut sm);
+        Pcg32::new(a, key)
+    }
+
     pub fn get(&mut self, stream: Stream) -> &mut Pcg32 {
         &mut self.rngs[stream as usize]
     }
@@ -159,6 +167,17 @@ impl Streams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 派生的随机数只取决于种子和键。
+    #[test]
+    fn derived_rngs_ignore_stream_use() {
+        let mut a = Streams::new(7);
+        let b = Streams::new(7);
+        a.get(Stream::Spawn).next_u32();
+        assert_eq!(a.derive(42).next_u32(), b.derive(42).next_u32());
+        assert_ne!(a.derive(42).next_u32(), a.derive(43).next_u32());
+        assert_ne!(Streams::new(8).derive(42).next_u32(), b.derive(42).next_u32());
+    }
 
     /// 参考实现 pcg32-demo 用 srandom(42, 54) 的前六个输出。
     #[test]

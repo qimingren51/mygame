@@ -18,6 +18,7 @@ mod effects;
 mod fx;
 mod ground;
 pub mod lighting;
+mod mist;
 mod particles;
 mod stats;
 
@@ -71,6 +72,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<particles::ParticleClock>()
             .init_resource::<Feel>()
             .init_resource::<ViewStats>()
+            .init_resource::<mist::MistReady>()
             .add_systems(
                 Startup,
                 (
@@ -101,10 +103,16 @@ impl Plugin for ViewPlugin {
             )
             .add_systems(
                 OnExit(AppState::Run),
-                (actors::reset_pools, ground::clear_decor, lighting::hide_darkness, camera::reset_rig),
+                (
+                    actors::reset_pools,
+                    ground::clear_decor,
+                    lighting::hide_darkness,
+                    camera::reset_rig,
+                    mist::hide_mist,
+                ),
             )
             .add_observer(actors::dress_player)
-            .add_systems(Update, (lighting::resize_lightmap, apply_bloom))
+            .add_systems(Update, (lighting::resize_lightmap, apply_bloom, mist::setup_mist))
             .add_systems(
                 Update,
                 (
@@ -129,6 +137,7 @@ impl Plugin for ViewPlugin {
                         particles::particle_events,
                         atmos::atmos_events,
                         atmos::update_atmos,
+                        mist::update_mist,
                         particles::update_particles,
                         actors::apply_pools,
                         actors::apply_glow,

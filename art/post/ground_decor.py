@@ -9,16 +9,22 @@ art/out/<ASSETS_DIR_NAME>/ground/ 与同一份 meta.json（一个文件夹只有
 
 单独预览（不写 assets，只出一张拼图到 art/out/review[@2x]/ground_decor_preview.png）：
   art/.venv/bin/python art/post/ground_decor.py
+
+青丘追加（帧名前缀 qq_，只往后追加，前面的条目逐字节不变）：qq_bamboo_leaves_0..2 落竹叶、qq_shoots_0..1 竹笋（锚点在底边）、
+qq_moss_0..1 苔点与地衣、qq_wash_0..1 兑花青石绿的淡墨晕、qq_fox_tracks 一行狐狸脚印。
+青丘审图（读盘：地面装饰、vfx/mist_0..1、weapons/bamboo_spike，先跑 vfx_textures.py 和 weapon_textures.py）：
+  LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/ground_decor.py --sample   # → art/out/review@2x/qq_2d_sample.png
 """
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -633,6 +639,325 @@ def make_zone_herb() -> tuple[Image.Image, Image.Image]:
     return herb, glow
 
 
+# ============================================================== 青丘的地面（帧名前缀 qq_，只往后追加）
+#
+# 青丘是竹海里的狐村：落了一地的竹叶、刚冒头的竹笋、苔点、兑了花青石绿的淡墨晕、一行狐狸脚印。
+# 画法与上面的落叶、卵石、竹子一致（Painter：淡彩填色、手抖轮廓、干笔）；长夜里以墨为主，颜色压得很淡。
+
+QQ_FLAT = 0.7  # 狐狸脚印按地面透视压扁（比反应区域的 0.62 略松，小脚印才认得出）
+
+
+def paint_bamboo_leaf(P: W.Painter, x, y, ang, length, width, rgb, *, curl=0.0, shadow=0.12, vein=True):
+    """一片落在地上的竹叶：披针形，叶柄端圆钝、最宽处靠后、长长地收成尖；略弯，中脉一线，淡墨勾边，底下一点影子。"""
+    s = np.linspace(0.0, 1.0, 48)
+    # 叶形：靠叶柄 30% 处最宽，叶尖细长
+    prof = 0.5 * width * np.sin(np.pi * np.clip(s, 0, 1) ** 0.62) ** 0.9 * (1.0 - 0.25 * s)
+    bend = curl * length * (s - 0.5) ** 2
+    up = np.stack([s * length, bend + prof], -1)
+    dn = np.stack([s * length, bend - prof], -1)
+    loc = np.vstack([up, dn[::-1][1:-1]]) - [0.5 * length, 0.0]
+    ca, sa = math.cos(ang), math.sin(ang)
+    R = np.array([[ca, -sa], [sa, ca]])
+    poly = loc @ R.T + [x, y]
+    if shadow:
+        d, _ = P.sdf(poly + [0.5, 0.6])
+        P.fill(d, JIAO, shadow)
+    d, t = P.sdf(poly)
+    base = np.array([x, y]) - 0.5 * length * np.array([ca, sa])
+    along = np.clip(((P.X - base[0]) * ca + (P.Y - base[1]) * sa) / length, 0, 1)
+    P.fill(d, mixc(rgb, mixc(rgb, ZHESHI, 0.35), smoothstep(0.3, 1.0, along)), mottle=0.12, mottle_rgb=mixc(ZHESHI, ZHONG, 0.5),
+           pool=0.3, pool_rgb=mixc(rgb, JIAO, 0.4), pool_w=0.45)
+    m = P.cover(d)
+    if vein:
+        mid = np.stack([s * length - 0.5 * length, bend], -1) @ R.T + [x, y]
+        P.line(mid[2:-6], 0.13, mixc(rgb, JIAO, 0.45), 0.75, clip=m)
+    stem = base - 1.6 * np.array([ca, sa]) + np.array([-sa, ca]) * curl * 0.6
+    P.line(W.seg_pts(base, stem, n=8), 0.2, mixc(rgb, JIAO, 0.5))
+    P.outline(d, t, 0.5, mixc(rgb, JIAO, 0.72), jitter=0.2)
+
+
+# 落叶的颜色：枯黄、赭、旧了的灰，少数还带一点石绿（墨为主，颜色很淡）
+QQ_LEAF_RGB = (
+    mixc(mixc(W_TENG, W_ZHESHI, 0.55), DAN, 0.15),  # 枯黄
+    mixc(W_ZHESHI, ZHESHI, 0.3),  # 赭
+    mixc(mixc(DAN, QING, 0.5), W_ZHESHI, 0.25),  # 旧叶，灰
+    mixc(mixc(W_SHILV, DAN, 0.35), W_TENG, 0.15),  # 刚落的，灰绿
+    mixc(mixc(SHILV, ZHONG, 0.35), W_ZHESHI, 0.2),  # 深一点的绿
+)
+
+
+def make_qq_bamboo_leaves(seed: int, Wd: int, Hd: int, n: int, *, axis: float, spread: float, elong: float) -> Image.Image:
+    """一堆被风扫到一起的竹叶：大致顺着风向（axis）排，有的叠在一起，中间密边上疏；底下一抹潮湿的淡墨。"""
+    P = W.Painter(Wd, Hd, seed, ss=6)
+    rng = P.rng
+    cx, cy = Wd / 2, Hd / 2
+    ca, sa = math.cos(axis), math.sin(axis)
+    # 潮湿的地：一抹很淡的墨，沿堆的方向拉长
+    u = ((P.X - cx) * ca + (P.Y - cy) * sa) / (0.42 * Wd)
+    v = (-(P.X - cx) * sa + (P.Y - cy) * ca) / (0.30 * Hd)
+    damp = V.bump_window(np.hypot(u, v)) * smoothstep(-1.2, 1.2, V.noise1(rng, P.X.shape, 3.0 * P.ss) + 0.4)
+    P.lay.over(DAN, 0.10 * damp)
+    leaves = []
+    for _ in range(n):
+        # 堆的中心密：沿 axis 方向近似正态、横向更窄
+        a_ = rng.normal(0, 0.30) * elong
+        b_ = rng.normal(0, 0.22)
+        x = cx + (a_ * ca - b_ * sa) * Wd * 0.5
+        y = cy + (a_ * sa + b_ * ca) * Hd * 0.5
+        L = rng.uniform(10.0, 14.5)
+        wdt = L * rng.uniform(0.17, 0.22)
+        ang = axis + rng.normal(0, spread) + (math.pi if rng.random() < 0.35 else 0.0)
+        # 不出框：叶尖、叶柄都离边至少 2.5 像素
+        hx, hy = 0.5 * L * abs(math.cos(ang)) + 2.5, 0.5 * L * abs(math.sin(ang)) + 2.5
+        x, y = float(np.clip(x, hx, Wd - hx)), float(np.clip(y, hy, Hd - hy))
+        k = int(rng.choice(len(QQ_LEAF_RGB), p=(0.3, 0.22, 0.22, 0.16, 0.10)))
+        leaves.append((x, y, ang, L, wdt, k, rng.uniform(-0.12, 0.12)))
+    # 先画下面的（离中心远的、旧的灰叶在下）
+    order = sorted(range(n), key=lambda i: (leaves[i][5] != 2, -abs(leaves[i][0] - cx) - abs(leaves[i][1] - cy) * 2))
+    for i in order:
+        x, y, ang, L, wdt, k, curl = leaves[i]
+        paint_bamboo_leaf(P, x, y, ang, L, wdt, QQ_LEAF_RGB[k], curl=curl)
+    return P.image()
+
+
+def paint_shoot(P: W.Painter, x, y0, h, b, lean, *, tone: float = 0.0):
+    """一根竹笋：下宽上尖、略弯的笋身，一层层箨（笋壳）交替包着，壳上褐斑，笋尖几片墨绿的箨叶。
+    tone 0..1：越大颜色越深（老一点的笋）。"""
+    rng = P.rng
+
+    def cx_at(f):  # 笋身中线：根直、上段弯向 lean 一侧（像牛角）
+        return x + lean * f ** 1.8
+
+    def half_at(f):  # 半宽：根部圆鼓，往上收尖
+        return b * (1.0 - f) ** 0.62 * (0.92 + 0.3 * np.sin(np.pi * np.clip(f / 0.42, 0, 1)) * (f < 0.42))
+
+    fs = np.linspace(0.0, 1.0, 40)
+    left = np.stack([cx_at(fs) - half_at(fs), y0 - fs * h], -1)
+    right = np.stack([cx_at(fs) + half_at(fs), y0 - fs * h], -1)
+    body = np.vstack([left, right[::-1][1:]]) + [[0.0, 0.4]]
+    d, t = P.sdf(body)
+    hh = np.clip((y0 - P.Y) / h, 0, 1)  # 0 根 .. 1 尖
+    base_rgb = mixc(mixc(W_ZHESHI, ZHESHI, 0.4 + 0.3 * tone), mixc(DAN, JIAO, 0.3), 0.22 + 0.12 * tone)
+    top_rgb = mixc(mixc(W_ZHESHI, W_SHILV, 0.5), DAN, 0.2)
+    rgb = mixc(base_rgb, top_rgb, smoothstep(0.3, 1.0, hh))
+    # 左亮右暗（光从左上来），和卵石一致
+    rgb = mixc(rgb, mixc(rgb, ZHONG, 0.5), smoothstep(x - 0.3 * b, x + 1.1 * b, P.X) * 0.75)
+    P.fill(d, rgb, mottle=0.16, mottle_rgb=mixc(ZHESHI, JIAO, 0.5), pool=0.35, pool_rgb=mixc(ZHESHI, JIAO, 0.55), pool_w=0.6)
+    m = P.cover(d)
+    # 箨：一片片尖头的壳从下往上叠，左右错开。每片外壳的边是一道“人”字形的弧（尖朝上），
+    # 弧外（下面那片被压住的地方）一线深，弧里（这片壳）一道亮
+    n_sh = max(3, int(round(h / 5.5)))
+    for k in range(n_sh):
+        f_tip = min(0.97, (k + 1.2) / (n_sh + 0.5))
+        f_lo = max(0.0, f_tip - 0.42)
+        side = 1.0 if k % 2 == 0 else -1.0
+        apex = np.array([cx_at(f_tip) + side * 0.18 * half_at(f_tip - 0.1), y0 - f_tip * h])
+        f_l = f_lo + (0.1 if side > 0 else 0.0)
+        f_r = f_lo + (0.0 if side > 0 else 0.1)
+        pl = np.array([cx_at(f_l) - half_at(f_l) * 1.05, y0 - f_l * h])
+        pr = np.array([cx_at(f_r) + half_at(f_r) * 1.05, y0 - f_r * h])
+        for p_side, bulge in ((pl, -1.0), (pr, 1.0)):
+            mid = (p_side + apex) / 2 + np.array([bulge * 0.12 * half_at(f_lo), 0.06 * h])
+            arc = V.bezier([p_side, mid, apex], 24)
+            P.line(arc + [0.0, -0.45], 0.3, mixc(top_rgb, PAPER, 0.45), 0.45, clip=m)
+            P.line(arc, 0.24 * W.brush_profile(24, 0.4, 0.5), mixc(ZHESHI, JIAO, 0.7), 0.85, clip=m)
+    # 笋壳上的褐斑（下半多）
+    for _ in range(int(h * 0.6)):
+        fy = rng.uniform(0.03, 0.7) ** 1.3
+        px = cx_at(fy) + rng.uniform(-0.8, 0.8) * half_at(fy)
+        P.dot(px, y0 - fy * h, rng.uniform(0.2, 0.42), mixc(ZHESHI, JIAO, 0.72), 0.8, ry=rng.uniform(0.16, 0.3), clip=m)
+    P.outline(d, t, 0.5, mixc(JIAO, NONG, 0.25), jitter=0.3, dry=0.18)
+    # 笋尖：两三片墨绿的箨叶
+    tip = np.array([x + lean, y0 - h])
+    for a_deg, L in ((-100 + rng.normal(0, 8), rng.uniform(3.0, 4.5)), (-62 + rng.normal(0, 8), rng.uniform(2.6, 4.0)), (-128 + rng.normal(0, 8), rng.uniform(2.0, 3.2))):
+        a = math.radians(a_deg) + 0.04 * lean
+        e = tip + L * np.array([math.cos(a), math.sin(a)])
+        e[1] = max(e[1], 1.8)
+        P.line(V.bezier([tip + [0.0, 0.8], (tip + e) / 2 + [0.25, 0.0], e], 20), 0.42 * W.brush_profile(20, 1.0, 0.1, 0.0),
+               mixc(SHILV, JIAO, 0.55), 0.95)
+
+
+def make_qq_shoots(seed: int, Wd: int, Hd: int, shoots) -> Image.Image:
+    """几根刚冒头的竹笋：根下一小堆翻起的土（淡墨、几粒土块），旁边一两片落叶。锚点在底边。"""
+    P = W.Painter(Wd, Hd, seed, ss=6)
+    rng = P.rng
+    y0 = Hd - 0.6
+    # 翻起的土：一抹淡墨，中间略鼓
+    mound = V.bump_window(np.hypot((P.X - Wd / 2) / (0.44 * Wd), (P.Y - y0 + 0.6) / 3.2))
+    P.lay.over(mixc(DAN, W_ZHESHI, 0.3), 0.32 * mound * smoothstep(-1.4, 1.4, V.noise1(rng, P.X.shape, 1.4 * P.ss) + 0.6))
+    for (sx, h, b, lean, tone) in sorted(shoots, key=lambda s: s[1]):  # 矮的在后
+        paint_shoot(P, Wd / 2 + sx, y0 - 0.2, h, b, lean, tone=tone)
+    # 土块与苔点
+    for _ in range(int(rng.integers(4, 7))):
+        px = Wd / 2 + rng.uniform(-0.42, 0.42) * Wd
+        P.dot(px, y0 - rng.uniform(0.3, 1.6), rng.uniform(0.45, 0.9), mixc(ZHONG, JIAO, rng.uniform(0.2, 0.8)), 0.9, ry=rng.uniform(0.35, 0.6))
+    # 一片落下的竹叶靠在根边
+    paint_bamboo_leaf(P, Wd / 2 + rng.choice([-1.0, 1.0]) * 0.3 * Wd, y0 - 1.8, rng.uniform(-0.25, 0.25), 9.0, 1.8, QQ_LEAF_RGB[0], shadow=0.0)
+    return P.image(keep_bottom=True)
+
+
+def make_qq_moss(seed: int, Wd: int, Hd: int, n_clumps: int, n_lichen: int) -> Image.Image:
+    """苔点与地衣：底下一层兑石绿的淡墨，上面一簇簇点出的苔点（浓墨为主，夹几点石绿，大小错落、横点多），
+    再有几圈灰绿的地衣（不规则的环，边上碎点）。按地面透视横向略宽。"""
+    P = W.Painter(Wd, Hd, seed, ss=6)
+    rng = P.rng
+    cx, cy = Wd / 2, Hd / 2
+    # 底：一整块兑石绿的淡墨，边缘柔和起伏
+    th = np.arctan2((P.Y - cy) / (0.36 * Hd), (P.X - cx) / (0.42 * Wd))
+    q = np.hypot((P.X - cx) / (0.42 * Wd), (P.Y - cy) / (0.36 * Hd)) * (1.0 + V.angular_noise(rng, th, harmonics=(2, 3, 4, 6), amp=0.14))
+    q = q + 0.06 * V.noise1(rng, P.X.shape, 1.5 * P.ss)
+    P.lay.over(mixc(mixc(W_SHILV, DAN, 0.45), PAPER, 0.05), 0.30 * smoothstep(1.0, 0.6, q) * (0.85 + 0.15 * V.noise1(rng, P.X.shape, 4.0 * P.ss)))
+    P.lay.over(mixc(SHILV, ZHONG, 0.4), 0.10 * smoothstep(0.75, 0.2, q))
+    # 地衣：灰绿的小圆斑，深一圈的边、里面淡，边上碎点
+    for _ in range(n_lichen):
+        a0 = rng.uniform(0, 2 * math.pi)
+        lx, ly = cx + 0.24 * Wd * math.cos(a0), cy + 0.2 * Hd * math.sin(a0)
+        r = rng.uniform(1.8, 2.8)
+        tt = np.linspace(0, 2 * math.pi, 40, endpoint=False)
+        rr = 1.0 + V.angular_noise(rng, tt, harmonics=(3, 5, 7), amp=0.12)
+        ring = np.stack([lx + r * rr * np.cos(tt), ly + r * QQ_FLAT * rr * np.sin(tt)], -1)
+        d, t = P.sdf(ring)
+        P.fill(d, mixc(mixc(W_SHILV, QING, 0.6), PAPER, 0.2), 0.45, pool=0.8, pool_rgb=mixc(SHILV, ZHONG, 0.6), pool_w=0.4)
+        for _ in range(int(rng.integers(4, 7))):
+            a = rng.uniform(0, 2 * math.pi)
+            P.dot(lx + r * 1.25 * math.cos(a), ly + r * QQ_FLAT * 1.25 * math.sin(a), rng.uniform(0.22, 0.38), mixc(SHILV, ZHONG, 0.55), 0.7)
+    # 苔点：几簇，每簇先点一两个大的“横点”，周围小点错落，簇外零星几粒
+    centers = []
+    tries = 0
+    while len(centers) < n_clumps and tries < 400:
+        tries += 1
+        px, py = cx + rng.uniform(-0.33, 0.33) * Wd, cy + rng.uniform(-0.24, 0.24) * Hd
+        if all(math.hypot(px - a, (py - b) / QQ_FLAT) > 8.0 for a, b in centers):
+            centers.append((px, py))
+    inks = (JIAO, NONG, mixc(NONG, SHILV, 0.3), mixc(SHILV, JIAO, 0.5))
+    for ci, (px, py) in enumerate(centers):
+        # 一簇按“品”字错落：点与点之间留出空，不粘成一团
+        placed: list[tuple[float, float, float]] = []
+        k = int(rng.integers(7, 12))
+        for j in range(120):
+            if len(placed) >= k:
+                break
+            big = len(placed) < 3
+            size = (rng.uniform(0.95, 1.25) if big else rng.uniform(0.4, 0.75))
+            rad = rng.uniform(0.0, 2.0) if big else rng.uniform(1.8, 5.0)
+            a = rng.uniform(0, 2 * math.pi)
+            dx, dy = px + rad * math.cos(a), py + rad * QQ_FLAT * math.sin(a)
+            rx, ry = size * rng.uniform(1.25, 1.6), size * rng.uniform(0.55, 0.7)
+            dx = float(np.clip(dx, rx + 2.0, Wd - rx - 2.0))
+            dy = float(np.clip(dy, ry + 2.0, Hd - ry - 2.0))
+            if any(math.hypot(dx - qx, (dy - qy) / 0.8) < 0.8 * (rx + qr) for qx, qy, qr in placed):
+                continue
+            placed.append((dx, dy, rx))
+            c = inks[0 if big else int(rng.choice(len(inks), p=(0.4, 0.3, 0.15, 0.15)))]
+            # 横点：左头略重、右尾略收（侧锋一点）
+            P.dot(dx, dy, rx, c, rng.uniform(0.85, 0.97), ry=ry)
+            P.dot(dx - 0.35 * rx, dy - 0.1 * ry, 0.6 * rx, c, 0.9, ry=ry * 1.15)
+    for _ in range(int(rng.integers(5, 9))):
+        a = rng.uniform(0, 2 * math.pi)
+        rr_ = rng.uniform(0.6, 1.0)
+        P.dot(cx + 0.4 * Wd * rr_ * math.cos(a), cy + 0.34 * Hd * rr_ * math.sin(a), rng.uniform(0.3, 0.55), NONG, 0.85)
+    return P.image()
+
+
+def make_qq_wash(seed: int, Wd: int, Hd: int, lobes, base_alpha: float, *, tilt=(0.0, 0.0)) -> Image.Image:
+    """兑了花青、石绿的淡墨晕：大片、很淡、边全是湿接湿的柔边（不像 wash_* 那样积出硬边）。
+    里面一块浓一块淡，有几处水渍的回流（一圈略深的淡痕），花青沉在纸纹里的细颗粒。"""
+    ss = 1
+    rng = np.random.default_rng(seed)
+    X, Y = V.grid1(Hd, Wd, ss)
+    sh = X.shape
+    nx, ny = (X - Wd / 2) / (Wd / 2), (Y - Hd / 2) / (Hd / 2)
+    wx = nx + 0.10 * V.noise1(rng, sh, 40) + 0.05 * V.noise1(rng, sh, 14) + 0.02 * V.noise1(rng, sh, 5)
+    wy = ny + 0.10 * V.noise1(rng, sh, 40) + 0.05 * V.noise1(rng, sh, 14) + 0.02 * V.noise1(rng, sh, 5)
+    F = np.zeros(sh)
+    for cx, cy, rx, ry, wt in lobes:
+        F += wt * np.exp(-(((wx - cx) / rx) ** 2 + ((wy - cy) / ry) ** 2))
+    F += 0.06 * V.noise1(rng, sh, 10) + 0.03 * V.noise1(rng, sh, 3) + 0.012 * V.noise1(rng, sh, 1.2)
+    # 柔边：湿接湿，过渡带宽窄沿边变化（几像素到十几像素），但看得出一块墨的边界
+    soft = 0.03 + 0.10 * smoothstep(-1.0, 1.0, V.noise1(rng, sh, 22))
+    body = smoothstep(0.5 - soft, 0.5 + soft, F)
+    inner = base_alpha * (1.0 + 0.3 * (tilt[0] * nx + tilt[1] * ny))
+    inner = inner * (0.75 + 0.25 * smoothstep(-1.5, 1.5, V.noise1(rng, sh, 18)) + 0.06 * V.noise1(rng, sh, 5))
+    inner += 0.05 * smoothstep(0.75, 1.05, F + 0.1 * V.noise1(rng, sh, 8))  # 墨聚处再深一层
+    # 边上略积一点颜料（柔边处几乎没有，窄边处才看得出）
+    inner += 0.035 * np.exp(-np.maximum(F - 0.5, 0) / 0.05) * (F > 0.5) * smoothstep(0.08, 0.04, soft)
+    # 回流：另一个场的等值线，一道略深的淡痕，只在里面
+    G = V.noise1(rng, sh, 12) + 0.4 * V.noise1(rng, sh, 3.5)
+    tide = 0.025 * np.exp(-(((G - 0.8) / 0.08) ** 2)) * (G < 0.85) * smoothstep(0.55, 0.85, F)
+    # 颗粒：花青颜料沉在纸纹里（很轻）
+    gran = 1.0 + 0.06 * V.noise1(rng, sh, 0.7) * smoothstep(0.5, 0.9, F)
+    a = (body * inner + tide * body) * gran
+    a *= smoothstep(1.0, 0.88, np.maximum(np.abs(nx), np.abs(ny)))
+    a = np.clip(a, 0, 0.3)
+    a[0, :] = a[-1, :] = a[:, 0] = a[:, -1] = 0
+    # 颜色：浓处偏花青、淡处偏石绿的淡墨（青）
+    k = smoothstep(-1.2, 1.2, V.noise1(rng, sh, 30) + 2.0 * (F - 0.7))
+    rgb = mixc(mixc(DAN, SHILV, 0.5), mixc(ZHONG, HUAQING, 0.55), k)
+    return V.to_rgba8(rgb, a)
+
+
+QQ_WASHES = [
+    # (种子, 宽, 高, 叶瓣 [(cx, cy, rx, ry, 权重)], 内部浓度, 关键字参数)
+    (5701, 320, 200, [(-0.32, 0.06, 0.46, 0.46, 1.0), (0.30, -0.08, 0.44, 0.42, 0.9), (0.02, 0.32, 0.40, 0.26, 0.55)], 0.19, {"tilt": (-0.4, 0.2)}),
+    (5702, 288, 192, [(-0.20, -0.10, 0.36, 0.50, 1.0), (0.32, 0.18, 0.34, 0.36, 0.85), (0.58, -0.30, 0.16, 0.18, 0.7), (-0.55, 0.30, 0.18, 0.20, 0.6)], 0.185, {"tilt": (0.3, -0.3)}),
+]
+
+
+def fox_print(GX, GY, x, y, heading, k):
+    """一只狐狸脚印的覆盖度（地面坐标）：四个趾垫（中间两个靠前）、一个人字形的掌垫、中趾前两点爪痕。
+    狐狸的脚印紧凑，趾垫和掌垫之间留出一个“X”形的空。"""
+    ca, sa = math.cos(heading), math.sin(heading)
+    u = ((GX - x) * ca + (GY - y) * sa) / k
+    v = (-(GX - x) * sa + (GY - y) * ca) / k
+
+    def blob(u0, v0, ru, rv, rot=0.0):
+        cr, sr = math.cos(rot), math.sin(rot)
+        du, dv = u - u0, v - v0
+        return np.hypot((du * cr + dv * sr) / ru, (-du * sr + dv * cr) / rv)
+
+    aa = 0.08
+    m = np.zeros_like(u)
+    for (u0, v0, ru, rv, rot) in ((1.35, 0.52, 0.72, 0.48, 0.15), (1.35, -0.52, 0.72, 0.48, -0.15),
+                                  (0.25, 1.32, 0.62, 0.46, 0.5), (0.25, -1.32, 0.62, 0.46, -0.5)):
+        m = np.maximum(m, smoothstep(1.0 + aa, 1.0 - aa, blob(u0, v0, ru, rv, rot)))
+    heel = smoothstep(1.0 + aa, 1.0 - aa, blob(-1.15, 0.0, 0.95, 1.18))
+    notch = smoothstep(1.0 + aa, 1.0 - aa, blob(-1.85, 0.0, 0.55, 0.5))  # 掌垫后沿一个缺口，成人字形
+    m = np.maximum(m, heel * (1.0 - notch))
+    claws = np.maximum(smoothstep(1.0 + aa, 1.0 - aa, blob(2.35, 0.5, 0.26, 0.2)), smoothstep(1.0 + aa, 1.0 - aa, blob(2.35, -0.5, 0.26, 0.2)))
+    halo = np.exp(-(blob(0.0, 0.0, 2.6, 2.1) ** 2))  # 踩实的地，周围一圈淡墨
+    return m, claws, halo
+
+
+def make_qq_fox_tracks() -> Image.Image:
+    """一行狐狸脚印：狐狸走路后脚踩进前脚的印里，所以几乎走成一条线，左右只差一点；从左下往右上走，
+    最早的几步淡（地干了），越往前越清楚。浓墨点出趾垫和掌垫，墨边略洇，周围一圈踩实的淡墨。按地面透视压扁。"""
+    Wd, Hd = 128, 40
+    P = W.Painter(Wd, Hd, 5800, ss=6)
+    rng = P.rng
+    cy = Hd / 2
+    GX, GY = P.X, cy + (P.Y - cy) / QQ_FLAT  # 屏幕 → 地面坐标
+    path = V.bezier([(10.0, cy + 17.0), (42.0, cy + 9.0), (78.0, cy - 2.0), (118.0, cy - 15.0)], 200)
+    tan = np.gradient(path, axis=0)
+    tan /= np.linalg.norm(tan, axis=1, keepdims=True)
+    n_steps = 7
+    idx = np.linspace(8, len(path) - 9, n_steps).astype(int)
+    for j, i in enumerate(idx):
+        side = 1.0 if j % 2 == 0 else -1.0
+        nrm = np.array([-tan[i, 1], tan[i, 0]])
+        x, y = path[i] + nrm * side * 1.3 + rng.normal(0, 0.25, 2)
+        heading = math.atan2(tan[i, 1], tan[i, 0]) + side * 0.12 + rng.normal(0, 0.06)
+        k = rng.uniform(1.45, 1.6)
+        fresh = 0.45 + 0.55 * j / (n_steps - 1)  # 越往后（越新）越清楚
+        m, claws, halo = fox_print(GX, GY, x, y, heading, k)
+        m = np.clip(m + 0.12 * V.noise1(rng, P.X.shape, 0.5 * P.ss) * (m > 0.05) * (m < 0.95), 0, 1)
+        P.lay.over(mixc(DAN, ZHONG, 0.3), 0.16 * fresh * halo)
+        P.lay.over(mixc(ZHONG, JIAO, 0.3 + 0.5 * fresh), 0.92 * fresh * m)
+        P.lay.over(mixc(NONG, JIAO, 0.5), 0.8 * fresh * claws)
+        # 洇边：墨在湿地上往外渗一点
+        P.lay.over(mixc(ZHONG, DAN, 0.4), 0.25 * fresh * np.clip(V.fft_blur(m, V.sig(0.5 * P.ss)) - m, 0, 1) * 2.0)
+    return P.image()
+
+
 # ============================================================== 汇总
 
 
@@ -668,10 +993,158 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
                                            "note": "灵草（滋生反应）：已按俯角压扁，等比缩放到区域半径（radius_px 是横向半径）；上面叠 zone_herb_glow"})
     out["zone_herb_glow"] = (herb_glow, (0.5, 0.5), {**white_add, "kind": "zone", "radius_px": V.dpx(79),
                                                       "note": "灵草草尖的光：与 zone_herb 同尺寸同锚点叠加，建议染 #9CF0B8"})
+    out.update(build_qq())
     return out
 
 
+def build_qq() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
+    """青丘的地面装饰（帧名前缀 qq_），追加在 build() 的最后。"""
+    normal = {"color": "full", "blend": "normal", "tint": False, "region": "qingqiu"}
+    out: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
+    specs = ((5401, 72, 44, 12, -0.25, 0.45, 1.0), (5402, 56, 36, 7, 0.4, 0.9, 0.8), (5403, 96, 40, 14, -0.12, 0.3, 1.5))
+    for i, (seed, w, h, n, axis, spread, elong) in enumerate(specs):
+        out[f"qq_bamboo_leaves_{i}"] = (make_qq_bamboo_leaves(seed, w, h, n, axis=axis, spread=spread, elong=elong), (0.5, 0.5),
+                                        {**normal, "kind": "decor", "note": "青丘：被风扫成一堆的落竹叶（枯黄、赭、灰，少数灰绿），可随机旋转、镜像"})
+    shoots = (
+        (5501, 44, 44, ((-8.0, 30.0, 6.2, 1.6, 0.2), (7.5, 19.0, 4.6, -1.4, 0.5), (16.5, 9.0, 3.0, 0.6, 0.0))),
+        (5502, 32, 40, ((-2.0, 33.0, 6.6, 2.4, 0.35), (10.0, 7.5, 3.0, -0.6, 0.0))),
+    )
+    for i, (seed, w, h, sp) in enumerate(shoots):
+        out[f"qq_shoots_{i}"] = (make_qq_shoots(seed, w, h, sp), (0.5, 1.0), {**normal, "kind": "decor", "note": "青丘：刚冒头的竹笋，锚点在根部（底边），可水平镜像"})
+    for i, (seed, w, h, nc, nl) in enumerate(((5601, 56, 36, 6, 2), (5602, 44, 30, 4, 1))):
+        out[f"qq_moss_{i}"] = (make_qq_moss(seed, w, h, nc, nl), (0.5, 0.5), {**normal, "kind": "decor", "note": "青丘：苔点与地衣，可随机旋转（小角度）、镜像"})
+    for i, (seed, w, h, lobes, ba, kw) in enumerate(QQ_WASHES):
+        out[f"qq_wash_{i}"] = (make_qq_wash(seed, w, h, lobes, ba, **kw), (0.5, 0.5),
+                               {**normal, "kind": "decor", "max_alpha": 0.3, "note": "青丘：兑花青、石绿的淡墨晕，大片柔边，铺在宣纸上最底层；可随机旋转、镜像"})
+    out["qq_fox_tracks"] = (make_qq_fox_tracks(), (0.5, 0.5), {**normal, "kind": "decor", "flat": QQ_FLAT,
+                                                               "note": "青丘：一行狐狸脚印（从左下往右上走，越往右越新），已按地面透视压扁；可水平镜像、小角度旋转"})
+    return out
+
+
+# ============================================================== 青丘审图（读盘，不重新生成）
+
+
+def qq_sample(path: Path) -> None:
+    """青丘新素材的游戏比例审图（1 贴图像素 = 1 画面像素）：
+    上排：左白天（宣纸、不打光）、右夜里（世界 × 光照图，竹刺尾光叠加，迷雾两层画在暗层之上、染月白、alpha 0.3 / 0.2）；
+    中排：mist_0、mist_1 各平铺 2×2（夜色底，满不透明度，看接缝和重复）；
+    下排：新素材放大 2 倍（最近邻），纸色底。
+    先跑 vfx_textures.py 和 weapon_textures.py（同一密度）。"""
+    import weapon_textures as WT  # noqa: PLC0415  只读它的产物与 place()
+
+    def load(folder, name):
+        return Image.open(V.ASSETS / folder / f"{name}.png").convert("RGBA")
+
+    gmeta = json.loads((V.GROUND_DIR / "meta.json").read_text(encoding="utf-8"))["files"]
+    wmeta = json.loads((WT.WEAPON_DIR / "meta.json").read_text(encoding="utf-8"))["files"]
+    Wm, Hm = V.dpx(1000), V.dpx(640)
+    pt = np.asarray(Image.open(V.GROUND_DIR / "paper.png").convert("RGB"), np.float64) / 255.0
+    base = np.tile(pt, (Hm // pt.shape[0] + 1, Wm // pt.shape[1] + 1, 1))[:Hm, :Wm].copy()
+    G = {n[:-4]: load("ground", n[:-4]) for n in gmeta if n.startswith(("qq_", "bamboo_", "grass_"))}
+    spike, trail = load("weapons", "bamboo_spike"), load("weapons", "bamboo_spike_trail")
+    mists = [load("vfx", f"mist_{i}") for i in range(2)]
+    shadow, light = load("vfx", "shadow"), load("vfx", "light")
+    hero, hero_k = None, 1.0
+    for b, k in ((V.ASSETS, 1.0), (V.OUT / "assets", D)):
+        if (b / "hero" / "idle_SE_00.png").exists():
+            hero, hero_k = Image.open(b / "hero" / "idle_SE_00.png").convert("RGBA"), k
+            break
+
+    def put(canvas, img, x, y, **kw):
+        WT.place(canvas, img, x * D, y * D, **kw)
+
+    def A(n):
+        return tuple(gmeta[f"{n}.png"]["anchor"])
+
+    flat = [("qq_wash_0", 250, 430, 1.0), ("qq_wash_1", 770, 170, 1.0), ("qq_bamboo_leaves_0", 390, 320, 1.0),
+            ("qq_bamboo_leaves_1", 690, 470, 1.0), ("qq_bamboo_leaves_2", 560, 590, 1.0), ("qq_moss_0", 150, 200, 1.0),
+            ("qq_moss_1", 880, 430, 1.0), ("qq_fox_tracks", 640, 300, 1.0), ("qq_fox_tracks", 250, 560, -1.0)]
+    upright = [("bamboo_0", 720, 250), ("bamboo_1", 765, 238), ("qq_shoots_0", 180, 300), ("qq_shoots_1", 830, 330),
+               ("qq_shoots_0", 95, 600), ("grass_0", 430, 520), ("grass_2", 950, 600), ("qq_shoots_1", 520, 160)]
+    hx, hy = 470.0, 400.0
+    spikes = [(610, 140, -0.3), (300, 110, 0.25), (880, 560, math.pi + 0.4), (360, 250, 0.05)]
+
+    def draw_world(world):
+        for n, x, y, sx in flat:
+            put(world, G[n], x, y, anchor=A(n), scale=(sx, 1.0))
+        items = [(y, n, x) for n, x, y in upright]
+        if hero is not None:
+            items.append((hy, "hero", hx))
+        for y, n, x in sorted(items):
+            if n == "hero":
+                put(world, shadow, x, y, scale=1.0)
+                put(world, hero, x, y, anchor=(0.5, 0.875), scale=hero_k)
+            else:
+                put(world, G[n], x, y, anchor=A(n))
+
+    def draw_spikes(canvas, mode, lm=None):
+        for x, y, ang in spikes:
+            put(canvas, trail, x, y, angle=ang, anchor=tuple(wmeta["bamboo_spike_trail.png"]["anchor"]), mode=mode,
+                tint=col(WT.SPIKE_TRAIL_TINT), alpha=0.85 if mode == "add" else 0.5)
+            tint = None if lm is None else lm[int(y * D), int(x * D)]
+            put(canvas, spike, x, y, angle=ang, anchor=tuple(wmeta["bamboo_spike.png"]["anchor"]), tint=tint)
+
+    def mist_layer(canvas, img, alpha, off):
+        a = np.asarray(img, np.float64)[..., 3] / 255.0
+        a = np.roll(np.roll(a, off[1], 0), off[0], 1)
+        t = np.tile(a, (canvas.shape[0] // a.shape[0] + 1, canvas.shape[1] // a.shape[1] + 1))[: canvas.shape[0], : canvas.shape[1]]
+        k = (alpha * t)[..., None]
+        canvas[:] = canvas * (1 - k) + col(V.MIST_TINT) * k
+
+    day = base.copy()
+    draw_world(day)
+    draw_spikes(day, "over")
+    world = base.copy()
+    draw_world(world)
+    lm = np.broadcast_to(col(S.NIGHT_AMBIENT), world.shape).copy()
+    put(lm, light, hx, hy - 50, scale=760 * D / light.width, mode="add", tint=col(S.LANTERN_LIGHT))
+    lm = np.clip(lm, 0, 1)
+    night = world * lm
+    draw_spikes(night, "add", lm)
+    mist_layer(night, mists[0], V.MIST_ALPHAS[0], (V.dpx(37), V.dpx(11)))
+    mist_layer(night, mists[1], V.MIST_ALPHAS[1], (V.dpx(-90), V.dpx(60)))
+    gap, top = 12, V.dpx(30)
+    tiles = []
+    for m in mists:
+        a = np.asarray(m, np.float64)[..., 3:4] / 255.0
+        t = np.tile(a, (2, 2, 1))
+        tiles.append(col(S.NIGHT_AMBIENT) * (1 - t) + col(V.MIST_TINT) * t)
+    # 放大 2 倍的新素材
+    zoom_names = [n for n in G if n.startswith("qq_") and not n.startswith("qq_wash")]
+    zimgs = [G[n] for n in zoom_names] + [spike]
+    zw = sum(im.width * 2 + 16 for im in zimgs) + 16
+    zh = max(im.height * 2 for im in zimgs) + 32
+    zoom = np.broadcast_to(PAPER, (zh, max(zw, Wm * 2 + gap), 3)).copy()
+    x = 16
+    for im in zimgs:
+        V.composite(zoom, im, x, 16, "over", scale=2)
+        x += im.width * 2 + 16
+    th = tiles[0].shape[0]
+    Wt = max(Wm * 2 + gap, tiles[0].shape[1] * 2 + gap, zoom.shape[1])
+    out = np.ones((top + Hm + top + th + top + zh, Wt, 3)) * 0.1
+    out[top : top + Hm, :Wm] = np.clip(day, 0, 1)
+    out[top : top + Hm, Wm + gap : Wm * 2 + gap] = np.clip(night, 0, 1)
+    y2 = top + Hm + top
+    out[y2 : y2 + th, : tiles[0].shape[1]] = tiles[0]
+    out[y2 : y2 + th, tiles[0].shape[1] + gap : tiles[0].shape[1] * 2 + gap] = tiles[1]
+    y3 = y2 + th + top
+    out[y3 : y3 + zh, : zoom.shape[1]] = zoom
+    im = Image.fromarray(np.round(out * 255).astype(np.uint8), "RGB")
+    dr = ImageDraw.Draw(im)
+    f = V.font(V.dpx(14))
+    dr.text((8, 7), f"day: paper, normal over (density {D:g}x, 1 texel = {1 / S.PX_PER_UNIT:g} world unit); bamboo_spike + trail (tinted {WT.SPIKE_TRAIL_TINT})", fill="#DDDDDD", font=f)
+    dr.text((Wm + gap + 8, 7), f"night: world x lightmap, trail additive, mist_0 @ {V.MIST_ALPHAS[0]} + mist_1 @ {V.MIST_ALPHAS[1]} over the dark layer (tint {V.MIST_TINT})", fill="#DDDDDD", font=f)
+    dr.text((8, y2 - top + 7), "mist_0 / mist_1 tiled 2x2, full alpha on NIGHT_AMBIENT (tile edges meet at the centre lines)", fill="#DDDDDD", font=f)
+    dr.text((8, y3 - top + 7), "new decor + bamboo_spike at 2x nearest, on PAPER", fill="#DDDDDD", font=f)
+    V.save_png(im, path)
+
+
 if __name__ == "__main__":
+    if "--sample" in sys.argv:
+        V.REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+        qq_sample(V.REVIEW_DIR / "qq_2d_sample.png")
+        print("写出", V.REVIEW_DIR / "qq_2d_sample.png")
+        sys.exit(0)
     items = build()
     entries = [(k, img, "add" if e.get("blend") == "add" else "over", col(RIFT_TINT) if k == "rift_glow" else None) for k, (img, _, e) in items.items()]
     V.REVIEW_DIR.mkdir(parents=True, exist_ok=True)

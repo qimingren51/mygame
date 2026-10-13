@@ -103,6 +103,7 @@ pub(crate) struct ReactRes<'w, 's> {
     shots: ResMut<'w, Shots>,
     disc: ResMut<'w, Discoveries>,
     hold: ResMut<'w, Hold>,
+    bamboo: ResMut<'w, crate::bamboo::Bamboo>,
     found: Local<'s, Vec<u32>>,
 }
 
@@ -279,6 +280,7 @@ fn react(
         }
         ReactionEffect::Steam { radius, ratio, per_level, confuse } => {
             let dmg = (base * ratio + ctx.level as f32 * per_level) * mult;
+            ctx.res.bamboo.circle(pos, radius, dmg);
             ctx.grid.query_circle(en, pos.x, pos.y, radius, found);
             for &j in found.iter() {
                 let j = j as usize;
@@ -306,6 +308,7 @@ fn react(
             }
         }
         ReactionEffect::Rupture { radius, stun, ratio } => {
+            ctx.res.bamboo.circle(pos, radius, base * ratio * mult);
             ctx.grid.query_circle(en, pos.x, pos.y, radius, found);
             for &j in found.iter() {
                 let j = j as usize;
@@ -338,6 +341,7 @@ pub(crate) fn update_zones(
     mut en: ResMut<Enemies>,
     mut zones: ResMut<Zones>,
     mut hits: ResMut<HitQueue>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut scratch: Local<Scratch>,
 ) {
     zones.0.retain_mut(|z| {
@@ -359,6 +363,9 @@ pub(crate) fn update_zones(
     for z in &zones.0 {
         if z.kind == ZoneKind::Lava && !lava_tick {
             continue;
+        }
+        if z.kind == ZoneKind::Lava {
+            bamboo.circle(z.pos, z.radius, z.dps * ZONE_TICK as f32 * DT);
         }
         sc.found.clear();
         grid.query_circle(en, z.pos.x, z.pos.y, z.radius, &mut sc.found);

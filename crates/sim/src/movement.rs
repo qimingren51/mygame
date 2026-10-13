@@ -42,6 +42,7 @@ pub(crate) fn update_enemies(
     mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
     mut survival: ResMut<Survival>,
+    bamboo: Res<crate::bamboo::Bamboo>,
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
     let content = &content.0;
@@ -161,6 +162,10 @@ pub(crate) fn update_enemies(
                 }
                 _ => None,
             };
+            // 竹丛里减速，冲锋不减
+            if charge_step.is_none() {
+                sp *= bamboo.speed_at(Vec2::new(x, y));
+            }
             if let Some(step) = charge_step {
                 x += step.x * DT;
                 y += step.y * DT;
@@ -212,7 +217,7 @@ pub(crate) fn update_enemies(
         };
         if d < en.r[i] + pr
             && contact > 0.0
-            && hurt_player(&mut player, &mut health, pos.0, contact, by, &mut ctx)
+            && hurt_player(&mut player, &mut health, pos.0, contact, (by, Vec2::new(x, y)), &mut ctx)
             && thorn > 0.0
             && ctx.rng.chance(thorn)
         {

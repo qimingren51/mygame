@@ -109,6 +109,7 @@ pub(crate) fn flame_band(
     grid: Res<Grid>,
     en: Res<Enemies>,
     mut hits: ResMut<HitQueue>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
 ) {
     if reveal.band_dps <= 0.0 || !tick.0.is_multiple_of(ZONE_TICK) {
@@ -119,6 +120,7 @@ pub(crate) fn flame_band(
     grid.query_circle(&en, c.x, c.y, reveal.radius, &mut found);
     let inner = (reveal.radius - reveal.band_width).max(0.0);
     let dmg = reveal.band_dps * ZONE_TICK as f32 * lantern_core::step::DT;
+    bamboo.ring(c, inner, reveal.radius, dmg);
     for &i in found.iter() {
         let i = i as usize;
         let d2 = Vec2::new(en.x[i], en.y[i]).distance_squared(c);

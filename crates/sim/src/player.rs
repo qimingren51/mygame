@@ -24,6 +24,7 @@ pub(crate) fn move_player(
     stats: Res<Stats>,
     director: Res<crate::run::Director>,
     input: Res<InputFrame>,
+    bamboo: Res<crate::bamboo::Bamboo>,
     mut q: Query<(&mut Pos, &mut Player)>,
 ) {
     let speed = stats.get(Stat::Speed);
@@ -35,7 +36,9 @@ pub(crate) fn move_player(
             p.dash_t -= DT;
             pos.0 += p.dash_vel * DT;
         } else {
-            pos.0 += dir * speed * DT;
+            // 竹丛里减速，闪避不减
+            let slow = bamboo.speed_at(pos.0);
+            pos.0 += dir * speed * slow * DT;
         }
         // 夜主的结界：出不去
         if let Some((c, r)) = director.barrier {

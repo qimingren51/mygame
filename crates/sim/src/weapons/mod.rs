@@ -157,6 +157,7 @@ pub(crate) struct Ctx<'a> {
     pub shots: &'a mut volley::Shots,
     pub seals: &'a mut drop::Seals,
     pub outbox: &'a mut SimOutbox,
+    pub bamboo: &'a mut crate::bamboo::Bamboo,
     pub found: &'a mut Vec<u32>,
 }
 
@@ -174,6 +175,7 @@ pub(crate) fn update_weapons(
     mut shots: ResMut<volley::Shots>,
     mut seals: ResMut<drop::Seals>,
     mut outbox: ResMut<SimOutbox>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
 ) {
     let content = &content.0;
@@ -182,7 +184,7 @@ pub(crate) fn update_weapons(
     for slot in &mut arsenal.0 {
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
-            orbit::update(content, &stats, &grid, en, player.0, t, slot, &mut hits, &mut found);
+            orbit::update(content, &stats, &grid, en, player.0, t, slot, &mut hits, &mut bamboo, &mut found);
             continue;
         }
         let mut ctx = Ctx {
@@ -198,6 +200,7 @@ pub(crate) fn update_weapons(
             shots: &mut shots,
             seals: &mut seals,
             outbox: &mut outbox,
+            bamboo: &mut bamboo,
             found: &mut found,
         };
         match slot.behavior(content) {

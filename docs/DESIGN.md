@@ -126,11 +126,11 @@ ECS 实体都有 `SimId(u32)`，按创建顺序递增，永不复用。对顺序
 
 ```
 Input（处理命令；选择阶段和演出停顿时只跑这一段）→ Player（移动、留火痕、回复、护盾、周期触发器、照见圈）
-→ Director（刷怪、时间表、奇遇出现）→ Spatial（重建空间网格）→ Ai（夜主出招）
+→ Director（刷怪、时间表、奇遇出现、竹丛生长）→ Spatial（重建空间网格）→ Ai（夜主出招）
 → Move（妖物移动、互推、接触伤害）
 → Weapons（执行排队的触发器动作 → 法器 → 石印落地、地裂 → 轻功闪避伤敌 → 灯焰带
   → 反应区域（赤地、淤泥）→ 火痕 → 范围打击变成命中）
-→ Projectiles（飞剑、金刃、弹幕）→ Collide（回光、九转金丹的震退）→ Damage（结算命中、命中触发器、印记与反应）→ Status（灼烧）
+→ Projectiles（飞剑、金刃、弹幕）→ Collide（回光、九转金丹的震退）→ Damage（结算命中、命中触发器、印记与反应）→ Status（灼烧、竹丛受击）
 → Death（掉落、击杀触发器、连斩、燃灯充能、击败夜主）→ Pickup（魂火、拾取物、灵草、奇遇触碰）
 → Progress（升级；倒下、天明、打开升级或宝箱）→ Cleanup → Hash
 ```
@@ -174,7 +174,7 @@ Input（处理命令；选择阶段和演出停顿时只跑这一段）→ Playe
 - 控制：冰冻、击晕、定身是硬控，晕头是软控；夜主免疫，精英时长减半，同一只精英 6 秒内第二次 × 0.5、第三次起 × 0.25（硬控、软控分开计）。减速同类取最大、上限 70%，夜主减半。
 - **印记与反应**：法器命中带着五行，给妖物打上 3 秒的印记；带着印记的妖物被另一系命中就反应，印记清空。每只妖物每秒最多反应一次，每一步最多 64 次；反应、灼烧、共鸣效果、燃灯不带五行，所以反应不会引起反应。十种反应写在 `elements.ron`（效果是 `ReactionEffect` 的一个变体：蔓延灼烧、地面区域、金刃、冻结、灵草、蒸腾、熔金、斩击、地刺），区域同类对同一只妖物只算最强的一块，每类最多 64 块。**余印**：带印记的妖物死时（命中、灼烧都算，在 `combat::kill` 里），印记传给 `marks.spread_radius` 以内还没有印记的妖物，最多 `spread_count` 只，重新计时；按空间网格的查询顺序挑，结果是确定的。
 - **照见圈**（`sim/reveal.rs`）：规则半径，和画面的灯光分开。基础 130，每升一级 +1%，最大 220；照见圈里的妖物易伤 +10%。灯芯 1 级起，圈边 20 宽的一圈是灯焰带，每 0.5 秒结算一次伤害。
-- 每次命中按来源（法器、灼烧、连锁爆炸、太极、燃灯、各种反应、灯焰带……）累计实际打掉的血（`DamageLog`），平衡工具用它统计伤害占比。妖物池另记累计刷出的血量（`Enemies::spawned_hp`），主角受伤的事件带着是谁打的（`SimEvent::PlayerHurt { by: HurtBy }`：碰撞、冲锋、弹幕、九尾扫、狐火雨），平衡工具据此算刷出血量和死因。这两样都不进状态哈希。
+- 每次命中按来源（法器、灼烧、连锁爆炸、太极、燃灯、各种反应、灯焰带……）累计实际打掉的血（`DamageLog`），平衡工具用它统计伤害占比。妖物池另记累计刷出的血量（`Enemies::spawned_hp`），主角受伤的事件带着是谁打的（`SimEvent::PlayerHurt { by: HurtBy, from }`：碰撞、冲锋、弹幕、九尾扫、狐火雨，`from` 是伤害的来源位置，画面用它定受伤的方向），平衡工具据此算刷出血量和死因。这两样都不进状态哈希。
 
 ### 6.6 构筑：属性、修正与触发器（扩展性的核心）
 
@@ -226,6 +226,7 @@ Points(2), Favor,                                                 // 夜签“�
 - **冲锋**（`enemies.ron` 的 `charge`，docs/BALANCE.md 第 12.6 节）：赤面狐扑击、青面鬼冲撞。妖物池里记阶段（冷却、蓄力、冲出、收势）、剩余时间和方向：离主角够近且冷却好了就原地蓄力（转向跟着主角，画面上身上发亮、地上画冲锋线；出手前 `lock` 秒锁定方向，线停下、变亮），然后冲出，接触伤害乘倍率，冲完原地停一会儿。冻住、击晕、定身、晕头会打断蓄力和冲锋。冲锋速度不吃“疾”“狂”和难度的移速加成。
 - **精英词缀**（`affixes.ron`）：疾、坚、分、召、隐、狂；精英出场时按属性 `Affixes` 随机挑几个不重复的，记在妖物池的位掩码里。“隐”在照见圈外时自动瞄准锁定不到（空间网格的最近查询跳过它），范围伤害照样打得到。“分”死后分出几只小号（不算精英、不掉宝箱和铜钱）。
 - **夜主**（`sim/boss.rs`）：九尾按生命分三个阶段：狐火环与召唤；分出幻身（`BossState.illusions`，不是妖物、打不死，在照见圈里待 0.5 秒就散）；九尾扫（扇形，预警后结算）。登场 120 秒后狂暴，攻击间隔 ×0.6；三更起全程多一招狐火雨。全部点亮石灯笼时夜主少两成生命。台词在 `enemies.ron` 的 `boss.lines`（登场、第二阶段、第三阶段、倒下；无尽夜里的退去、再来，docs/LORE.md 第 7 节）：换阶段、退去的那句出在提示条上，登场和天明的演出由 `moments.rs` 决定怎么用。
+- **竹丛**（`sim/bamboo.rs`，`run.ron` 的 `bamboo`，docs/BALANCE.md 第 12.7 节）：青丘的软障碍，不挡路。地图按 512 的块生成：主角周围 5 × 5 块里还没长过的，按“种子 + 块坐标”派生的随机数（`Streams::derive`，不消耗随机流，同一个种子地图一样）长出竹丛，避开出生点和石灯笼；长过的块一直记着。查询用主角周围一张 64 格的表，主角换块时重建。主角和妖物站在立着的竹丛里移速 × (1 − slow)，闪避和冲锋不减。法器（灯火、飞剑和刃、纸鹤出手、不夜城内环）、范围打击（石印、寒波、燃灯……）、反应（蒸腾、崩裂、赤地）、灯焰带、风火轮的火痕打到竹丛时往 `Bamboo.hits` 记一笔，Status 阶段结算：每丛取最大的一笔，之后隔 `hit_every` 秒才再受伤；不经过命中管线，所以不打印记、不触发心法和灯坠、不计连斩。打碎发 `BambooBroken`，按概率掉一枚铜钱，`regrow` 秒后主角不在附近时长回来。奇遇和货郎出现时让开周围的竹丛；夜主的结界出现时，结界里的竹丛烧平（`BambooBurned`），这一夜不再长。画面按状态画立着的、打碎的、焦黑的竹丛。
 - **点灯**（`sim/lanterns.rs`）：开局把出生点周围分成 5 个扇区，每个扇区一盏，离出生点 600–1800。站在旁边累计 3 秒点亮，进入点灯奖励的选择阶段（回复、一次升级、铜钱）。点亮的灯是永久光区：区里的妖物减速、算被照见。
 - **铜钱**（`sim/gold.rs`）：和魂火一样在模拟里，但不会自己飞回来；拾取范围、引魂铃会吸过来，天明时剩下的全部算进结算。倒下时已经捡到的全部保留。
 - **燃灯**：每击杀一只妖物充“它的最大生命 ÷（基础刷怪曲线每秒刷出的总血量 × 40）”，精英额外 +15%；对夜主每次不超过最大生命的 2.5%。
@@ -244,7 +245,7 @@ Points(2), Favor,                                                 // 夜签“�
 **规则**（`sim` crate 里用 clippy 的 `disallowed-methods` 强制执行）：
 
 1. 步长是常量。不读系统时间，不读帧时间。
-2. 所有随机数来自按用途划分的随机流：夜签、开局、刷怪、战斗、掉落、奇遇、选项、宝箱。每个流是一个 PCG32，由本局种子经过 SplitMix64 派生。
+2. 所有随机数来自按用途划分的随机流：夜签、开局、刷怪、战斗、掉落、奇遇、选项、宝箱。每个流是一个 PCG32，由本局种子经过 SplitMix64 派生。地图上按块生成的东西（竹丛）用 `Streams::derive(键)`：只由种子和键决定，和各条流抽了多少次无关。
 3. `sin`、`cos`、`atan2`、`exp`、`powf` 一律用 `bevy_math::ops`，并开启 `libm` 特性。直接调用 `f32::sin` 这类方法会报错。加减乘除和 `sqrt` 在各平台上都是 IEEE 精确的，可以直接用。
 4. 不遍历 `HashMap` / `HashSet`。需要按顺序遍历的地方用 `Vec`、`BTreeMap` 或者排好序的数据。
 5. 只在“每个实体只写自己”的地方使用并行，往队列里写的阶段一律串行。
@@ -282,19 +283,20 @@ assets/data/
   difficulty.ron   更（难度）
   omens.ron        夜签
   events.ron       奇遇与古灯增益
-  run.ron          单局节奏与曲线、时间表、铜钱、点灯（第 6.8 节）
+  run.ron          单局节奏与曲线、时间表、铜钱、点灯、竹丛（第 6.8 节）
   meta.ron         心灯：用灯油点亮的功能节点（第 n 级花费 = 基础 × 1.6^(n−1)）
   attributes.ron   局外属性：用铜钱买（每级价格 = 基础 × 级 × (1 + 2% × 已买总级数)）
   lamps.ron        灯：起手法器、本命五行、灯性与代价、光色、一句话描述
   charms.ron       灯坠（带一句话描述）
   achievements.ron 成就：条件和奖励（开放基础、灯、灯坠、更、铜钱、灯油）
   hub.ron          灯驿人物的台词：按条件挑一句（docs/LORE-TEXT.md 第 1 节）
+  regions.ron      地区：名字、开场卷轴的旁白（长夜、天明），P0 只有青丘
 ```
 
 - 数据结构用 `serde` 定义在 `lantern_content` 里，游戏和命令行工具共用同一套。
 - 加载后统一校验：ID 不能重复、引用必须存在、每种行为需要的数值都在、概率在 0 到 1 之间、效果只能用在允许的地方。`cargo test` 会校验仓库里的全部数据文件。游戏启动时如果校验失败，直接显示哪个文件出了什么错（RON 语法错误带行列号）。
 - 文件里用字符串 ID（例如 `"sword"`），开局时转换成数组下标。
-- 全部数据文件原文的哈希写进回放文件头，内容不同的版本重放时会提示。`hub.ron` 只有台词，不计入哈希。
+- 全部数据文件原文的哈希写进回放文件头，内容不同的版本重放时会提示。`hub.ron`、`regions.ron` 只有文字，不计入哈希。
 - 灯坠、灯、奇遇的一句话描述（`flavor`，docs/LORE-TEXT.md 第 3 节）写在各自的数据里，没有就不显示。
 - 名字和说明（法器名、心法说明、夜签好处……）目前直接写在数据里（中文）；界面上的固定文字写在 `crates/ui` 的代码里。`fonts.py` 扫描这两处裁剪字体。加第二种语言时再把文字移到 `assets/i18n/`，数据里改存文本键。
 
@@ -333,7 +335,7 @@ assets/data/
 - **动画**：帧名形如 `hero/walk_SE_05`（第 15 节），开局前按名字查好“动作 × 方向 × 帧”的表，每帧不再查字符串。主角朝向带滞后（偏离扇区中心超过 22.5° + 0.12 弧度才切换）；走路动画按移动距离推进（`stride_units`），待机、闪避按时间推进；倒下时播放一次 death。妖物按 fps 播放、每只错开相位，朝向玩家时左右镜像，受击 0.08 秒内换白色剪影帧，浮空的上下浮动。
 - **镜头**（`camera.rs`）：跟随插值后的玩家位置，移动方向上略微前瞻；创伤式震屏（平滑噪声，带一点侧倾）、方向冲击、只往里推的缩放冲击。顿帧和慢镜只调 `Time<Virtual>` 的速度，模拟照样逐步推进，不影响回放。各事件的参数见 docs/FEEL.md 第 2 节。
 - **粒子**（`particles.rs`）：固定容量的 CPU 粒子池，不创建实体，每帧攒成绘制请求写进精灵池和发光池；贴图在启动时用代码画好，作为图集的一页（`AtlasDb::add_page`）。需要上万粒子时再考虑 GPU 粒子。
-- **地面装饰**：用本局种子派生出画面专用的随机数，同一个种子每次看到的地面一样，但不消耗模拟的随机流。
+- **地面装饰**：用本局种子派生出画面专用的随机数，同一个种子每次看到的地面一样，但不消耗模拟的随机流。P0 只有青丘，通用的草和墨晕之外铺青丘的 `qq_` 装饰，偶尔摆石狐、狐仙祠、狐灯；发光道具的光色、光半径取素材 meta 的 `light_color`、`light_radius_units`，光放在 `glow` 挂点。以后有了地区，再按地区挑装饰。
 - **法器与法术（M2）**：`fx.rs` 参照网页版 `render/weaponViews.ts`。持续存在的东西（飞剑、纸鹤、石印与预警、地裂、护盾、拾取物、夜主弹幕、奇遇道具）每帧直接读模拟资源，画进同一个精灵池；一次性的效果（各种环、印痕、连锁爆炸、太极、燃灯）收到 `SimEvent::Strike { fx, .. }` 等事件后记在 `FxState` 里自己计时淡出。地面上的圆按透视压扁（×0.62）。
 - **震屏与闪屏**：都在画面层，由事件触发（落印、地裂、燃灯、夜主登场、受伤），不影响模拟。
 - **伤害数字**：96 个 `Text2d` 的环形池，按 28 号字栅格化后缩小到世界单位；普通数字按五行上色，暴击用毛笔字、金色、盖章式弹出。反应名在发生的地方飘出毛笔小字（12 个的环形池）。墨点（最多 160 个）和击杀闪光也在 `effects.rs`。
@@ -362,6 +364,7 @@ assets/data/
 - 字体：标题用 Ma Shan Zheng，正文和数字用 Noto Serif SC（都是 OFL 协议）。`crates/ui/fonts.py` 收集界面代码和 `assets/data/` 里所有非 ASCII 字符，裁剪出子集（目前两款合计约 300 KB，完整字体约 31 MB）。新增文字后要重新运行这个脚本；CI 用 `--check` 检查缺字。Ma Shan Zheng 没有“·”，标题字体的文字里自动换成“•”。
 - 文字：界面固定文字仍写在 `crates/ui` 的代码里，名字和说明在 `assets/data/`。加第二种语言时再统一移到 `assets/i18n/`（第 8 节）。
 - 性能面板（F3）：帧率、帧时间、模拟每步耗时（FixedUpdate 首尾计时，只做诊断）、画面层每帧耗时（`ViewStats`）、妖物和魂火数量、精灵、发光与粒子数量。egui 调试面板（实时开关光照、调整妖物数量、无敌、加速）在需要时再加，只在 `dev` 特性下编译。
+- **开场卷轴**（`ui/scroll.rs`，docs/GAMEPLAY.md 第 2.5 节）：出发时如果这个地区的卷轴还没展开过，先在标题界面展开：画是 `atlas/screens/scroll_<地区>.png`，从左往右展开，左上角的天空里一行行浮出 `regions.ron` 的旁白（长夜版纸色字）；确认、返回或点一下就接着出发。拿回烛火（通关过一更）以后再出发，展开一次天明版 `scroll_<地区>_dawn.png`（墨色字，数据里写了天明旁白才展开）。展开过的记在存档的 `scrolls`。
 - 跑分（标题界面按 B）：依次保持 250、1000、2500、5000 只妖物，各 10 秒（前 3 秒不计），主角无敌、自动绕圈；结束后显示结果，并存到数据目录的 `bench/bench-<时间>.txt`，内容包括显卡、窗口大小、每段的帧率、95% 帧时间、最长帧和模拟耗时。
 
 ## 12. 平台（`lantern_platform`）
@@ -374,7 +377,7 @@ assets/data/
 
 | 文件 | 内容 |
 | --- | --- |
-| `save.ron` | 局外进度（`Profile`，第 2 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯和灯坠、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场 |
+| `save.ron` | 局外进度（`Profile`，第 2 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯和灯坠、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、展开过的开场卷轴（`scrolls`）、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场 |
 | `settings.ron` | 全屏、垂直同步、音乐和音效音量（画质、语言、按键以后加） |
 | `replays/` | 最近 20 局的回放 |
 | `logs/` | 运行日志（保留最近 5 份） |
@@ -438,14 +441,14 @@ assets/data/
 
   | 图集 | 内容 |
   | --- | --- |
-  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
-  | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head` |
-  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow` |
+  | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”） |
+  | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
-  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底） |
+  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底）；地区开场卷轴 `scroll_qingqiu.png`（长夜，只有墨色）和 `scroll_qingqiu_dawn.png`（天明，同一幅画上了颜色），见下面“开场卷轴” |
   | `skin/` | 不进 index.json：界面九宫格皮肤，一张图一个文件，清单 `skin.json`（见下面“界面皮肤”） |
   | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
 
@@ -457,7 +460,7 @@ assets/data/
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
   - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。特效、地面、界面帧还可能带素材 meta 里的其他标量字段，例如 `radius_px`（反应区域、扇形的半径）、`angle_deg`、`flat`、`stretch`、`width_px`，界面帧带 `kind`、`id`、`name`。像素单位都是本图集的像素，换算到世界单位除以 `pxPerUnit`。这些字段都是可选的，读取时不认识的字段忽略即可。
-  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼、古灯和货郎担 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`、`windup_frames`、`loop_from`，见下面“妖物动作”）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`（竹魅另有 `muzzle`），石灯笼、古灯和货郎担 `flame`，血祭坛、狐仙祠 `glow`，狐灯 `glow` 和 `glow_0..2`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影、狐火），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
   - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；
@@ -475,10 +478,26 @@ assets/data/
   - 灯光位置照旧用主角的 `lantern` 挂点。铜镜灯的铜镜在灯芯后面当反光镜，背面朝向（N、NE、NW）时灯芯被挡住，`_emit` 帧接近全透明，属正常现象，光源照常放。
   - 倒地动画里灯笼落在地上，灯芯渐暗，三盏灯一致。
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
-- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
-- **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
+- **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`weapons/bamboo_spike_trail` 染 `#A8E6B8`；`vfx/mist_*` 染 `#DDD9CF`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
+- **锚点补充**：芦苇、竹子、竹笋 `qq_shoots_*` 的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。`qq_wash_*` 的 meta 有 `max_alpha: 0.3`（整张最浓处的不透明度），`qq_fox_tracks` 已压扁成地面透视（`flat: 0.7`）。
 - **扇形预警**：`weapons/sector` 是 120° 扇形，锚点在扇形顶点（`(0.0625, 0.5)`），开口朝 +X，2 倍下半径 128 像素，按需要的半径缩放、按方向旋转；`sector_fill` 是同形的填充层，蓄力时从顶点向外放大。
 - **平时的动作**：有好几个动作的素材在 `meta.lantern.assets.<素材>.default_anim` 写平时循环的动作名；没写时用 `move`，再没有取名字排在最前的（`AssetMeta::default_anim`）。
+- **妖物动作**（青丘包起）：
+  - `windup_frames: n`：出手动作的第 0 到 n−1 帧是蓄力。预警一开始播这几帧，然后停在第 n−1 帧（最后一个蓄力帧）等预警结束，再从第 n 帧接着播。目前都是 2：赤面狐 `pounce`、青面鬼 `charge`、狐火 `pounce`、竹魅 `shoot`、九尾 `sweep`。
+  - `loop: false`：播一遍停在最后一帧，播完回到平时的动作。上面这些出手动作、九尾 `summon`、讨封狐 `reveal` 都是。没写 `loop` 的动作循环。
+  - `loop_from: n`：播完后从第 n 帧起循环，直到这一招结束。目前只有青面鬼 `charge`（第 0–1 帧蓄力，2–5 帧是冲锋的跑步循环）。
+  - 游戏里怎么用（`crates/view` 的 `actors.rs`）：有冲锋的妖物播素材的 `pounce` 或 `charge`，模拟蓄力时播蓄力帧，冲出去接着播，停下以后没播完的播完再回到平时；九尾扫预警时蓄力、落下时扫过去，召唤和狐火雨时播 `summon`。出招时朝着招式的方向，不再朝着主角。没画出手动作的妖物照旧播平时的动作。
+  - 新妖物的 `eye_color`（妖眼染色，写进 enemies.ron）：狐火 `#F2FFFC`、竹魅 `#9BF5C9`、讨封狐 `#FFD23F`。
+  - **狐火** `fox_wisp`：`float` 8 帧（平时，悬浮）、`pounce` 4 帧（绕圈后扑出）。身体是青白的火，夜里整只发光，不只是眼睛。
+  - **竹魅** `bamboo_wraith`：`idle` 4 帧是藏在竹丛里（面具半露，眼睛暗淡），`move` 6 帧，`shoot` 5 帧（竹枝甩出竹刺）。竹刺从 `muzzle` 挂点出手，挂点每帧都有，只在 `shoot` 有意义。
+  - **讨封狐** `taofeng_fox`：`disguise` 6 帧是斗笠蓑衣的路人（平时的动作，`_emit` 是空的，眼睛不亮），`reveal` 4 帧甩掉蓑衣现形（眼睛亮起），之后用 `move` 6 帧。进照见圈时播 `reveal`。
+  - **九尾**：`sweep` 6 帧是原地转身一圈、尾巴扫过身前（第 3 帧尾巴在 E 方向铺开，配扇形预警）；`summon` 4 帧九条尾尖各亮一团狐火（`_emit`，同狐火弹幕的颜色），召唤或狐火雨时用。幻身没有单独的帧，用 `boss` 的帧画（建议半透明、不画 `_emit`）。
+- **青丘道具**：
+  - `bamboo_clump`（竹丛，可打碎的软障碍）和 `bamboo_clump_broken` 同画布、同锚点，打碎时直接换图；meta 里互相用 `broken_variant` / `intact_variant` 指向对方。2 倍下 320²，比别的道具大。
+  - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。按游戏里的反馈放大过：狐仙祠高约 38 个世界单位（和石灯笼差不多高、更宽，好当地标），石狐约 32。
+- **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
+- **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15）。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
+- **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。
 - **冲锋预警**：`weapons/charge_line` 是车道，锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − `head_len_px`”再旋转；沿 X 透明度一致，拉多长都不走样，宽 `width_px`（2 倍下 28 像素）。`weapons/charge_line_head` 是箭头，锚点在箭头底边正中，放在车道末端、同样旋转、不拉伸，箭尖离锚点 `head_len_px`（2 倍下 51 像素）。两张都是白色、叠加、可染色，建议染 `#FF4A3A`。
 - **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。
@@ -604,7 +623,7 @@ M3 之后是抢先体验（3 个地区、2 处险地、10 件法器）和 1.0（
 | 美术 | `art/`、`assets/atlas/`、`docs/PORTING-NOTES.md` |
 | 玩法与数值 | `docs/GAMEPLAY.md`、`docs/BALANCE.md`、`docs/baseline/` |
 | 世界观与命名 | `docs/LORE.md`（故事背景和全部名字的总表）、`docs/LORE-TEXT.md`（游戏里显示的成稿文字：灯驿人物台词、手记、一句话描述、百妖谱） |
-| 质感 | `docs/FEEL.md`；镜头、粒子、光与氛围、高光时刻的演出、音效（`crates/view/src/{camera,particles,atmos}.rs`、`crates/ui/src/moments.rs`、`crates/audio/src/sfx.rs`）。改其他会话的代码时照样先商量 |
+| 质感 | `docs/FEEL.md`；镜头、粒子、光与氛围、高光时刻的演出、音效（`crates/view/src/{camera,particles,atmos,mist}.rs`、`crates/ui/src/{moments,hub_fx}.rs`、`crates/audio/src/sfx.rs`）。改其他会话的代码时照样先商量 |
 
 - 需要改对方负责的文件时，先发消息商量。
 - 接口约定（图集格式、帧命名、内容数据结构）变化时，在本文对应的章节里更新。

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use lantern_content::Element;
 
+pub mod bamboo;
 pub mod boss;
 pub mod bot;
 pub mod build;
@@ -247,7 +248,9 @@ impl Plugin for SimPlugin {
                     (player::move_player, charms::lay_trail, player::upkeep, reveal::update_reveal)
                         .chain()
                         .in_set(SimSet::Player),
-                    (spawn::update_spawns, encounters::spawn_encounters).chain().in_set(SimSet::Director),
+                    (spawn::update_spawns, encounters::spawn_encounters, bamboo::update_bamboo)
+                        .chain()
+                        .in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
                     (boss::boss_attacks, boss::elite_summons).chain().in_set(SimSet::Ai),
                     (movement::update_enemies, crowd::separate).chain().in_set(SimSet::Move),
@@ -266,7 +269,7 @@ impl Plugin for SimPlugin {
                     (weapons::volley::update_shots, boss::update_foes).chain().in_set(SimSet::Projectiles),
                     charms::apply_rescue.in_set(SimSet::Collide),
                     combat::resolve_hits.in_set(SimSet::Damage),
-                    combat::burn.in_set(SimSet::Status),
+                    (combat::burn, bamboo::hit_bamboo).chain().in_set(SimSet::Status),
                     combat::process_deaths.in_set(SimSet::Death),
                     (
                         gems::update_gems,

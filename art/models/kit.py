@@ -236,12 +236,31 @@ def toon(name, base=None, ramp=None, **kw):
     return B.toon_material(name, base, ramp=ramp, **kw)
 
 
-def banded_toon_material(name, bands, attr="fade", noise_amt=0.10, seed=0.0, **toon_kw):
+def flame_material(name, bands, emissive_hex=None, seed=0.0, edge=0.45, noise_amt=0.14, rim=0.0, rim_power=2.0,
+                   **toon_kw):
+    """发光的火身（狐火、九尾尾尖的狐火）：沿顶点属性 fade 分段的假卡通（banded_toon_material），
+    每段直接给三档 hex（亮, 中, 暗）——火根亮、火舌尖暗；整个物体进发光遮罩（emissive）。
+    rim>0 时越靠轮廓越往后面的段走（芯亮、边是深青，像一团火而不是一个亮的实体）。
+    这些颜色不在 style.py 的调色板里，出图要写进 palette_extra。积墨（edge）让轮廓处落到暗档。"""
+    m = banded_toon_material(name, bands, noise_amt=noise_amt, seed=seed, edge=edge, rim=rim, rim_power=rim_power,
+                             **toon_kw)
+    m["emissive"] = emissive_hex or bands[0][1][0]
+    m["emit_strength"] = 1.0
+    return m
+
+
+def _ramp_of(base):
+    """分段颜色：一个 hex（按 shade_ramp 展开三档）或直接给的三档 (亮, 中, 暗)。"""
+    return list(base) if isinstance(base, (tuple, list)) else S.shade_ramp(base)
+
+
+def banded_toon_material(name, bands, attr="fade", noise_amt=0.10, seed=0.0, rim=0.0, rim_power=2.0, **toon_kw):
     """沿顶点属性 attr（0..1）分段换颜色的假卡通材质（九尾的尾巴：根部浓墨 → 淡墨 → 藤黄 → 朱砂尖）。
-    bands = [(起点 t, 基础色 hex), ...]；每段仍是该色的三档 shade_ramp，段与段之间用噪声打散成水墨晕开的边，
-    同一个材质里完成，所以分段处不会被 Freestyle 当成材质分界描线。"""
+    bands = [(起点 t, 基础色 hex 或三档 (亮, 中, 暗)), ...]；每段是该色的三档 shade_ramp（或直接给的三档），段与段之间用噪声打散成水墨晕开的边，
+    同一个材质里完成，所以分段处不会被 Freestyle 当成材质分界描线。
+    rim>0：分段位置再加 rim·Facing^rim_power（越靠轮廓越往后面的段走；缺省 0，不加这一项）。"""
     I = S.INK
-    m = B.toon_material(name, ramp=S.shade_ramp(bands[0][1]), **toon_kw)
+    m = B.toon_material(name, ramp=_ramp_of(bands[0][1]), **toon_kw)
     nt = m.node_tree
     N, L = nt.nodes, nt.links
     ramp_node = next(n for n in N if n.type == "VALTORGB")  # 原来的三档：亮/中/暗
@@ -256,19 +275,28 @@ def banded_toon_material(name, bands, attr="fade", noise_amt=0.10, seed=0.0, **t
     L.new(nz.outputs["Fac"], nzs.inputs[0])
     tt = N.new("ShaderNodeMath"); tt.operation = "ADD"; tt.use_clamp = True
     L.new(at.outputs["Fac"], tt.inputs[0]); L.new(nzs.outputs["Value"], tt.inputs[1])
+    if rim > 0:  # 轮廓处往后面的段走
+        lw = N.new("ShaderNodeLayerWeight"); lw.inputs["Blend"].default_value = 0.5
+        pw = N.new("ShaderNodeMath"); pw.operation = "POWER"; pw.inputs[1].default_value = rim_power
+        L.new(lw.outputs["Facing"], pw.inputs[0])
+        rk = N.new("ShaderNodeMath"); rk.operation = "MULTIPLY_ADD"
+        rk.inputs[1].default_value = rim
+        L.new(pw.outputs["Value"], rk.inputs[0])
+        L.new(nzs.outputs["Value"], rk.inputs[2])
+        L.new(rk.outputs["Value"], tt.inputs[1])
     outs = []
     for step in range(3):  # 每一档（亮/中/暗）各一个沿 t 的常量色带
         cr = N.new("ShaderNodeValToRGB")
         cr.color_ramp.interpolation = "CONSTANT"
         els = cr.color_ramp.elements
         for k, (t0, base) in enumerate(bands):
-            col = B.hex_lin(S.shade_ramp(base)[step])
+            col = B.hex_lin(_ramp_of(base)[step])
             if k < 2:
                 els[k].position, els[k].color = t0, col
             else:
                 e = els.new(t0); e.color = col
         if len(bands) == 1:
-            els[1].position, els[1].color = 1.0, B.hex_lin(S.shade_ramp(bands[0][1])[step])
+            els[1].position, els[1].color = 1.0, B.hex_lin(_ramp_of(bands[0][1])[step])
         L.new(tt.outputs["Value"], cr.inputs["Fac"])
         outs.append(cr.outputs["Color"])
     # 用原来的明暗点积选档：>阈值1 亮，>阈值2 中，否则暗
@@ -285,5 +313,5 @@ def banded_toon_material(name, bands, attr="fade", noise_amt=0.10, seed=0.0, **t
     for lk in list(ramp_node.outputs["Color"].links):
         nt.links.remove(lk)
     L.new(B.sock(mx2.outputs, "Result_Color"), scale_node.inputs[0])
-    m["toon_ramp"] = [c for _, b in bands for c in S.shade_ramp(b)]
+    m["toon_ramp"] = [c for _, b in bands for c in _ramp_of(b)]
     return m
