@@ -279,6 +279,7 @@ def toon_material(
     noise.inputs["W"].default_value = seed
     L.new(tc.outputs["Object"], noise.inputs["Vector"])
     wash_off = N.new("ShaderNodeMath")
+    wash_off.name = "ToonBias"  # 常数项 = 偏置；需要逐点偏置的材质（铜镜镜缘提亮）往 inputs[2] 接节点
     wash_off.operation = "MULTIPLY_ADD"  # fac*wash - 0.5*wash
     wash_off.inputs[1].default_value = wash
     wash_off.inputs[2].default_value = -0.5 * wash + bias
@@ -726,6 +727,87 @@ def render_layers(out_prefix, keep_exr: bool = False) -> dict:
         exr.unlink(missing_ok=True)
         res["exr"] = None
     return res
+
+
+def holdout_material():
+    """Holdout：表面本身透明（alpha=0），但照样挡住后面的物体和墨线（物体仍在 Freestyle 的视图图里）。
+    smoke_test.py 实测：用它覆盖全部材质时，墨线与正常渲染逐像素一致。"""
+    m = bpy.data.materials.get("HoldoutOccluder")
+    if m is None:
+        m, nt = _new_node_material("HoldoutOccluder")
+        h = nt.nodes.new("ShaderNodeHoldout")
+        out = nt.nodes.new("ShaderNodeOutputMaterial")
+        nt.links.new(h.outputs["Holdout"], out.inputs["Surface"])
+    return m
+
+
+def _scoped_collections(objs, tag: str) -> dict:
+    """为一组物体建一套“只含它们”的线条集合：每个 lineset 一个集合，内容 = 该 lineset 原本会选中的物体 ∩ objs。
+    返回 {lineset 名: 集合}。集合不链接到场景（只给 Freestyle 的集合筛选用），按 tag 缓存。"""
+    fs = bpy.context.scene.view_layers[0].freestyle_settings
+    out = {}
+    objs = list(objs)
+    for ls in fs.linesets:
+        name = f"{tag}·{ls.name}"
+        coll = bpy.data.collections.get(name)
+        if coll is None:
+            coll = bpy.data.collections.new(name)
+            coll.use_fake_user = True
+            base = set(ls.collection.all_objects) if ls.collection else set()
+            for ob in objs:
+                sel = (ob in base) if ls.collection_negation == "INCLUSIVE" else (ob not in base)
+                if sel:
+                    coll.objects.link(ob)
+        out[ls.name] = coll
+    return out
+
+
+@contextlib.contextmanager
+def render_scope(hide=(), holdout=(), lines_only=None, lines_tag: str = "scope"):
+    """一次渲染的临时状态，退出时全部还原：
+      hide：不渲染（hide_render，也不进 Freestyle 视图图，不挡任何东西）；
+      holdout：材质全换成 Holdout（填色透明、照样挡住后面的填色和墨线）；
+      lines_only：墨线只画这些物体（各 lineset 的集合筛选临时换成只含它们的集合，线宽分档不变）。
+    用来把一个角色拆成几层：例如主角底图 hide=灯笼头；灯笼叠层 holdout=身体、lines_only=灯笼头。"""
+    hide = [o for o in hide]
+    saved_hide = [(o, o.hide_render) for o in hide]
+    saved_mats = []
+    saved_ls = []
+    try:
+        for o in hide:
+            o.hide_render = True
+        if holdout:
+            hm = holdout_material()
+            for o in holdout:
+                mats = getattr(o.data, "materials", None)
+                if mats is None:
+                    continue
+                saved_mats.append((o, o.data, list(mats)))
+                if len(mats) == 0:
+                    mats.append(hm)
+                else:
+                    for i in range(len(mats)):
+                        mats[i] = hm
+        if lines_only is not None:
+            fs = bpy.context.scene.view_layers[0].freestyle_settings
+            colls = _scoped_collections(lines_only, lines_tag)
+            for ls in fs.linesets:
+                saved_ls.append((ls, ls.collection, ls.collection_negation))
+                ls.collection = colls[ls.name]
+                ls.collection_negation = "INCLUSIVE"
+        bpy.context.view_layer.update()
+        yield
+    finally:
+        for ls, coll, neg in saved_ls:
+            ls.collection = coll
+            ls.collection_negation = neg
+        for o, me, mats in saved_mats:
+            me.materials.clear()
+            for m in mats:
+                me.materials.append(m)
+        for o, h in saved_hide:
+            o.hide_render = h
+        bpy.context.view_layer.update()
 
 
 @contextlib.contextmanager

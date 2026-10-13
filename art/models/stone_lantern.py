@@ -3,6 +3,8 @@
 颜色：石头清墨/淡墨/重墨三档；朝上的面零星长着淡彩石绿的苔（独立的苔壳，噪声镂空，不描线）；
 窗口是发光材质（FLAME_LIGHT），夜里叠加用的发光遮罩从同一次渲染得到。
 道具用 PROP_ANCHOR，帧尺寸 FRAME["prop"]（96px）。挂点：flame（正面窗口中心）、feet（原点）。
+build_stone_lantern(lit=False)：没点亮的石灯笼（stone_lantern_dark）——窗口是焦墨，不发光、没有 _emit；
+其余一模一样（同样的材质种子，出图时也用 stone_lantern 的纸纹），点灯时直接换成亮的那张。
 """
 
 from __future__ import annotations
@@ -107,13 +109,13 @@ def _roof_build(seg=6, rot=math.radians(30)):
     return build
 
 
-def build_stone_lantern():
+def build_stone_lantern(lit: bool = True):
     I = S.INK
     root = B.empty("StoneLantern")
     stone = B.toon_material("StoneInk", ramp=[I["qing"], I["dan"], I["zhong"]], wash=0.35, wash_scale=4.0,
                             edge=0.5, seed=21.0)
     inner = B.flat_material("StoneInside", I["nong"])
-    glow = B.emissive_material("StoneFlame", S.FLAME_LIGHT, 1.0)
+    glow = B.emissive_material("StoneFlame", S.FLAME_LIGHT, 1.0) if lit else B.flat_material("StoneWindowDark", I["jiao"])
     moss = moss_material(seed=3.0)
     obj = B.mesh_object
     pieces = [

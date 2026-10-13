@@ -147,6 +147,8 @@ def check_asset(asset_dir: Path) -> dict:
     if errors:
         return {"ok": False, "errors": errors, "warnings": warns, "info": info}
     W, H = meta["size"]
+    if meta.get("category") == "overlay":
+        return check_overlay(asset_dir, meta, errors, warns, info)
     if meta.get("category") == "prop":
         want_anchor = S.PROP_ANCHOR
     elif meta.get("anchor_kind") == "big_enemy":
@@ -316,11 +318,153 @@ def check_asset(asset_dir: Path) -> dict:
     return {"ok": not errors, "errors": errors, "warnings": warns, "info": info}
 
 
+EMIT_TOL_PX = 1.0  # 叠层发光重心离底图 lantern 挂点的容差（1 倍密度的像素；2 倍时 2px）
+EMIT_FULL = 0.85  # 发光面积 ≥ 参考面积（循环动画各帧发光面积的 90 分位）的这个比例，才算“灯芯没被挡”，按容差严格查
+EMIT_HIDDEN = 0.05  # 发光面积不到参考面积的 5%：当作完全被挡住，只计数（剩下一两个像素的重心没有意义）
+EMIT_PARTIAL_K = 3.0  # 被身体挡住一部分的帧（以及死亡倒地的帧）只在超过 3 倍容差时警告
+OVERLAY_MIN_SAMPLE = 300  # 叠层单帧的调色板比例只在样本（不透明、非墨线、不发光的像素）够这么多时按帧要求
+
+
+def check_overlay(asset_dir: Path, meta: dict, errors: list, warns: list, info: dict) -> dict:
+    """叠层素材（category=overlay，例如灯笼叠层 lantern_<灯>）：叠在底图（meta.base）同名帧上画，没有身体，
+    所以不查身高、配准、着地、墨线占比上限。查：
+      - 与底图的 size、anchor、px_per_unit、anims（帧数、朝向、fps、loop）完全相同；
+      - 每帧都有 PNG 和 _emit（尺寸对）；四周 1px 透明；
+      - 调色板（meta.palette_extra 计入）：不透明、非墨线、不发光（_emit alpha < 0.3，后期也不吸附发光像素）的像素，
+        全部帧合起来 ≥90% 在容差内；单帧样本 ≥ OVERLAY_MIN_SAMPLE 时该帧也要 ≥90%，样本更少的帧（灯笼只露出一小块，
+        几个纸纹压暗的像素就能把比例拉下去）只警告。叠层里的这些像素和拆层前整张主角帧里的一模一样，
+        只是分母从整个人（上万像素）变成了一盏灯（几十到几百像素）；
+      - 发光层重心对准底图该帧的 lantern 挂点：参考面积 = 循环动画各帧发光面积的 90 分位；灯芯没被挡住的帧
+        （面积 ≥ 参考的 85%）误差不超过 EMIT_TOL_PX（2 倍密度 2px）；被挡住一部分的帧（身体，或者铜镜灯背面的铜镜）、
+        只播一次的动画（死亡倒地）只在超过 3 倍容差时警告；面积不到参考 5% 的帧当作完全被挡住，只计数。
+        全透明的帧不算错。"""
+    W, H = meta["size"]
+    ppu = float(meta.get("px_per_unit", 2.0))
+    info["px_per_unit"] = ppu
+    tol = EMIT_TOL_PX * ppu / 2.0
+    base_name = meta.get("base")
+    base_dir = asset_dir.parent / str(base_name)
+    if not base_name or not (base_dir / "meta.json").exists():
+        errors.append(f"叠层的底图 {base_name!r} 不存在（应在 {base_dir}）")
+        return {"ok": False, "errors": errors, "warnings": warns, "info": info}
+    bmeta = json.loads((base_dir / "meta.json").read_text(encoding="utf-8"))
+    for key in ("size", "anchor", "px_per_unit"):
+        if bmeta.get(key) != meta.get(key):
+            errors.append(f"meta.{key} = {meta.get(key)}，与底图 {base_name} 的 {bmeta.get(key)} 不同")
+    if set(meta["anims"]) != set(bmeta.get("anims", {})):
+        errors.append(f"动画 {sorted(meta['anims'])} 与底图 {sorted(bmeta.get('anims', {}))} 不同")
+    for an, a in meta["anims"].items():
+        b = bmeta.get("anims", {}).get(an, {})
+        for key in ("frames", "dirs", "fps", "loop"):
+            if a.get(key) != b.get(key):
+                errors.append(f"anims.{an}.{key} = {a.get(key)}，与底图的 {b.get(key)} 不同")
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(meta.get("light_color", ""))):
+        errors.append(f"meta.light_color 应为 #RRGGBB，现在是 {meta.get('light_color')!r}")
+    pal = _pal(LIGHT_COLORS + list(meta.get("palette_extra", [])))
+    ax, ay = meta["anchor"][0] * W, meta["anchor"][1] * H
+    sockets = bmeta.get("sockets", {}).get("lantern")
+    if not sockets:
+        errors.append(f"底图 {base_name} 没有 lantern 挂点，没法对发光层")
+    present = {p.name for p in asset_dir.glob("*.png")}
+    ys, xs = np.mgrid[0:H, 0:W]
+    rows, shares, n_frames, n_empty = [], [], 0, 0
+    pool_in = pool_all = 0
+    for an, a in meta["anims"].items():
+        for d in a.get("dirs", []):
+            for i in range(a.get("frames", 0)):
+                nm = f"{an}_{d}_{i:02d}"
+                if f"{nm}.png" not in present:
+                    errors.append(f"缺少帧：{nm}.png")
+                    continue
+                if f"{nm}_emit.png" not in present:
+                    errors.append(f"缺少发光层：{nm}_emit.png")
+                    continue
+                im, em = Image.open(asset_dir / f"{nm}.png"), Image.open(asset_dir / f"{nm}_emit.png")
+                if im.mode != "RGBA" or em.mode != "RGBA":
+                    errors.append(f"{nm}：不是 RGBA（{im.mode} / {em.mode}）")
+                if im.size != (W, H) or em.size != (W, H):
+                    errors.append(f"{nm}：尺寸 {im.size} / {em.size}，应为 {(W, H)}")
+                    continue
+                n_frames += 1
+                arr = np.asarray(im.convert("RGBA"))
+                al = arr[..., 3]
+                if al[0].any() or al[-1].any() or al[:, 0].any() or al[:, -1].any():
+                    errors.append(f"{nm}.png 贴边：四周 1px 内有不透明像素")
+                if not al.any():
+                    n_empty += 1
+                e = np.asarray(em.convert("RGBA"))[..., 3] / 255.0
+                opaque = (al >= 250) & (e < 0.3)
+                lm = line_mask(arr[..., :3], pal) & opaque
+                rest = opaque & ~lm
+                if rest.any():
+                    dist = palette_distance(arr[..., :3][rest][:, None, :], pal)[:, 0]
+                    ok_px = int((dist <= S.PALETTE_TOLERANCE).sum())
+                    pool_in += ok_px
+                    pool_all += int(rest.sum())
+                    share = ok_px / int(rest.sum())
+                    if rest.sum() >= 30:
+                        shares.append(share)
+                    if share < PALETTE_MIN_SHARE:
+                        msg = (f"{nm}.png：非墨线像素只有 {share:.1%} 在调色板容差内（要求 ≥{PALETTE_MIN_SHARE:.0%}，"
+                               f"样本 {int(rest.sum())} 像素）")
+                        (errors if rest.sum() >= OVERLAY_MIN_SAMPLE else warns).append(msg)
+                area = float(e.sum())
+                off = None
+                if area >= 1.0 and sockets:
+                    try:
+                        sx, sy = sockets[an][d][i]
+                    except (KeyError, IndexError, TypeError):
+                        errors.append(f"底图 lantern 挂点缺 {an}/{d}/{i}")
+                    else:
+                        cx = float((e * (xs + 0.5)).sum() / area) - ax
+                        cy = float((e * (ys + 0.5)).sum() / area) - ay
+                        off = float(np.hypot(cx - sx, cy - sy))
+                rows.append({"key": nm, "anim": an, "dir": d, "area": area, "off": off,
+                             "one_shot": a.get("loop") is False})
+    # 参考发光面积：循环动画各帧发光面积的 90 分位（灯芯没被挡住时的面积）
+    v = [r["area"] for r in rows if not r["one_shot"]]
+    ref_all = float(np.percentile(v, 90)) if v else 0.0
+    ref = {r["dir"]: ref_all for r in rows}
+    strict, partial, oneshot, hidden = [], [], [], 0
+    for r in rows:
+        if r["off"] is None or r["area"] < EMIT_HIDDEN * ref_all:
+            hidden += 1
+            continue
+        if r["one_shot"]:
+            oneshot.append(r)
+            if r["area"] >= 0.5 * ref_all and r["off"] > EMIT_PARTIAL_K * tol:
+                warns.append(f"{r['key']}（倒地）：发光重心离 lantern 挂点 {r['off']:.1f}px")
+        elif r["area"] >= EMIT_FULL * ref[r["dir"]]:
+            strict.append(r)
+            if r["off"] > tol:
+                errors.append(f"{r['key']}：发光重心离 lantern 挂点 {r['off']:.2f}px，超过 {tol:g}px")
+        else:
+            partial.append(r)
+            if r["off"] > EMIT_PARTIAL_K * tol:
+                warns.append(f"{r['key']}（灯芯被挡住一部分，面积 {r['area'] / max(ref[r['dir']], 1e-6):.0%}）："
+                             f"发光重心离 lantern 挂点 {r['off']:.1f}px")
+    pooled = pool_in / pool_all if pool_all else 1.0
+    if pooled < PALETTE_MIN_SHARE:
+        errors.append(f"全部帧合起来非墨线像素只有 {pooled:.1%} 在调色板容差内（要求 ≥{PALETTE_MIN_SHARE:.0%}）")
+    mx = lambda lst: round(max((r["off"] for r in lst), default=0.0), 2)  # noqa: E731
+    info.update(frames_checked=n_frames, empty_frames=n_empty, palette_share_min=round(min(shares), 3) if shares else None,
+                palette_share_pooled=round(pooled, 4),
+                emit_offset={"tolerance_px": tol, "ref_area_px": round(ref_all, 1), "strict_frames": len(strict), "strict_max_px": mx(strict),
+                             "strict_median_px": round(float(np.median([r["off"] for r in strict])), 2) if strict else None,
+                             "partial_frames": len(partial), "partial_max_px": mx(partial),
+                             "one_shot_frames": len(oneshot), "one_shot_max_px": mx(oneshot), "no_emit_frames": hidden})
+    return {"ok": not errors, "errors": errors, "warnings": warns, "info": info}
+
+
 def report(res: dict) -> str:
     i = res["info"]
     head = ("通过" if res["ok"] else "不通过") + f"  {i.get('asset')}"
     lines = [head]
-    if "frames_checked" in i:
+    if "emit_offset" in i:
+        lines.append(f"  叠层：帧数 {i['frames_checked']}（全透明 {i['empty_frames']}）；调色板内比例 全部 {i.get('palette_share_pooled')}"
+                     f"、单帧最低 {i.get('palette_share_min')}；"
+                     f"发光重心对 lantern 挂点 {i['emit_offset']}")
+    elif "frames_checked" in i:
         lines.append(f"  帧数 {i['frames_checked']}；脚点最大漂移 {i.get('foot_drift_max_px')}px；"
                      f"身高中位数 {i.get('height_median_px')}px（范围 {i.get('height_range_px')}）；"
                      f"调色板内比例最低 {i.get('palette_share_min')}；墨线占比 {i.get('line_ratio_range')}")

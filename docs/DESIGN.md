@@ -427,7 +427,8 @@ assets/data/
 
   | 图集 | 内容 |
   | --- | --- |
-  | `actors` | 主角、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern、古灯 ancient_lamp、血祭坛 blood_altar），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
   | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill` |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow` |
@@ -445,7 +446,7 @@ assets/data/
   - `pxPerUnit`：这张图集的密度。精灵的世界尺寸 = 像素尺寸 ÷ `pxPerUnit`，Rust 端不要写死。
   - `page`、`pages`：页号和总页数。多页时文件名是 `<图集>_<页号>.json/png`，`meta.related_multi_packs` 列出其他页；单页时就是 `<图集>.json/png`。
   - `frames`：本页每帧的 `{"blend": "normal" | "add", "tint": bool}`。`tint: true` 的帧是白色或灰度的，用时乘颜色；`blend: add` 的帧画在叠加层。特效、地面、界面帧还可能带素材 meta 里的其他标量字段，例如 `radius_px`（反应区域、扇形的半径）、`angle_deg`、`flat`、`stretch`、`width_px`，界面帧带 `kind`、`id`、`name`。像素单位都是本图集的像素，换算到世界单位除以 `pxPerUnit`。这些字段都是可选的，读取时不认识的字段忽略即可。
-  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼和古灯 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
+  - `assets`（只在第 0 页）：每个角色素材的 `meta.json` 原样保留（妖物只有 E 方向，道具只有 `idle` 的 S 方向 1 帧），包括 `size`、`anchor`、`px_per_unit`、`anims`（每个动画的 `frames`、`fps`、`dirs`、`loop`、`stride_units`）、逐帧挂点 `sockets`（单位是图集像素，相对锚点即脚底，x 向右、y 向下；换算到世界单位同样除以 `pxPerUnit`），以及 `shadow_radius_px`、`floating`、`category`（hero / enemy / elite / prop）、`anchor_kind`、`vertical_motion` 等。挂点：主角 `lantern`，妖物 `eyes`，石灯笼、古灯和货郎担 `flame`，血祭坛 `glow`。`game_radius` 只用来对齐画面，碰撞半径以 `assets/data/` 的妖物数据为准。`floating: true` 表示悬浮的妖物（影妖、疾影），游戏里给它们加上下起伏；`register_x_only` 只给美术自检用，可以忽略。
 - **动画序列**：`animations`（只在第 0 页）把 `<素材>/<动画>_<方向>` 映射到有序的帧名列表；`_flash`、`_emit` 各有自己的序列，例如 `hero/walk_E_emit`。多页时帧可能落在任何一页，加载时先合并所有页的 `frames`。
 - **帧名与方向**：
   - 帧名形如 `<素材>/<动画>_<方向>_<两位帧号>`，例如 `hero/walk_SE_05`；
@@ -454,7 +455,14 @@ assets/data/
   - 妖物只画 E 方向，往西走时左右镜像；主角 8 个方向都有，不镜像（灯笼始终在右手）。
 - **白色剪影帧**：`_flash` 是纯白剪影，尺寸、锚点和普通帧相同。受击时整帧换成它（普通混合），不是叠加。主角没有剪影帧。
 - **自发光层**：`_emit` 帧和对应的普通帧尺寸、锚点完全相同，叠加画在暗层之上，所以暗处也能看到灯笼窗、妖眼。没有自发光部件的素材没有 `_emit` 帧。
-- **主角动画**：`idle`（6 帧）、`walk`（8 帧，按移动距离推进，`stride_units` 是一个循环走过的世界距离）、`dash`（4 帧 @16 fps）、`hurt`（2 帧 @10 fps）、`death`（6 帧 @8 fps，不循环），各 8 个方向。
+- **主角动画**：`idle`（6 帧）、`walk`（8 帧，按移动距离推进，`stride_units` 是一个循环走过的世界距离）、`dash`（4 帧 @16 fps）、`hurt`（2 帧 @10 fps）、`death`（6 帧 @8 fps，不循环），各 8 个方向。主角帧里只有灯杖，没有灯笼头，也没有 `_emit`。
+- **灯笼叠层**（一位主角，换灯只换叠层）：
+  - 每盏灯一套和主角帧**同画布、同锚点**的逐帧叠层：`lantern_<灯>/<动画>_<方向>_<帧号>`，以及 `_emit`（灯芯，叠加）。动画、方向、帧数和 `hero` 完全一致。
+  - 渲染时主角身体和灯杖当遮挡，被挡住的部分已经是透明的。所以游戏在主角帧之上原样叠画即可（同位置、同锚点，z 略高于主角），不用处理前后关系。
+  - 灯的 id 和 `assets/data/lamps.ron` 一致：目前有 `red`（红纸灯）、`mirror`（铜镜灯）、`frost`（霜瓷灯）。以后的灯照同样规则加帧，id 以 lamps.ron 为准。没有灯笼的灯（无灯）什么都不画，不要回退到红纸灯。
+  - 叠层的 `meta.lantern.assets.lantern_<灯>` 有 `category: "overlay"`、`base: "hero"`、`lamp`、`lamp_name`、`light_color`（与 lamps.ron 的 color 一致，以内容数据为准）。主角的 `assets.hero.overlays` 列出现有的叠层。
+  - 灯光位置照旧用主角的 `lantern` 挂点。铜镜灯的铜镜在灯芯后面当反光镜，背面朝向（N、NE、NW）时灯芯被挡住，`_emit` 帧接近全透明，属正常现象，光源照常放。
+  - 倒地动画里灯笼落在地上，灯芯渐暗，三盏灯一致。
 - **宣纸**：不透明 RGB PNG，1024×1024，无缝平铺，1 纹素 = 0.25 世界单位（一张覆盖 256 个世界单位）。
 - **染色建议**（`tint: true` 的帧本身是白的）：妖眼按妖物种类染色；`weapons/foxfire_*` 染 `#FF6B5A`；`ground/rift_glow` 染 `#D2386A`；`weapons/sector`、`sector_fill` 染 `#FF4A3A`（叠加；照亮的宣纸上会发白，亮处可改用普通混合）；`ground/zone_lava_glow` 染 `#FF7A2A`，`ground/zone_herb_glow` 染 `#9CF0B8`。`vfx/flame_*`（灯火火焰）带颜色、普通混合，火焰尖端的墨色要保留。
 - **锚点补充**：芦苇、竹子的锚点在底边 `(0.5, 1.0)`；其他地面装饰居中。
@@ -482,6 +490,7 @@ assets/data/
   | 标记印 | `ui/seal_{evo,elite,boss}` 96×160；`ui/seal_record`（新纪录）96×224 | 竖长 |
   | 五行反应印 | `ui/seal_react_{liaoyuan,rongyan,zhubing,ningshuang,zisheng,zhengteng,rongjin,duanmu,lietu,yuni}`（朱白相间的圆角方印、双边栏，两字从上往下读；第一次发生反应时盖在屏幕中间） | 128² |
   | 头像 | `ui/portrait_hero`（主角胸像，装在同款圆框里） | 256² |
+  | 灯 | `ui/icon_lamp_{red,mirror,frost}`（单独渲染的灯笼头，id 同 lamps.ron；注意 `ui/icon_lamp` 和 `ui/icon_lamp_evo` 是灯火法器，不是灯） | 128² |
 
   印章周围和刻掉的笔画是透明的，直接盖在夜色上对比偏低，最好盖在宣纸卡片上或者垫一层浅色底。
 - **界面皮肤 `skin/`**：给 `ImageNode` + `TextureSlicer` 用的九宫格图，直通 alpha，不裁边。

@@ -4,9 +4,12 @@
     art/.venv/bin/python art/render/produce.py                    # 全部（约 3 分钟）
     art/.venv/bin/python art/render/produce.py --only shade,wisp  # 只重渲部分素材（审图仍用全部）
     art/.venv/bin/python art/render/produce.py --only hero:dash+death  # 主角只重渲某几个动画（其它帧和 meta 保留）
+                                                                    # 灯笼叠层 lantern_<灯> 总是跟着主角一起渲
     art/.venv/bin/python art/render/produce.py --review           # 不渲染，只自检 + 重拼审图
 输出：
     art/out/assets/<素材>/    按 style.py 输出约定（PNG、_emit、_flash、meta.json、逐帧挂点）
+                              主角拆成两层：hero/（不带灯笼头的底图，lantern 挂点照旧）和每盏灯一份叠层
+                              lantern_<灯>/（同画布、同锚点、同帧名，主角身体当遮挡物，带 _emit；meta category=overlay）
     art/out/review/           审图：hero_sheet_day / hero_sheet_zoom（主角专页）、sheet_day / sheet_zoom / sheet_night / game_size / night_scene，
                               动图 hero_walk_8dir.gif、hero_idle_8dir.gif、shade_float.gif、wisp_float.gif，
                               check_report.json、timings.json
@@ -50,36 +53,62 @@ BATCH2 = {
     "toad": ("toad", "toad", "small", 6, 10, 14, {"category": "enemy", "vertical_motion": True}),
 }
 ALL += list(BATCH2)
-ALL += ["ancient_lamp", "blood_altar"]
+ALL += ["ancient_lamp", "blood_altar", "merchant", "stone_lantern_dark"]
+HERO_LAMPS = ("red", "mirror", "frost")  # 主角的灯笼叠层（lanterns.LAMP_IDS）；跟着 hero 一起渲
+OVERLAYS = [f"lantern_{lid}" for lid in HERO_LAMPS]
+CHECK = ALL + OVERLAYS  # 自检的素材（叠层不单独渲，只自检）
 HERO_ACTIONS = {"dash": (4, 16, {}), "hurt": (2, 10, {}),
                 "death": (6, 8, {"loop": False, "vertical_motion": True})}  # 帧数, fps, 额外 meta
 HERO_IDLE, HERO_WALK = 6, 8
 SHADE_FRAMES, WISP_FRAMES = 8, 6
 
 
-def produce(name: str, timings: dict):
+def hero_jobs(only_anims=None) -> list:
+    jobs = [("idle", d, i, HERO_IDLE) for d in S.DIRS for i in range(HERO_IDLE)]
+    jobs += [("walk", d, i, HERO_WALK) for d in S.DIRS for i in range(HERO_WALK)]
+    for an, (n, fps, extra) in HERO_ACTIONS.items():
+        jobs += [(an, d, i, n) for d in S.DIRS for i in range(n)]
+    if only_anims:
+        jobs = [j for j in jobs if j[0] in only_anims]
+    return jobs
+
+
+def render_hero(jobs, out_root: Path = ASSETS, merge: bool = False, timings: dict | None = None,
+                lamps=HERO_LAMPS) -> None:
+    """主角底图 hero/ + 每盏灯一份叠层 lantern_<灯>/：每个姿态在同一个 Blender 会话里连渲 1 + len(lamps) 遍。"""
+    import functools
     import hero as HERO
+    import lanterns as LAN
+
+    info = LAN.lamp_data()
+    hero_h = S.HERO_HEIGHT_M * S.PX_PER_M * math.cos(math.radians(S.CAMERA_PITCH_DEG))
+    anim_extra = {"idle": {"fps": 6}, "walk": {"fps": 12, "stride_units": HERO.walk_stride_units()},
+                  **{an: {"fps": fps, **extra} for an, (n, fps, extra) in HERO_ACTIONS.items()}}
+    variants = []
+    for lid in lamps:
+        pe = LAN.palette_extra(lid)
+        variants.append({"name": f"lantern_{lid}", "scope": functools.partial(HERO.lamp_scope, lamp=lid),
+                         "palette_extra": pe,
+                         "meta_extra": {"category": "overlay", "base": "hero", "lamp": lid, "lamp_name": info[lid]["name"],
+                                        "light_color": info[lid]["color"], "layers": ["emit"],
+                                        **({"palette_extra": pe} if pe else {})}})
+    render_asset("hero", S.FRAME["hero"], functools.partial(HERO.build_hero, lamps=lamps), jobs, out_root,
+                 pose=HERO.pose_hero, sockets_wanted=("lantern",), timings=timings, merge=merge,
+                 scope=HERO.base_scope, variants=variants,
+                 meta_extra={"category": "hero", "height_px": round(hero_h, 2), "layers": [],
+                             "overlays": [f"lantern_{lid}" for lid in lamps],
+                             "required_sockets": ["lantern"], "shadow_radius_px": round(13 * D), "anim_extra": anim_extra})
+
+
+def produce(name: str, timings: dict, out_root: Path = ASSETS):
     import shade as GHOST
     import rock as ROCK
     import stone_lantern as SL
 
+    ASSETS = out_root  # noqa: N806 - 下面沿用原来的名字
     if name.startswith("hero"):  # "hero" 全部；"hero:dash+death" 只重渲这些动画（其它帧和 meta 保留）
         only_anims = name.split(":", 1)[1].split("+") if ":" in name else None
-        name = "hero"
-        jobs = [("idle", d, i, HERO_IDLE) for d in S.DIRS for i in range(HERO_IDLE)]
-        jobs += [("walk", d, i, HERO_WALK) for d in S.DIRS for i in range(HERO_WALK)]
-        for an, (n, fps, extra) in HERO_ACTIONS.items():
-            jobs += [(an, d, i, n) for d in S.DIRS for i in range(n)]
-        if only_anims:
-            jobs = [j for j in jobs if j[0] in only_anims]
-        hero_h = S.HERO_HEIGHT_M * S.PX_PER_M * math.cos(math.radians(S.CAMERA_PITCH_DEG))
-        render_asset("hero", S.FRAME["hero"], HERO.build_hero, jobs, ASSETS, pose=HERO.pose_hero,
-                     sockets_wanted=("lantern",), timings=timings, merge=bool(only_anims),
-                     meta_extra={"category": "hero", "height_px": round(hero_h, 2), "layers": ["emit"],
-                                 "required_sockets": ["lantern"], "shadow_radius_px": round(13 * D),
-                                 "anim_extra": {"idle": {"fps": 6},
-                                                "walk": {"fps": 12, "stride_units": HERO.walk_stride_units()},
-                                                **{an: {"fps": fps, **extra} for an, (n, fps, extra) in HERO_ACTIONS.items()}}})
+        render_hero(hero_jobs(only_anims), ASSETS, merge=bool(only_anims), timings=timings)
     elif name in ("shade", "wisp"):
         n = SHADE_FRAMES if name == "shade" else WISP_FRAMES
         build = GHOST.build_shade if name == "shade" else GHOST.build_wisp
@@ -98,13 +127,19 @@ def produce(name: str, timings: dict):
                      anchor=S.PROP_ANCHOR, sockets_wanted=("flame",), timings=timings,
                      meta_extra={"category": "prop", "layers": ["emit"], "required_sockets": ["flame"],
                                  "shadow_radius_px": round(16 * D), "anim_extra": {"idle": {"fps": 1}}})
-    elif name in ("ancient_lamp", "blood_altar"):
+    elif name == "stone_lantern_dark":  # 没点亮的石灯笼：窗口焦墨、没有 _emit；纸纹用亮的那张的，点灯时直接换图
+        render_asset(name, S.FRAME["prop"], lambda: SL.build_stone_lantern(lit=False), [("idle", "S", 0, 1)], ASSETS,
+                     anchor=S.PROP_ANCHOR, sockets_wanted=("flame",), timings=timings, grain="stone_lantern",
+                     meta_extra={"category": "prop", "lit_variant": "stone_lantern", "required_sockets": ["flame"],
+                                 "shadow_radius_px": round(16 * D), "anim_extra": {"idle": {"fps": 1}}})
+    elif name in ("ancient_lamp", "blood_altar", "merchant"):
         import event_props as EP
-        sock = "flame" if name == "ancient_lamp" else "glow"
+        sock = "glow" if name == "blood_altar" else "flame"
+        radius = 30 if name == "merchant" else 20
         render_asset(name, S.FRAME["prop"], getattr(EP, f"build_{name}"), [("idle", "S", 0, 1)], ASSETS,
                      anchor=S.PROP_ANCHOR, sockets_wanted=(sock,), timings=timings,
                      meta_extra={"category": "prop", "layers": ["emit"], "required_sockets": [sock],
-                                 "shadow_radius_px": round(20 * D), "anim_extra": {"idle": {"fps": 1}}})
+                                 "shadow_radius_px": round(radius * D), "anim_extra": {"idle": {"fps": 1}}})
     elif name in BATCH2:
         import importlib
         mod, fn, fk, n, fps, radius, extra = BATCH2[name]
@@ -120,6 +155,33 @@ def produce(name: str, timings: dict):
 
 
 # ================================================================ 审图
+def with_overlay(A: dict, O: dict) -> dict:
+    """主角底图 + 灯笼叠层合成的素材（审图用；游戏里也是这样叠画）：同名帧逐帧叠上，发光层也叠上。"""
+    ov = {f["key"]: f for f in O["frames"]}
+    frames = []
+    for f in A["frames"]:
+        o = ov.get(f["key"])
+        if o is None:
+            frames.append(f)
+            continue
+        rgba = f["rgba"].copy()
+        rgba.alpha_composite(o["rgba"])
+        emit = o["emit"]
+        if f["emit"] is not None and emit is not None:
+            emit = f["emit"].copy()
+            emit.alpha_composite(o["emit"])
+        frames.append(dict(f, rgba=rgba, emit=emit if emit is not None else f["emit"]))
+    return dict(A, frames=frames)
+
+
+def load_assets(names, lamp: str = "red") -> dict:
+    """读素材；主角自动叠上某盏灯的叠层（有的话）。"""
+    A = {n: CS.load_asset(ASSETS / n) for n in names}
+    if "hero" in A and (ASSETS / f"lantern_{lamp}" / "meta.json").exists():
+        A["hero"] = with_overlay(A["hero"], CS.load_asset(ASSETS / f"lantern_{lamp}"))
+    return A
+
+
 def view(A: dict, keys: list[str]) -> dict:
     return dict(A, frames=[f for k in keys for f in A["frames"] if f["key"] == k])
 
@@ -170,7 +232,7 @@ def scene(A: dict, scale: float = 1.0, size=(600 * D, 360 * D)):
 
 def build_review(timings: dict):
     REVIEW.mkdir(parents=True, exist_ok=True)
-    A = {n: CS.load_asset(ASSETS / n) for n in ALL}
+    A = load_assets(ALL)
     t = time.perf_counter()
     rows = [view(A["hero"], [f"idle_{d}_00" for d in S.DIRS]),
             view(A["hero"], [f"walk_{d}_02" for d in S.DIRS]),
@@ -211,7 +273,7 @@ def build_review_batch2(timings: dict):
     REVIEW.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
     names = ["hero", "shade", "wisp", "toad", "golem", "fox", "ghoul", "stonelord", "boss"]
-    A = {n: CS.load_asset(ASSETS / n) for n in names}
+    A = load_assets(names)
     # 1) 同一地面上排成一排（游戏 1 倍大小），再给 3 倍
     gap = int(10 * D)
     ws = [A[n]["meta"]["size"][0] for n in names]
@@ -273,7 +335,7 @@ def build_review_desktop(timings: dict):
     """桌面版（任意密度）审图：游戏大小的总排列、几帧 3 倍放大、夜景、新动作和改过的妖物动图。"""
     REVIEW.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    A = {n: CS.load_asset(ASSETS / n) for n in ALL}
+    A = load_assets(ALL)
     # 1) 游戏大小总排列：角色一排、道具一排
     def lineup(names, keys, path, hh):
         gap = int(10 * D)
@@ -292,7 +354,7 @@ def build_review_desktop(timings: dict):
     keys = ["idle_S_00", "dash_E_01", "death_S_05", "float_E_00", "float_E_00", "move_E_00", "move_E_00", "move_E_00",
             "move_E_00", "move_E_00", "move_E_00"]
     lineup(actors, keys, REVIEW / "lineup_actors.png", 300)
-    props = ["rock_a", "rock_b", "rock_c", "stone_lantern", "ancient_lamp", "blood_altar"]
+    props = ["rock_a", "rock_b", "rock_c", "stone_lantern", "stone_lantern_dark", "ancient_lamp", "blood_altar", "merchant"]
     lineup(props, ["idle_S_00"] * len(props), REVIEW / "lineup_props.png", 110)
     # 2) 几帧 3 倍放大
     picks = [("hero", "idle_S_00"), ("hero", "dash_E_01"), ("hero", "hurt_S_00"), ("hero", "death_E_04"),
@@ -373,7 +435,7 @@ def main(argv):
             produce(n, timings)
     timings["render_total_s"] = round(time.perf_counter() - T0, 2)
     t = time.perf_counter()
-    results = [C.check_asset(ASSETS / n) for n in ALL if (ASSETS / n / "meta.json").exists()]
+    results = [C.check_asset(ASSETS / n) for n in CHECK if (ASSETS / n / "meta.json").exists()]
     print("\n==== check_asset ====")
     for r in results:
         print(C.report(r))

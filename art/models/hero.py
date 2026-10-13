@@ -7,7 +7,8 @@
   - 浓墨长裤、焦墨长靴；浓墨宽腰带，左前挂石绿玉佩和朱砂穗
   - 黑发高马尾（清墨银冠 + 石绿玉珠），两缕鬓发垂在脸侧；朱砂发带两条长尾
   - 背上斜背长剑：剑柄在左肩上方，S/SE 向也能露出来；藤黄剑格，朱砂剑穗
-  - 右手（世界 -X）持赭石灯杖，向前外侧伸出，杖头挂红纸灯笼（朱砂纸壳、墨色上下盖、发光芯）和藤黄符纸
+  - 右手（世界 -X）持赭石灯杖，向前外侧伸出，杖头挂灯笼。灯笼头在 models/lanterns.py（红纸灯、铜镜灯、霜瓷灯可换），
+    build_hero(lamps=...) 可以同时挂几盏（同一位置、同样摆动），出图时每次只显示一盏（见 base_scope / lamp_scope）
   - 脸：肤色，下巴收尖，墨点眼、细眉
 
 约定：脚底在原点，面朝 -Y，右手在 -X；总高 HERO_HEIGHT_M（脚底到冠顶）。
@@ -34,6 +35,7 @@ if str(ART) not in sys.path:
     sys.path.insert(0, str(ART))
 from style import bstyle as B  # noqa: E402
 from style import style as S  # noqa: E402
+import lanterns as LAN  # noqa: E402
 
 H = S.HERO_HEIGHT_M  # 2.2
 
@@ -57,7 +59,6 @@ STAFF_LEN, STAFF_GRIP = 1.32, 0.22
 STAFF_R = (0.034, 0.030)
 SWORD_POMMEL = Vector((0.255, 0.205, 2.00))
 SWORD_TIP = Vector((-0.33, 0.175, 0.86))
-TALISMAN_W, TALISMAN_LEN = 0.072, 0.26
 COAT_TOP = 1.235  # 长摆从腰带下沿开始
 COAT_OFF = 0.024  # 大氅比内袍大一圈
 
@@ -95,14 +96,10 @@ def _materials():
         "tassel": T("Tassel", A["zhusha"], seed=11.0),
         "staff": T("Staff", A["zheshi"], edge=0.15, seed=12.0),
         "gold": T("Tenghuang", A["tenghuang"], seed=13.0),
-        "shell": T("LanternShell", A["zhusha"], edge=0.25, seed=14.0),
         "cap": T("Cap", I["jiao"], seed=15.0),
         "scabbard": T("Scabbard", I["nong"], seed=16.0),
         "eye": B.flat_material("EyeInk", I["jiao"]),
-        "seal": B.flat_material("TalismanMark", A["zhusha"]),
-        "core": B.emissive_material("LanternCore", S.LANTERN_LIGHT, 1.0),
     }
-    m["window"] = B.window_material("LanternWindow", m["shell"], open_facing=0.25)
     return m
 
 
@@ -332,39 +329,12 @@ def _sidelock_points(sx, phase, wind):
     return pts
 
 
-# ---------------------------------------------------------------- 符纸
-def _talisman_points(top, phase, wind, n=7):
-    pts = []
-    for i in range(n):
-        t = i / (n - 1)
-        sway = (0.02 + 0.035 * wind) * t * t * math.sin(phase - 2.2 * t)
-        back = (0.01 + 0.06 * wind) * t * t
-        pts.append(Vector(top) + Vector((sway, back - 0.004 * i, -TALISMAN_LEN * t)))
-    return pts
-
-
-TALISMAN_SIDE = Vector((math.cos(math.radians(-35)), math.sin(math.radians(-35)), 0))
-
-
-def _talisman_build(top, phase, wind):
-    return _strip_build(_talisman_points(top, phase, wind), TALISMAN_W, 0.006,
-                        twist=math.radians(60) + 0.25 * math.sin(phase), side_hint=TALISMAN_SIDE, taper=(1.0, 0.92))
-
-
-def _talisman_mark_build(top, phase, wind):
-    pts = _talisman_points(top, phase, wind)
-    seg = pts[2:5]
-    n = (seg[-1] - seg[0]).normalized().cross(TALISMAN_SIDE).normalized()
-    if n.y > 0:
-        n = -n
-    seg = [p + n * 0.006 for p in seg]
-    return _strip_build(seg, TALISMAN_W * 0.35, 0.004, twist=math.radians(30), side_hint=TALISMAN_SIDE,
-                        taper=(1.0, 1.0))
-
-
 # ================================================================ 组装
-def build_hero():
-    """返回 (root, parts, sockets)。sockets: lantern（灯笼纸壳中心）、feet（原点）。"""
+def build_hero(lamps=("red",)):
+    """返回 (root, parts, sockets)。sockets: lantern（灯芯中心）、feet（原点）。
+    lamps：挂哪几盏灯（lanterns.LAMP_IDS 里的 id）。第一盏在原来的位置建（物体顺序与只挂红纸灯时相同），
+    lantern 挂点挂在它的枢轴下；其余几盏最后建，枢轴每帧跟着第一盏走。parts["lamps"] = {id: lanterns.Head}。"""
+    lamps = tuple(lamps or ("red",))
     M = _materials()
     obj = B.mesh_object
     root = B.empty("HeroRoot")
@@ -453,27 +423,12 @@ def build_hero():
     staff = obj("Staff", B.cylinder(STAFF_R[0], STAFF_R[1], STAFF_LEN, 10), M["staff"], "thin", armR)
     B.aim(staff, a - SH_R, tip - SH_R)
     obj("StaffKnob", B.uv_sphere(0.040, 10, 6), M["gold"], "thin", armR, loc=tip - SH_R)
-    lp = B.empty("LanternPivot", armR, loc=tip - SH_R)
+    heads = {lamps[0]: LAN.build_head(lamps[0], armR, tip - SH_R, M, pivot_name="LanternPivot")}
+    lp = heads[lamps[0]].pivot
     parts["lantern"] = lp
-    cord, sh_h, sh_r = 0.10, 0.150, 0.118
-    c_z = -cord - 0.026 - sh_h
-    obj("LanternCord", B.cylinder(0.005, 0.005, cord, 6), M["cap"], "none", lp, loc=(0, 0, -cord / 2))
-    obj("LanternCapTop", B.cylinder(0.070, 0.060, 0.036, 16), M["cap"], "inner", lp, loc=(0, 0, -cord - 0.014))
-    obj("LanternShell", B.lathe([(0.0, -sh_h), (0.066, -0.138), (0.102, -0.096), (sh_r, -0.036), (sh_r, 0.036),
-                                 (0.102, 0.096), (0.066, 0.138), (0.0, sh_h)], 24,
-                                radial=lambda th, z: 1 + 0.035 * abs(math.sin(4 * th))),
-        M["window"], "outer", lp, loc=(0, 0, c_z), sharp_deg=0)
-    obj("LanternCore", B.uv_sphere(1.0, 16, 10, scale=(0.086, 0.086, 0.114)), M["core"], "none", lp, loc=(0, 0, c_z))
-    obj("LanternCapBot", B.cylinder(0.060, 0.067, 0.030, 16), M["cap"], "inner", lp, loc=(0, 0, c_z - sh_h - 0.005))
-    ttop = Vector((0.0, -0.06, c_z - sh_h - 0.014))
-    tal = obj("Talisman", _talisman_build(ttop, 0.0, 0.0), M["gold"], "thin", lp)
-    mark = obj("TalismanMark", _talisman_mark_build(ttop, 0.0, 0.0), M["seal"], "none", lp)
-    parts["talisman"] = (tal, mark, ttop)
-    obj("LanternTassel", B.cylinder(0.009, 0.028, 0.11, 8), M["tassel"], "none", lp,
-        loc=(0.024, 0.03, c_z - sh_h - 0.07))
-    sock_lantern = B.empty("SocketLantern", lp, loc=(0, 0, c_z))
+    sock_lantern = B.empty("SocketLantern", lp, loc=(0, 0, LAN.C_Z))
     parts["lantern_loc0"] = lp.location.copy()
-    parts["lantern_cz"] = c_z
+    parts["lantern_cz"] = LAN.C_Z
 
     # ---- 头：脸（下巴收尖）、发、冠、马尾、鬓发、发带
     head = B.empty("HeadPivot", chest, loc=rel((0, 0, 1.84)))
@@ -563,6 +518,9 @@ def build_hero():
     obj("SwordTassel", B.cylinder(0.008, 0.026, 0.10, 8), M["tassel"], "none", st, loc=(0, 0, -0.12))
     parts["sword_tassel"] = st
 
+    for lid in lamps[1:]:  # 其余几盏灯：最后建，前面所有物体的顺序与只挂一盏时相同
+        heads[lid] = LAN.build_head(lid, armR, tip - SH_R, M)
+    parts["lamps"] = heads
     sockets = {"lantern": sock_lantern, "feet": B.empty("SocketFeet", root)}
     parts["sockets"] = sockets
     bpy.context.view_layer.update()
@@ -700,9 +658,12 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
                                       taper=(0.8, 1.0)))
     for sx, ob in zip((-1, 1), parts["sidelocks"]):
         _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind_hair), 0.026, 0.012, taper=(1.0, 0.4)))
-    tal, mark, ttop = parts["talisman"]
-    _replace_mesh(tal, _talisman_build(ttop, rib_phase + 0.6, wind))
-    _replace_mesh(mark, _talisman_mark_build(ttop, rib_phase + 0.6, wind))
+    for h in parts["lamps"].values():  # 其余几盏灯的枢轴跟着第一盏；挂件（符纸、剑坠、穗子）随风
+        if h.pivot is not lp:
+            h.pivot.location = lp.location
+            h.pivot.rotation_mode = lp.rotation_mode
+            h.pivot.rotation_euler = lp.rotation_euler
+        h.animate(rib_phase + 0.6, wind)
     bpy.context.view_layer.update()
     if anim == "death":
         _drop_lantern(parts, frame)
@@ -726,10 +687,9 @@ def _back_view_staff(parts):
 
 
 def _set_core_strength(parts, k):
-    """灯笼芯的自发光强度（死亡动画里灯灭）。"""
-    m = parts["mats"]["core"]
-    emi = next(n for n in m.node_tree.nodes if n.type == "EMISSION")
-    emi.inputs["Strength"].default_value = k
+    """灯芯的自发光强度（死亡动画里灯灭），每盏灯都设。"""
+    for h in parts["lamps"].values():
+        h.set_core(k)
 
 
 # 死亡：踉跄 → 单膝跪地 → 前俯 → 灯笼落地 → 伏倒 → 静止；灯芯在最后三帧熄灭
@@ -806,13 +766,32 @@ def _pose_action(parts, anim, frame, n):
 
 
 def _drop_lantern(parts, frame):
-    """死亡第 3 帧起，灯笼脱手，侧躺在右前方的地上（直接设世界矩阵）。"""
+    """死亡第 3 帧起，灯笼脱手，躺在右前方的地上（直接设世界矩阵）。每盏灯的灯芯落在同一点（lantern 挂点），
+    红纸灯、霜瓷灯侧躺，铜镜灯镜面朝下平躺（见 lanterns.Head.drop）。"""
     if frame < 3:
         return
-    lp, root = parts["lantern"], parts["root"]
-    c_z = parts["lantern_cz"]
-    roll = math.radians(80 + 6 * (frame - 3))
-    center = Vector((-0.30, 0.16 + 0.02 * (frame - 3), 0.118))  # root 坐标：落在右侧身旁，离锚点 0.35 米以内
-    rot = Matrix.Rotation(roll, 4, "Y")
-    pivot = center - (rot.to_3x3() @ Vector((0, 0, c_z)))
-    lp.matrix_world = root.matrix_world @ (Matrix.Translation(pivot) @ rot)
+    center = Vector((-0.30, 0.16 + 0.02 * (frame - 3), LAN.DROP_CENTER_Z))  # root 坐标：右侧身旁，离锚点 0.35 米以内
+    for h in parts["lamps"].values():
+        LAN.drop_head(h, parts["root"], frame, center)
+
+
+# ================================================================ 出图分层
+def lamp_objects(parts, lamp=None) -> list:
+    """某盏灯（None = 全部）的网格物体。"""
+    heads = parts["lamps"].values() if lamp is None else [parts["lamps"][lamp]]
+    return [o for h in heads for o in h.objects()]
+
+
+def base_scope(parts):
+    """主角底图：所有灯笼头都不渲染（灯杖、杖头留在主角身上）。"""
+    return B.render_scope(hide=lamp_objects(parts))
+
+
+def lamp_scope(parts, lamp):
+    """某盏灯的叠层：只渲这盏灯；主角身体（含灯杖）换成 Holdout 材质当遮挡物（挡住的灯笼像素透明），
+    墨线只画这盏灯自己的（身体仍在 Freestyle 视图图里，挡住灯笼的线）；其余几盏不渲染。"""
+    mine = lamp_objects(parts, lamp)
+    others = [o for o in lamp_objects(parts) if o not in mine]
+    keep = set(mine) | set(others)
+    body = [o for o in bpy.context.scene.objects if o.type == "MESH" and o not in keep]
+    return B.render_scope(hide=others, holdout=body, lines_only=mine, lines_tag=f"lamp_{lamp}")

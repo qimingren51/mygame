@@ -3,6 +3,7 @@
   "actors",
   "boss",
   "ground",
+  "lanterns",
   "ui",
   "vfx"
  ],
@@ -22,6 +23,9 @@
   ],
   "boss": [
    "boss.json"
+  ],
+  "lanterns": [
+   "lanterns.json"
   ]
  }
 }

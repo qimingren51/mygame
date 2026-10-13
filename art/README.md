@@ -141,11 +141,11 @@ art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 L
 ```bash
 A=art/out/assets@2x
 art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out assets/atlas
-art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/ancient_lamp $A/blood_altar
+art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/lantern_red $A/lantern_mirror $A/lantern_frost $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
 art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
-art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait
+art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons
 mkdir -p assets/atlas/screens && cp art/out/screens/title.png art/out/screens/logo.png assets/atlas/screens/
 art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规则检查 assets/atlas
 ```
@@ -199,9 +199,12 @@ art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自
 | `models/shade.py` | 影妖、疾影（墨烟幽灵，float） |
 | `models/golem.py` `fox.py` `ghoul.py` `stonelord.py` `toad.py` | 石妖、赤面狐与夜主九尾、青面鬼、石将（翁仲）、金蟾（move，只画 E） |
 | `models/kit.py` | 妖物建模公共件（石块、管状尾、毛笔形尾、分段晕染材质、破布片、发光眼） |
-| `models/rock.py` `stone_lantern.py` `event_props.py` | 山石 a/b/c、石灯笼、古灯、血祭坛 |
-| `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（出图脚本共用） |
+| `models/lanterns.py` | 主角的灯笼头：红纸灯 red、铜镜灯 mirror、霜瓷灯 frost（id 和光色取自 `assets/data/lamps.ron`） |
+| `models/rock.py` `stone_lantern.py` `event_props.py` | 山石 a/b/c、石灯笼（亮 / 未点亮 `stone_lantern_dark`）、古灯、血祭坛、货郎担 `merchant` |
+| `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（出图脚本共用）；可以每个姿态连渲几层（variants） |
 | `render/produce.py` | 正式出图 + 自检 + 审图 |
+| `render/lantern_review.py` | 灯笼拆层的样张和审图（合成、旧帧对比热图、道具）；`full` 出正式素材的 8 向动图、三灯夜景、全帧对比 |
+| `render/lamp_icons.py` | 灯的界面图标 `ui/icon_lamp_<灯>`（灯笼头单独渲染，装进图标圆框） |
 | `render/style_frame.py` | 风格样张（早期） |
 
 墨线分档（物体放进哪个集合就用哪档，见 `bstyle.LINE_COLLECTIONS`）：
@@ -210,6 +213,37 @@ thin 细长彩色部件（只有 1.1px，不进粗外轮廓，灯杖、符纸）
 `cun=True` 另加暗示轮廓线作皴笔。道具用 `setup_camera(..., anchor=PROP_ANCHOR)`，
 石妖、精英、夜主用 `BIG_ENEMY_ANCHOR`（meta 里 `anchor_kind: "big_enemy"`）。
 meta 里的 `vertical_motion`（整个素材或单个动画）表示动画本身大幅上下（金蟾跳、主角死亡倒地），自检只查水平配准。
+
+**主角和灯笼分层**（灯可以换，docs/GAMEPLAY.md 11.4 节）：主角出两种文件夹，每个姿态在同一个 Blender 会话里连渲 4 遍——
+- `hero/`：不带灯笼头的底图（灯杖、杖头留着），没有 `_emit`；`lantern` 挂点照旧（灯芯中心，放光源用），`overlays` 列出叠层；
+- `lantern_<灯>/`：这盏灯的叠层，画布、锚点、帧名、`anims` 和底图完全相同，`_emit` 是灯芯。渲的时候只显示这盏灯，
+  主角身体（含灯杖）换成 Holdout 材质当遮挡物：被身体挡住的灯笼像素是透明的，墨线也被挡住（身体仍在 Freestyle 视图图里），
+  各线条集合临时换成只含这盏灯的（`bstyle.render_scope`）。所以游戏里把叠层原样画在主角帧上面就行，不用管前后。
+  纸纹用底图的偏移（`process_layers(grain_name="hero")`），叠起来对得上。meta：`category: "overlay"`、`base: "hero"`、
+  `lamp`、`lamp_name`、`light_color`（lamps.ron 里的光色）、`layers: ["emit"]`、`palette_extra`（调色板外的颜色）、`sockets: {}`。
+- 自检对叠层另有一套（`check_asset.check_overlay`）：不查身高、配准、着地、墨线占比；查与底图的尺寸、锚点、动画完全一致，
+  每帧都有 `_emit`，以及发光重心对准底图的 `lantern` 挂点（灯芯没被挡住的帧 2 倍密度下 ≤2px；被身体挡住一部分的帧、
+  死亡倒地的帧只在超过 6px 时警告；全透明的帧不算错）。调色板按全部帧合起来要求 ≥90%（发光像素不算）；单帧只在样本
+  ≥300 像素时也要求 ≥90%，更少的只警告——灯笼只露出一小块时，几个被纸纹压暗的藤黄、朱砂像素就能把比例拉到八成，
+  这些像素和拆层前的主角帧逐像素相同，只是分母从整个人变成了一盏灯。
+- `--only hero:dash+death` 时叠层也只重渲这几个动画。
+- 铜镜灯的铜镜立在灯芯后面（朝主角一侧，镜面朝前聚光）：背面朝向（N、NE、NW）灯芯被镜子挡住，叠层几乎没有 `_emit`，
+  光源照旧放在 `lantern` 挂点。霜瓷灯的冰裂纹格条是半透明的，发光遮罩仍是整个圆窗。
+- 审图：`LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lantern_review.py full`（约 4 分钟）——每盏灯 walk、idle、
+  dash、death 的 8 向动图（宣纸底 / 夜里），三盏灯并排的夜景，旧单遍帧对比底图 + 红纸灯的全帧差异（按动画 × 朝向），自检报告。
+  整套主角 + 三份叠层 2 倍约 55 分钟（208 个姿态 × 4 遍，每遍约 3.5 秒）。
+
+**灯的界面图标**（`render/lamp_icons.py`，只出 2 倍）：
+
+```bash
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lamp_icons.py   # → out/assets@2x/lamp_icons/，审图 review@2x/lamp_icons_review*.png
+```
+
+每盏灯的灯笼头单独渲（四分之三侧面、相机略向下看、灯芯点亮、线宽加粗 1.25 倍好在 32 像素下看清），再按
+`render/portrait.py` 装头像的办法装进 `post/ui_icons.py` 的圆框（`disc_back` / `ring_front`，只读借用）：
+宣纸圆底、灯后一团该灯光色的晕、灯芯由白热到灯色、色弧是灯的光色兑国画颜料（同五行色弧的配法：火兑朱砂、金兑藤黄赭石、水兑花青）。
+128²（64 逻辑像素 × 2），meta 是特效格式，`name: "ui"`，所以打包后帧名是 `ui/icon_lamp_<灯>`；每项有 `kind: "lamp"`、
+`id`、`name`（中文名）、`light_color`、`arc_color`。打包时和 `ui/` 一起用 `--no-trim`。
 
 实测要点（bpy 5.2.2）：
 - 物体编号通道在 EXR 里叫 `ViewLayer.Object Index.X`；**只开 Object Index 时全是 0，要同时开 Depth 才会写出**。

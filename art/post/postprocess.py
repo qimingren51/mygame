@@ -208,8 +208,9 @@ def to_rgba8(rgb: np.ndarray, a: np.ndarray) -> np.ndarray:
 
 # ================================================================ 总流程
 def process_layers(layers: dict, name: str, scale: int = S.RENDER_SCALE,
-                   extra_palette: tuple[str, ...] = tuple(LIGHT_COLORS)) -> dict:
-    """渲染三层 → 最终贴图。返回 uint8 数组：rgba / emit / flash（都是 (h,w,4)），以及 stats。"""
+                   extra_palette: tuple[str, ...] = tuple(LIGHT_COLORS), grain_name: str | None = None) -> dict:
+    """渲染三层 → 最终贴图。返回 uint8 数组：rgba / emit / flash（都是 (h,w,4)），以及 stats。
+    grain_name：纸纹偏移按哪个名字取（默认 name）。叠层（灯笼叠在主角上）要用底图的名字，叠起来纸纹才对得上。"""
     fill = box_downscale(layers["fill"], scale)
     lines = box_downscale(layers["lines"], scale)
     emit_hi = layers["emit"] * np.clip(layers["fill"][..., 3], 0, 1)
@@ -228,7 +229,7 @@ def process_layers(layers: dict, name: str, scale: int = S.RENDER_SCALE,
     out_rgb = np.where(out_a[..., None] > 1e-6, num / np.maximum(out_a[..., None], 1e-6), 0.0)
 
     h, w = out_a.shape
-    out_rgb = np.clip(out_rgb * paper_grain(h, w, name)[..., None], 0, 255)
+    out_rgb = np.clip(out_rgb * paper_grain(h, w, grain_name or name)[..., None], 0, 255)
 
     out_a = np.where(out_a < ALPHA_FLOOR, 0.0, out_a)
     out_rgb = alpha_bleed(out_rgb, out_a)
