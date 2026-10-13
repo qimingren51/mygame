@@ -384,12 +384,14 @@ assets/data/
 | `cargo test --workspace` | 单元测试、内容数据校验、模拟场景测试、确定性黄金测试 |
 | `cargo run -p lantern-tools -- bench --enemies 5000` | 不开窗口，测每一步的耗时 |
 | `cargo run --release -p lantern-tools -- balance --runs 20 [--god]` | 用机器人（`lantern_sim::bot`：风筝走位，随机选卡，燃灯满了就放）批量跑局，输出胜率、存活和击杀的中位数、每 30 秒的等级、首次进化时间、各来源的伤害占比和每局的构筑。`--god` 无敌，用来看完整一局的节奏 |
+| `cargo run --release -p lantern-tools -- kite --runs 100 --tier 1 --meta none` | 会躲的风筝机器人（`crates/tools/src/kite.rs`，玩法与数值会话写的）：每步在 16 个方向里挑威胁最小的走，躲弹幕和夜主预警，安全时去点石灯笼。`--meta none / half / full` 是三档局外成长，`--lamp` 换灯。输出胜率、倒下时间分布、等级、首次进化、夜主战用时、场上妖物数、燃灯间隔、伤害占比。docs/BALANCE.md 第 11 节的验收用它 |
+| `LANTERN_DATA=<目录> lantern-tools …` | 换一份数据目录跑，用来比较两套数值 |
 | `cargo run -p lantern-tools -- replay <文件>` | 校验并分析回放，定位分歧点 |
 | `cargo run -p lantern -- --replay <文件>` | 在游戏里观看回放 |
 | `cargo run -p lantern --features dev` | 开发模式：调试面板、热重载 |
 
 - **场景测试**用来验证具体规则，例如“火系 6 点时，妖物死亡会爆炸”：搭一个最小的模拟场景，跑若干步，断言结果。`lantern_sim::harness` 提供开局、改构筑、放妖物、读伤害记录等辅助函数；`tests/build.rs`、`tests/weapons.rs`、`tests/gameplay.rs` 覆盖五行共鸣、相生、太极、进化、宝箱、各法器和机器人打完整局。
-- **画面测试**：云端没有显卡，但装了 Mesa 的软件 Vulkan（lavapipe）。M0 会验证能否用它截图，做画面冒烟测试。画面的实际观感和帧率以你在自己电脑上运行的结果为准。
+- **画面测试**：云端没有显卡，但装了 Mesa 的软件 Vulkan（lavapipe）和 Xvfb。在 Xvfb 里用 `VK_ICD_FILENAMES=…/lvp_icd.json` 启动 `lantern --windowed`，用 `xdotool` 按键（先 `windowfocus`）、`import -window root` 截图，可以逐个检查界面；`XDG_DATA_HOME` 指到临时目录就能用一份测试存档。画面的实际观感和帧率以你在自己电脑上运行的结果为准。
 
 ## 14. 构建与发布
 

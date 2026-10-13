@@ -38,6 +38,7 @@ cargo fmt --all
 cargo run --release -p lantern-tools -- bench  # 模拟跑分（不开窗口，默认 5000 只妖物）
 cargo run --release -p lantern-tools -- replay <文件>  # 校验回放：逐秒核对状态哈希
 cargo run --release -p lantern-tools -- balance --runs 20  # 机器人批量跑局看平衡（加 --god 无敌跑完整局）
+cargo run --release -p lantern-tools -- kite --runs 100 --tier 1 --meta none  # 会躲的机器人测胜率（--meta none/half/full）
 cargo run -- --replay <文件>                   # 在游戏里观看回放
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希
 python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）

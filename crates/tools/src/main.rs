@@ -4,6 +4,7 @@
 //!   cargo run -p lantern-tools -- check-content
 //!   cargo run --release -p lantern-tools -- replay <回放文件>
 //!   cargo run --release -p lantern-tools -- balance [--runs 20] [--seed 1] [--god]
+//!   cargo run --release -p lantern-tools -- kite [--runs 40] [--tier 1] [--meta none|half|full] [--lamp <id>]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,10 +25,17 @@ const USAGE: &str = "用法：
       不开窗口重放，逐秒核对状态哈希，报告第一次出现分歧的步数
   lantern-tools balance [--runs <局数>] [--seed <起始种子>] [--god]
       机器人自动选卡、绕圈走位打整局，统计等级曲线、击杀、进化时间、伤害来源占比、存活时间
-      （--god：主角无敌，看成长曲线和夜主战）";
+      （--god：主角无敌，看成长曲线和夜主战）
+  lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full] [--lamp <灯>]
+      会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、夜主战、
+      场上妖物数、燃灯间隔、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
+环境变量 LANTERN_DATA 可以换一份数据目录（比较两套数值时用）";
+
+mod kite;
 
 fn data_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")
+    std::env::var_os("LANTERN_DATA")
+        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"), PathBuf::from)
 }
 
 fn flag(args: &[String], name: &str, default: u64) -> Result<u64, String> {
@@ -258,6 +266,7 @@ fn main() -> ExitCode {
         Some("bench") => bench(&args[1..]),
         Some("replay") => replay(&args[1..]),
         Some("balance") => balance(&args[1..]),
+        Some("kite") => kite::kite_cmd(&args[1..]),
         Some("check-content") => {
             Content::load(&data_dir()).map(|_| println!("内容数据校验通过")).map_err(|e| e.to_string())
         }

@@ -179,7 +179,7 @@ fn second_watch_makes_enemies_tougher_and_elites_get_affixes() {
     let mut s2 = setup(4);
     s2.tier = 2;
     let two = SimHarness::with_setup(content(), s2);
-    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.3).abs() < 1e-4);
+    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.4).abs() < 1e-4);
     assert_eq!(two.stats().get(Stat::Affixes), 1.0);
     let mut s3 = setup(4);
     s3.tier = 3;
@@ -305,6 +305,29 @@ fn ult_charges_by_clear_amount() {
     let per_kill = 10.0 / (lantern_sim::spawn::base_spawn_hp(&c, 0.0) * c.player.ult.clear_seconds);
     assert!(kills > 10.0);
     assert!((sim.progress().ult - (kills * per_kill).min(1.0)).abs() < 0.05, "{}", sim.progress().ult);
+
+    // 三更：妖物更厚、刷得更快，分母一起乘上，充能节奏不随难度变快（docs/BALANCE.md 第 2.6 节）
+    let mut s = setup(10);
+    s.tier = 3;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    sim.set_build(&[("sword", 8, true)], &[]);
+    for k in 0..40 {
+        let a = k as f32 * 0.3;
+        sim.spawn("shade", Vec2::new(bevy_math::ops::cos(a), bevy_math::ops::sin(a)) * 120.0);
+    }
+    for _ in 0..60 * 6 {
+        sim.step(InputFrame::default(), &[]);
+    }
+    let kills = sim.progress().kills as f32;
+    let spawn = sim.stats().get(Stat::SpawnRate);
+    assert!(kills > 10.0);
+    assert!(
+        (sim.progress().ult - (kills * per_kill / spawn).min(1.0)).abs() < 0.05,
+        "{} vs {}",
+        sim.progress().ult,
+        kills * per_kill / spawn
+    );
 }
 
 #[test]

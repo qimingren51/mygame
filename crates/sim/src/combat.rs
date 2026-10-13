@@ -821,8 +821,12 @@ pub(crate) fn process_deaths(
     let gd = &c.run.gold;
     let drops = &c.run.drops;
     let gold_mult = stats.get(Stat::GoldGain);
-    // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次
-    let clear = crate::spawn::base_spawn_hp(c, minute) * c.player.ult.clear_seconds;
+    // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次。
+    // 更和夜签改了妖物生命、刷怪速度时分母一起乘上，充能节奏不随难度变快（docs/BALANCE.md 第 2.6 节）
+    let clear = crate::spawn::base_spawn_hp(c, minute)
+        * stats.get(Stat::EnemyHp)
+        * stats.get(Stat::SpawnRate)
+        * c.player.ult.clear_seconds;
     let ult_mult = stats.get(Stat::UltCharge);
     for d in deaths.0.drain(..) {
         let def = &c.enemies[d.kind as usize];

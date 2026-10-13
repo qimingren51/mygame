@@ -22,7 +22,7 @@
     // 三阶段（25%）：每 4 秒九尾扫（120° 扇形，半径 220，伤害 25，预警 0.8 秒），狐火环间隔缩到 1.7 秒。
     // 登场 120 秒后狂暴：所有攻击间隔 ×0.6。三更起全程多一招狐火雨。
     (id: "jiuwei", name: "夜主 · 九尾", rank: Boss, movement: Chase,
-     radius: 44.0, hp: 48000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
+     radius: 44.0, hp: 40000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
      boss: Some((volley_every: 2.6, volley_first: 2.0, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
                  shot_damage: 14.0, shot_life: 6.0, summon_every: 7.0, summon: "shade", summon_count: 6,
                  summon_radius: 70.0,
