@@ -136,5 +136,5 @@ test('连续宝箱可以逐个确认，连续进化会重新计时', async ({ pa
   }, firstId);
   await page.waitForTimeout(300);
   await expect(page.locator('#evo-screen')).toBeVisible();
-  await expect(page.locator('#evo-screen')).toBeHidden({ timeout: 5000 });
+  await expect(page.locator('#evo-screen')).toBeHidden({ timeout: 20_000 }); // 两段演出约 4.2 秒游戏时间，CI 低帧率会拉长
 });
