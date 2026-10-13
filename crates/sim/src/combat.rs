@@ -41,7 +41,7 @@ pub const HIT_DOT: u8 = 2;
 pub const HIT_BONUS: u8 = 4;
 /// 五行反应造成的伤害（显示用）
 pub const HIT_REACT: u8 = 8;
-/// 伤害已经乘过加成区（以触发伤害为基数的反应、熔岩）
+/// 伤害已经乘过加成区（以触发伤害为基数的反应、赤地）
 pub const HIT_RAW: u8 = 16;
 /// 伤害原样扣除，不乘任何乘区（斩杀）
 pub const HIT_TRUE: u8 = 32;
@@ -827,7 +827,7 @@ pub(crate) fn process_deaths(
     for d in deaths.0.drain(..) {
         let def = &c.enemies[d.kind as usize];
         if let Some(loot) = &def.loot {
-            // 金蟾：散落大量魂火和金币，不计击杀
+            // 金蟾：散落大量魂火和铜钱，不计击杀
             let total = c.run.xp_need.at(progress.level as f32) * loot.xp_levels;
             let r = rng.0.get(Stream::Drop);
             for _ in 0..loot.gems {

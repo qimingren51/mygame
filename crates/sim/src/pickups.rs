@@ -77,7 +77,7 @@ pub(crate) fn update_pickups(
         match it.kind {
             PickupKind::Chest => flow.chest_queue.push_back(ChestSource::Elite),
             PickupKind::BossChest => flow.chest_queue.push_back(ChestSource::MiniBoss),
-            // 引魂铃：魂火和金币全部吸来
+            // 引魂铃：魂火和铜钱全部吸来
             PickupKind::Bell => {
                 let n = gems.n;
                 gems.pulled[..n].fill(true);

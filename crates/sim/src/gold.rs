@@ -1,7 +1,7 @@
-//! 金币（docs/GAMEPLAY.md 第 11.1 节，docs/BALANCE.md 第 10.2 节）。
+//! 铜钱（docs/GAMEPLAY.md 第 11.1 节，docs/BALANCE.md 第 10.2 节）。
 //!
 //! 和魂火一样放在模拟里（掉落、吸附、拾取都在模拟里，回放能复现），但不会自己飞回来：
-//! 要走过去捡，拾取范围会把它吸过来，引魂铃也吸金币。天明时地上剩下的全部飞来。
+//! 要走过去捡，拾取范围会把它吸过来，引魂铃也吸铜钱。天明时地上剩下的全部飞来。
 
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
@@ -48,7 +48,7 @@ impl Coins {
         self.0.push(Coin { pos, prev: pos, vel: Vec2::ZERO, value, pulled: false });
     }
 
-    /// 掉一笔金币：按 per_coin 拆成几枚，散在 pos 周围。
+    /// 掉一笔铜钱：按 per_coin 拆成几枚，散在 pos 周围。
     pub fn scatter(&mut self, rng: &mut Pcg32, pos: Vec2, total: f32, per_coin: f32, spread: f32, cap: u32) {
         let n = (total / per_coin).ceil().max(1.0) as u32;
         for _ in 0..n {
@@ -81,7 +81,7 @@ impl Coins {
     }
 }
 
-/// 进入拾取范围的金币飞向主角，碰到即拾取。
+/// 进入拾取范围的铜钱飞向主角，碰到即拾取。
 pub(crate) fn update_coins(
     content: Res<GameContent>,
     stats: Res<Stats>,

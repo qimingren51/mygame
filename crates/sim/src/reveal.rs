@@ -16,7 +16,7 @@ use crate::spatial::Grid;
 use crate::stats::Stats;
 use crate::{GameContent, Player, Pos, Tick};
 
-/// 灯焰带、熔岩等持续区域每隔这么多步结算一次（0.5 秒）
+/// 灯焰带、赤地等持续区域每隔这么多步结算一次（0.5 秒）
 pub const ZONE_TICK: u64 = 30;
 
 #[derive(Resource, Clone, Debug, Default)]

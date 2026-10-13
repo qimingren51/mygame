@@ -593,7 +593,7 @@ fn spawn_lamp(
                     LampReward::Level => {
                         (Some("ui/icon_level"), "升", hex("#9FE3FF"), "升级", "立即获得一次升级".to_string())
                     }
-                    LampReward::Gold => (None, "金", hex("#E8C27A"), "金币", format!("获得 {} 金币", l.gold)),
+                    LampReward::Gold => (None, "钱", hex("#E8C27A"), "铜钱", format!("获得 {} 铜钱", l.gold)),
                 };
                 plain_card(row, fonts, db, skin, i, icon, glyph, color, name, &desc, true);
             }
@@ -616,7 +616,7 @@ fn spawn_shop(
 ) {
     commands.spawn(overlay(skin)).with_children(|root| {
         root.spawn(text(&fonts.title, 64.0, hex("#E8C27A"), "货郎"));
-        root.spawn(text(&fonts.body, 18.0, DIM, &format!("身上的金币 {gold}　·　花掉的就带不出这一夜了")));
+        root.spawn(text(&fonts.body, 18.0, DIM, &format!("身上的铜钱 {gold}　·　花掉的就带不出这一夜了")));
         root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
             plain_card(
                 row,
@@ -628,7 +628,7 @@ fn spawn_shop(
                 "箱",
                 hex("#FFD98A"),
                 "宝箱",
-                &format!("{chest} 金币"),
+                &format!("{chest} 铜钱"),
                 gold >= chest,
             );
             plain_card(
@@ -642,7 +642,7 @@ fn spawn_shop(
                 hex("#B07CF0"),
                 "灯坠",
                 &if charms {
-                    format!("{charm} 金币　三选一")
+                    format!("{charm} 铜钱　三选一")
                 } else {
                     "解锁的灯坠都挂上了".to_string()
                 },

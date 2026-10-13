@@ -191,7 +191,7 @@ pub struct Progress {
     pub best_combo: u32,
     /// 燃灯充能 0..=1
     pub ult: f32,
-    /// 本局捡到的金币
+    /// 本局捡到的铜钱
     pub gold: f32,
 }
 

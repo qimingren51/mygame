@@ -42,7 +42,7 @@ pub enum RunState {
     #[default]
     Playing,
     Paused,
-    /// 这一局结束（灯灭或天明），等待界面进入结算
+    /// 这一局结束（倒下或天明），等待界面进入结算
     Over,
 }
 
@@ -97,7 +97,7 @@ pub enum LampReward {
     Heal,
     /// 一次升级
     Level,
-    /// 金币
+    /// 铜钱
     Gold,
 }
 
@@ -156,7 +156,7 @@ pub struct RunResult {
     /// 灯油：合计与各项（存活、击杀、天明、石灯笼、额外）
     pub oil: u32,
     pub oil_parts: [u32; 5],
-    /// 带出这一夜的金币
+    /// 带出这一夜的铜钱
     pub gold: u32,
     /// 点亮的石灯笼、灯阵是否完整
     pub lanterns: u32,
@@ -362,7 +362,7 @@ impl FlowParams<'_, '_> {
         if source == ChestSource::MiniBoss {
             n = n.max(miniboss_chest_min(c));
         }
-        // 灯坠三选一：小头目按时间表必给，精英宝箱有一定概率附带；没有能给的灯坠时改给金币
+        // 灯坠三选一：小头目按时间表必给，精英宝箱有一定概率附带；没有能给的灯坠时改给铜钱
         if !self.setup.charm_pool.is_empty() {
             let charm = match source {
                 ChestSource::MiniBoss => miniboss_charm(c),
@@ -377,7 +377,7 @@ impl FlowParams<'_, '_> {
                 }
             }
         }
-        // 每个宝箱附带金币
+        // 每个宝箱附带铜钱
         let (lo, hi) = c.run.gold.chest;
         let gold = self.rng.0.get(Stream::Chest).range_f32(lo as f32, hi as f32 + 0.999).floor();
         self.progress.gold += gold * self.stats.get(Stat::GoldGain);
@@ -480,7 +480,7 @@ impl FlowParams<'_, '_> {
         self.refresh();
     }
 
-    /// 点灯奖励：回复生命 / 一次升级 / 金币（无法回复生命时不给回复）。
+    /// 点灯奖励：回复生命 / 一次升级 / 铜钱（无法回复生命时不给回复）。
     fn open_lamp(&mut self) {
         self.flow.lamp_queue -= 1;
         let mut v = Vec::with_capacity(3);
@@ -527,7 +527,7 @@ impl FlowParams<'_, '_> {
             self.flow.oil_bonus,
         ];
         let oil = (parts.iter().sum::<u32>() as f32 * self.stats.get(Stat::OilGain)).round() as u32;
-        // 天明时地上剩下的金币全部飞来；倒下时已经捡到的全部保留
+        // 天明时地上剩下的铜钱全部飞来；倒下时已经捡到的全部保留
         if won {
             self.progress.gold += self.coins.total();
             self.coins.0.clear();

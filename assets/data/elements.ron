@@ -16,7 +16,7 @@
     // 金·极境：追加飞剑每秒最多 30 把
     bonus_sword_rate: 30.0,
     elements: [
-        (id: Metal, name: "金", resonance: "锐", color: "#E9D9A6", tiers: [
+        (id: Metal, name: "金", star: "太白", resonance: "锐", color: "#E9D9A6", tiers: [
             (desc: "暴击率 +10%", effects: [Add(CritChance, 0.10)]),
             (desc: "暴击伤害 +50%", effects: [Add(CritMult, 0.50)]),
             (desc: "暴击时 50% 追加飞剑", superseded: true, effects: [
@@ -30,7 +30,7 @@
                                            turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
             ]),
         ]),
-        (id: Wood, name: "木", resonance: "生", color: "#6FD6A0", tiers: [
+        (id: Wood, name: "木", star: "岁星", resonance: "生", color: "#6FD6A0", tiers: [
             (desc: "每秒回复 0.5% 生命", effects: [Add(Regen, 0.005)]),
             (desc: "数量 +1", effects: [Add(Amount, 1.0)]),
             (desc: "击杀回复生命", effects: [Trigger(on: Kill, action: Heal(0.4))]),
@@ -39,7 +39,7 @@
                 Add(OverhealShield, 0.3),
             ]),
         ]),
-        (id: Water, name: "水", resonance: "凝", color: "#6FB8FF", tiers: [
+        (id: Water, name: "水", star: "辰星", resonance: "凝", color: "#6FB8FF", tiers: [
             (desc: "命中减速", effects: [Trigger(on: Hit, action: Slow(amount: 0.2, duration: 1.0))]),
             (desc: "命中有概率冰冻", effects: [Trigger(on: Hit, chance: 0.12, action: Freeze(duration: 1.0))]),
             (desc: "冰冻目标易伤并碎裂", superseded: true, effects: [
@@ -54,7 +54,7 @@
                 Trigger(on: Hit, only: ThirdHit, action: Freeze(duration: 1.0)),
             ]),
         ]),
-        (id: Fire, name: "火", resonance: "焚", color: "#FF8A3D", tiers: [
+        (id: Fire, name: "火", star: "荧惑", resonance: "焚", color: "#FF8A3D", tiers: [
             (desc: "命中附加灼烧", effects: [Trigger(on: Hit, action: Burn(duration: 3.0, ratio: 0.2))]),
             (desc: "灼烧可叠加", effects: [Add(BurnStacks, 4.0)]),
             (desc: "妖物死亡时爆炸", superseded: true, effects: [
@@ -64,7 +64,7 @@
                 Trigger(on: Kill, action: Explode(radius: 69.0, damage: (8.0, 4.0, 0.0), kind: Fire, ignite: 5.0)),
             ]),
         ]),
-        (id: Earth, name: "土", resonance: "固", color: "#C9925A", tiers: [
+        (id: Earth, name: "土", star: "镇星", resonance: "固", color: "#C9925A", tiers: [
             (desc: "周期获得护盾", effects: [Shield(amount: (20.0, 5.0, 0.0))]),
             (desc: "击退加倍", effects: [Mul(Knockback, 1.0)]),
             (desc: "护盾破碎时震地", superseded: true, effects: [
@@ -95,7 +95,7 @@
     reactions: [
         (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%",
          effect: Spread(count: 3, radius: 60.0, mult: 1.5, duration: 3.0, burn_ratio: 0.2)),
-        (a: Fire, b: Earth, id: "rongyan", name: "熔岩", desc: "地上留下熔岩 3 秒，持续伤害",
+        (a: Fire, b: Earth, id: "rongyan", name: "赤地", desc: "地面烧红 3 秒，持续伤害",
          effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 0.6, slow: 0.0, knock_mult: 1.0)),
         (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透",
          effect: Blades(count: 3, ratio: 0.5, pierce: 2, speed: 320.0, life: 0.8, hit_radius: 7.0)),

@@ -1,11 +1,11 @@
-//! 结算：天明 / 灯灭、本局数据、构筑、灯油（移植自网页版 lantern/game.js 的 endRun）。
+//! 结算：天明 / 夜未尽、本局数据、构筑、灯油（移植自网页版 lantern/game.js 的 endRun）。
 //! 灯油和最好成绩记进存档；跑分和观看回放不记。
 
 use bevy::prelude::*;
 
 use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
 use lantern_platform::{Actions, Profile};
-use lantern_sim::omens::omen_good;
+use lantern_sim::omens::{omen_good, omen_name};
 use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
 use lantern_view::atlas::AtlasDb;
 
@@ -57,7 +57,7 @@ fn spawn(
     } else {
         format!("倒在第 {}　·　离天明还有 {}", mmss(r.seconds), mmss(c.run.duration - r.seconds))
     };
-    let omen = setup.omen.as_ref().and_then(|o| c.omen_index(&o.id).map(|i| (o, &c.omens[i])));
+    let omen = setup.omen.as_ref().filter(|o| c.omen_index(&o.id).is_some());
     commands
         .spawn((
             DespawnOnExit(RunState::Over),
@@ -105,7 +105,7 @@ fn results_body(
     skin: &Skin,
     r: &lantern_sim::RunResult,
     sub: &str,
-    omen: Option<(&lantern_sim::OmenPick, &lantern_content::OmenDef)>,
+    omen: Option<&lantern_sim::OmenPick>,
     recorded: &Recorded,
     counts: bool,
     arsenal: &Arsenal,
@@ -118,15 +118,15 @@ fn results_body(
                 &fonts.title,
                 96.0,
                 if r.won { on_paper(hex("#FFD98A")) } else { CINNABAR },
-                if r.won { "天明" } else { "灯灭" },
+                if r.won { "天明" } else { "夜未尽" },
             ));
             p.spawn(text(&fonts.body, 20.0, INK, sub));
-            if let Some((pick, def)) = omen {
+            if let Some(pick) = omen {
                 p.spawn(text(
                     &fonts.body,
                     16.0,
                     INK_DIM,
-                    &format!("夜签「{}」　{}", def.name, omen_good(c, pick)),
+                    &format!("夜签「{}」　{}", omen_name(c, pick), omen_good(c, pick)),
                 ));
             }
             if let Some(rec) = recorded.record {
@@ -240,7 +240,7 @@ fn results_body(
                     18.0,
                     on_paper(hex("#E8C27A")),
                     &format!(
-                        "带出金币 {}　·　点亮石灯笼 {} / 5{}",
+                        "带出铜钱 {}　·　点亮石灯笼 {} / 5{}",
                         r.gold,
                         r.lanterns,
                         if r.lamps_complete { "　灯阵完整" } else { "" }

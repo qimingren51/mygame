@@ -21,6 +21,16 @@ pub fn draw_omens(content: &Content, seed: u64, n: usize) -> Vec<OmenPick> {
     out
 }
 
+/// 夜签显示的名字：“五星”抽到哪一系就显示哪颗星（docs/LORE.md）。
+pub fn omen_name(content: &Content, pick: &OmenPick) -> String {
+    let Some(i) = content.omen_index(&pick.id) else { return String::new() };
+    let def = &content.omens[i];
+    match pick.element {
+        Some(el) if def.pick_element => content.element(el).star.clone(),
+        _ => def.name.clone(),
+    }
+}
+
 /// 夜签好处的文字（{el} 换成选定的五行名）。
 pub fn omen_good(content: &Content, pick: &OmenPick) -> String {
     let Some(i) = content.omen_index(&pick.id) else { return String::new() };

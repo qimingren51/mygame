@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use lantern_content::Content;
 use lantern_platform::{Actions, Profile, Settings};
-use lantern_sim::omens::{draw_omens, omen_good};
+use lantern_sim::omens::{draw_omens, omen_good, omen_name};
 use lantern_sim::{AppState, GameContent, OmenPick};
 
 use bevy::ui::widget::NodeImageMode;
@@ -527,8 +527,9 @@ fn omen_panel(
                     card.spawn(focus(skin, "card_focus", i, 6.0));
                     card.spawn(text(&fonts.body, 14.0, INK_DIM, "夜签"));
                     let icon = format!("ui/icon_omen_{}", def.id);
-                    spawn_icon(card, db, fonts, Some(&icon), &def.name, accent, 84.0);
-                    card.spawn(text(&fonts.title, 48.0, accent, &def.name));
+                    let name = omen_name(c, pick);
+                    spawn_icon(card, db, fonts, Some(&icon), &name, accent, 84.0);
+                    card.spawn(text(&fonts.title, 48.0, accent, &name));
                     card.spawn(Node { flex_grow: 1.0, ..default() });
                     card.spawn((
                         text(&fonts.body, 16.0, hex("#2F6B45"), &format!("＋ {}", omen_good(c, pick))),

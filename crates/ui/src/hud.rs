@@ -123,8 +123,7 @@ pub(crate) fn spawn_hud(
     let omen = setup
         .omen
         .as_ref()
-        .and_then(|o| c.omen_index(&o.id))
-        .map_or(String::new(), |i| format!("　夜签 · {}", c.omens[i].name));
+        .map_or(String::new(), |o| format!("　夜签 · {}", lantern_sim::omens::omen_name(c, o)));
     commands.spawn((
         run.clone(),
         Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
@@ -297,7 +296,7 @@ pub(crate) fn update_hud(
         set(
             &mut t,
             format!(
-                "击杀 {}　金币 {}　石灯笼 {}/{}",
+                "击杀 {}　铜钱 {}　石灯笼 {}/{}",
                 progress.kills,
                 progress.gold.floor(),
                 lamps.0,

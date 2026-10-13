@@ -369,7 +369,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 反应留下的区域：熔岩（橙红的裂纹）、淤泥（暗褐的泥圈）
+    // ---- 反应留下的区域：赤地（橙红的裂纹）、淤泥（暗褐的泥圈）
     if let Some(zones) = &res.zones {
         for z in &zones.0 {
             let p = to_screen(z.pos);
@@ -489,7 +489,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 金币：金色的小火珠，被吸住时飞向主角
+    // ---- 铜钱：金色的小火珠，被吸住时飞向主角
     if let (Some(coins), Some(gem)) = (&res.coins, f.gem) {
         for c in &coins.0 {
             let p = lerp(c.prev, c.pos);

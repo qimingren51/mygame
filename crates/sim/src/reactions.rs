@@ -3,7 +3,7 @@
 //! - 法器命中给妖物打上自己五行的印记，持续 3 秒；带着印记的妖物被另一系命中时发生反应，印记清空。
 //! - 每只妖物每秒最多反应一次；冷却中被另一系命中只换印记。每一步最多结算 64 次反应，超出的丢弃。
 //! - 反应不带五行、不打印记、不暴击；伤害以触发那一击的加成区伤害为基数，之后再乘一次易伤。
-//! - 区域型反应（熔岩、淤泥）：同一类对同一只妖物只算最强的一块；每类全场最多 64 块，超出替换最老的。
+//! - 区域型反应（赤地、淤泥）：同一类对同一只妖物只算最强的一块；每类全场最多 64 块，超出替换最老的。
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -35,7 +35,7 @@ const LABEL_EVERY: f32 = 2.0;
 /// 灵草的拾取距离（加上主角半径）
 const HERB_REACH: f32 = 12.0;
 
-/// 地面区域：熔岩（持续伤害）、淤泥（减速、击退加倍）。
+/// 地面区域：赤地（持续伤害）、淤泥（减速、击退加倍）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Zone {
     pub kind: ZoneKind,
@@ -329,7 +329,7 @@ fn react(
     outbox.0.push(SimEvent::Reaction { kind: r as u8, pos, first, label });
 }
 
-/// 地面区域：淤泥每步减速并让击退加倍；熔岩每 0.5 秒结算一次伤害（同一只妖物只算最强的一块）。
+/// 地面区域：淤泥每步减速并让击退加倍；赤地每 0.5 秒结算一次伤害（同一只妖物只算最强的一块）。
 pub(crate) fn update_zones(
     content: Res<GameContent>,
     stats: Res<Stats>,

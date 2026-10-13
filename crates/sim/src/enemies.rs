@@ -16,7 +16,7 @@ const _: () = assert!(1 << SLOT_BITS == ENEMY_CAP);
 
 /// [`Enemies::tags`] 的标记位：小头目
 pub const TAG_MINIBOSS: u8 = 1;
-/// 精英“分”出来的小号（不算精英，不掉宝箱和金币，不再分裂）
+/// 精英“分”出来的小号（不算精英，不掉宝箱和铜钱，不再分裂）
 pub const TAG_CHILD: u8 = 2;
 /// “狂”已经发作
 pub const TAG_FRENZY: u8 = 4;

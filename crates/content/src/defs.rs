@@ -150,7 +150,7 @@ pub enum PlanEvent {
     Boss { enemy: String, spawn_mult: f32, barrier: f32 },
 }
 
-/// 金币（docs/BALANCE.md 第 10.2 节）：掉在地上要走过去捡，拾取范围会把它吸过来，天明时全部飞来。
+/// 铜钱（docs/BALANCE.md 第 10.2 节）：掉在地上要走过去捡，拾取范围会把它吸过来，天明时全部飞来。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GoldDef {
@@ -164,7 +164,7 @@ pub struct GoldDef {
     /// 大额掉落拆成每枚这么多
     pub coin_value: u32,
     pub scatter: f32,
-    /// 场上金币上限，超过后并入最近的一枚
+    /// 场上铜钱上限，超过后并入最近的一枚
     pub cap: u32,
 }
 
@@ -186,7 +186,7 @@ pub struct LanternsDef {
     pub oil: u32,
     /// 全部点亮时夜主的生命倍率
     pub boss_hp: f32,
-    /// 三选一奖励：回复生命上限的比例、金币
+    /// 三选一奖励：回复生命上限的比例、铜钱
     pub heal: f32,
     pub gold: u32,
 }
@@ -235,7 +235,7 @@ pub struct ChoicesDef {
     pub skip_oil: u32,
     /// 宝箱：随机数（加上运气）超过阈值时开出的个数，从高到低
     pub chest_odds: Vec<(f32, u32)>,
-    /// 局内灯坠三选一给几个选项；精英宝箱附带一次的概率；没有可给的灯坠时改给的金币
+    /// 局内灯坠三选一给几个选项；精英宝箱附带一次的概率；没有可给的灯坠时改给的铜钱
     pub charm_offers: u32,
     pub elite_charm: f32,
     pub charm_gold: u32,
@@ -509,7 +509,7 @@ pub struct DifficultyDef {
     pub effects: Vec<Effect>,
 }
 
-/// 金蟾：打死后散落相当于当前等级所需 xp_levels 倍的魂火，另掉金币。
+/// 金蟾：打死后散落相当于当前等级所需 xp_levels 倍的魂火，另掉铜钱。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CritterLoot {
@@ -801,7 +801,7 @@ pub enum ReactionEffect {
     /// 燎原：目标和附近 count 只妖物灼烧 duration 秒，层数取目标的（至少 1 层），
     /// 每层每秒 = max(目标的灼烧, 触发伤害 × burn_ratio × 灼烧倍率) × mult
     Spread { count: u32, radius: f32, mult: f32, duration: f32, burn_ratio: f32 },
-    /// 地面区域（熔岩、淤泥）：每秒伤害 = 触发伤害 × dps_ratio；区里的妖物减速、受到的击退乘 knock_mult
+    /// 地面区域（赤地、淤泥）：每秒伤害 = 触发伤害 × dps_ratio；区里的妖物减速、受到的击退乘 knock_mult
     Zone { zone: ZoneKind, radius: f32, duration: f32, dps_ratio: f32, slow: f32, knock_mult: f32 },
     /// 铸兵：从妖物身上四散迸出 count 片金刃，每片伤害 = 触发伤害 × ratio
     Blades { count: u32, ratio: f32, pierce: u32, speed: f32, life: f32, hit_radius: f32 },
@@ -833,6 +833,8 @@ pub struct ElementDef {
     pub name: String,
     /// 共鸣名：锐、生、凝、焚、固
     pub resonance: String,
+    /// 对应的星（太白、岁星、辰星、荧惑、镇星）：夜签“五星”抽到哪一系，界面就显示哪颗星
+    pub star: String,
     pub color: String,
     pub tiers: Vec<TierDef>,
 }
@@ -917,7 +919,7 @@ pub enum EventKind {
     Shrine { radius: f32, duration: f32 },
     /// 碰到后失去 cost 比例的生命上限（至少留 1），换宝箱
     Altar { radius: f32, cost: f32, chests: u32 },
-    /// 货郎：碰到后用金币买宝箱、灯坠三选一（买完就走）
+    /// 货郎：碰到后用铜钱买宝箱、灯坠三选一（买完就走）
     Merchant { radius: f32, chest_cost: u32, charm_cost: u32 },
     /// 一群妖物加一个守卫精英（守卫掉宝箱）
     Rift {
@@ -984,7 +986,7 @@ pub struct MetaNodeDef {
     pub insight: Option<Element>,
 }
 
-/// 局外属性（`attributes.ron`，docs/GAMEPLAY.md 第 11.2 节，docs/BALANCE.md 第 10.3 节）：用金币买。
+/// 局外属性（`attributes.ron`，docs/GAMEPLAY.md 第 11.2 节，docs/BALANCE.md 第 10.3 节）：用铜钱买。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AttributesDef {

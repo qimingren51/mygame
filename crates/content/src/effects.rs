@@ -136,7 +136,7 @@ pub enum Stat {
     EliteCount,
     /// 奇遇出现频率
     EventRate,
-    /// 灯油、金币收益倍率
+    /// 灯油、铜钱收益倍率
     OilGain,
     GoldGain,
 }

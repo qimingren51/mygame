@@ -1,4 +1,4 @@
-//! 单局层：点灯、金币、合围、夜主阶段与结界、更与精英词缀、货郎、燃灯充能、夜签规则
+//! 单局层：点灯、铜钱、合围、夜主阶段与结界、更与精英词缀、货郎、燃灯充能、夜签规则
 //! （docs/GAMEPLAY.md 第 8–12 节，docs/BALANCE.md 第 4、9、10、12 节）。
 
 mod common;
@@ -220,8 +220,8 @@ fn split_elites_break_into_four_small_ones() {
 fn boss_phases_bring_illusions_and_sweeps() {
     let c = content();
     let mut sim = quiet(6);
-    let boss = c.enemy_index("boss").unwrap();
-    let i = sim.spawn("boss", Vec2::new(300.0, 0.0)).unwrap();
+    let boss = c.enemy_index("jiuwei").unwrap();
+    let i = sim.spawn("jiuwei", Vec2::new(300.0, 0.0)).unwrap();
     let h = sim.enemies().handle(i);
     sim.world_mut().resource_mut::<Director>().boss = Some(h);
     let max = sim.enemies().max_hp[i];
@@ -246,7 +246,7 @@ fn boss_phases_bring_illusions_and_sweeps() {
 #[test]
 fn illusions_inside_the_reveal_circle_dispel() {
     let mut sim = quiet(6);
-    let i = sim.spawn("boss", Vec2::new(300.0, 0.0)).unwrap();
+    let i = sim.spawn("jiuwei", Vec2::new(300.0, 0.0)).unwrap();
     let h = sim.enemies().handle(i);
     sim.world_mut().resource_mut::<Director>().boss = Some(h);
     let max = sim.enemies().max_hp[i];

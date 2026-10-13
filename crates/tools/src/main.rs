@@ -243,7 +243,7 @@ fn balance(args: &[String]) -> Result<(), String> {
         println!(
             "  种子 {:>4}　{}　{:>4.0} 秒　击杀 {:>5}　{}",
             seed0 + k as u64,
-            if r.won { "天明" } else { "灯灭" },
+            if r.won { "天明" } else { "夜未尽" },
             r.secs,
             r.kills,
             r.build

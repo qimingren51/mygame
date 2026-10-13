@@ -1,4 +1,4 @@
-//! 存档 `save.ron`（docs/DESIGN.md 第 12 节）：灯油与金币、心灯、局外属性、解锁、成就、最好成绩、累计统计。
+//! 存档 `save.ron`（docs/DESIGN.md 第 12 节）：灯油与铜钱、心灯、局外属性、解锁、成就、最好成绩、累计统计。
 //!
 //! 和设置文件一样带版本号、原子写入、保留备份；文件损坏时改名保留，改用空存档。
 //! 读到 M2 的存档（版本 1）时按 docs/BALANCE.md 第 10.6 节迁移一次：要等内容数据加载好，
@@ -58,12 +58,12 @@ pub struct Profile {
     /// 灯油（心灯）：可以花的、累计得到的
     pub oil: u32,
     pub oil_total: u32,
-    /// 金币（局外属性）：可以花的、累计得到的
+    /// 铜钱（局外属性）：可以花的、累计得到的
     pub gold: u32,
     pub gold_total: u32,
     /// 心灯各节点的等级（按 `meta.ron` 的 ID）
     pub meta: BTreeMap<String, u32>,
-    /// 局外属性的等级（按 `attributes.ron` 的 ID）、买属性一共花掉的金币（全部退还时返还）
+    /// 局外属性的等级（按 `attributes.ron` 的 ID）、买属性一共花掉的铜钱（全部退还时返还）
     pub attributes: BTreeMap<String, u32>,
     pub attributes_spent: u32,
     /// 出发前手动开关过的属性；没写的按默认（招妖默认关闭）
@@ -180,7 +180,7 @@ impl Profile {
             return false;
         }
         if self.version < 2 {
-            // 锋芒、体魄、灵巧清零，退回花掉的灯油；气运保留等级；金币从 0 开始
+            // 锋芒、体魄、灵巧清零，退回花掉的灯油；祈福保留等级；铜钱从 0 开始
             for id in M2_REFUND {
                 if let Some(lv) = self.meta.remove(id) {
                     self.oil += M2_COSTS.iter().take(lv as usize).sum::<u32>();
@@ -259,7 +259,7 @@ impl Profile {
         true
     }
 
-    /// 全部退还：返还实际花掉的金币（包括涨价的部分）。返回退回了多少。
+    /// 全部退还：返还实际花掉的铜钱（包括涨价的部分）。返回退回了多少。
     pub fn refund_attributes(&mut self) -> u32 {
         let back = self.attributes_spent;
         self.gold += back;
@@ -327,7 +327,7 @@ impl Profile {
 
     // ---- 成就 ----
 
-    /// 发放一个成就的奖励（成就发的灯油和金币不乘倍率）。已经达成过的不再发。
+    /// 发放一个成就的奖励（成就发的灯油和铜钱不乘倍率）。已经达成过的不再发。
     pub fn grant(&mut self, content: &Content, k: usize) -> bool {
         let a = &content.achievements[k];
         if !self.achievements.insert(a.id.clone()) {
@@ -476,13 +476,13 @@ mod tests {
         let r3 = result(true, 600.0, 7000, 1300, 650);
         let got = p.record(&c, rec(&r3));
         assert_eq!(got.record, Some(NewRecord::FirstDawn));
-        // 通关一更：霜瓷灯、二更；不带属性通关再 500 金币
+        // 通关一更：霜瓷灯、二更；不带属性通关再 500 铜钱
         assert!(p.lamp_unlocked(&c, "frost") && p.tier == 2);
         assert!(p.achievements.contains("no_attributes"));
         assert_eq!(p.oil, 1760);
         assert_eq!(p.gold, 50 + 650 + 500);
 
-        // 心灯：气运第 1 级 300
+        // 心灯：祈福第 1 级 300
         assert!(p.buy_meta(&c, "luck"));
         assert_eq!((p.meta_level("luck"), p.oil), (1, 1460));
         // 属性：伤害 60，第二次买涨价 2%：生命 40 → 80 × 1.02 ≈ 80

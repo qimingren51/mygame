@@ -1,5 +1,5 @@
 // P0 的 15 个成就（docs/GAMEPLAY.md 第 13.1 节），名字见 docs/LORE.md 第 9.12 节。
-// 达成时弹提示、立即发奖；解锁的内容下一局起能用。成就发的灯油和金币不乘更和夜签的倍率。
+// 达成时弹提示、立即发奖；解锁的内容下一局起能用。成就发的灯油和铜钱不乘更和夜签的倍率。
 [
     (id: "first_night", name: "秉烛夜游", desc: "完成第 1 局（倒下也算）", when: Runs(1), rewards: [Basics]),
     (id: "second_night", name: "去而复返", desc: "完成第 2 局", when: Runs(2), rewards: [Lamp("mirror")]),

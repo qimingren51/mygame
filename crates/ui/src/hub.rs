@@ -21,7 +21,7 @@ const OIL: &str = "#FFD98A";
 /// 灯驿里的四个人物：(人物, 管什么, 字)
 pub(crate) const HUB: [(&str, &str, &str); 4] = [
     ("老灯匠", "心灯 · 收灯油", "匠"),
-    ("货郎", "属性 · 收金币", "货"),
+    ("货郎", "属性 · 收铜钱", "货"),
     ("灯童", "成就", "童"),
     ("说书人", "图鉴", "书"),
 ];
@@ -198,9 +198,9 @@ fn frame(
     });
 }
 
-/// 钱袋：灯油、金币。
+/// 钱袋：灯油、铜钱。
 pub(crate) fn purses(profile: &Profile) -> String {
-    format!("灯油 {}　·　金币 {}", profile.oil, profile.gold)
+    format!("灯油 {}　·　铜钱 {}", profile.oil, profile.gold)
 }
 
 pub(crate) fn hub_panel(
@@ -261,7 +261,7 @@ pub(crate) fn shop_panel(
 ) {
     let a = &c.attributes;
     let sub = format!(
-        "金币 {}　·　每买一级，所有属性涨价 {}%　·　已买 {} 级",
+        "铜钱 {}　·　每买一级，所有属性涨价 {}%　·　已买 {} 级",
         profile.gold,
         (a.inflation * 100.0).round(),
         profile.attributes_bought()
@@ -277,8 +277,8 @@ pub(crate) fn shop_panel(
                     let can = price.is_some_and(|x| profile.gold >= x);
                     let label = match price {
                         None => "已满".to_string(),
-                        Some(x) if can => format!("{x} 金币"),
-                        Some(x) => format!("{x} 金币　差 {}", x - profile.gold),
+                        Some(x) if can => format!("{x} 铜钱"),
+                        Some(x) => format!("{x} 铜钱　差 {}", x - profile.gold),
                     };
                     let mut row = g.spawn(Node {
                         width: percent(100.0 / SHOP_COLUMNS as f32),
@@ -315,7 +315,7 @@ pub(crate) fn shop_panel(
         refund.with_children(|r| {
             r.spawn(focus(skin, "focus_ring", i, 2.0));
             let s = if profile.attributes_spent > 0 {
-                format!("全部退还（返还 {} 金币）", profile.attributes_spent)
+                format!("全部退还（返还 {} 铜钱）", profile.attributes_spent)
             } else {
                 "全部退还".to_string()
             };
@@ -337,7 +337,7 @@ fn reward_text(c: &Content, r: &Reward) -> String {
         Reward::Tier(t) => {
             c.difficulty.get(*t as usize - 1).map_or("下一更", |d| d.name.as_str()).to_string()
         }
-        Reward::Gold(n) => format!("{n} 金币"),
+        Reward::Gold(n) => format!("{n} 铜钱"),
         Reward::Oil(n) => format!("{n} 灯油"),
     }
 }
@@ -444,7 +444,7 @@ pub(crate) fn codex_panel(
             ),
             format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
             format!(
-                "累计金币 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
+                "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
                 t.gold, t.oil, t.lanterns, t.evolutions
             ),
         ];

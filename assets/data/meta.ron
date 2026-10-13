@@ -1,12 +1,12 @@
 // 心灯（docs/GAMEPLAY.md 第 11.3 节，花费见 docs/BALANCE.md 第 10.4 节）：用灯油点亮，只管功能和规则；
-// 数值加成在 attributes.ron（金币）。第 n 级花费 = round(base_cost × 1.6^(n−1) / 10) × 10。
+// 数值加成在 attributes.ron（铜钱）。第 n 级花费 = round(base_cost × 1.6^(n−1) / 10) × 10。
 // 悟·五行：出发前从已点亮的悟里选一个生效，那一系的升级选项权重 ×1.15。
 #![enable(implicit_some)]
 (
     cost_exp: 1.6,
     cost_round: 10.0,
     nodes: [
-        (id: "luck", name: "气运", icon: "运", desc: "宝箱多开概率 +3%；1、3、5 级各多一次重抽", max_level: 5,
+        (id: "luck", name: "祈福", icon: "祈", desc: "宝箱多开概率 +3%；1、3、5 级各多一次重抽", max_level: 5,
          base_cost: 300.0, per_level: [Add(ChestLuck, 0.03)],
          levels: [[Add(Rerolls, 1.0)], [], [Add(Rerolls, 1.0)], [], [Add(Rerolls, 1.0)]]),
         (id: "seal", name: "封印", icon: "封", desc: "每级封印 +1 次", max_level: 3,
@@ -29,7 +29,7 @@
          base_cost: 1200.0, insight: Fire),
         (id: "wu_earth", name: "悟·土", icon: "土", desc: "出发前选它：土系选项更容易出现", max_level: 1,
          base_cost: 1200.0, insight: Earth),
-        (id: "oil", name: "油灯", icon: "油", desc: "每级灯油收益 +5%", max_level: 3,
+        (id: "oil", name: "香火", icon: "香", desc: "每级灯油收益 +5%", max_level: 3,
          base_cost: 800.0, per_level: [Mul(OilGain, 0.05)]),
     ],
 )
