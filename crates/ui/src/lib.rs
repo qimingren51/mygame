@@ -13,6 +13,7 @@ mod choice;
 mod describe;
 mod hub;
 mod hud;
+mod hud_fx;
 mod markers;
 mod moments;
 mod pause;
@@ -93,6 +94,7 @@ impl Plugin for UiPlugin {
         markers::register(app);
         toasts::register(app);
         moments::register(app);
+        hud_fx::register(app);
         results::register(app);
         pause::register(app);
     }

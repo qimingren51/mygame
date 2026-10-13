@@ -473,7 +473,7 @@ pub(crate) fn hero_glow(
     frames: Res<ActorFrames>,
     stats: Option<Res<Stats>>,
     outbox: Res<lantern_sim::SimOutbox>,
-    q: Query<(&Transform, &HeroView)>,
+    q: Query<(&Transform, &HeroView, Option<&lantern_sim::Health>)>,
     mut flare: ResMut<LanternFlare>,
     mut glow: ResMut<GlowRequests>,
 ) {
@@ -481,10 +481,17 @@ pub(crate) fn hero_glow(
     flare.0 = (flare.0 + picked as f32 * 0.12).min(1.0);
     flare.0 *= (-time.delta_secs() * 5.0).exp();
     let t = time.elapsed_secs();
-    let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.0;
+    // 生命低于三成时灯焰摇曳：光圈忽大忽小（docs/GAMEPLAY.md 第 4.4、14 节）
+    let low = q
+        .iter()
+        .next()
+        .and_then(|(_, _, h)| h)
+        .map_or(0.0, |h| ((0.3 - h.hp / h.max.max(1.0)) / 0.2).clamp(0.0, 1.0));
+    let gutter = low * (0.08 * (t * 11.0).sin() + 0.06 * (t * 23.7).sin() - 0.1).min(0.0);
+    let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.0 + gutter;
     let (warm, base) = LANTERN_LIGHT;
     let radius = stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker;
-    for (tf, view) in &q {
+    for (tf, view, _) in &q {
         // 灯的光色淡淡地染进暖光里，纸面不至于整片变色
         let color = view.light.map_or(warm, |c| mix(warm, c, 0.45));
         let pos = tf.translation.truncate();
