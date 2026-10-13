@@ -123,7 +123,45 @@ pub struct RunDef {
     pub choices: ChoicesDef,
     pub combo: ComboDef,
     pub oil: OilDef,
+    /// 10 分钟以后的刷怪、生命曲线
+    pub late: LateDef,
+    pub endless: EndlessDef,
     pub bench: BenchDef,
+}
+
+impl RunDef {
+    /// 第 m 分钟的曲线值：after 分钟以前照 q，之后 = after 时的值 × (1 + slope × (m − after))。
+    pub fn late_at(&self, q: Quad, slope: f32, m: f32) -> f32 {
+        let after = self.late.after;
+        if m <= after { q.at(m) } else { q.at(after) * (1.0 + slope * (m - after)) }
+    }
+}
+
+/// 10 分钟以后（无尽夜、长更、终章）刷怪和生命改成线性增长（docs/BALANCE.md 第 4.1 节）。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LateDef {
+    /// 从第几分钟起
+    pub after: f32,
+    /// 刷怪、杂兵和精英生命每分钟涨 after 时的值的这么多
+    pub spawn: f32,
+    pub hp: f32,
+}
+
+/// 无尽夜（docs/BALANCE.md 第 4.7 节）：夜主倒下不天明。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EndlessDef {
+    /// 10 分钟以后每隔这么多分钟一次妖潮（照时间表里的妖潮），妖潮结束时夜主再来
+    pub every: f32,
+    /// 第 k 次再来的夜主生命 × boss_growth^k
+    pub boss_growth: f32,
+    /// 10 分钟以后的灯油：每秒、每次击杀、每个再来的夜主（第一个夜主照常算 oil.win）
+    pub oil_per_second: f32,
+    pub oil_per_kill: f32,
+    pub oil_boss: u32,
+    /// 10 分钟以后铜钱掉落乘它
+    pub gold: f32,
 }
 
 /// 时间表的一项：在 at 范围内随机一个时刻出场。

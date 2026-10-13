@@ -74,8 +74,8 @@ fn read_events(
     let mut oldest: Vec<(Entity, f32)> = toasts.iter().map(|(e, t)| (e, t.t)).collect();
     oldest.sort_by(|a, b| b.1.total_cmp(&a.1));
     for ev in &outbox.0 {
-        // 夜主伏诛之后让给天明的演出，清掉现有的提示，也不再出新的
-        if matches!(ev, SimEvent::BossDefeated { .. }) {
+        // 夜主伏诛之后让给天明的演出，清掉现有的提示，也不再出新的（无尽夜不天明，照常提示）
+        if matches!(ev, SimEvent::BossDefeated { dawn: true, .. }) {
             for (e, _) in &toasts {
                 commands.entity(e).despawn();
             }
@@ -106,6 +106,9 @@ fn read_events(
             }
             SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
             SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
+            SimEvent::BossDefeated { dawn: false, .. } => {
+                msg("夜主退去", "夜还没完：下一次妖潮过后它会再来，更难缠", hex("#FFD98A"), true)
+            }
             // 夜主登场、伏诛有专门的演出（moments.rs）
             SimEvent::Resonance { element, tier } => {
                 let e = c.element(element);

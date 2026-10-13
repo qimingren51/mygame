@@ -49,6 +49,17 @@ pub struct LastPick {
     pub charm: Option<String>,
     pub tier: u8,
     pub insight: Option<Element>,
+    /// 走无尽夜
+    pub endless: bool,
+}
+
+/// 无尽夜的最长一次。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EndlessBest {
+    pub seconds: f32,
+    pub kills: u32,
+    pub bosses: u32,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,6 +94,8 @@ pub struct Profile {
     pub reactions: u32,
     pub last: LastPick,
     pub best: Best,
+    /// 无尽夜的最长存活（按更；以后加了地区再按地区分开）
+    pub endless: BTreeMap<u8, EndlessBest>,
     pub totals: Totals,
     pub runs: u32,
     pub wins: u32,
@@ -111,6 +124,7 @@ impl Default for Profile {
             reactions: 0,
             last: LastPick::default(),
             best: Best::default(),
+            endless: BTreeMap::new(),
             totals: Totals::default(),
             runs: 0,
             wins: 0,
@@ -135,6 +149,8 @@ pub enum NewRecord {
     FirstDawn,
     Kills,
     Survival,
+    /// 无尽夜在这一更撑得最久的一次
+    Endless,
 }
 
 /// 记下一局之后的结果：刷新的记录、新达成的成就（`achievements.ron` 下标）。
@@ -315,6 +331,11 @@ impl Profile {
         s.meta = self.meta.clone();
         s.attributes = self.active_attributes(content);
         s.tier = self.last.tier.clamp(1, self.tier.max(1));
+        // 无尽夜只能选通关过的更
+        if self.last.endless && self.endless_unlocked() {
+            s.mode = RunMode::Endless;
+            s.tier = s.tier.min(self.cleared);
+        }
         s.lamp = self.last.lamp.clone().filter(|id| self.lamp_unlocked(content, id));
         if self.basics {
             s.charms =
@@ -380,10 +401,23 @@ impl Profile {
     // ---- 一局结束 ----
 
     /// 记下一局的结果：货币、统计、最好成绩、成就。刷新的记录同时有几项时按 天明 > 击杀 > 存活 取一项。
+    /// 无尽夜：通关青丘一更后开放（docs/GAMEPLAY.md 第 3.4 节）。
+    pub fn endless_unlocked(&self) -> bool {
+        self.cleared >= 1
+    }
+
     pub fn record(&mut self, content: &Content, rec: RunRecord) -> Recorded {
         let r = rec.result;
         let b = &mut self.best;
-        let record = if r.won && !b.won {
+        let record = if r.endless {
+            // 无尽夜只记在自己的榜上
+            let e = self.endless.entry(rec.tier).or_default();
+            let new = r.seconds > e.seconds;
+            if new {
+                *e = EndlessBest { seconds: r.seconds, kills: r.kills, bosses: r.bosses };
+            }
+            new.then_some(NewRecord::Endless)
+        } else if r.won && !b.won {
             Some(NewRecord::FirstDawn)
         } else if r.kills > b.kills {
             Some(NewRecord::Kills)
@@ -392,9 +426,11 @@ impl Profile {
         } else {
             None
         };
-        b.seconds = b.seconds.max(r.seconds);
-        b.kills = b.kills.max(r.kills);
-        b.won |= r.won;
+        if !r.endless {
+            b.seconds = b.seconds.max(r.seconds);
+            b.kills = b.kills.max(r.kills);
+            b.won |= r.won;
+        }
         self.oil += r.oil;
         self.oil_total += r.oil;
         self.gold += r.gold;
@@ -445,6 +481,8 @@ mod tests {
             lanterns: 0,
             lamps_complete: false,
             feats: Feats::default(),
+            endless: false,
+            bosses: u32::from(won),
         }
     }
 
@@ -495,13 +533,31 @@ mod tests {
         p.toggle_attribute(&c, "damage");
         assert_eq!(p.active_attributes(&c).keys().collect::<Vec<_>>(), ["health"]);
 
-        p.last =
-            LastPick { lamp: Some("frost".into()), charm: Some("elixir".into()), tier: 2, insight: None };
+        p.last = LastPick {
+            lamp: Some("frost".into()),
+            charm: Some("elixir".into()),
+            tier: 2,
+            ..Default::default()
+        };
         let s = p.run_setup(&c, 7);
         assert_eq!((s.lamp.as_deref(), s.tier, s.charms.len()), (Some("frost"), 2, 1));
         assert!(
             s.charm_pool.iter().any(|id| id == "elixir") && !s.charm_pool.iter().any(|id| id == "five_coins")
         );
+
+        // 无尽夜：通关一更后开放，只能选通关过的更；记在自己的榜上
+        assert!(p.endless_unlocked());
+        p.last.endless = true;
+        let s = p.run_setup(&c, 8);
+        assert_eq!((s.mode, s.tier), (RunMode::Endless, 1));
+        let best = p.best.clone();
+        let e = RunResult { endless: true, bosses: 2, ..result(false, 1300.0, 40000, 2900, 900) };
+        assert_eq!(p.record(&c, rec(&e)).record, Some(NewRecord::Endless));
+        assert_eq!(p.endless[&1], EndlessBest { seconds: 1300.0, kills: 40000, bosses: 2 });
+        assert_eq!(p.best, best);
+        let shorter = RunResult { endless: true, ..result(false, 900.0, 20000, 1500, 400) };
+        assert_eq!(p.record(&c, rec(&shorter)).record, None);
+        p.last.endless = false;
 
         p.save().unwrap();
         let mut q = Profile::load(&dir);

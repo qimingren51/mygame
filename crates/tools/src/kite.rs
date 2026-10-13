@@ -7,6 +7,7 @@
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
 //!       [--skill novice|regular|expert|circle] [--lamp <id>] [--school <流派>|all] [--combo <反应>|all]
 //!       [--csv <目录>]（每 30 秒一行的 timeline.csv、每局一行的 runs.csv）[--jobs <线程数>]
+//!       [--endless]（无尽夜，最多打 40 分钟）
 //!       [--record <文件>]（把第一局存成回放，可以用 `lantern --replay <文件>` 在游戏里看）
 
 use std::collections::BTreeMap;
@@ -320,6 +321,8 @@ struct Cfg<'a> {
     skill: Skill,
     skill_name: &'a str,
     plan: Option<&'a Plan>,
+    /// 无尽夜
+    endless: bool,
 }
 
 /// 每 30 秒一行（docs/BALANCE.md 第 11 节）。
@@ -367,7 +370,12 @@ struct KiteRun {
     reactions: Vec<u32>,
     /// 结束时的法器、心法、灯坠
     build: [String; 3],
+    /// 打倒的夜主
+    bosses: u32,
 }
+
+/// 无尽夜最多打这么多秒。
+const ENDLESS_CAP: f32 = 40.0 * 60.0;
 
 /// 伤害来源里除了法器和反应的那些，CSV 的列名。
 const OTHERS: [(Source, &str); 9] = [
@@ -451,7 +459,7 @@ fn screen_hp(sim: &SimHarness) -> f64 {
 }
 
 fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> KiteRun {
-    let mut setup = RunSetup::new(seed, RunMode::Normal);
+    let mut setup = RunSetup::new(seed, if cfg.endless { RunMode::Endless } else { RunMode::Normal });
     setup.tier = cfg.tier;
     setup.lamp = cfg.lamp.map(str::to_string);
     meta_setup(&mut setup, cfg.meta);
@@ -470,10 +478,14 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
     let (mut evolutions, mut alive7, mut surge_peak, mut ults, mut ults_total) =
         (Vec::new(), None, 0u32, 0, 0);
     let (mut last_hurt, mut cause, mut taiji) = (None, None, None);
+    // 第一个夜主：登场时刻、从登场到倒下用了多久
+    let (mut boss_at, mut boss_time) = (None, None);
     let mut tiers = [[None; 4]; 5];
     let mut reactions = vec![0u32; content.elements.reactions.len()];
     let (mut last_dmg, mut last_spawned, mut taken) = (by_column(content, sim.damage_log()), 0.0, 0.0);
-    while !sim.is_over() && sim.tick() < 15 * 60 * hz {
+    // 一夜最多打 15 分钟；无尽夜最多 40 分钟（再长就算撑满）
+    let cap = if cfg.endless { ENDLESS_CAP } else { 15.0 * 60.0 } as u64 * hz;
+    while !sim.is_over() && sim.tick() < cap {
         let tick = sim.tick();
         let (input, cmds) = match sim.phase() {
             SimPhase::Play if cfg.skill.circle => bot::input(tick),
@@ -506,6 +518,12 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
                     taiji.get_or_insert(now);
                 }
                 SimEvent::Reaction { kind, .. } => reactions[kind as usize] += 1,
+                SimEvent::BossArrived { .. } => {
+                    boss_at.get_or_insert(now);
+                }
+                SimEvent::BossDefeated { .. } if boss_time.is_none() => {
+                    boss_time = boss_at.map(|a| now - a);
+                }
                 _ => {}
             }
         }
@@ -544,8 +562,9 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         }
     }
     let won = sim.flow().result.as_ref().is_some_and(|r| r.won);
+    // 打满时长还没倒下的局没有结算，从无尽夜的进度里读
+    let bosses = sim.world().resource::<Director>().endless.map_or(u32::from(won), |e| e.downs);
     let secs = sim.tick() as f32 / TICK_HZ as f32;
-    let since = sim.world().resource::<Director>().boss_since;
     let join = |v: Vec<String>| v.join(" ");
     let build = [
         join(
@@ -575,7 +594,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         level: sim.progress().level,
         rows,
         evolutions,
-        boss_time: won.then_some(secs - since),
+        boss_time,
         alive7,
         surge_peak,
         ults,
@@ -587,6 +606,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         taiji,
         reactions,
         build,
+        bosses,
     }
 }
 
@@ -632,7 +652,13 @@ fn mmss(s: f32) -> String {
 }
 
 /// 打印一组局的汇总；返回对照表的一行。
-fn report(content: &Content, label: &str, all: &[KiteRun], plan: Option<&Plan>) -> Vec<String> {
+fn report(
+    content: &Content,
+    label: &str,
+    all: &[KiteRun],
+    plan: Option<&Plan>,
+    endless: bool,
+) -> Vec<String> {
     let n = all.len().max(1) as f32;
     let wins = all.iter().filter(|r| r.won).count();
     let early = all.iter().filter(|r| !r.won && r.secs < 180.0).count();
@@ -644,6 +670,19 @@ fn report(content: &Content, label: &str, all: &[KiteRun], plan: Option<&Plan>) 
         mmss(median(all.iter().map(|r| r.secs).collect())),
         median(all.iter().map(|r| r.kills as f32).collect())
     );
+    if endless {
+        let over = |m: f32| 100.0 * all.iter().filter(|r| r.secs >= m * 60.0).count() as f32 / n;
+        println!(
+            "无尽夜：存活中位 {}；撑过 15 分 {:.0}%、20 分 {:.0}%、25 分 {:.0}%、撑满 {} {:.0}%；打退夜主中位 {:.0} 次",
+            mmss(median(all.iter().map(|r| r.secs).collect())),
+            over(15.0),
+            over(20.0),
+            over(25.0),
+            mmss(ENDLESS_CAP),
+            over(ENDLESS_CAP / 60.0),
+            median(all.iter().map(|r| r.bosses as f32).collect())
+        );
+    }
     let lv = |i: usize| {
         let v: Vec<f32> = all.iter().filter_map(|r| r.rows.get(i).map(|row| row.level as f32)).collect();
         let len = v.len();
@@ -773,13 +812,14 @@ fn opt(v: Option<f32>) -> String {
 fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>)]) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("建不了 {}：{e}", dir.display()))?;
     let cols = columns(content);
-    let mut tl = String::from("bot,skill,meta,tier,seed,t,level,kills,alive,spawned_hp,taken,clear_secs");
+    let mut tl =
+        String::from("bot,mode,skill,meta,tier,seed,t,level,kills,alive,spawned_hp,taken,clear_secs");
     for c in &cols {
         let _ = write!(tl, ",dmg_{c}");
     }
     tl.push('\n');
     let mut rs = String::from(
-        "bot,skill,meta,tier,lamp,seed,won,secs,cause,kills,level,evolutions,first_evolution,boss_secs,ults,ults_before_930,lamps,alive_7min,surge_peak",
+        "bot,mode,skill,meta,tier,lamp,seed,won,secs,cause,kills,level,evolutions,first_evolution,boss_secs,bosses,ults,ults_before_930,lamps,alive_7min,surge_peak",
     );
     for e in Element::ALL {
         for t in 1..=4 {
@@ -792,7 +832,8 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
     }
     rs.push_str(",weapons,passives,charms\n");
     for (label, cfg, all) in groups {
-        let head = [cell(label), cell(cfg.skill_name), cell(cfg.meta), cell(cfg.tier)].join(",");
+        let mode = if cfg.endless { "endless" } else { "night" };
+        let head = [cell(label), cell(mode), cell(cfg.skill_name), cell(cfg.meta), cell(cfg.tier)].join(",");
         for r in all {
             for row in &r.rows {
                 let _ = write!(
@@ -827,7 +868,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
             };
             let _ = write!(
                 rs,
-                "{head},{},{},{},{:.1},{},{},{},{},{},{},{},{},{},{},{}",
+                "{head},{},{},{},{:.1},{},{},{},{},{},{},{},{},{},{},{},{}",
                 cell(&r.lamp),
                 r.seed,
                 u8::from(r.won),
@@ -838,6 +879,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
                 cell(evo.join(" ")),
                 opt(r.evolutions.first().map(|e| e.0)),
                 opt(r.boss_time),
+                r.bosses,
                 r.ults_total,
                 r.ults,
                 r.lamps,
@@ -900,13 +942,16 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
             );
         }
     }
+    let endless = args.iter().any(|a| a == "--endless");
     let mut groups: Vec<(String, Cfg, Vec<KiteRun>)> = Vec::new();
     let start = Instant::now();
     println!(
-        "风筝机器人每组 {runs} 局，手法 {skill_name}，{tier} 更，局外成长 {meta}，灯 {}，{jobs} 个线程",
+        "风筝机器人每组 {runs} 局，{}，手法 {skill_name}，{tier} 更，局外成长 {meta}，灯 {}，{jobs} 个线程",
+        if endless { "无尽夜" } else { "夜行" },
         lamp.as_deref().unwrap_or("默认")
     );
-    let base = Cfg { tier, meta: &meta, lamp: lamp.as_deref(), skill, skill_name: &skill_name, plan: None };
+    let base =
+        Cfg { tier, meta: &meta, lamp: lamp.as_deref(), skill, skill_name: &skill_name, plan: None, endless };
     let todo: Vec<Option<&Plan>> =
         if plans.is_empty() { vec![None] } else { plans.iter().map(Some).collect() };
     let mut table = Vec::new();
@@ -915,7 +960,7 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
         let label = plan.map_or_else(|| "不限流派".to_string(), |p| p.name.clone());
         let rec = record.as_deref().filter(|_| g == 0);
         let all = run_all(&content, seed0, runs, jobs, cfg, rec);
-        table.push(report(&content, &label, &all, plan));
+        table.push(report(&content, &label, &all, plan, endless));
         groups.push((label, cfg, all));
     }
     if table.len() > 1 {

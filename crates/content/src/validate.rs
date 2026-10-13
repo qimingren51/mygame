@@ -420,6 +420,25 @@ impl Content {
             }
         }
         c.non_negative("run.ron", &[("win_delay", r.win_delay)])?;
+        c.positive("run.ron", &[("late.after", r.late.after)])?;
+        c.non_negative("run.ron", &[("late.spawn", r.late.spawn), ("late.hp", r.late.hp)])?;
+        let e = &r.endless;
+        c.positive("run.ron", &[("endless.every", e.every)])?;
+        c.non_negative(
+            "run.ron",
+            &[("endless.oil_per_second", e.oil_per_second), ("endless.oil_per_kill", e.oil_per_kill)],
+        )?;
+        c.fraction("run.ron", "endless.gold", e.gold)?;
+        if e.boss_growth < 1.0 {
+            return c.fail("run.ron", "endless.boss_growth 不能小于 1".into());
+        }
+        // 无尽夜照时间表里的妖潮和夜主再来
+        let has = |f: fn(&crate::PlanEvent) -> bool| r.schedule.iter().any(|s| f(&s.event));
+        if !has(|e| matches!(e, crate::PlanEvent::Surge { .. }))
+            || !has(|e| matches!(e, crate::PlanEvent::Boss { .. }))
+        {
+            return c.fail("run.ron", "schedule 里要有妖潮和夜主（无尽夜照它们再来）".into());
+        }
         let g = &r.gems;
         c.positive("run.ron", &[("gems.accel", g.accel), ("gems.max_speed", g.max_speed)])?;
         if g.cap == 0 || g.elite_split == 0 {

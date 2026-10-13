@@ -827,7 +827,9 @@ pub(crate) fn process_deaths(
     let frozen_xp = 1.0 + stats.get(Stat::FrozenXp);
     let gd = &c.run.gold;
     let drops = &c.run.drops;
-    let gold_mult = stats.get(Stat::GoldGain);
+    // 无尽夜 10 分钟以后铜钱减半
+    let late = director.endless.is_some() && minute >= c.run.late.after;
+    let gold_mult = stats.get(Stat::GoldGain) * if late { c.run.endless.gold } else { 1.0 };
     // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次。
     // 更和夜签改了妖物生命、刷怪速度时分母一起乘上，充能节奏不随难度变快（docs/BALANCE.md 第 2.6 节）
     let clear = crate::spawn::base_spawn_hp(c, minute)
@@ -863,6 +865,9 @@ pub(crate) fn process_deaths(
         }
         let p = &mut *progress;
         p.kills += 1;
+        if late && let Some(e) = &mut director.endless {
+            e.late_kills += 1;
+        }
         p.combo = if p.combo_t > 0.0 { p.combo + 1 } else { 1 };
         p.combo_t = c.run.combo.window;
         p.best_combo = p.best_combo.max(p.combo);
@@ -960,9 +965,19 @@ pub(crate) fn process_deaths(
         if def.rank == Rank::Boss {
             director.boss = None;
             director.barrier = None;
-            flow.won_at = Some(t + c.run.win_delay);
+            // 无尽夜：夜主倒下不天明，夜续下去
+            let dawn = match &mut director.endless {
+                Some(e) => {
+                    e.downs += 1;
+                    false
+                }
+                None => {
+                    flow.won_at = Some(t + c.run.win_delay);
+                    true
+                }
+            };
             coins.pull_all();
-            outbox.0.push(SimEvent::BossDefeated { pos: d.pos });
+            outbox.0.push(SimEvent::BossDefeated { pos: d.pos, dawn });
         }
     }
 }

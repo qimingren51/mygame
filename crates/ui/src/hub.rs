@@ -32,6 +32,8 @@ pub(crate) const SHOP_COLUMNS: usize = 2;
 /// 出发前准备的一行。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrepRow {
+    /// 夜行 / 无尽夜（通关一更后出现）
+    Mode,
     Tier,
     Lamp,
     Charm,
@@ -43,7 +45,11 @@ pub(crate) enum PrepRow {
 
 /// 准备面板里的行：悟只在点亮过时出现；属性只列买过的。
 pub(crate) fn prep_rows(c: &Content, profile: &Profile) -> Vec<PrepRow> {
-    let mut v = vec![PrepRow::Tier, PrepRow::Lamp, PrepRow::Charm];
+    let mut v = Vec::new();
+    if profile.endless_unlocked() {
+        v.push(PrepRow::Mode);
+    }
+    v.extend([PrepRow::Tier, PrepRow::Lamp, PrepRow::Charm]);
     if !profile.insights(c).is_empty() {
         v.push(PrepRow::Insight);
     }
@@ -67,11 +73,18 @@ pub(crate) fn normalize_last(c: &Content, profile: &mut Profile) {
         .or_else(|| c.lamps.iter().find(|l| l.initial).map(|l| l.id.clone()));
     let charm = last.charm.clone().filter(|id| profile.charm_unlocked(c, id));
     let insight = last.insight.filter(|e| profile.insights(c).contains(e));
-    let tier = last.tier.clamp(1, tier);
+    let endless = last.endless && profile.endless_unlocked();
+    let tier = last.tier.clamp(1, max_tier(profile, endless).min(tier));
+    profile.last.endless = endless;
     profile.last.lamp = lamp;
     profile.last.charm = charm;
     profile.last.insight = insight;
     profile.last.tier = tier;
+}
+
+/// 能选到第几更：无尽夜只能选通关过的更。
+fn max_tier(profile: &Profile, endless: bool) -> u8 {
+    if endless { profile.cleared.max(1) } else { profile.tier.max(1) }
 }
 
 /// 在可选项里前后挪一格（循环）。
@@ -119,8 +132,12 @@ pub(crate) fn prep_input(
     match rows[ui.selected] {
         PrepRow::Go if pressed => return PrepAction::Go,
         PrepRow::Go => return PrepAction::None,
+        PrepRow::Mode => {
+            profile.last.endless = !profile.last.endless;
+            profile.last.tier = profile.last.tier.min(max_tier(profile, profile.last.endless));
+        }
         PrepRow::Tier => {
-            let tiers: Vec<u8> = (1..=profile.tier.max(1)).collect();
+            let tiers: Vec<u8> = (1..=max_tier(profile, profile.last.endless)).collect();
             profile.last.tier = cycle(&tiers, &profile.last.tier, dir);
         }
         PrepRow::Lamp => {
@@ -388,6 +405,17 @@ pub(crate) fn achievements_panel(
     });
 }
 
+/// 无尽夜各更的最长存活；没打过时是空的。
+fn endless_line(c: &Content, profile: &Profile) -> String {
+    let v: Vec<String> = profile
+        .endless
+        .iter()
+        .filter(|(_, b)| b.seconds > 0.0)
+        .map(|(&t, b)| format!("{} {}", tier_name(c, t), mmss(f64::from(b.seconds))))
+        .collect();
+    if v.is_empty() { String::new() } else { format!("无尽夜最长　{}", v.join("　·　")) }
+}
+
 fn mmss(secs: f64) -> String {
     let s = secs.max(0.0) as u64;
     if s >= 3600 {
@@ -443,13 +471,14 @@ pub(crate) fn codex_panel(
                 tier_name(c, profile.cleared)
             ),
             format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
+            endless_line(c, profile),
             format!(
                 "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
                 t.gold, t.oil, t.lanterns, t.evolutions
             ),
         ];
-        for l in lines {
-            panel.spawn(text(&fonts.body, 16.0, INK, &l));
+        for l in lines.iter().filter(|l| !l.is_empty()) {
+            panel.spawn(text(&fonts.body, 16.0, INK, l));
         }
     });
 }
@@ -492,9 +521,30 @@ pub(crate) fn prep_panel(
                     String,
                     Option<(String, String)>,
                 ) = match *row {
+                    PrepRow::Mode if last.endless => {
+                        let best = profile
+                            .endless
+                            .get(&last.tier)
+                            .filter(|b| b.seconds > 0.0)
+                            .map_or(String::new(), |b| {
+                                format!("　这一更最长 {}", mmss(f64::from(b.seconds)))
+                            });
+                        (
+                            "玩法",
+                            "无尽夜".into(),
+                            on_paper(hex("#B07CF0")),
+                            format!("夜主倒下也不天明，每 5 分钟妖潮过后它再来，一次比一次难缠{best}"),
+                            None,
+                        )
+                    }
+                    PrepRow::Mode => {
+                        ("玩法", "夜行".into(), INK, "一夜 10 分钟，击败夜主迎来天明".into(), None)
+                    }
                     PrepRow::Tier => {
                         let d = c.difficulty.get(last.tier as usize - 1);
-                        let locked = if profile.tier < c.difficulty.len() as u8 {
+                        let locked = if last.endless {
+                            "　（无尽夜只能选通关过的更）"
+                        } else if profile.tier < c.difficulty.len() as u8 {
                             "　（通关上一更开放下一更）"
                         } else {
                             ""

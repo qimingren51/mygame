@@ -163,6 +163,10 @@ pub struct RunResult {
     pub lamps_complete: bool,
     /// 成就要看的统计
     pub feats: Feats,
+    /// 无尽夜（倒下才结束，`won` 总是 false）
+    pub endless: bool,
+    /// 打倒的夜主
+    pub bosses: u32,
 }
 
 /// 一局里做到的事（成就、图鉴用）。
@@ -232,6 +236,7 @@ pub(crate) struct FlowParams<'w, 's> {
     lanterns: Res<'w, crate::lanterns::Lanterns>,
     coins: ResMut<'w, crate::gold::Coins>,
     survival: Res<'w, Survival>,
+    director: Res<'w, crate::run::Director>,
     discoveries: Res<'w, crate::reactions::Discoveries>,
     player: Query<'w, 's, &'static mut Health, With<Player>>,
 }
@@ -519,13 +524,23 @@ impl FlowParams<'_, '_> {
         let o = &c.run.oil;
         let secs = self.secs();
         let lit = self.lanterns.lit();
-        let parts = [
+        let endless = self.director.endless;
+        let mut parts = [
             (secs.min(o.max_seconds) * o.per_second).floor() as u32,
             (self.progress.kills as f32 * o.per_kill).floor() as u32,
             if won { o.win } else { 0 },
             lit * c.run.lanterns.oil,
             self.flow.oil_bonus,
         ];
+        // 无尽夜：前 10 分钟照常算，之后每秒、每次击杀、每个再来的夜主另算；第一个夜主算作天明
+        if let Some(e) = endless {
+            let ed = &c.run.endless;
+            let early_kills = self.progress.kills - e.late_kills;
+            parts[0] += ((secs - o.max_seconds).max(0.0) * ed.oil_per_second).floor() as u32;
+            parts[1] =
+                (early_kills as f32 * o.per_kill + e.late_kills as f32 * ed.oil_per_kill).floor() as u32;
+            parts[2] = if e.downs > 0 { o.win + (e.downs - 1) * ed.oil_boss } else { 0 };
+        }
         let oil = (parts.iter().sum::<u32>() as f32 * self.stats.get(Stat::OilGain)).round() as u32;
         // 天明时地上剩下的铜钱全部飞来；倒下时已经捡到的全部保留
         if won {
@@ -554,6 +569,8 @@ impl FlowParams<'_, '_> {
                 hurts: self.survival.hurts,
                 taken: self.survival.taken,
             },
+            endless: endless.is_some(),
+            bosses: endless.map_or(u32::from(won), |e| e.downs),
         });
         self.flow.choice = None;
         *self.phase = SimPhase::Over;

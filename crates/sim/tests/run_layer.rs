@@ -437,3 +437,105 @@ fn a_pounce_hits_harder_than_a_bump() {
     // 减去护甲之前是 1.5 倍；默认没有护甲
     assert!((pounce / bump - mult).abs() < 0.01, "扑击 {pounce}，碰撞 {bump}");
 }
+
+/// 无尽夜（docs/BALANCE.md 第 4.7 节）：10 分钟以后每 5 分钟一次妖潮，妖潮结束时夜主再来，
+/// 生命逐次 × 1.25；夜主倒下不天明，夜续下去。
+#[test]
+fn endless_night_brings_surges_and_tougher_bosses() {
+    let c = content();
+    let mut s = setup(3);
+    s.mode = RunMode::Endless;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    sim.set_build(&[("sword", 8, false)], &[]);
+    // 跳到 15:00 前一刻，当作第一个夜主已经来过、倒下
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 15 * 60 * hz - 1;
+    {
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.arrivals, e.downs) = (1, 1);
+    }
+    let mut surge_at = None;
+    let mut boss_at = None;
+    for _ in 0..40 * hz {
+        sim.step(InputFrame::default(), &[]);
+        for ev in sim.take_events() {
+            match ev {
+                SimEvent::Surge => surge_at = Some(sim.tick()),
+                SimEvent::BossArrived { .. } => boss_at = Some(sim.tick()),
+                _ => {}
+            }
+        }
+        if boss_at.is_some() {
+            break;
+        }
+    }
+    let (surge_at, boss_at) = (surge_at.expect("15:00 妖潮"), boss_at.expect("妖潮过后夜主再来"));
+    // 事件在 15:00 那一步发出，读到时步数已经加一
+    assert_eq!(surge_at, 15 * 60 * hz + 1);
+    assert_eq!(boss_at - surge_at, 30 * hz, "妖潮 30 秒后夜主来");
+    let jiuwei = c.enemy_index("jiuwei").unwrap();
+    let handle = sim.world().resource::<Director>().boss.unwrap();
+    let i = sim.enemies().resolve(handle).unwrap();
+    let want = c.enemies[jiuwei].hp * sim.stats().get(Stat::BossHp) * 1.25;
+    assert!(
+        (sim.enemies().max_hp[i] - want).abs() < 1.0,
+        "第 2 次来的生命 × 1.25：{}",
+        sim.enemies().max_hp[i]
+    );
+    assert!(sim.world().resource::<Director>().barrier.is_some());
+
+    // 打倒它：不天明，结界撤掉，下一个妖潮（20:00）照常来
+    let p = player_pos(&sim);
+    {
+        let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
+        (en.x[i], en.y[i], en.hp[i]) = (p.x + 60.0, p.y, 0.001);
+    }
+    let mut down = false;
+    for _ in 0..5 * hz {
+        sim.step(InputFrame::default(), &[]);
+        down |= sim.take_events().iter().any(|e| matches!(e, SimEvent::BossDefeated { dawn: false, .. }));
+    }
+    assert!(down, "无尽夜里夜主倒下不天明");
+    let d = sim.world().resource::<Director>();
+    assert!(d.barrier.is_none() && d.endless.unwrap().downs == 2);
+    assert!(sim.flow().won_at.is_none() && !sim.is_over());
+}
+
+/// 10 分钟以后刷怪、生命改成线性增长（docs/BALANCE.md 第 4.1 节）。
+#[test]
+fn curves_turn_linear_after_ten_minutes() {
+    let c = content();
+    let r = &c.run;
+    let at10 = r.enemy_hp_scale.at(10.0);
+    assert_eq!(r.late_at(r.enemy_hp_scale, r.late.hp, 9.0), r.enemy_hp_scale.at(9.0));
+    assert!((r.late_at(r.enemy_hp_scale, r.late.hp, 14.0) - at10 * 2.0).abs() < 1e-4);
+    assert!((r.late_at(r.spawn.rate, r.late.spawn, 20.0) - r.spawn.rate.at(10.0) * 1.8).abs() < 1e-3);
+}
+
+/// 无尽夜的灯油：前 10 分钟照常，之后每秒 0.5、击杀 × 0.01；第一个夜主算天明 300，再来的每个 150。
+#[test]
+fn endless_oil_counts_late_time_and_bosses_separately() {
+    let mut s = setup(4);
+    s.mode = RunMode::Endless;
+    s.god = false;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 1200 * hz;
+    sim.progress_mut().kills = 30_000;
+    {
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.late_kills, e.downs) = (20_000, 3);
+    }
+    let w = sim.world_mut();
+    let mut q = w.query_filtered::<&mut lantern_sim::Health, bevy_ecs::query::With<lantern_sim::Player>>();
+    q.single_mut(w).unwrap().hp = 0.0;
+    sim.step(InputFrame::default(), &[]);
+    let r = sim.flow().result.clone().expect("倒下就结算");
+    assert!(r.endless && !r.won && r.bosses == 3);
+    // 存活 600 + 600 × 0.5；击杀 10000 × 0.05 + 20000 × 0.01；夜主 300 + 2 × 150
+    assert_eq!(&r.oil_parts[..3], &[900, 700, 600]);
+}

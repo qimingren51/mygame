@@ -232,8 +232,10 @@ pub enum SimEvent {
     BossSummon {
         pos: Vec2,
     },
+    /// 夜主倒下；dawn：这一下迎来天明（无尽夜里是 false，夜续下去）
     BossDefeated {
         pos: Vec2,
+        dawn: bool,
     },
     Pickup {
         kind: PickupKind,

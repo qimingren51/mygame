@@ -152,6 +152,22 @@
         max_seconds: 600.0,
     ),
 
+    // 10 分钟以后（无尽夜、长更、终章）：刷怪 = 10 分钟的值 × (1 + spawn × (m − 10))，
+    // 杂兵、精英生命同理用 hp；仍受硬上限（docs/BALANCE.md 第 4.1 节）
+    late: (after: 10.0, spawn: 0.08, hp: 0.25),
+
+    // 无尽夜（docs/BALANCE.md 第 4.7 节）：夜主倒下不天明。10 分钟以后每 5 分钟一次妖潮（照时间表里的妖潮），
+    // 妖潮结束时夜主再来，第 k 次再来的生命 × 1.25^k。10 分钟以后的灯油：每秒 0.5、击杀 × 0.01、
+    // 再来的夜主每个 150；铜钱掉落减半
+    endless: (
+        every: 5.0,
+        boss_growth: 1.25,
+        oil_per_second: 0.5,
+        oil_per_kill: 0.01,
+        oil_boss: 150,
+        gold: 0.5,
+    ),
+
     bench: (
         refill_per_tick: 60,
         enemy: "shade",

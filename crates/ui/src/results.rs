@@ -123,7 +123,9 @@ fn spawn(
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
     let boss_name = c.enemies.iter().find(|e| e.boss.is_some()).map_or("夜主", |e| e.name.as_str());
-    let sub = if r.won {
+    let sub = if r.endless {
+        format!("无尽夜　·　撑了 {}　·　打退「{boss_name}」{} 次", mmss(r.seconds), r.bosses)
+    } else if r.won {
         format!("存活 {}　·　击败「{boss_name}」", mmss(r.seconds))
     } else {
         format!("倒在第 {}　·　离天明还有 {}", mmss(r.seconds), mmss(c.run.duration - r.seconds))
@@ -208,6 +210,7 @@ fn results_body(
                     NewRecord::FirstDawn => "首次天明",
                     NewRecord::Kills => "新纪录 · 单局击杀",
                     NewRecord::Survival => "新纪录 · 存活时间",
+                    NewRecord::Endless => "新纪录 · 无尽夜最长",
                 };
                 p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() })
                     .with_children(|row| {
@@ -284,7 +287,7 @@ fn results_body(
                 let [time, kills, win, lamps, bonus] = r.oil_parts;
                 let mut detail = format!("存活 {time} · 击杀 {kills}");
                 if win > 0 {
-                    detail.push_str(&format!(" · 天明 {win}"));
+                    detail.push_str(&format!(" · {} {win}", if r.endless { "夜主" } else { "天明" }));
                 }
                 if lamps > 0 {
                     detail.push_str(&format!(" · 石灯笼 {lamps}"));
