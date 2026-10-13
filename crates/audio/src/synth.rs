@@ -124,6 +124,11 @@ pub struct Buf {
 }
 
 impl Buf {
+    /// 材质变体各用独立噪声纹理；只在启动合成时设置。
+    pub fn seed_noise(&mut self, seed: u32) {
+        self.noise = Noise(seed.max(1));
+    }
+
     pub fn new(secs: f32) -> Self {
         Buf { data: vec![0.0; (secs * SR) as usize], noise: Noise(0x2545_f491) }
     }

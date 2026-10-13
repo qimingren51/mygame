@@ -1,8 +1,9 @@
-//! 暂停：继续、音乐与音效音量、全屏、回到标题。
+//! 暂停：继续、四类音量、全屏、回到标题。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
+use lantern_audio::UiCue;
 use lantern_platform::{Actions, Settings};
 use lantern_sim::{AppState, RunState};
 
@@ -10,7 +11,7 @@ use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, overlay_vignette, text};
 
-/// 菜单行：0 继续，1..=3 设置项，4 回到标题
+/// 菜单行：继续、设置项、回到标题。
 const ROWS: usize = ITEMS.len() + 2;
 
 #[derive(Resource, Default)]
@@ -32,7 +33,7 @@ pub(crate) fn register(app: &mut App) {
 fn row_node() -> Node {
     Node {
         width: percent(100),
-        padding: UiRect::axes(px(18), px(8)),
+        padding: UiRect::axes(px(18), px(4)),
         justify_content: JustifyContent::Center,
         ..default()
     }
@@ -90,14 +91,14 @@ fn spawn(
                     width: px(460),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::axes(px(48), px(40)),
-                    row_gap: px(4),
+                    padding: UiRect::axes(px(48), px(20)),
+                    row_gap: px(2),
                     ..default()
                 },
                 skin.image("panel"),
             ))
             .with_children(|p| {
-                p.spawn(text(&fonts.title, 64.0, INK, "暂停"));
+                p.spawn(text(&fonts.title, 52.0, INK, "暂停"));
                 p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
                 let mut resume = p.spawn(row_node());
                 resume.with_children(|r| {
@@ -133,7 +134,9 @@ fn input(
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
+    mut cues: MessageWriter<UiCue>,
 ) {
+    let before_selected = ui.selected;
     if let Some(h) = ui.hovered.take()
         && actions.pointer_moved
     {
@@ -156,6 +159,13 @@ fn input(
         // 点击设置项等同回车（全屏切换），音量用左右键
         a.confirm |= clicked.is_some();
         settings_ui::adjust(ITEMS[sel - 1], &a, &mut settings, &mut window);
+    }
+    if actions.pause || actions.back || actions.quit_to_title {
+        cues.write(UiCue::Back);
+    } else if actions.confirm || clicked.is_some() {
+        cues.write(UiCue::Confirm);
+    } else if before_selected != ui.selected || actions.nav.x != 0 {
+        cues.write(UiCue::Move);
     }
 }
 

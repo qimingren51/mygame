@@ -1,14 +1,17 @@
-//! 音效（移植自网页版 audio/sfx.ts）。启动时全部渲染好；每种音效有最短间隔，
+//! 音效与材质采样库。启动时全部渲染好；每种音效有最短间隔，
 //! 一帧几十次命中也不会叠成噪音。
 
 use kira::sound::static_sound::StaticSoundData;
 
+use crate::impact::ImpactBank;
 use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, pent, render};
 
 /// 渲染好的全部音效。
 pub struct Sfx {
-    pub hit: StaticSoundData,
-    pub crit: StaticSoundData,
+    pub impacts: ImpactBank,
+    pub ui_move: StaticSoundData,
+    pub ui_confirm: StaticSoundData,
+    pub ui_back: StaticSoundData,
     pub kill: StaticSoundData,
     /// 拾取魂火：基准音 pent(10)，播放时按连拾次数升调
     pub gem: StaticSoundData,
@@ -90,14 +93,10 @@ fn chest(n: usize) -> StaticSoundData {
 impl Sfx {
     pub fn new() -> Self {
         Sfx {
-            hit: render(0.1, |b| b.noise(0.0, 0.035, 0.07, noise(FilterKind::High, 3300.0))),
-            // 暴击：清脆的金属声（docs/GAMEPLAY.md 第 14 节）
-            crit: render(0.5, |b| {
-                b.noise(0.0, 0.03, 0.09, noise(FilterKind::High, 5200.0));
-                b.bell(2350.0, 0.0, 0.05, 0.35);
-                b.sine(4980.0, 0.0, 0.12, 0.025);
-                b.wood(0.0, 0.05, 1500.0);
-            }),
+            impacts: ImpactBank::new(),
+            ui_move: render(0.12, |b| b.wood(0.0, 0.055, 760.0)),
+            ui_confirm: render(0.32, |b| b.pluck(pent(12), 0.0, 0.10, 0.28)),
+            ui_back: render(0.22, |b| b.pluck(pent(8), 0.0, 0.075, 0.18)),
             kill: render(0.2, |b| b.osc(Wave::Sine, 285.0, 0.0, 0.12, 0.1, Some((85.0, 0.12)), 0.004)),
             gem: render(0.25, |b| {
                 let f = pent(10);
@@ -370,17 +369,18 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 16] = [
+        let all: [(&str, &StaticSoundData); 17] = [
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),
-            ("crit", &s.crit),
+            ("ui_move", &s.ui_move),
+            ("ui_confirm", &s.ui_confirm),
+            ("ui_back", &s.ui_back),
             ("combo", &s.combo),
             ("stamp", &s.stamp),
             ("heart", &s.heart),
             ("boss_down", &s.boss_down),
             ("dawn", &s.dawn),
             ("elite_down", &s.elite_down),
-            ("hit", &s.hit),
             ("kill", &s.kill),
             ("ult", &s.ult),
             ("evolution", &s.evolution),

@@ -3,6 +3,7 @@
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
+use lantern_audio::{AudioSystems, MenuSoundscape, UiCue};
 use lantern_content::Content;
 use lantern_platform::{Actions, HubNews, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good, omen_name};
@@ -60,10 +61,21 @@ pub(crate) fn register(app: &mut App) {
     app.init_resource::<TitleMode>()
         .init_resource::<TitleUi>()
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
+        .add_systems(PostUpdate, sync_soundscape.before(AudioSystems).run_if(in_state(AppState::Title)))
         .add_systems(
             Update,
             (input, redraw, highlight, crate::scroll::animate).chain().run_if(in_state(AppState::Title)),
         );
+}
+
+fn sync_soundscape(mode: Res<TitleMode>, mut soundscape: ResMut<MenuSoundscape>) {
+    let scene = match *mode {
+        TitleMode::Hub | TitleMode::Meta | TitleMode::Shop | TitleMode::Achievements | TitleMode::Codex => {
+            MenuSoundscape::Hub
+        }
+        _ => MenuSoundscape::Title,
+    };
+    soundscape.set_if_neq(scene);
 }
 
 fn enter(
@@ -105,7 +117,10 @@ fn input(
     mut commands: Commands,
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
+    mut cues: MessageWriter<UiCue>,
 ) {
+    let before_mode = std::mem::discriminant(&*mode);
+    let before_selected = ui.selected;
     let c = &content.0;
     let clicked = ui.clicked.take();
     let open = |ui: &mut TitleUi| {
@@ -290,6 +305,13 @@ fn input(
                 back_to_hub(&mut mode, &mut ui, 0);
             }
         }
+    }
+    if actions.back {
+        cues.write(UiCue::Back);
+    } else if before_mode != std::mem::discriminant(&*mode) || clicked.is_some() || actions.confirm {
+        cues.write(UiCue::Confirm);
+    } else if before_selected != ui.selected || (*mode == TitleMode::Settings && actions.nav.x != 0) {
+        cues.write(UiCue::Move);
     }
 }
 
@@ -712,7 +734,7 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
                 width: px(460),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                padding: UiRect::axes(px(48), px(40)),
+                padding: UiRect::axes(px(48), px(24)),
                 row_gap: px(4),
                 ..default()
             },
@@ -724,7 +746,7 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
             for (i, &item) in ITEMS.iter().enumerate() {
                 let mut row = panel.spawn(Node {
                     width: percent(100),
-                    padding: UiRect::axes(px(18), px(8)),
+                    padding: UiRect::axes(px(18), px(4)),
                     ..default()
                 });
                 row.with_children(|r| {
