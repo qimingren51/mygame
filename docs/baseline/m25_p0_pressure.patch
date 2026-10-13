@@ -1,0 +1,37 @@
+diff --git a/assets/data/enemies.ron b/assets/data/enemies.ron
+index b692844..26b37ae 100644
+--- a/assets/data/enemies.ron
++++ b/assets/data/enemies.ron
+@@ -5,7 +5,7 @@
+     (id: "shade", name: "影妖", rank: Normal, movement: Chase,
+      radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FF8A5B"),
+     (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
+-     radius: 10.0, hp: 6.0, speed: 84.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
++     radius: 10.0, hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+     (id: "golem", name: "石妖", rank: Normal, movement: Chase,
+      radius: 19.0, hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+     (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
+diff --git a/assets/data/run.ron b/assets/data/run.ron
+index 498eb5f..65900f7 100644
+--- a/assets/data/run.ron
++++ b/assets/data/run.ron
+@@ -44,14 +44,14 @@
+     // P0 青丘的时间表（docs/BALANCE.md 第 4.6 节）：在 at 范围内随机一个时刻出场（每局不同）
+     schedule: [
+         (at: (150.0, 200.0), event: Elite(["fox", "stonelord"])),
+-        // 合围：40 + 10m 只在视野外围成一圈，1.5 倍速合拢，进入 300 以内恢复原速；提前 1 秒预警
+-        (at: (230.0, 250.0), event: Encircle(count: (40.0, 10.0, 0.0), extra: 60.0, speed_mult: 1.5,
+-                                             release: 300.0, warn: 1.0, enemy: "shade")),
++        // 合围：70 + 15m 只在视野外围成一圈，2.2 倍速合拢，进入 200 以内恢复原速；提前 1 秒预警（docs/BALANCE.md 第 2.6 节）
++        (at: (230.0, 250.0), event: Encircle(count: (70.0, 15.0, 0.0), extra: 60.0, speed_mult: 2.2,
++                                             release: 200.0, warn: 1.0, enemy: "shade")),
+         // 5:00 小头目青面鬼：宝箱至少三连，必给一次灯坠三选一
+         (at: (300.0, 300.0), event: MiniBoss(enemy: "ghoul", chest_min: 3, charm: true)),
+         (at: (360.0, 400.0), event: Elite(["fox", "stonelord"])),
+-        (at: (410.0, 430.0), event: Encircle(count: (40.0, 10.0, 0.0), extra: 60.0, speed_mult: 1.5,
+-                                             release: 300.0, warn: 1.0, enemy: "shade")),
++        (at: (410.0, 430.0), event: Encircle(count: (70.0, 15.0, 0.0), extra: 60.0, speed_mult: 2.2,
++                                             release: 200.0, warn: 1.0, enemy: "shade")),
+         // 妖潮：30 秒，刷怪 ×3，开头出一只精英
+         (at: (480.0, 480.0), event: Surge(duration: 30.0, rate_mult: 3.0, elites: ["fox", "stonelord"])),
+         // 9:30 夜主九尾降临，此后刷怪 ×0.4；以主角为中心生成半径 600 的结界

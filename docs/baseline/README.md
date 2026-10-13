@@ -10,8 +10,10 @@
 | `pacing.py` | 单局节奏模型：击杀≈刷怪时每分钟的等级、累计击杀、场上妖物数 | 第 4.2、4.3 节 |
 | `resonance_mc.py` | 共鸣计点规则的蒙特卡洛模拟：专精和兼修机器人各阶的达成时间 | 第 7.1 节 |
 | `weapons.py` | 原型五件法器按公式算的理论输出 | 第 6.1 节 |
-| `m25_kite.patch` | 给桌面版加一个会躲的风筝机器人和 `lantern-tools kite` 子命令（三档局外成长、选更、按局统计），并按第 4.5 节修正燃灯充能 | 第 2.6 节 |
-| `m25_p0_tuning.patch` | 第 2.6 节建议的 P0 数据改动：刷怪系数、接触伤害、夜主生命、更 | 第 2.6、4、9 节 |
+| `m25_kite.patch` | 第一版风筝机器人和燃灯充能修正（已收进 de0af3b；它只扫了妖物池的前 count 个槽位，有 bug，留作记录） | 第 2.6 节 |
+| `m25_p0_tuning.patch` | 第一版的 P0 数据校准（已收进 de0af3b） | 第 2.6、4、9 节 |
+| `m25_kite_skill.patch` | 给 `lantern-tools kite` 加 `--skill novice\|regular\|expert` 三档手法 | 第 2.6 节 |
+| `m25_p0_pressure.patch` | 疾影加快、合围收紧（数据） | 第 2.6 节 |
 
 ## 复现原型实测
 
@@ -39,26 +41,22 @@ python3 docs/baseline/analyze.py /tmp
 
 ## 复现 M2.5 的 P0 实测（第 2.6 节）
 
-现状在 M2.5 局外层（提交 2eaa1f5）上测，调整后在提交 72c9dd2 上测。两个补丁都只是实验用，不提交到 `crates/` 和 `assets/data/`：
+风筝机器人已经在 `lantern-tools` 里（提交 de0af3b）。按手法分档的补丁还没收：
 
 ```bash
 git worktree add --detach /tmp/kite HEAD
 cd /tmp/kite
-git apply "$OLDPWD/docs/baseline/m25_kite.patch"
+git apply "$OLDPWD/docs/baseline/m25_kite_skill.patch"
 cargo build --release -p lantern-tools
-
-# 现状
-./target/release/lantern-tools kite --runs 100 --seed 101 --meta none --tier 1
-# 建议的数值：再打上数据补丁
-git apply "$OLDPWD/docs/baseline/m25_p0_tuning.patch"
-./target/release/lantern-tools kite --runs 100 --seed 101 --meta half --tier 2
+./target/release/lantern-tools kite --runs 60 --seed 101 --skill novice --meta none --tier 1
+# 再试疾影加快、合围收紧：
+git apply "$OLDPWD/docs/baseline/m25_p0_pressure.patch"
+./target/release/lantern-tools kite --runs 60 --seed 101 --skill novice --meta none --tier 1
 ```
 
-- `--meta none|half|full`：局外成长三档。`half` 约等于第 35 局：属性买一半，心灯点一部分，挂长命锁。`full` 是全部买满、点满。具体等级见补丁里的 `meta_setup`。
-- `--tier 1|2|3`：更。`--lamp <id>`：灯，不写时用红纸灯。
-- 环境变量 `LANTERN_DATA=<目录>` 可以换一套数据目录，方便同时试几组数值。
-- 100 局在云端 4 核上约 4–5 分钟；可以开几个进程并行跑。
-- 机器人的走位：每步在 16 个方向里挑威胁最小的（附近的妖物、按速度外推的弹幕、夜主的扇形和落点预警、结界边缘），安全时去点石灯笼，快被碰到时闪避。它离夜主和大只精英比真人远，所以夜主击杀时间偏长。
+- `--skill novice|regular|expert`：手法（2.6 节的表），不写时是 expert。`--meta none|half|full`：局外成长。`--tier`：更。
+- 环境变量 `LANTERN_DATA=<目录>` 可以换一套数据目录，几组数值并行比。
+- 60 局在云端 4 核上约 5–7 分钟。
 
 ## 模拟
 

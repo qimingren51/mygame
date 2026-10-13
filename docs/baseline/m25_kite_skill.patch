@@ -1,0 +1,200 @@
+diff --git a/crates/tools/src/kite.rs b/crates/tools/src/kite.rs
+index f8b3305..0d3dd0d 100644
+--- a/crates/tools/src/kite.rs
++++ b/crates/tools/src/kite.rs
+@@ -3,7 +3,8 @@
+ //! 走位：每步在 16 个方向里挑威胁最小的一个。威胁 = 前方几个采样点附近的妖物、弹幕（按速度外推）、
+ //! 夜主的扇形和落点预警、结界边缘。安全时去点石灯笼。快被碰到时闪避。选择阶段交给 `bot::respond`。
+ //!
+-//!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full] [--lamp <id>]
++//!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
++//!       [--skill novice|regular|expert] [--lamp <id>]
+ 
+ use std::collections::BTreeMap;
+ use std::time::Instant;
+@@ -23,9 +24,79 @@ use crate::{data_dir, flag, median, source_name};
+ 
+ const DIRS: usize = 16;
+ 
+-#[derive(Default)]
++/// 机器人的手法：反应间隔、留意的范围、会不会预判弹幕、走位的偏差、闪避。
++#[derive(Clone, Copy)]
++struct Skill {
++    /// 每隔几步重新判断一次方向（之间沿用上一次的方向）
++    every: u64,
++    /// 只留意这个距离以内的妖物和弹幕
++    sight: f32,
++    /// 按弹幕的速度预判落点
++    foresee: bool,
++    /// 选好的方向再随机偏转，最多这么多弧度
++    wobble: f32,
++    /// 妖物离身体多近才想到闪避
++    dash_gap: f32,
++    /// 想到了也只有这个概率真的按下去
++    dash_chance: f32,
++}
++
++impl Skill {
++    fn by_name(name: &str) -> Option<Self> {
++        Some(match name {
++            // 新手：约 0.35 秒反应一次，只盯着身边，不预判弹幕，走位偏差大，常常忘了闪避
++            "novice" => Skill {
++                every: 21,
++                sight: 170.0,
++                foresee: false,
++                wobble: 0.6,
++                dash_gap: 0.0,
++                dash_chance: 0.5,
++            },
++            // 熟手：约 0.2 秒反应一次，看得到大半个屏幕
++            "regular" => Skill {
++                every: 12,
++                sight: 240.0,
++                foresee: true,
++                wobble: 0.25,
++                dash_gap: 3.0,
++                dash_chance: 0.8,
++            },
++            // 高手：每步都判断，全看得见（原来的风筝机器人）
++            "expert" => {
++                Skill { every: 1, sight: 340.0, foresee: true, wobble: 0.0, dash_gap: 3.0, dash_chance: 1.0 }
++            }
++            _ => return None,
++        })
++    }
++}
++
+ struct Kite {
+     last: Vec2,
++    skill: Skill,
++    next: u64,
++    held: InputFrame,
++    /// 机器人自己的随机数（xorshift），按种子定，不动模拟的随机流
++    rng: u64,
++}
++
++impl Kite {
++    fn new(skill: Skill, seed: u64) -> Self {
++        Kite {
++            last: Vec2::ZERO,
++            skill,
++            next: 0,
++            held: InputFrame::default(),
++            rng: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1,
++        }
++    }
++
++    fn rand(&mut self) -> f32 {
++        self.rng ^= self.rng << 13;
++        self.rng ^= self.rng >> 7;
++        self.rng ^= self.rng << 17;
++        (self.rng >> 40) as f32 / (1u64 << 24) as f32
++    }
+ }
+ 
+ /// 主角的位置、剩余闪避段数、生命。
+@@ -40,6 +111,11 @@ fn decide(sim: &SimHarness, k: &mut Kite, player_r: f32) -> (InputFrame, Vec<Sim
+     let Some((p, dash_ready, hp, hp_max)) = player(sim) else {
+         return (InputFrame::default(), Vec::new());
+     };
++    let sk = k.skill;
++    if sim.tick() < k.next {
++        return (k.held, Vec::new());
++    }
++    k.next = sim.tick() + sk.every;
+     let speed = sim.stats().get(Stat::Speed).max(30.0);
+     let w = sim.world();
+     let en = sim.enemies();
+@@ -51,7 +127,7 @@ fn decide(sim: &SimHarness, k: &mut Kite, player_r: f32) -> (InputFrame, Vec<Sim
+         }
+         let q = Vec2::new(en.x[i], en.y[i]);
+         let d = q.distance(p);
+-        if d < 340.0 {
++        if d < sk.sight {
+             nearest = nearest.min(d - en.r[i] - player_r);
+             let wgt = if en.max_hp[i] > 2000.0 {
+                 6.0
+@@ -67,8 +143,8 @@ fn decide(sim: &SimHarness, k: &mut Kite, player_r: f32) -> (InputFrame, Vec<Sim
+         .resource::<Foes>()
+         .0
+         .iter()
+-        .filter(|f| f.pos.distance(p) < 320.0)
+-        .map(|f| (f.pos, f.vel, f.radius))
++        .filter(|f| f.pos.distance(p) < sk.sight)
++        .map(|f| (f.pos, if sk.foresee { f.vel } else { Vec2::ZERO }, f.radius))
+         .collect();
+     let bullet_close = shots
+         .iter()
+@@ -149,11 +225,19 @@ fn decide(sim: &SimHarness, k: &mut Kite, player_r: f32) -> (InputFrame, Vec<Sim
+         }
+     }
+     k.last = best.1;
++    let mut dir = best.1;
++    if sk.wobble > 0.0 {
++        let a = (k.rand() * 2.0 - 1.0) * sk.wobble;
++        let (s, c) = ops::sin_cos(a);
++        dir = Vec2::new(dir.x * c - dir.y * s, dir.x * s + dir.y * c);
++    }
+     let mut cmds = Vec::new();
+-    if dash_ready > 0 && (nearest < 3.0 || bullet_close || in_hazard(p)) {
++    if dash_ready > 0 && (nearest < sk.dash_gap || bullet_close || in_hazard(p)) && k.rand() < sk.dash_chance
++    {
+         cmds.push(SimCommand::Dash);
+     }
+-    (InputFrame::quantize(best.1), cmds)
++    k.held = InputFrame::quantize(dir);
++    (k.held, cmds)
+ }
+ 
+ struct KiteRun {
+@@ -221,14 +305,14 @@ fn meta_setup(setup: &mut RunSetup, meta: &str) {
+     }
+ }
+ 
+-fn kite_one(content: &Content, seed: u64, tier: u8, meta: &str, lamp: Option<&str>) -> KiteRun {
++fn kite_one(content: &Content, seed: u64, tier: u8, meta: &str, lamp: Option<&str>, skill: Skill) -> KiteRun {
+     let mut setup = RunSetup::new(seed, RunMode::Normal);
+     setup.tier = tier;
+     setup.lamp = lamp.map(str::to_string);
+     meta_setup(&mut setup, meta);
+     let player_r = content.player.radius;
+     let mut sim = SimHarness::with_setup(content.clone(), setup);
+-    let mut k = Kite::default();
++    let mut k = Kite::new(skill, seed);
+     let (mut levels, mut evolutions, mut alive7, mut surge_peak, mut ults) =
+         (Vec::new(), Vec::new(), None, 0u32, 0u32);
+     let hz = u64::from(TICK_HZ);
+@@ -289,16 +373,18 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
+         return Err("--meta 只能是 none、half、full".into());
+     }
+     let lamp = text("--lamp");
++    let skill_name = text("--skill").unwrap_or_else(|| "expert".into());
++    let skill = Skill::by_name(&skill_name).ok_or("--skill 只能是 novice、regular、expert")?;
+     let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
+     let start = Instant::now();
+     let all: Vec<KiteRun> =
+-        (0..runs).map(|k| kite_one(&content, seed0 + k, tier, &meta, lamp.as_deref())).collect();
++        (0..runs).map(|k| kite_one(&content, seed0 + k, tier, &meta, lamp.as_deref(), skill)).collect();
+     let n = runs as f32;
+     let wins = all.iter().filter(|r| r.won).count();
+     let early = all.iter().filter(|r| !r.won && r.secs < 180.0).count();
+     let mmss = |s: f32| format!("{}:{:02}", (s / 60.0) as u32, (s % 60.0) as u32);
+     println!(
+-        "风筝机器人 {runs} 局，{tier} 更，局外成长 {meta}，灯 {}，用时 {:.1} 秒",
++        "风筝机器人 {runs} 局，手法 {skill_name}，{tier} 更，局外成长 {meta}，灯 {}，用时 {:.1} 秒",
+         lamp.as_deref().unwrap_or("默认"),
+         start.elapsed().as_secs_f64()
+     );
+diff --git a/crates/tools/src/main.rs b/crates/tools/src/main.rs
+index 663feca..f9fbc36 100644
+--- a/crates/tools/src/main.rs
++++ b/crates/tools/src/main.rs
+@@ -26,7 +26,7 @@ const USAGE: &str = "用法：
+   lantern-tools balance [--runs <局数>] [--seed <起始种子>] [--god]
+       机器人自动选卡、绕圈走位打整局，统计等级曲线、击杀、进化时间、伤害来源占比、存活时间
+       （--god：主角无敌，看成长曲线和夜主战）
+-  lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full] [--lamp <灯>]
++  lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full] [--skill novice|regular|expert] [--lamp <灯>]
+       会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、夜主战、
+       场上妖物数、燃灯间隔、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
+ 环境变量 LANTERN_DATA 可以换一份数据目录（比较两套数值时用）";
