@@ -47,6 +47,8 @@ pub const HIT_RAW: u8 = 16;
 pub const HIT_TRUE: u8 = 32;
 /// 冰爆：这样冻住的妖物再死不触发冰爆
 pub const HIT_BLAST: u8 = 64;
+/// 冻土碎裂的伤害不再引起冻土碎裂。
+pub const HIT_SHATTER: u8 = 128;
 
 /// 灼烧：每层每秒 = 命中伤害（暴击前）× 20%，持续 3 秒（docs/BALANCE.md 第 3.3 节）。
 /// 冰爆、火·极境的爆炸直接点上灼烧时用。
@@ -76,6 +78,8 @@ pub enum Source {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Hit {
+    pub molten: Option<lantern_content::MoltenDef>,
+    pub execute: f32,
     pub target: EnemyHandle,
     /// 基础伤害，结算时乘以伤害倍率
     pub damage: f32,
@@ -100,6 +104,8 @@ pub struct Hit {
 impl Hit {
     pub fn new(target: EnemyHandle, damage: f32, source: Source) -> Self {
         Hit {
+            molten: None,
+            execute: 0.0,
             target,
             damage,
             knockback: 0.0,
@@ -158,6 +164,9 @@ pub enum StrikeFx {
     Seal {
         evolved: bool,
     },
+    /// 巨竹破土、剑林落地，复用既有绘制素材但保留打击身份。
+    Bamboo,
+    SwordGrove,
     Blast(BlastKind),
     Quake,
     Taiji,
@@ -224,6 +233,8 @@ pub struct ActionQueue(pub Vec<Deferred>);
 /// 一只妖物的死亡，Death 阶段处理。
 #[derive(Clone, Copy, Debug)]
 pub struct Death {
+    /// 碎裂击杀的妖物不再碎裂。
+    pub shatter: bool,
     pub handle: EnemyHandle,
     pub pos: Vec2,
     pub kind: u16,
@@ -458,6 +469,9 @@ pub(crate) fn resolve_hits(
         if boss && hit.boss_cap > 0.0 {
             dmg = dmg.min(hit.boss_cap);
         }
+        if rank == Rank::Normal && hit.execute > 0.0 && en.hp[i] <= en.max_hp[i] * hit.execute {
+            dmg = en.hp[i];
+        }
         // 统计只计实际打掉的血（溢出的不算）
         log.add(hit.source, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
@@ -520,6 +534,10 @@ pub(crate) fn resolve_hits(
                 en.ky[i] += d.y / len * f;
             }
         }
+        if let Some(m) = hit.molten {
+            en.melt[i] = if en.melt_t[i] > 0.0 { en.melt[i].max(m.vulnerability) } else { m.vulnerability };
+            en.melt_t[i] = en.melt_t[i].max(m.duration);
+        }
         if hit.ignite > 0.0 {
             ignite(en, i, &stats, base, BURN_RATIO, hit.ignite, BURN_TIME);
         }
@@ -538,6 +556,42 @@ pub(crate) fn resolve_hits(
             }
         } else {
             kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
+            if let Some(d) = deaths.0.last_mut() {
+                d.shatter = hit.flags & HIT_SHATTER == 0;
+            }
+            if let Some(m) = hit.molten.filter(|m| m.split_ratio > 0.0) {
+                // 子剑保留易伤，却失去分裂资格；飞剑池另有全场上限。
+                let mut targets = Vec::new();
+                grid.nearest_k(en, pos.x, pos.y, 460.0, 2, &mut targets);
+                for k in 0..2 {
+                    let target = targets.get(k).map(|&j| en.handle(j as usize));
+                    let angle = targets.get(k).map_or(k as f32 * std::f32::consts::PI, |&j| {
+                        ops::atan2(en.y[j as usize] - pos.y, en.x[j as usize] - pos.x)
+                    });
+                    ctx.shots().fire(crate::weapons::volley::ShotSpec {
+                        pos,
+                        angle,
+                        speed: 420.0,
+                        life: 1.0,
+                        turn: 8.0,
+                        hit_radius: 7.0,
+                        knockback: 15.0,
+                        damage: hit.damage * m.split_ratio,
+                        pierce: 1,
+                        target,
+                        skip: Some(hit.target),
+                        big: true,
+                        bonus: false,
+                        flags: 0,
+                        element: hit.element,
+                        source: hit.source,
+                        effects: crate::weapons::volley::ShotEffects {
+                            molten: Some(lantern_content::MoltenDef { split_ratio: 0.0, ..m }),
+                            ..Default::default()
+                        },
+                    });
+                }
+            }
         }
     }
     list.clear();
@@ -588,6 +642,7 @@ pub(crate) fn kill(
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
     deaths.0.push(Death {
+        shatter: true,
         handle: en.handle(i),
         pos,
         kind,
@@ -688,6 +743,7 @@ pub(crate) fn run_actions(
                     flags: HIT_BONUS,
                     element: Some(Element::Metal),
                     source: Source::BonusSword,
+                    effects: Default::default(),
                 });
             }
             Action::DropChest { distance } => {
@@ -772,6 +828,8 @@ pub(crate) fn process_strikes(
             let i = i as usize;
             let boss = content.enemies[en.kind[i] as usize].rank == Rank::Boss;
             let mut hit = Hit {
+                molten: None,
+                execute: 0.0,
                 target: en.handle(i),
                 damage: s.damage,
                 knockback: s.knockback,

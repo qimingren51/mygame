@@ -1,0 +1,29 @@
+// 终式：两件正统进化、两系共鸣二阶。材料顺序同时决定主图标与伤害归属。
+[
+    (
+        id: "phoenix", name: "百鸟朝凤", weapons: ("crane", "lamp"),
+        desc: "群鹤化火凤，扑击炸开留下火海，一只巨凤绕身护行。把追兵引入凤火，双系各留四点，腾出一格。",
+        behavior: Seeker(orbit_radius: 42.0, orbit_spin: 2.0, range: 380.0, pick: 5, rest: 0.6,
+            knockback: 40.0, speed: (350.0, 0.0, 0.0), steer: 7.0, reach: 8.0,
+            on_hit: Some((radius: 52.0, ratio: 0.6,
+                zone: (kind: Fire, radius_scale: 1.0, life: 3.0, tick: 0.5, damage_scale: 0.25, slow: 0.0, slow_time: 0.0))),
+            escort: Some((radius: 92.0, every: 0.4, ratio: 1.2))),
+        level: (count: 10, damage: 65.0),
+    ),
+    (
+        id: "sword_grove", name: "万剑冢", weapons: ("seal", "sword"),
+        desc: "天降万剑，插地成林。剑林留存四秒，穿行其中的妖物不断被斩；以走位把追兵引回剑林。双系各留四点，腾出一格。",
+        behavior: Drop(range: 440.0, candidates: 24, delay: 0.45, stagger: 0.05, knockback: 35.0,
+            stun: 0.3, scatter: (240.0, 150.0), amount_div: 2,
+            fissure: Some((kind: Sword, radius_scale: 1.0, life: 4.0, tick: 0.4, damage_scale: 0.6, slow: 0.15, slow_time: 0.5))),
+        level: (cooldown: 2.5, count: 8, radius: 72.0, damage: 110.0),
+    ),
+    (
+        id: "frost_rain", name: "霜天剑雨", weapons: ("bell", "sword"),
+        desc: "钟鸣召来满屏冰剑，冻结并贯穿妖群。跟随钟声进退，在两次剑雨间寻找空隙。双系各留四点，腾出一格。",
+        behavior: Pulse(knockback: 40.0, slow: 0.4, slow_time: 1.5,
+            toll: Some((period: 4.5, damage: 75.0, freeze: 1.2, boss_cap: 250.0)),
+            ice_rain: Some((count: 24, speed: 500.0, life: 1.4, damage: 100.0, freeze: 0.8, boss_cap: 180.0))),
+        level: (cooldown: 2.5, radius: 165.0, damage: 85.0),
+    ),
+]

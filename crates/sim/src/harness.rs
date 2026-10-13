@@ -117,7 +117,7 @@ impl SimHarness {
         for &(id, level, evolved) in weapons {
             let mut w = WeaponSlot::new(content.weapon_index(id).unwrap_or_else(|| panic!("没有法器 {id}")));
             w.level = level;
-            w.evolved = evolved;
+            w.form = if evolved { crate::weapons::Form::Evolved } else { crate::weapons::Form::Base };
             arsenal.0.push(w);
         }
         let mut build = world.resource::<Build>().clone();

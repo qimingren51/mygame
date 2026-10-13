@@ -2,7 +2,7 @@
 
 use bevy_math::Vec2;
 
-use lantern_content::{Content, Stat, WeaponBehavior};
+use lantern_content::{Content, Element, Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::WeaponSlot;
@@ -24,14 +24,16 @@ pub(crate) fn update(
     bamboo: &mut Bamboo,
     found: &mut Vec<u32>,
 ) {
-    let WeaponBehavior::Orbit { spin, hit_cooldown, knockback, size, inner } = *slot.behavior(content) else {
+    let WeaponBehavior::Orbit { spin, hit_cooldown, knockback, size, inner, ice_half } =
+        *slot.behavior(content)
+    else {
         return;
     };
     let lv = slot.stats(content);
     let area = stats.get(Stat::Area);
     slot.prev_angle = slot.angle;
     slot.angle += spin.at(slot.level as f32) * DT;
-    slot.count = lv.count + stats.amount();
+    slot.count = if ice_half { lv.count } else { lv.count + stats.amount() };
     slot.radius = lv.radius * area;
     slot.size = size * area;
     let source = Source::Weapon(slot.def as u16);
@@ -47,7 +49,17 @@ pub(crate) fn update(
                 continue;
             }
             en.lamp_ready[i] = t + hit_cooldown;
-            hits.0.push(Hit::new(en.handle(i), lv.damage, source).knock(knockback, p).element(element));
+            let mut hit = Hit::new(en.handle(i), lv.damage, source).knock(knockback, p).element(element);
+            if ice_half {
+                if k % 2 == 0 {
+                    hit.element = Some(Element::Water);
+                    hit.freeze = 0.6;
+                } else {
+                    hit.element = Some(Element::Fire);
+                    hit.ignite = 1.0;
+                }
+            }
+            hits.0.push(hit);
         }
     }
     if let Some(f) = inner {

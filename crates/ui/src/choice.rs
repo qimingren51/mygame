@@ -363,8 +363,8 @@ pub(crate) fn spawn_icon(
 
 fn card_skin(r: Rarity) -> &'static str {
     match r {
-        Rarity::Tian => "card_tian",
-        Rarity::Xuan => "card_xuan",
+        Rarity::Tian | Rarity::He => "card_tian",
+        Rarity::Xuan | Rarity::Yi => "card_xuan",
         Rarity::Ling => "card_ling",
         Rarity::Fan => "card_fan",
     }
@@ -768,6 +768,8 @@ fn spawn_chest(
                             format!("Lv{} → {}", item.level - 1, item.level)
                         }
                         Offer::Evolve(_) => "进化".into(),
+                        Offer::Mutate(_) => "异化".into(),
+                        Offer::Fuse { .. } => "合璧".into(),
                         Offer::NewWeapon(_) | Offer::NewPassive(_) => "新".into(),
                         _ => "补给".into(),
                     };
@@ -951,7 +953,7 @@ pub(crate) fn animate_rise(
 #[derive(Component, Clone, Copy)]
 pub(crate) enum EvoPart {
     Old,
-    New,
+    New(Color),
     Seal,
     Text,
 }
@@ -969,18 +971,55 @@ fn spawn_evolve(
     arsenal: &Arsenal,
     k: usize,
 ) {
-    let def = &c.weapons[arsenal.0[k].def];
-    let Some(evo) = &def.evolution else { return };
-    let color = element_color(c, def.element);
+    let w = &arsenal.0[k];
+    let def = &c.weapons[w.def];
+    let (stamp, color) = match w.form {
+        lantern_sim::weapons::Form::Mutated => ("异", hex("#CF8CDB")),
+        lantern_sim::weapons::Form::Fused(_) => ("合", hex("#FFD98A")),
+        _ => ("进化", element_color(c, def.element)),
+    };
+    let origin = if let lantern_sim::weapons::Form::Fused(f) = w.form {
+        c.fusions[f]
+            .weapons
+            .iter()
+            .map(|id| {
+                c.weapons[c.weapon_index(id).expect("合璧材料")]
+                    .evolution
+                    .as_ref()
+                    .expect("正统进化")
+                    .name
+                    .as_str()
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
+    } else {
+        def.name.clone()
+    };
     let icon_name = format!("ui/icon_{}_evo", def.id);
-    let old_icon = db.find(&format!("ui/icon_{}", def.id));
+    let old_icon = db.find(&format!(
+        "ui/icon_{}{}",
+        def.id,
+        if matches!(w.form, lantern_sim::weapons::Form::Fused(_)) { "_evo" } else { "" }
+    ));
     let new_icon = db.find(&icon_name);
     let size = 168.0;
     commands
         .spawn((overlay(skin), EvoClock::default()))
         .with_children(|root| {
             // “进化”竖印（96×160），垫一张宣纸方笺才看得清
-            if let Some(seal) = db.find("ui/seal_evo") {
+            if stamp != "进化" {
+                root.spawn((
+                    EvoPart::Seal,
+                    Node {
+                        padding: UiRect::all(px(12)),
+                        border_radius: BorderRadius::all(px(6)),
+                        ..default()
+                    },
+                    BackgroundColor(PAPER.with_alpha(0.0)),
+                    UiTransform::from_scale(Vec2::splat(2.4)),
+                    text(&fonts.title, 70.0, color.with_alpha(0.0), stamp),
+                ));
+            } else if let Some(seal) = db.find("ui/seal_evo") {
                 root.spawn((
                     EvoPart::Seal,
                     Node {
@@ -1005,22 +1044,40 @@ fn spawn_evolve(
                             ..default()
                         };
                         b.spawn((
-                            EvoPart::New,
+                            EvoPart::New(if stamp == "异" { color } else { Color::WHITE }),
                             full.clone(),
                             UiTransform::from_scale(Vec2::splat(1.35)),
                             db.ui_image(new).with_color(Color::WHITE.with_alpha(0.0)),
                         ));
                         b.spawn((EvoPart::Old, full, UiTransform::default(), db.ui_image(old)));
+                        if let lantern_sim::weapons::Form::Fused(f) = w.form {
+                            let other = &c.fusions[f].weapons[1];
+                            if let Some(icon) = db.find(&format!("ui/icon_{other}_evo")) {
+                                b.spawn((
+                                    EvoPart::Old,
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: px(size * 0.7),
+                                        top: px(size * 0.25),
+                                        width: px(size * 0.7),
+                                        height: px(size * 0.7),
+                                        ..default()
+                                    },
+                                    UiTransform::default(),
+                                    db.ui_image(icon),
+                                ));
+                            }
+                        }
                     });
                 }
                 _ => spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, size),
             }
-            root.spawn((EvoPart::Text, text(&fonts.title, 88.0, color.with_alpha(0.0), &evo.name)));
+            root.spawn((EvoPart::Text, text(&fonts.title, 88.0, color.with_alpha(0.0), w.name(c))));
             root.spawn((
                 EvoPart::Text,
-                text(&fonts.body, 20.0, PAPER.with_alpha(0.0), &format!("{} → {}", def.name, evo.name)),
+                text(&fonts.body, 20.0, PAPER.with_alpha(0.0), &format!("{} → {}", origin, w.name(c))),
             ));
-            root.spawn((EvoPart::Text, text(&fonts.body, 18.0, DIM.with_alpha(0.0), &evo.desc)));
+            root.spawn((EvoPart::Text, text(&fonts.body, 18.0, DIM.with_alpha(0.0), w.desc(c))));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
 }
@@ -1072,15 +1129,18 @@ pub(crate) fn animate_evolve(
                     tf.scale = Vec2::splat(1.0 + 0.2 * gone);
                 }
             }
-            EvoPart::New => {
+            EvoPart::New(tint) => {
                 if let Some(mut img) = img {
-                    img.color = Color::WHITE.with_alpha(smooth(born * 1.5));
+                    img.color = tint.with_alpha(smooth(born * 1.5));
                 }
                 if let Some(mut tf) = tf {
                     tf.scale = Vec2::splat(1.35 - 0.35 * ease_out_back(born));
                 }
             }
             EvoPart::Seal => {
+                if let Some(mut color) = txt {
+                    color.0.set_alpha(smooth(stamp * 2.0));
+                }
                 if let Some(mut img) = img {
                     img.color = Color::WHITE.with_alpha(smooth(stamp * 2.0));
                 }

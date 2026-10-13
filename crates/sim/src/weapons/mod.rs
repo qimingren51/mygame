@@ -42,13 +42,23 @@ pub struct Crane {
     pub angle: f32,
 }
 
+/// 一件法器只有一条已选定的路径；合璧记内容下标，不能再次进化或异化。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Form {
+    #[default]
+    Base,
+    Evolved,
+    Mutated,
+    Fused(usize),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct WeaponSlot {
     /// `weapons.ron` 里的下标
     pub def: usize,
     /// 等级，从 1 开始
     pub level: u32,
-    pub evolved: bool,
+    pub form: Form,
     /// 冷却计时
     pub timer: f32,
     /// 寒山钟的全屏钟鸣计时（进化后才有）
@@ -70,7 +80,7 @@ impl WeaponSlot {
         WeaponSlot {
             def,
             level: 1,
-            evolved: false,
+            form: Form::Base,
             timer: 0.6,
             toll: None,
             inner_t: 0.0,
@@ -83,21 +93,25 @@ impl WeaponSlot {
         }
     }
 
-    /// 当前的行为参数（进化后用进化的那一套）。
+    /// 当前形态的行为参数。
     pub fn behavior<'a>(&self, content: &'a Content) -> &'a WeaponBehavior {
         let def = &content.weapons[self.def];
-        match (&def.evolution, self.evolved) {
-            (Some(evo), true) => &evo.behavior,
-            _ => &def.behavior,
+        match self.form {
+            Form::Evolved => &def.evolution.as_ref().expect("正统进化数据").behavior,
+            Form::Mutated => &def.mutation.as_ref().expect("异化数据").behavior,
+            Form::Fused(f) => &content.fusions[f].behavior,
+            Form::Base => &def.behavior,
         }
     }
 
     /// 当前等级的数值。
     pub fn stats<'a>(&self, content: &'a Content) -> &'a WeaponLevel {
         let def = &content.weapons[self.def];
-        match (&def.evolution, self.evolved) {
-            (Some(evo), true) => &evo.level,
-            _ => &def.levels[(self.level as usize).clamp(1, def.levels.len()) - 1],
+        match self.form {
+            Form::Evolved => &def.evolution.as_ref().expect("正统进化数据").level,
+            Form::Mutated => &def.mutation.as_ref().expect("异化数据").level,
+            Form::Fused(f) => &content.fusions[f].level,
+            Form::Base => &def.levels[(self.level as usize).clamp(1, def.levels.len()) - 1],
         }
     }
 
@@ -109,9 +123,54 @@ impl WeaponSlot {
     pub fn can_evolve(&self, content: &Content, build: &Build) -> bool {
         let def = &content.weapons[self.def];
         let Some(evo) = &def.evolution else { return false };
-        !self.evolved
+        self.form == Form::Base
             && self.is_max_level(content)
             && content.passive_index(&evo.passive).is_some_and(|p| build.passive_level(p) > 0)
+    }
+
+    pub fn transformed(&self) -> bool {
+        self.form != Form::Base
+    }
+
+    pub fn name<'a>(&self, content: &'a Content) -> &'a str {
+        let d = &content.weapons[self.def];
+        match self.form {
+            Form::Base => &d.name,
+            Form::Evolved => &d.evolution.as_ref().expect("进化数据").name,
+            Form::Mutated => &d.mutation.as_ref().expect("异化数据").name,
+            Form::Fused(f) => &content.fusions[f].name,
+        }
+    }
+
+    pub fn desc<'a>(&self, content: &'a Content) -> &'a str {
+        let d = &content.weapons[self.def];
+        match self.form {
+            Form::Base => &d.desc,
+            Form::Evolved => &d.evolution.as_ref().expect("进化数据").desc,
+            Form::Mutated => &d.mutation.as_ref().expect("异化数据").desc,
+            Form::Fused(f) => &content.fusions[f].desc,
+        }
+    }
+
+    /// 已合璧的材料仍视为持有，防止重新拿取同一法器。
+    pub fn contains(&self, content: &Content, def: usize) -> bool {
+        self.def == def
+            || matches!(self.form, Form::Fused(f)
+            if content.fusions[f].weapons.contains(&content.weapons[def].id))
+    }
+
+    pub fn can_mutate(&self, content: &Content, build: &Build, arsenal: &Arsenal) -> bool {
+        let d = &content.weapons[self.def];
+        d.mutation.is_some()
+            && self.can_evolve(content, build)
+            && arsenal.0.iter().any(|w| {
+                w.is_max_level(content)
+                    && content
+                        .weapons
+                        .iter()
+                        .enumerate()
+                        .any(|(k, other)| w.contains(content, k) && other.element.overcomes(d.element))
+            })
     }
 
     /// 第 k 个环绕物在给定角度下相对主角的位置。
@@ -132,12 +191,27 @@ impl Arsenal {
         for w in &self.0 {
             h.write_u32(w.def as u32);
             h.write_u32(w.level);
-            h.write_u32(u32::from(w.evolved));
+            h.write_u32(match w.form {
+                Form::Base => 0,
+                Form::Evolved => 1,
+                Form::Mutated => 2,
+                Form::Fused(f) => 3 + f as u32,
+            });
             h.write_f32(w.angle);
             h.write_f32(w.timer);
             for c in &w.cranes {
                 h.write_f32(c.pos.x);
                 h.write_f32(c.pos.y);
+            }
+            if matches!(w.form, Form::Mutated | Form::Fused(_)) {
+                h.write_f32(w.inner_t);
+                h.write_f32(w.toll.unwrap_or(-1.0));
+                for c in &w.cranes {
+                    h.write_f32(c.rest);
+                    h.write_u32(u32::from(c.striking));
+                    h.write_f32(c.vel.x);
+                    h.write_f32(c.vel.y);
+                }
             }
         }
     }
@@ -156,6 +230,7 @@ pub(crate) struct Ctx<'a> {
     pub strikes: &'a mut Strikes,
     pub shots: &'a mut volley::Shots,
     pub seals: &'a mut drop::Seals,
+    pub ground: &'a mut drop::Fissures,
     pub outbox: &'a mut SimOutbox,
     pub bamboo: &'a mut crate::bamboo::Bamboo,
     pub found: &'a mut Vec<u32>,
@@ -174,6 +249,7 @@ pub(crate) fn update_weapons(
     mut strikes: ResMut<Strikes>,
     mut shots: ResMut<volley::Shots>,
     mut seals: ResMut<drop::Seals>,
+    mut ground: ResMut<drop::Fissures>,
     mut outbox: ResMut<SimOutbox>,
     mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
@@ -199,6 +275,7 @@ pub(crate) fn update_weapons(
             strikes: &mut strikes,
             shots: &mut shots,
             seals: &mut seals,
+            ground: &mut ground,
             outbox: &mut outbox,
             bamboo: &mut bamboo,
             found: &mut found,

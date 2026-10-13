@@ -124,8 +124,8 @@
         lamp_mult: 1.2,
         insight_mult: 1.15,
         // 保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上但缺进化心法时，
-        // 每次升级 25% 把那门心法放进选项（docs/GAMEPLAY.md 第 5.8 节）
-        pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25),
+        // 每次升级 25% 提示钥匙；5 分钟后满级缺钥匙必展示，仍需玩家选择与心法空格
+        pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25, key_guarantee_after: 300.0),
         heal: 0.3,
         oil: 20,
         skip_oil: 10,

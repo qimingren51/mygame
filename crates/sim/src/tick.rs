@@ -207,6 +207,8 @@ pub(crate) struct HashParams<'w, 's> {
     stats: Res<'w, crate::stats::Stats>,
     progress: Res<'w, Progress>,
     shots: Res<'w, Shots>,
+    ground: Res<'w, Fissures>,
+    seals: Res<'w, Seals>,
     foes: Res<'w, Foes>,
     pickups: Res<'w, Pickups>,
     encounters: Res<'w, Encounters>,
@@ -252,6 +254,29 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.build.hash_into(&mut h);
     p.stats.hash_into(&mut h);
     p.shots.hash_into(&mut h);
+    // 新形态的持续区域和待落点纳入校验；旧形态的哈希布局保持兼容。
+    let new_ground = |z: &&crate::weapons::drop::Fissure| z.kind != lantern_content::GroundKind::Fissure;
+    let new_seal = |s: &&crate::weapons::drop::SealDrop| {
+        s.fissure.is_some_and(|f| f.kind != lantern_content::GroundKind::Fissure)
+    };
+    let ground_count = p.ground.0.iter().filter(new_ground).count();
+    let seal_count = p.seals.0.iter().filter(new_seal).count();
+    if ground_count + seal_count > 0 {
+        h.write_u32(0x4d32);
+        h.write_u32(ground_count as u32);
+        for z in p.ground.0.iter().filter(new_ground) {
+            h.write_u32(z.kind as u32);
+            for v in [z.pos.x, z.pos.y, z.radius, z.life, z.tick, z.damage] {
+                h.write_f32(v);
+            }
+        }
+        h.write_u32(seal_count as u32);
+        for s in p.seals.0.iter().filter(new_seal) {
+            for v in [s.pos.x, s.pos.y, s.t, s.delay, s.damage] {
+                h.write_f32(v);
+            }
+        }
+    }
     p.foes.hash_into(&mut h);
     p.pickups.hash_into(&mut h);
     p.encounters.hash_into(&mut h);

@@ -387,13 +387,15 @@ impl FlowParams<'_, '_> {
         let gold = self.rng.0.get(Stream::Chest).range_f32(lo as f32, hi as f32 + 0.999).floor();
         self.progress.gold += gold * self.stats.get(Stat::GoldGain);
         let mut items = Vec::with_capacity(n as usize);
-        for k in 0..n {
-            // 宝箱只给升级和进化；都满了才放开新法器、新心法
+        for _ in 0..n {
+            // 宝箱只给升级和无分岔的进化；终式与异化分岔由玩家在升级卡亲自选择。
             let all = offers(c, &self.arsenal, &self.build, self.secs());
-            let ups: Vec<_> = all.iter().copied().filter(|(o, _)| o.is_upgrade()).collect();
-            let pool = if ups.is_empty() { &all } else { &ups };
-            // 小头目的宝箱：第一项优先升级最接近进化的法器
-            let priority = if source == ChestSource::MiniBoss && k == 0 {
+            let ups: Vec<_> = all.iter().copied().filter(|(o, _)| o.is_upgrade()
+                && !matches!(o, Offer::Evolve(k) if self.arsenal.0[*k].can_mutate(c, &self.build, &self.arsenal))).collect();
+            // 分岔与终式必须由玩家决定；没有可升的内容就给灯油。
+            let pool = &ups;
+            // 小头目的宝箱：每一项都优先补最接近进化的法器。
+            let priority = if source == ChestSource::MiniBoss {
                 closest_to_evolution(&self.arsenal, pool)
             } else {
                 None
@@ -403,10 +405,10 @@ impl FlowParams<'_, '_> {
             });
             self.apply(offer);
             let level = match offer {
-                Offer::Evolve(k) | Offer::WeaponUp(k) => self.arsenal.0[k].level,
+                Offer::Evolve(k) | Offer::Mutate(k) | Offer::WeaponUp(k) => self.arsenal.0[k].level,
                 Offer::PassiveUp(k) => self.build.passives[k].level,
                 Offer::NewWeapon(_) | Offer::NewPassive(_) => 1,
-                Offer::Heal | Offer::Oil => 0,
+                Offer::Heal | Offer::Oil | Offer::Fuse { .. } => 0,
             };
             items.push(crate::flow::ChestItem { offer, level });
         }
@@ -426,7 +428,10 @@ impl FlowParams<'_, '_> {
         if let Some(k) = self.flow.pending_evos.pop_front() {
             self.flow.evolving = Some(k);
             *self.phase = SimPhase::Evolve;
-            self.outbox.0.push(SimEvent::Evolve { weapon: self.arsenal.0[k].def as u16 });
+            self.outbox.0.push(SimEvent::Evolve {
+                weapon: self.arsenal.0[k].def as u16,
+                form: self.arsenal.0[k].form,
+            });
         } else {
             self.next_pending();
         }
@@ -452,7 +457,14 @@ impl FlowParams<'_, '_> {
     /// 现在有没有能给的灯坠。
     fn charms_available(&self) -> bool {
         let c = &self.content.0;
-        !charm_candidates(c, &self.setup, &self.build, &self.survival, self.arsenal.0.len()).is_empty()
+        !charm_candidates(
+            c,
+            &self.setup,
+            &self.build,
+            &self.survival,
+            crate::build::material_slots(&self.arsenal) as usize,
+        )
+        .is_empty()
     }
 
     /// 灯坠三选一；没有可给的灯坠时直接跳过。
@@ -464,7 +476,7 @@ impl FlowParams<'_, '_> {
             &self.setup,
             &self.build,
             &self.survival,
-            self.arsenal.0.len(),
+            crate::build::material_slots(&self.arsenal) as usize,
             self.rng.0.get(Stream::Chest),
         );
         if offers.is_empty() {
@@ -705,6 +717,26 @@ pub(crate) fn handle_commands(
                 }
                 fp.flow.banishes -= 1;
                 fp.build.banished.push(ban);
+                // 形态牌可能共享材料：封印后重新整理整组，避免残留另一条已失效的分岔。
+                if matches!(offer, Offer::Evolve(_) | Offer::Mutate(_) | Offer::Fuse { .. }) {
+                    let c = fp.content.0.clone();
+                    let secs = fp.secs();
+                    let (offers, inspired) = roll_choices(
+                        &c,
+                        &fp.arsenal,
+                        &mut fp.build,
+                        &fp.stats,
+                        secs,
+                        fp.rng.0.get(Stream::Choice),
+                        false,
+                    );
+                    if let Some(choice) = &mut fp.flow.choice {
+                        choice.offers = offers;
+                        choice.inspired = inspired;
+                    }
+                    fp.outbox.0.push(SimEvent::Banished);
+                    continue;
+                }
                 // 被封印的那一项换成新抽的一项，其余不变（余烬只换心法）
                 let content = fp.content.0.clone();
                 let c = &*content;

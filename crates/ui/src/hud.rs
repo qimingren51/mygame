@@ -436,15 +436,15 @@ pub(crate) fn update_slots(
     arsenal: Option<Res<Arsenal>>,
     build: Option<Res<Build>>,
     slots: Single<Entity, With<Slots>>,
-    mut shown: Local<Vec<(u8, usize, u32, bool)>>,
+    mut shown: Local<Vec<(u8, usize, u32, lantern_sim::weapons::Form)>>,
 ) {
     let (Some(arsenal), Some(build)) = (arsenal, build) else { return };
     let c = &content.0;
-    let now: Vec<(u8, usize, u32, bool)> = arsenal
+    let now: Vec<(u8, usize, u32, lantern_sim::weapons::Form)> = arsenal
         .0
         .iter()
-        .map(|w| (0, w.def, w.level, w.evolved))
-        .chain(build.passives.iter().map(|p| (1, p.def, p.level, false)))
+        .map(|w| (0, w.def, w.level, w.form))
+        .chain(build.passives.iter().map(|p| (1, p.def, p.level, lantern_sim::weapons::Form::Base)))
         .collect();
     if *shown == now {
         return;
@@ -456,8 +456,11 @@ pub(crate) fn update_slots(
             for w in &arsenal.0 {
                 let def = &c.weapons[w.def];
                 let color = element_color(c, def.element);
-                let name =
-                    if w.evolved { format!("ui/icon_{}_evo", def.id) } else { format!("ui/icon_{}", def.id) };
+                let name = if w.transformed() {
+                    format!("ui/icon_{}_evo", def.id)
+                } else {
+                    format!("ui/icon_{}", def.id)
+                };
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
@@ -472,11 +475,31 @@ pub(crate) fn update_slots(
                             align_items: AlignItems::Center,
                             ..default()
                         },
-                        skin.image(if w.evolved { "slot_l_evo" } else { "slot_l" }),
+                        skin.image(if w.transformed() { "slot_l_evo" } else { "slot_l" }),
                     ))
                     .with_children(|slot| spawn_icon(slot, &db, &fonts, Some(&name), &def.icon, color, 38.0));
-                    let lv = if w.evolved { "★".to_string() } else { format!("{}", w.level) };
-                    cell.spawn(text(&fonts.body, 12.0, if w.evolved { GOLD } else { PAPER }, &lv));
+                    let lv = match w.form {
+                        lantern_sim::weapons::Form::Base => w.level.to_string(),
+                        lantern_sim::weapons::Form::Evolved => "正".into(),
+                        lantern_sim::weapons::Form::Mutated => "异".into(),
+                        lantern_sim::weapons::Form::Fused(f) => {
+                            let names: Vec<_> = c.fusions[f]
+                                .weapons
+                                .iter()
+                                .map(|id| {
+                                    c.element(c.weapons[c.weapon_index(id).expect("合璧材料")].element)
+                                        .name
+                                        .chars()
+                                        .next()
+                                        .unwrap()
+                                })
+                                .collect();
+                            format!("合·{}{}", names[0], names[1])
+                        }
+                    };
+                    let badge =
+                        if w.form == lantern_sim::weapons::Form::Mutated { hex("#CF8CDB") } else { GOLD };
+                    cell.spawn(text(&fonts.body, 12.0, if w.transformed() { badge } else { PAPER }, &lv));
                 });
             }
         });

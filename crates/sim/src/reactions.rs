@@ -119,6 +119,10 @@ pub(crate) struct ReactCtx<'a, 'w, 's> {
 }
 
 impl<'a, 'w, 's> ReactCtx<'a, 'w, 's> {
+    pub(crate) fn shots(&mut self) -> &mut Shots {
+        &mut self.res.shots
+    }
+
     pub fn new(
         content: &'a Content,
         stats: &'a Stats,
@@ -237,6 +241,7 @@ fn react(
             let a0 = rng.range_f32(0.0, TAU);
             for k in 0..count {
                 ctx.res.shots.fire(ShotSpec {
+                    effects: Default::default(),
                     pos,
                     angle: a0 + k as f32 * TAU / count as f32,
                     speed: speed * stats.get(Stat::ProjSpeed),

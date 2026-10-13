@@ -336,6 +336,8 @@ pub struct PityDef {
     pub early_new_weapons: u32,
     pub key_level: u32,
     pub key_chance: f32,
+    /// 此时刻之后，满级缺钥匙每次升级必定展示心法。
+    pub key_guarantee_after: f32,
 }
 
 /// 连斩：两次击杀间隔不超过 window 秒时连续计数。
@@ -691,6 +693,7 @@ impl ElementsDef {
 /// 法器的行为。新增行为 = 加一个变体，再在 `lantern_sim` 的 weapons 模块里实现。
 /// 进化后的法器用同一种行为，参数可以不同。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum WeaponBehavior {
     /// 环绕周身（灯火）。spin 是转速（弧度/秒，x 为等级）；同一只妖物 hit_cooldown 秒内只吃一次。
     /// inner 是不夜城的内环火海。
@@ -701,6 +704,9 @@ pub enum WeaponBehavior {
         size: f32,
         #[serde(default)]
         inner: Option<InnerFireDef>,
+        /// 冰火各半：冰焰冻结，火焰点燃。
+        #[serde(default)]
+        ice_half: bool,
     },
     /// 朝最近的妖物齐射追踪飞行物（符剑）。
     Volley {
@@ -716,6 +722,8 @@ pub enum WeaponBehavior {
         spread: f32,
         /// 没有目标时多久再找一次
         retry: f32,
+        #[serde(default)]
+        molten: Option<MoltenDef>,
     },
     /// 以主角为中心周期震出一圈（霜铃）；toll 是进化后的全屏钟鸣。
     Pulse {
@@ -724,6 +732,10 @@ pub enum WeaponBehavior {
         slow_time: f32,
         #[serde(default)]
         toll: Option<TollDef>,
+        #[serde(default)]
+        permafrost: Option<PermafrostDef>,
+        #[serde(default)]
+        ice_rain: Option<IceRainDef>,
     },
     /// 平时绕身，随机扑向附近的妖物，撞到后折返（纸鹤）。速度 speed 的 x 为等级。
     Seeker {
@@ -739,6 +751,18 @@ pub enum WeaponBehavior {
         steer: f32,
         /// 撞击判定：目标半径 + reach
         reach: f32,
+        /// 扑击后射出贯穿铁羽；0 表示没有。
+        #[serde(default)]
+        pierce: u32,
+        #[serde(default)]
+        execute: f32,
+        #[serde(default)]
+        count_cap: Option<u32>,
+        #[serde(default)]
+        on_hit: Option<ImpactDef>,
+        /// 绕身巨凤，沿环路接敌；不受召唤数量加成。
+        #[serde(default)]
+        escort: Option<InnerFireDef>,
     },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
@@ -782,12 +806,59 @@ pub struct TollDef {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FissureDef {
+    #[serde(default)]
+    pub kind: GroundKind,
     pub radius_scale: f32,
     pub life: f32,
     pub tick: f32,
     pub damage_scale: f32,
     pub slow: f32,
     pub slow_time: f32,
+}
+
+/// 持续区域的身份；同类重叠取最强，全场受统一预算限制。
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+pub enum GroundKind {
+    #[default]
+    Fissure,
+    Fire,
+    Bamboo,
+    Sword,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MoltenDef {
+    pub vulnerability: f32,
+    pub duration: f32,
+    /// 击杀分出的两剑倍率；分出的剑归零，不再分裂。
+    pub split_ratio: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PermafrostDef {
+    pub shatter_radius: f32,
+    pub shatter_ratio: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IceRainDef {
+    pub count: u32,
+    pub speed: f32,
+    pub life: f32,
+    pub damage: f32,
+    pub freeze: f32,
+    pub boss_cap: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ImpactDef {
+    pub radius: f32,
+    pub ratio: f32,
+    pub zone: FissureDef,
 }
 
 /// 每一级的数值；没用到的字段省略。
@@ -815,6 +886,8 @@ pub struct WeaponDef {
     /// 第 1 级到满级
     pub levels: Vec<WeaponLevel>,
     pub evolution: Option<EvolutionDef>,
+    #[serde(default)]
+    pub mutation: Option<MutationDef>,
 }
 
 /// 进化：满级并持有对应心法后，下次升级必出。进化后换成另一套行为参数和数值。
@@ -825,6 +898,28 @@ pub struct EvolutionDef {
     pub desc: String,
     /// 需要的心法 ID
     pub passive: String,
+    pub behavior: WeaponBehavior,
+    pub level: WeaponLevel,
+}
+
+/// 异化与正统共用心法钥匙；额外需要克制本系的满级法器。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MutationDef {
+    pub name: String,
+    pub desc: String,
+    pub behavior: WeaponBehavior,
+    pub level: WeaponLevel,
+}
+
+/// 两件正统进化的终式。材料按 ID 引用，两系共鸣都需达到二阶。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FusionDef {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub weapons: [String; 2],
     pub behavior: WeaponBehavior,
     pub level: WeaponLevel,
 }

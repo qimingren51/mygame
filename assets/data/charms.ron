@@ -16,6 +16,6 @@
      effects: [Add(MaxHp, 60.0), Add(Damage, -0.10)], initial: true),
     (id: "ice_soul", name: "冰魄珠", flavor: "冰魄散了凝成的珠子。冻住的魂，加倍归灯。", good: "冰冻中被击杀的妖物，魂火 ×2", bad: "冰冻时长 -20%",
      effects: [Add(FrozenXp, 1.0), Mul(FreezeTime, -0.2)], initial: true),
-    (id: "broken_sword", name: "断剑", flavor: "剑断了，剩下的那截更狠。", good: "每件法器伤害 +35%", bad: "法器栏只剩 4 格",
+    (id: "broken_sword", name: "断剑", flavor: "剑断了，剩下的那截更狠。", good: "每件法器伤害 +35%", bad: "法器栏只剩 4 格，合璧仍占 2 格",
      effects: [Add(Damage, 0.35), Add(WeaponSlots, -2.0)], max_weapons: Some(4)),
 ]

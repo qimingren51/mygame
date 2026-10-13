@@ -12,11 +12,15 @@ pub(crate) enum Rarity {
     Xuan,
     Ling,
     Fan,
+    Yi,
+    He,
 }
 
 impl Rarity {
     pub fn name(self) -> &'static str {
         match self {
+            Rarity::Yi => "异化",
+            Rarity::He => "终式",
             Rarity::Tian => "天品",
             Rarity::Xuan => "玄品",
             Rarity::Ling => "灵品",
@@ -26,6 +30,8 @@ impl Rarity {
 
     pub fn color(self) -> Color {
         match self {
+            Rarity::Yi => hex("#CF8CDB"),
+            Rarity::He => hex("#F6BD62"),
             Rarity::Tian => hex("#FFD98A"),
             Rarity::Xuan => hex("#B07CF0"),
             Rarity::Ling => hex("#6FB8FF"),
@@ -122,6 +128,34 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 element: Some(def.element),
             }
         }
+        Offer::Mutate(k) => {
+            let def = &c.weapons[arsenal.0[k].def];
+            let m = def.mutation.as_ref().expect("异化数据");
+            OfferInfo {
+                rarity: Rarity::Yi,
+                kind: "异化 · 不可合璧".into(),
+                icon: Some(format!("ui/icon_{}_evo", def.id)),
+                glyph: "异".into(),
+                color: Rarity::Yi.color(),
+                name: m.name.clone(),
+                desc: m.desc.clone(),
+                element: Some(def.element),
+            }
+        }
+        Offer::Fuse { fusion_id, .. } => {
+            let f = &c.fusions[fusion_id];
+            let def = &c.weapons[c.weapon_index(&f.weapons[0]).expect("合璧材料")];
+            OfferInfo {
+                rarity: Rarity::He,
+                kind: "合璧 · 终式".into(),
+                icon: Some(format!("ui/icon_{}_evo", def.id)),
+                glyph: "合".into(),
+                color: Rarity::He.color(),
+                name: f.name.clone(),
+                desc: f.desc.clone(),
+                element: Some(def.element),
+            }
+        }
         Offer::NewWeapon(d) => {
             let def = &c.weapons[d];
             OfferInfo {
@@ -176,6 +210,25 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
 pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -> Option<OfferNote> {
     let gold = hex("#FFD98A");
     let el = offer.element(c, arsenal, build)?;
+    if let Offer::Mutate(_) = offer {
+        return Some(OfferNote {
+            color: Some(Rarity::Yi.color()),
+            title: "另辟一途，不能回头".into(),
+            body: "与正统进化互斥；异化之后，失去合璧资格。".into(),
+        });
+    }
+    if let Offer::Fuse { a, b, .. } = offer {
+        let slots = if build.charms.iter().any(|&k| c.charms[k].id == "broken_sword") {
+            "断剑在身，仍占两格"
+        } else {
+            "两器合一，腾出一格"
+        };
+        return Some(OfferNote {
+            color: Some(Rarity::He.color()),
+            title: slots.into(),
+            body: format!("{} + {}；两系各计四点", arsenal.0[a].name(c), arsenal.0[b].name(c)),
+        });
+    }
     if let Offer::Evolve(k) = offer {
         let def = &c.weapons[arsenal.0[k].def];
         let evo = def.evolution.as_ref()?;
@@ -183,7 +236,7 @@ pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
         return Some(OfferNote {
             color: Some(gold),
             title: "选择后立即进化".into(),
-            body: format!("{} Lv{} + {}", def.name, def.levels.len(), passive),
+            body: format!("{} Lv{} + {}；走正统，保留合璧之路", def.name, def.levels.len(), passive),
         });
     }
     let from = build.points[el.index()];
@@ -255,7 +308,7 @@ pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 _ => unreachable!(),
             };
             let owned = arsenal.0.iter().find(|w| {
-                !w.evolved && c.weapons[w.def].evolution.as_ref().is_some_and(|e| &e.passive == pid)
+                !w.transformed() && c.weapons[w.def].evolution.as_ref().is_some_and(|e| &e.passive == pid)
             });
             if let Some(w) = owned {
                 let def = &c.weapons[w.def];

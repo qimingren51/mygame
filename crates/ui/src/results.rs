@@ -256,7 +256,7 @@ fn results_body(
                 |row| {
                     for w in &arsenal.0 {
                         let def = &c.weapons[w.def];
-                        let name = if w.evolved {
+                        let name = if w.transformed() {
                             format!("ui/icon_{}_evo", def.id)
                         } else {
                             format!("ui/icon_{}", def.id)

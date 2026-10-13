@@ -43,6 +43,7 @@ pub(crate) fn update_enemies(
     mut outbox: ResMut<SimOutbox>,
     mut survival: ResMut<Survival>,
     bamboo: Res<crate::bamboo::Bamboo>,
+    ground: Res<crate::weapons::drop::Fissures>,
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
     let content = &content.0;
@@ -164,7 +165,7 @@ pub(crate) fn update_enemies(
             };
             // 竹丛里减速，冲锋不减
             if charge_step.is_none() {
-                sp *= bamboo.speed_at(Vec2::new(x, y));
+                sp *= bamboo.speed_at(Vec2::new(x, y)) * ground.speed_at(Vec2::new(x, y));
             }
             if let Some(step) = charge_step {
                 x += step.x * DT;

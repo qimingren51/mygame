@@ -696,6 +696,14 @@ pub(crate) fn particle_events(
                         parts.dust(at, (10.0 * k) as u32, radius / 40.0 * k, DUST);
                         parts.ink(at, (6.0 * k) as u32, 1.3 * k);
                     }
+                    StrikeFx::Bamboo => {
+                        parts.dust(at, 12, radius / 40.0, DUST);
+                        parts.sparks(at, element_glow(Some(Element::Wood)), 8, 140.0, Vec2::Y);
+                    }
+                    StrikeFx::SwordGrove => {
+                        parts.sparks(at, element_glow(Some(Element::Metal)), 12, 220.0, Vec2::NEG_Y);
+                        parts.ink(at, 5, 1.0);
+                    }
                     StrikeFx::Blast(b) => {
                         let c = if b == BlastKind::Ice { element_glow(Some(Element::Water)) } else { FIRE };
                         parts.sparks(at, c, 8, 200.0, Vec2::ZERO);
@@ -766,7 +774,12 @@ pub(crate) fn particle_events(
                 if parts.rng.chance(dt * 3.0) {
                     let p =
                         to_screen(slot.orbit_offset(angle, k)) + hero_at + Vec2::new(0.0, slot.size * 0.6);
-                    parts.embers(p, 3.0, FIRE, 1);
+                    let ice = k % 2 == 0
+                        && matches!(
+                            slot.behavior(&content.0),
+                            lantern_content::WeaponBehavior::Orbit { ice_half: true, .. }
+                        );
+                    parts.embers(p, 3.0, if ice { Color::srgb(0.4, 0.8, 1.0) } else { FIRE }, 1);
                 }
             }
         }

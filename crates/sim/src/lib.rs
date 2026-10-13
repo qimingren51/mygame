@@ -258,6 +258,7 @@ impl Plugin for SimPlugin {
                         combat::run_actions,
                         weapons::update_weapons,
                         weapons::drop::update_seals,
+                        weapons::drop::update_ground,
                         player::dash_strike,
                         reveal::flame_band,
                         reactions::update_zones,
@@ -270,7 +271,7 @@ impl Plugin for SimPlugin {
                     charms::apply_rescue.in_set(SimSet::Collide),
                     combat::resolve_hits.in_set(SimSet::Damage),
                     (combat::burn, bamboo::hit_bamboo).chain().in_set(SimSet::Status),
-                    combat::process_deaths.in_set(SimSet::Death),
+                    (weapons::pulse::shatter_deaths, combat::process_deaths).chain().in_set(SimSet::Death),
                     (
                         gems::update_gems,
                         gold::update_coins,

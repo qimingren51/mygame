@@ -23,6 +23,7 @@ pub struct Content {
     pub run: RunDef,
     pub enemies: Vec<EnemyDef>,
     pub weapons: Vec<WeaponDef>,
+    pub fusions: Vec<FusionDef>,
     pub passives: Vec<PassiveDef>,
     pub elements: ElementsDef,
     pub omens: Vec<OmenDef>,
@@ -94,6 +95,7 @@ impl Content {
             run: read(data_dir, "run.ron", &mut hash)?,
             enemies: read(data_dir, "enemies.ron", &mut hash)?,
             weapons: read(data_dir, "weapons.ron", &mut hash)?,
+            fusions: read(data_dir, "fusions.ron", &mut hash)?,
             passives: read(data_dir, "passives.ron", &mut hash)?,
             elements: read(data_dir, "elements.ron", &mut hash)?,
             omens: read(data_dir, "omens.ron", &mut hash)?,
@@ -221,6 +223,36 @@ mod tests {
         assert_eq!(el.weapon_points(8, false), 3);
         assert_eq!(el.weapon_points(8, true), 4);
         assert_eq!(el.passive_points(5), 3);
+    }
+
+    #[test]
+    fn mutation_and_fusion_catalog_is_complete_and_validated() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        assert_eq!(c.fusions.len(), 3);
+        for id in ["lamp", "sword", "bell", "crane", "seal"] {
+            assert!(c.weapons[c.weapon_index(id).unwrap()].mutation.is_some());
+        }
+        let bad = |c: &Content, file: &str| {
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains(file))
+        };
+        let mut missing = c.clone();
+        missing.fusions[0].weapons[0] = "不存在".into();
+        bad(&missing, "fusions.ron");
+        let mut ke = c.clone();
+        ke.fusions[0].weapons = ["lamp".into(), "bell".into()];
+        bad(&ke, "fusions.ron");
+        let mut duplicate = c.clone();
+        duplicate.fusions.push(c.fusions[0].clone());
+        bad(&duplicate, "fusions.ron");
+        let mut mutation = c.clone();
+        mutation.weapons[0].mutation = None;
+        bad(&mutation, "weapons.ron");
+        let mut invalid = c.clone();
+        invalid.fusions[0].level.damage = f32::NAN;
+        bad(&invalid, "fusions.ron");
+        let unknown: Result<WeaponBehavior, _> =
+            ron::from_str("Pulse(knockback: 0.0, slow: 0.2, slow_time: 1.0, typo: true)");
+        assert!(unknown.is_err());
     }
 
     #[test]

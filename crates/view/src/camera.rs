@@ -194,6 +194,14 @@ pub(crate) fn camera_events(outbox: Res<SimOutbox>, mut rig: ResMut<Rig>, player
                     rig.trauma(if evolved { 0.3 } else { 0.15 });
                     rig.kick(Vec2::NEG_Y, if evolved { 0.9 } else { 0.45 });
                 }
+                StrikeFx::Bamboo => {
+                    rig.trauma(0.18);
+                    rig.kick(Vec2::Y, 0.55);
+                }
+                StrikeFx::SwordGrove => {
+                    rig.trauma(0.2);
+                    rig.kick(Vec2::NEG_Y, 0.6);
+                }
                 StrikeFx::Quake => rig.trauma(0.42),
                 StrikeFx::Toll => {
                     rig.trauma(0.28);

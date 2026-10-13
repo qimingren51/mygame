@@ -208,7 +208,7 @@ fn choosing_an_evolution_plays_the_show_then_continues() {
     sim.step(InputFrame::default(), &[SimCommand::Choose(i)]);
     assert_eq!(sim.phase(), SimPhase::Evolve);
     assert_eq!(sim.flow().evolving, Some(0));
-    assert!(sim.arsenal().0[0].evolved);
+    assert!(sim.arsenal().0[0].transformed());
     sim.step(InputFrame::default(), &[SimCommand::Ack]);
     assert_eq!(sim.phase(), SimPhase::Play);
 }
