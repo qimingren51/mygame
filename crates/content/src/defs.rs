@@ -402,6 +402,24 @@ pub struct EnemyDef {
     /// 奇遇小动物被打死时的奖励
     #[serde(default)]
     pub loot: Option<CritterLoot>,
+    /// 冲锋（扑击、冲撞）
+    #[serde(default)]
+    pub charge: Option<ChargeDef>,
+}
+
+/// 精英的冲锋（docs/BALANCE.md 第 12.6 节）：离主角 range 以内、冷却好了就原地蓄力 windup 秒
+/// （转向跟着主角），然后方向锁定，以 speed 冲 duration 秒，接触伤害乘 damage_mult；冲完原地停 recover 秒，
+/// 再冷却 every 秒。冲锋速度不吃词缀“疾”“狂”的移速加成。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChargeDef {
+    pub range: f32,
+    pub every: f32,
+    pub windup: f32,
+    pub speed: f32,
+    pub duration: f32,
+    pub damage_mult: f32,
+    pub recover: f32,
 }
 
 /// 夜主的招式（docs/BALANCE.md 第 12.2 节）：一阶段放狐火环、召唤小妖；

@@ -3,13 +3,13 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Movement, Rank, Stat};
+use lantern_content::{ChargeDef, Movement, Rank, Stat};
 use lantern_core::Stream;
 use lantern_core::step::DT;
 
 use crate::charms::Survival;
 use crate::combat::{ActionQueue, Hard, HurtCtx, apply_hard, hurt_player};
-use crate::enemies::Enemies;
+use crate::enemies::{CHARGE_DASH, CHARGE_IDLE, CHARGE_RECOVER, CHARGE_WINDUP, Enemies};
 use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan, SimView};
 use crate::spatial::Grid;
@@ -101,6 +101,16 @@ pub(crate) fn update_enemies(
         en.kx[i] *= decay;
         en.ky[i] *= decay;
 
+        // 被冻住、击晕、定身、晕头时，蓄力和冲锋都被打断，重新冷却
+        let held = en.frozen[i] > 0.0 || en.stun[i] > 0.0 || en.root[i] > 0.0 || en.confuse[i] > 0.0;
+        if held
+            && let Some(ch) = &def.charge
+            && matches!(en.charge[i], CHARGE_WINDUP | CHARGE_DASH)
+        {
+            en.charge[i] = CHARGE_IDLE;
+            en.charge_t[i] = ch.every;
+        }
+
         if en.frozen[i] > 0.0 {
             en.frozen[i] -= DT;
             if en.frozen[i] <= 0.0 {
@@ -137,7 +147,18 @@ pub(crate) fn update_enemies(
             if dark_speed > 0.0 && !reveal.covers(Vec2::new(x, y)) {
                 sp *= 1.0 + dark_speed;
             }
-            if en.confuse[i] > 0.0 {
+            // 冲锋：速度不吃“疾”“狂”和难度的移速加成，只吃减速、光区这类倍率
+            let charge_step = match &def.charge {
+                Some(ch) if en.confuse[i] <= 0.0 => {
+                    let ratio = if en.speed[i] > 0.0 { sp / en.speed[i] } else { 1.0 };
+                    charge(en, i, ch, (dx / d, dy / d), d, ch.speed * ratio)
+                }
+                _ => None,
+            };
+            if let Some(step) = charge_step {
+                x += step.x * DT;
+                y += step.y * DT;
+            } else if en.confuse[i] > 0.0 {
                 // 晕头：朝随机方向乱走
                 en.confuse[i] -= DT;
                 let (s, c) = ops::sin_cos(en.confuse_dir[i]);
@@ -176,13 +197,69 @@ pub(crate) fn update_enemies(
             en.cloaked[i] = !reveal.covers(Vec2::new(x, y));
         }
 
+        let contact = match &def.charge {
+            Some(ch) if en.charge[i] == CHARGE_DASH => en.damage[i] * ch.damage_mult,
+            _ => en.damage[i],
+        };
         if d < en.r[i] + pr
-            && en.damage[i] > 0.0
-            && hurt_player(&mut player, &mut health, pos.0, en.damage[i], &mut ctx)
+            && contact > 0.0
+            && hurt_player(&mut player, &mut health, pos.0, contact, &mut ctx)
             && thorn > 0.0
             && ctx.rng.chance(thorn)
         {
             apply_hard(en, i, def.rank, Hard::Freeze { blast: false }, thorn_time);
+        }
+    }
+}
+
+/// 冲锋走一步（docs/BALANCE.md 第 12.6 节）。返回这一步的速度；`None` 表示照常追击。
+/// to_player 是指向主角的单位向量，d 是到主角的距离，speed 是这一步的冲锋速度。
+fn charge(
+    en: &mut Enemies,
+    i: usize,
+    ch: &ChargeDef,
+    to_player: (f32, f32),
+    d: f32,
+    speed: f32,
+) -> Option<Vec2> {
+    en.charge_t[i] -= DT;
+    let done = en.charge_t[i] <= 0.0;
+    match en.charge[i] {
+        CHARGE_WINDUP => {
+            // 蓄力：原地转向跟着主角，时间到就锁定方向冲出
+            en.charge_dx[i] = to_player.0;
+            en.charge_dy[i] = to_player.1;
+            if done {
+                en.charge[i] = CHARGE_DASH;
+                en.charge_t[i] = ch.duration;
+            }
+            Some(Vec2::ZERO)
+        }
+        CHARGE_DASH => {
+            if done {
+                en.charge[i] = CHARGE_RECOVER;
+                en.charge_t[i] = ch.recover;
+            }
+            Some(Vec2::new(en.charge_dx[i], en.charge_dy[i]) * speed)
+        }
+        CHARGE_RECOVER => {
+            if done {
+                en.charge[i] = CHARGE_IDLE;
+                en.charge_t[i] = ch.every;
+            }
+            Some(Vec2::ZERO)
+        }
+        _ => {
+            // 冷却：照常追击；冷却好了、主角又在范围里就开始蓄力
+            if done && d <= ch.range {
+                en.charge[i] = CHARGE_WINDUP;
+                en.charge_t[i] = ch.windup;
+                en.charge_dx[i] = to_player.0;
+                en.charge_dy[i] = to_player.1;
+                return Some(Vec2::ZERO);
+            }
+            en.charge_t[i] = en.charge_t[i].max(0.0);
+            None
         }
     }
 }

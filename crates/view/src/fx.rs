@@ -14,6 +14,7 @@ use lantern_sim::boss::{BossState, Foes};
 use lantern_sim::charms::Trail;
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::encounters::Encounters;
+use lantern_sim::enemies::CHARGE_WINDUP;
 use lantern_sim::gold::Coins;
 use lantern_sim::lanterns::Lanterns;
 use lantern_sim::pickups::{PickupKind, Pickups};
@@ -665,6 +666,43 @@ pub(crate) fn collect_fx(
                 Vec2::new(k, k * FLAT) * (1.2 - 0.2 * u),
                 0.0,
                 red.with_alpha(0.3 + 0.6 * u),
+            );
+        }
+    }
+
+    // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮）
+    if let Some(en) = &res.enemies {
+        let c = &content.0;
+        let red = rgb(0xff4a3a);
+        for i in en.iter_alive() {
+            if en.charge[i] != CHARGE_WINDUP {
+                continue;
+            }
+            let Some(ch) = &c.enemies[en.kind[i] as usize].charge else { continue };
+            let u = (1.0 - en.charge_t[i] / ch.windup).clamp(0.0, 1.0);
+            let at = Vec2::new(en.x[i], en.y[i]);
+            let dir = Vec2::new(en.charge_dx[i], en.charge_dy[i]);
+            // 线从妖物脚下画到冲锋的终点（贴图的锚点在右端，放在终点、朝冲锋方向）
+            let len = ch.speed * ch.duration + en.r[i];
+            let end = to_screen(at + dir * len);
+            let screen_dir = end - to_screen(at);
+            let rot = screen_dir.y.atan2(screen_dir.x);
+            let w = db.frame(f.trail).size;
+            let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
+            pools.fx.push(Draw {
+                scale,
+                rot,
+                color: red.with_alpha(0.25 + 0.45 * u),
+                ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
+            });
+            glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
+            let pulse = 0.6 + 0.4 * (now * 18.0).sin();
+            glow.add(
+                f.glow,
+                lerp(Vec2::new(en.px[i], en.py[i]), at).extend(layer::EMISSIVE),
+                Vec2::splat(en.r[i] / 30.0),
+                0.0,
+                red.with_alpha((0.3 + 0.5 * u) * pulse),
             );
         }
     }

@@ -25,6 +25,12 @@ pub const TAG_FRENZY: u8 = 4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnemyHandle(u32);
 
+/// 冲锋的阶段：冷却（照常追击）、蓄力（原地转向）、冲出（方向锁定）、收势（原地停）。
+pub const CHARGE_IDLE: u8 = 0;
+pub const CHARGE_WINDUP: u8 = 1;
+pub const CHARGE_DASH: u8 = 2;
+pub const CHARGE_RECOVER: u8 = 3;
+
 #[derive(Resource)]
 pub struct Enemies {
     pub x: Vec<f32>,
@@ -82,6 +88,11 @@ pub struct Enemies {
     pub tags: Vec<u8>,
     /// 合围：大于 0 时移速乘它，直到离主角足够近
     pub rush: Vec<f32>,
+    /// 冲锋：阶段（CHARGE_*）、这一阶段剩下的时间（冷却阶段是到下一次出招的时间）、方向
+    pub charge: Vec<u8>,
+    pub charge_t: Vec<f32>,
+    pub charge_dx: Vec<f32>,
+    pub charge_dy: Vec<f32>,
     /// “隐”：在照见圈外，自动瞄准锁定不到
     pub cloaked: Vec<bool>,
     /// 控制递减（只对精英）：6 秒内受到的硬控、软控次数与窗口剩余时间
@@ -142,6 +153,10 @@ impl Default for Enemies {
             affix: vec![0; ENEMY_CAP],
             tags: vec![0; ENEMY_CAP],
             rush: f(),
+            charge: vec![0; ENEMY_CAP],
+            charge_t: f(),
+            charge_dx: f(),
+            charge_dy: f(),
             cloaked: vec![false; ENEMY_CAP],
             hard_n: vec![0; ENEMY_CAP],
             hard_t: f(),
@@ -197,9 +212,13 @@ impl Enemies {
             &mut self.hard_t,
             &mut self.soft_t,
             &mut self.rush,
+            &mut self.charge_t,
+            &mut self.charge_dx,
+            &mut self.charge_dy,
         ] {
             v[i] = 0.0;
         }
+        self.charge[i] = CHARGE_IDLE;
         self.affix[i] = 0;
         self.tags[i] = 0;
         self.cloaked[i] = false;
@@ -245,6 +264,10 @@ impl Enemies {
                 [self.x[i], self.y[i], self.hp[i], self.kx[i], self.ky[i], self.burn_t[i], self.frozen[i]]
             {
                 h.write_f32(v);
+            }
+            if self.charge[i] != CHARGE_IDLE || self.charge_t[i] != 0.0 {
+                h.write_u32(u32::from(self.charge[i]));
+                h.write_f32(self.charge_t[i]);
             }
         }
     }

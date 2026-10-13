@@ -493,6 +493,20 @@ impl Content {
             c.positive("enemies.ron", &[("radius", e.radius), ("hp", e.hp)])?;
             c.non_negative("enemies.ron", &[("speed", e.speed), ("damage", e.damage), ("xp", e.xp)])?;
             c.color("enemies.ron", &e.id, &e.eye)?;
+            if let Some(ch) = &e.charge {
+                c.positive(
+                    "enemies.ron",
+                    &[
+                        ("charge.range", ch.range),
+                        ("charge.every", ch.every),
+                        ("charge.windup", ch.windup),
+                        ("charge.speed", ch.speed),
+                        ("charge.duration", ch.duration),
+                        ("charge.damage_mult", ch.damage_mult),
+                    ],
+                )?;
+                c.non_negative("enemies.ron", &[("charge.recover", ch.recover)])?;
+            }
             if let Some(b) = &e.boss {
                 c.positive(
                     "enemies.ron",

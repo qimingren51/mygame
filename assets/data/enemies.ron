@@ -5,14 +5,20 @@
     (id: "shade", name: "影妖", rank: Normal, movement: Chase,
      radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FF8A5B"),
     (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
-     radius: 10.0, hp: 6.0, speed: 84.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+     radius: 10.0, hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
     (id: "golem", name: "石妖", rank: Normal, movement: Chase,
      radius: 19.0, hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+    // 赤面狐扑击、青面鬼冲撞（docs/BALANCE.md 第 12.6 节）：离主角 range 以内每 every 秒一次，
+    // 原地蓄力 windup 秒（转向跟着主角），然后方向锁定，以 speed 冲 duration 秒，接触伤害 × damage_mult，冲完停 recover 秒
     (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
-     radius: 24.0, hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A"),
+     radius: 24.0, hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
+     charge: Some((range: 260.0, every: 4.0, windup: 0.6, speed: 320.0, duration: 0.45, damage_mult: 1.5,
+                   recover: 0.5))),
     (id: "ghoul", name: "青面鬼", rank: Elite, movement: Chase,
      radius: 30.0, hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#C8FF6B",
-     title: Some("小头目")),
+     title: Some("小头目"),
+     charge: Some((range: 360.0, every: 5.0, windup: 0.8, speed: 380.0, duration: 0.6, damage_mult: 2.0,
+                   recover: 1.0))),
     (id: "stonelord", name: "石将", rank: Elite, movement: Chase,
      radius: 28.0, hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
     // 九尾（docs/BALANCE.md 第 12.2 节）：生命 48000（再乘更的倍率；灯阵完整时 ×0.8）。

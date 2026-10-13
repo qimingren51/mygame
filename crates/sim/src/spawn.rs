@@ -57,6 +57,9 @@ pub fn spawn_enemy(
         en.atk_t[i] = b.volley_first;
         en.summon_t[i] = b.summon_every;
     }
+    if let Some(ch) = &def.charge {
+        en.charge_t[i] = ch.every;
+    }
     Some(i)
 }
 

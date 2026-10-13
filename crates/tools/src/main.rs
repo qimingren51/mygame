@@ -27,7 +27,8 @@ const USAGE: &str = "用法：
   lantern-tools balance [--runs <局数>] [--seed <起始种子>] [--god]
       机器人自动选卡、绕圈走位打整局，统计等级曲线、击杀、进化时间、伤害来源占比、存活时间
       （--god：主角无敌，看成长曲线和夜主战）
-  lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full] [--lamp <灯>] [--record <文件>]
+  lantern-tools kite [--runs <局数>] [--seed <起始种子>] [--tier <更>] [--meta none|half|full]
+      [--skill novice|regular|expert] [--lamp <灯>] [--record <文件>]
       会躲的风筝机器人打整局，按更和局外成长（无 / 一半 / 全满）统计胜率、等级、进化、夜主战、
       场上妖物数、燃灯间隔、伤害来源（docs/BALANCE.md 第 2.6、11 节的验收用它）
   lantern-tools record [--seed <种子>] [--god] [--out <文件>]

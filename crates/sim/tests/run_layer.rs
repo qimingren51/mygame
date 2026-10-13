@@ -344,3 +344,96 @@ fn reverse_omen_disables_sheng_and_doubles_ke_reactions() {
     let ke = el.reaction_between(Element::Water, Element::Fire).unwrap();
     assert!(Element::Water.overcomes(Element::Fire) && ke < el.reactions.len());
 }
+
+/// docs/BALANCE.md 第 12.6 节：赤面狐蓄力时原地转向，出手后方向锁定，冲出约 speed × duration。
+#[test]
+fn fox_winds_up_then_pounces_in_a_locked_direction() {
+    use lantern_sim::enemies::{CHARGE_DASH, CHARGE_IDLE, CHARGE_RECOVER, CHARGE_WINDUP};
+    let c = content();
+    let fox = &c.enemies[c.enemy_index("fox").unwrap()];
+    let ch = fox.charge.clone().expect("赤面狐会扑击");
+    let mut sim = quiet(11);
+    let i = sim.spawn("fox", Vec2::new(200.0, 0.0)).unwrap();
+    // 冷却好了，主角在范围里：下一步开始蓄力
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().charge_t[i] = 0.0;
+    sim.step(InputFrame::default(), &[]);
+    let en = sim.enemies();
+    assert_eq!(en.charge[i], CHARGE_WINDUP);
+    let start = Vec2::new(en.x[i], en.y[i]);
+    // 蓄力途中主角往下走，狐狸原地转向跟着
+    let steps = (ch.windup * 60.0).round() as usize - 2;
+    for _ in 0..steps {
+        sim.step(InputFrame::quantize(Vec2::Y), &[]);
+    }
+    let en = sim.enemies();
+    assert_eq!(en.charge[i], CHARGE_WINDUP);
+    assert!(Vec2::new(en.x[i], en.y[i]).distance(start) < 1.0, "蓄力时不动");
+    assert!(en.charge_dy[i] > 0.05, "转向跟着主角：{}", en.charge_dy[i]);
+    // 出手：方向锁定，主角再怎么走也不变
+    while sim.enemies().charge[i] == CHARGE_WINDUP {
+        sim.step(InputFrame::quantize(Vec2::Y), &[]);
+    }
+    assert_eq!(sim.enemies().charge[i], CHARGE_DASH);
+    let locked = (sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]);
+    let from = Vec2::new(sim.enemies().x[i], sim.enemies().y[i]);
+    while sim.enemies().charge[i] == CHARGE_DASH {
+        sim.step(InputFrame::quantize(-Vec2::Y), &[]);
+        assert_eq!((sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]), locked);
+    }
+    let en = sim.enemies();
+    assert_eq!(en.charge[i], CHARGE_RECOVER);
+    let dist = Vec2::new(en.x[i], en.y[i]).distance(from);
+    let want = ch.speed * ch.duration;
+    assert!((dist - want).abs() < want * 0.15, "扑出 {dist}，应约 {want}");
+    // 收势后回到冷却，等 every 秒再出手
+    let steps = (ch.recover * 60.0).round() as usize + 1;
+    for _ in 0..steps {
+        sim.step(InputFrame::default(), &[]);
+    }
+    assert_eq!(sim.enemies().charge[i], CHARGE_IDLE);
+    assert!(sim.enemies().charge_t[i] > ch.every - 0.1);
+}
+
+#[test]
+fn freezing_a_fox_interrupts_its_pounce() {
+    use lantern_sim::enemies::{CHARGE_IDLE, CHARGE_WINDUP};
+    let mut sim = quiet(12);
+    let i = sim.spawn("fox", Vec2::new(200.0, 0.0)).unwrap();
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().charge_t[i] = 0.0;
+    sim.step(InputFrame::default(), &[]);
+    assert_eq!(sim.enemies().charge[i], CHARGE_WINDUP);
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().frozen[i] = 1.0;
+    sim.step(InputFrame::default(), &[]);
+    assert_eq!(sim.enemies().charge[i], CHARGE_IDLE);
+}
+
+#[test]
+fn a_pounce_hits_harder_than_a_bump() {
+    use lantern_sim::enemies::CHARGE_DASH;
+    let c = content();
+    let fox = &c.enemies[c.enemy_index("fox").unwrap()];
+    let mult = fox.charge.as_ref().unwrap().damage_mult;
+    let hit = |dash: bool| {
+        let mut s = RunSetup::new(13, RunMode::Normal);
+        s.god = false;
+        let mut sim = SimHarness::with_setup(content(), s);
+        sim.quiet();
+        let i = sim.spawn("fox", Vec2::new(5.0, 0.0)).unwrap();
+        {
+            let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
+            en.charge_t[i] = 5.0;
+            if dash {
+                en.charge[i] = CHARGE_DASH;
+                en.charge_t[i] = 1.0;
+                en.charge_dx[i] = -1.0;
+            }
+        }
+        let before = sim.player_hp();
+        sim.step(InputFrame::default(), &[]);
+        before - sim.player_hp()
+    };
+    let (bump, pounce) = (hit(false), hit(true));
+    assert!(bump > 0.0);
+    // 减去护甲之前是 1.5 倍；默认没有护甲
+    assert!((pounce / bump - mult).abs() < 0.01, "扑击 {pounce}，碰撞 {bump}");
+}
