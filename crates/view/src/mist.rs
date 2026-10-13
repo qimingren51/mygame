@@ -2,6 +2,7 @@
 //! 一张盖 128 个世界单位，白色可染。图集里不能重复采样，一格格铺开会在格子边上露出接缝，
 //! 所以等图集加载好，把这两帧拷成单独的、重复采样的贴图，每层一个盖住镜头的大四边形，
 //! UV 跟着世界坐标走、各自漂移。叠在暗层之上、普通混合：夜里像月光下的雾，天明时淡一半，成了晨雾。
+//! 夜签“浓雾”（灯光范围 −30%）的夜里雾浓得多、飘得慢，让减掉的灯光看得见。
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -9,6 +10,8 @@ use bevy::math::Affine2;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension};
 use bevy::sprite_render::AlphaMode2d;
+
+use lantern_sim::RunSetup;
 
 use crate::atlas::AtlasDb;
 use crate::{Dawn, Feel, MainCamera, layer};
@@ -20,6 +23,9 @@ const LAYERS: [(&str, f32, Vec2); 2] =
 const TILE: f32 = 128.0;
 /// #DDD9CF
 const TINT: Color = Color::srgb(0.867, 0.851, 0.812);
+/// 夜签“浓雾”：不透明度乘这么多，漂移乘 FOG_DRIFT
+const FOG_THICK: f32 = 2.6;
+const FOG_DRIFT: f32 = 0.6;
 
 #[derive(Component)]
 pub(crate) struct MistLayer(usize);
@@ -100,6 +106,7 @@ pub(crate) fn update_mist(
     time: Res<Time>,
     dawn: Res<Dawn>,
     feel: Res<Feel>,
+    setup: Option<Res<RunSetup>>,
     cam: Single<(&Transform, &Projection), With<MainCamera>>,
     mut q: Query<
         (&MistLayer, &mut Transform, &MeshMaterial2d<ColorMaterial>, &mut Visibility),
@@ -116,6 +123,8 @@ pub(crate) fn update_mist(
     let center = cam_tf.translation.truncate();
     let t = time.elapsed_secs();
     let fade = 1.0 - 0.5 * dawn.progress();
+    let fog = setup.is_some_and(|s| s.omen.as_ref().is_some_and(|o| o.id == "fog"));
+    let (thick, slow) = if fog { (FOG_THICK, FOG_DRIFT) } else { (1.0, 1.0) };
     for (m, mut tf, mat, mut vis) in &mut q {
         let (_, alpha, drift) = LAYERS[m.0];
         vis.set_if_neq(if feel.lite && m.0 > 0 { Visibility::Hidden } else { Visibility::Inherited });
@@ -123,11 +132,11 @@ pub(crate) fn update_mist(
         tf.scale = (half * 2.0).extend(1.0);
         let Some(mut material) = materials.get_mut(&mat.0) else { continue };
         // 四边形左上角在世界里的位置（贴图 v 向下，世界 y 向上）；贴图本身往 drift 方向漂
-        let corner = Vec2::new(center.x - half.x, center.y + half.y) - drift * t;
+        let corner = Vec2::new(center.x - half.x, center.y + half.y) - drift * slow * t;
         let offset = Vec2::new(corner.x, -corner.y) / TILE;
         material.uv_transform =
             Affine2::from_scale_angle_translation(half * 2.0 / TILE, 0.0, offset.rem_euclid(Vec2::ONE));
-        material.color = TINT.with_alpha(alpha * fade);
+        material.color = TINT.with_alpha(alpha * thick * fade);
     }
 }
 
