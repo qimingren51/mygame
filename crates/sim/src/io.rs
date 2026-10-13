@@ -273,6 +273,15 @@ pub enum SimEvent {
     RunOver {
         won: bool,
     },
+    /// 竹丛打碎了
+    BambooBroken {
+        pos: Vec2,
+    },
+    /// 夜主登场，结界里的竹丛被狐火烧平
+    BambooBurned {
+        pos: Vec2,
+        radius: f32,
+    },
 }
 
 /// 一帧内累积的事件。画面、音频、界面在 `Update` 里读取，`Last` 阶段统一清空。

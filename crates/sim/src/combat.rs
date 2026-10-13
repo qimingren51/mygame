@@ -743,6 +743,7 @@ pub(crate) fn process_strikes(
     mut strikes: ResMut<Strikes>,
     mut hits: ResMut<HitQueue>,
     mut outbox: ResMut<SimOutbox>,
+    mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
 ) {
     let content = &content.0;
@@ -766,6 +767,7 @@ pub(crate) fn process_strikes(
         if s.fx != StrikeFx::None {
             outbox.0.push(SimEvent::Strike { pos: s.pos, radius, fx: s.fx });
         }
+        bamboo.circle(s.pos, radius, s.damage);
         for &i in found.iter() {
             let i = i as usize;
             let boss = content.enemies[en.kind[i] as usize].rank == Rank::Boss;

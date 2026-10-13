@@ -440,6 +440,34 @@ impl Content {
         if e.boss_growth < 1.0 {
             return c.fail("run.ron", "endless.boss_growth 不能小于 1".into());
         }
+        if let Some(b) = &r.bamboo {
+            c.positive(
+                "run.ron",
+                &[
+                    ("bamboo.chunk", b.chunk),
+                    ("bamboo.radius", b.radius),
+                    ("bamboo.hp", b.hp),
+                    ("bamboo.hit_every", b.hit_every),
+                ],
+            )?;
+            c.non_negative(
+                "run.ron",
+                &[
+                    ("bamboo.cluster_radius", b.cluster_radius),
+                    ("bamboo.clear_spawn", b.clear_spawn),
+                    ("bamboo.clear_lantern", b.clear_lantern),
+                    ("bamboo.clear_event", b.clear_event),
+                    ("bamboo.regrow", b.regrow),
+                    ("bamboo.regrow_clear", b.regrow_clear),
+                ],
+            )?;
+            c.fraction("run.ron", "bamboo.cluster_chance", b.cluster_chance)?;
+            c.fraction("run.ron", "bamboo.slow", b.slow)?;
+            c.fraction("run.ron", "bamboo.coin_chance", b.coin_chance)?;
+            if b.per_chunk.0 > b.per_chunk.1 || b.cluster.0 > b.cluster.1 {
+                return c.fail("run.ron", "bamboo.per_chunk、bamboo.cluster 要写成（少, 多）".into());
+            }
+        }
         // 无尽夜照时间表里的妖潮和夜主再来
         let has = |f: fn(&crate::PlanEvent) -> bool| r.schedule.iter().any(|s| f(&s.event));
         if !has(|e| matches!(e, crate::PlanEvent::Surge { .. }))

@@ -137,6 +137,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Foes::default());
     commands.insert_resource(Pickups::default());
     commands.insert_resource(Coins::default());
+    commands.insert_resource(crate::bamboo::Bamboo::new(c.run.bamboo.as_ref()));
     commands.insert_resource(lanterns);
     commands.insert_resource(BossState::default());
     commands.insert_resource(Reveal::default());
@@ -217,6 +218,7 @@ pub(crate) struct HashParams<'w, 's> {
     trail: Res<'w, Trail>,
     survival: Res<'w, Survival>,
     director: Res<'w, Director>,
+    bamboo: Res<'w, crate::bamboo::Bamboo>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -259,6 +261,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.boss.hash_into(&mut h);
     p.trail.hash_into(&mut h);
     p.survival.hash_into(&mut h);
+    p.bamboo.hash_into(&mut h);
     if let Some(e) = &p.director.endless {
         e.hash_into(&mut h);
     }

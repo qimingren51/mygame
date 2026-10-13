@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use lantern_content::Stat;
+use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::boss::BossState;
 use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP};
 use lantern_sim::{
@@ -200,6 +201,8 @@ pub(crate) struct ActorFrames {
     pub(crate) light: FrameId,
     /// 光环（升级时扩开）
     pub(crate) ring: FrameId,
+    /// 竹丛：立着的、打碎的、影子缩放
+    bamboo: Option<(FrameId, FrameId, f32)>,
 }
 
 impl ActorFrames {
@@ -290,6 +293,10 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         shadow,
         light: need("vfx/light"),
         ring: need("weapons/ring"),
+        bamboo: db
+            .find("bamboo_clump/idle_S_00")
+            .zip(db.find("bamboo_clump_broken/idle_S_00"))
+            .map(|(a, b)| (a, b, shadow_scale(&db, "bamboo_clump", shadow))),
     });
 }
 
@@ -748,6 +755,7 @@ pub(crate) fn collect_draws(
     arsenal: Option<Res<Arsenal>>,
     sight: Sight,
     mut moves: Moves,
+    bamboo: Option<Res<Bamboo>>,
     player: Single<(&Pos, &PrevPos), With<Player>>,
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
     mut pools: ResMut<Pools>,
@@ -837,6 +845,33 @@ pub(crate) fn collect_draws(
         });
         if let Some(&emit) = anim.emit.get(k) {
             glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade));
+        }
+    }
+
+    // 竹丛：和角色一起按脚底排序；打碎的换图，烧平的焦黑，挨打时晃一下
+    if let (Some(b), Some((standing, broken, shadow_k))) = (&bamboo, frames.bamboo) {
+        for c in b.near() {
+            let s = to_screen(c.pos);
+            if !rect.contains(s) {
+                continue;
+            }
+            let (frame, color, shake) = match c.state {
+                ClumpState::Standing => (standing, Color::WHITE, c.cd.max(0.0) * 8.0),
+                ClumpState::Broken(_) => (broken, Color::WHITE, 0.0),
+                ClumpState::Burned => (broken, Color::srgb(0.32, 0.27, 0.25), 0.0),
+                ClumpState::Cleared => continue,
+            };
+            let x = s.x + (t * 55.0 + c.pos.x).sin() * shake;
+            pools.fx.push(Draw {
+                color,
+                flip: c.pos.x.rem_euclid(2.0) < 1.0,
+                ..Draw::new(frame, Vec3::new(x, s.y, sort_z(layer::ACTORS, c.pos.y)))
+            });
+            pools.enemy_shadow.push(Draw {
+                scale: Vec2::splat(shadow_k),
+                color: Color::srgba(1.0, 1.0, 1.0, 0.6),
+                ..Draw::new(frames.shadow, Vec3::new(s.x, s.y, layer::SHADOW))
+            });
         }
     }
 

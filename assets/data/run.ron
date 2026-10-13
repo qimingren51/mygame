@@ -177,4 +177,26 @@
         alt_enemy: "wisp",
         alt_share: 0.2,
     ),
+
+    // 青丘的竹丛（docs/BALANCE.md 第 12.7 节）：每个 512 × 512 的区块 2–4 丛，每丛有 60% 在 120 以内
+    // 再长 1–2 丛；出生点 300、石灯笼 100、奇遇和货郎 80 以内不长。判定半径 35，主角和妖物在丛里移速 −30%
+    // （闪避、冲锋不减）。生命 60，最多每 0.2 秒受一次伤；打碎 60 秒后主角不在 200 以内时长回来，5% 掉一枚铜钱。
+    // 夜主登场时结界里的竹丛烧平，不再长回来
+    bamboo: Some((
+        chunk: 512.0,
+        per_chunk: (2, 4),
+        cluster_chance: 0.6,
+        cluster: (1, 2),
+        cluster_radius: 120.0,
+        clear_spawn: 300.0,
+        clear_lantern: 100.0,
+        clear_event: 80.0,
+        radius: 35.0,
+        slow: 0.3,
+        hp: 60.0,
+        hit_every: 0.2,
+        regrow: 60.0,
+        regrow_clear: 200.0,
+        coin_chance: 0.05,
+    )),
 )

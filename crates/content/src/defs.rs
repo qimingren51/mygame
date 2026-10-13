@@ -127,6 +127,9 @@ pub struct RunDef {
     pub late: LateDef,
     pub endless: EndlessDef,
     pub bench: BenchDef,
+    /// 竹丛（青丘的软障碍）；不写时地图上没有
+    #[serde(default)]
+    pub bamboo: Option<BambooDef>,
 }
 
 impl RunDef {
@@ -135,6 +138,36 @@ impl RunDef {
         let after = self.late.after;
         if m <= after { q.at(m) } else { q.at(after) * (1.0 + slope * (m - after)) }
     }
+}
+
+/// 竹丛（docs/BALANCE.md 第 12.7 节）：可以打碎的软障碍，不挡路，主角和妖物穿过时减速。
+/// 地图按 chunk × chunk 分块，每块的竹丛由种子和块坐标决定，同一个种子地图一样。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BambooDef {
+    pub chunk: f32,
+    /// 每块几丛（含两端）
+    pub per_chunk: (u32, u32),
+    /// 每丛有 cluster_chance 的概率在 cluster_radius 以内再长 cluster 丛，成片出现
+    pub cluster_chance: f32,
+    pub cluster: (u32, u32),
+    pub cluster_radius: f32,
+    /// 出生点、石灯笼、奇遇和货郎周围多远以内不长
+    pub clear_spawn: f32,
+    pub clear_lantern: f32,
+    pub clear_event: f32,
+    /// 判定半径
+    pub radius: f32,
+    /// 在丛里移速 −slow（闪避、冲锋不减）
+    pub slow: f32,
+    pub hp: f32,
+    /// 两次受伤至少隔多久：火焰、飞剑贴着竹丛时不会每步都打一下；持续伤害按这段时间折算
+    pub hit_every: f32,
+    /// 打碎 regrow 秒后，主角不在 regrow_clear 以内时原地长回来
+    pub regrow: f32,
+    pub regrow_clear: f32,
+    /// 打碎时掉一枚铜钱的概率
+    pub coin_chance: f32,
 }
 
 /// 10 分钟以后（无尽夜、长更、终章）刷怪和生命改成线性增长（docs/BALANCE.md 第 4.1 节）。
