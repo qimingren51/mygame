@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use lantern_content::Rank;
+use lantern_content::{BossLines, Content, PlanEvent, Rank};
 use lantern_sim::{AppState, GameContent, SimEvent, SimOutbox};
 
 use crate::describe::{element_color, hex};
@@ -55,6 +55,16 @@ struct Msg {
     big: bool,
 }
 
+/// 这一夜夜主（时间表里的那一个）的一句台词。
+fn boss_line(c: &Content, pick: impl Fn(&BossLines) -> &String) -> Option<&str> {
+    let id = c.run.schedule.iter().find_map(|s| match &s.event {
+        PlanEvent::Boss { enemy, .. } => Some(enemy),
+        _ => None,
+    })?;
+    let lines = c.enemies[c.enemy_index(id)?].boss.as_ref()?.lines.as_ref()?;
+    Some(pick(lines).as_str())
+}
+
 fn msg(title: impl Into<String>, body: impl Into<String>, color: Color, big: bool) -> Option<Msg> {
     Some(Msg { title: title.into(), body: body.into(), color, big })
 }
@@ -74,8 +84,8 @@ fn read_events(
     let mut oldest: Vec<(Entity, f32)> = toasts.iter().map(|(e, t)| (e, t.t)).collect();
     oldest.sort_by(|a, b| b.1.total_cmp(&a.1));
     for ev in &outbox.0 {
-        // 夜主伏诛之后让给天明的演出，清掉现有的提示，也不再出新的
-        if matches!(ev, SimEvent::BossDefeated { .. }) {
+        // 夜主伏诛之后让给天明的演出，清掉现有的提示，也不再出新的（无尽夜不天明，照常提示）
+        if matches!(ev, SimEvent::BossDefeated { dawn: true, .. }) {
             for (e, _) in &toasts {
                 commands.entity(e).despawn();
             }
@@ -101,11 +111,26 @@ fn read_events(
                     msg(format!("点亮石灯笼 {lit} / 5"), "光区里的妖物减速、易伤", hex("#FFD98A"), false)
                 }
             }
-            SimEvent::BossPhase { phase: 2 } => {
-                msg("九尾分出幻身", "幻身没有影子；照见圈能让它们散去", hex("#D8C8FF"), true)
-            }
-            SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
+            // 换阶段：夜主的台词，下面一行写怎么打
+            SimEvent::BossPhase { phase: 2 } => msg(
+                boss_line(c, |l| &l.phase2).unwrap_or("九尾分出幻身"),
+                "分出幻身：幻身没有影子，照见圈能让它们散去",
+                hex("#D8C8FF"),
+                true,
+            ),
+            SimEvent::BossPhase { phase: 3 } => msg(
+                boss_line(c, |l| &l.phase3).unwrap_or("九尾扫"),
+                "九尾扫：躲开地上的扇形预警",
+                hex("#FF6B5A"),
+                true,
+            ),
             SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
+            SimEvent::BossDefeated { dawn: false, .. } => msg(
+                boss_line(c, |l| &l.retreat).unwrap_or("夜主退去"),
+                "夜主退去：梦太深，光透不上来，下一次妖潮过后它还会回来",
+                hex("#FFD98A"),
+                true,
+            ),
             // 夜主登场、伏诛有专门的演出（moments.rs）
             SimEvent::Resonance { element, tier } => {
                 let e = c.element(element);
@@ -137,7 +162,7 @@ fn read_events(
                 msg(format!("奇遇 · {}", k.name), k.hint.clone(), hex(&k.color), false)
             }
             SimEvent::CritterFled { .. } => msg("金蟾遁走了", "下次快一点", DIM, false),
-            SimEvent::CritterLooted { .. } => msg("金蟾散财", "魂火与灯油", hex("#FFD98A"), false),
+            SimEvent::CritterLooted { .. } => msg("金蟾散财", "魂火与铜钱", hex("#FFD98A"), false),
             SimEvent::Buff { index } => {
                 let b = &c.events.buffs[index as usize];
                 let secs = c

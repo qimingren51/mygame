@@ -29,7 +29,7 @@ use crate::run::{Director, Progress, SimView};
 use crate::spatial::Grid;
 use crate::stats::{ActiveTrigger, Effects, Stats};
 use crate::weapons::volley::Shots;
-use crate::{GameContent, Health, HitKind, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
+use crate::{GameContent, Health, HitKind, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 const TAU: f32 = std::f32::consts::TAU;
 
@@ -412,6 +412,7 @@ pub(crate) fn resolve_hits(
     // 反应产生的命中追加在队尾，本步一起结算
     let mut list = std::mem::take(&mut hits.0);
     let mut ctx = ReactCtx::new(content, &stats, &grid, progress.level, tick.secs(), &mut react);
+    let mut spread = Spread { content, grid: &grid, buf: Vec::new() };
     let mut k = 0;
     while k < list.len() {
         let hit = list[k];
@@ -536,15 +537,54 @@ pub(crate) fn resolve_hits(
                 apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
             }
         } else {
-            kill(en, i, rank, &mut deaths, &mut outbox);
+            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
         }
     }
     list.clear();
     hits.0 = list;
 }
 
-/// 妖物死亡：移出池子，记下死亡等 Death 阶段处理。
-pub(crate) fn kill(en: &mut Enemies, i: usize, rank: Rank, deaths: &mut Deaths, outbox: &mut SimOutbox) {
+/// 余印：带印记的妖物死时，印记传给附近还没有印记的妖物（docs/GAMEPLAY.md 第 6.2 节）。
+pub(crate) struct Spread<'a> {
+    pub content: &'a Content,
+    pub grid: &'a Grid,
+    pub buf: Vec<u32>,
+}
+
+impl Spread<'_> {
+    fn pass_on(&mut self, en: &mut Enemies, i: usize) {
+        let m = &self.content.elements.marks;
+        if en.mark[i] == 0 || en.mark_t[i] <= 0.0 || m.spread_count == 0 {
+            return;
+        }
+        self.buf.clear();
+        self.grid.query_circle(en, en.x[i], en.y[i], m.spread_radius, &mut self.buf);
+        let mut n = 0;
+        for &j in &self.buf {
+            let j = j as usize;
+            if j == i || !en.alive[j] || en.hp[j] <= 0.0 || en.mark_t[j] > 0.0 {
+                continue;
+            }
+            en.mark[j] = en.mark[i];
+            en.mark_t[j] = m.duration;
+            n += 1;
+            if n >= m.spread_count {
+                break;
+            }
+        }
+    }
+}
+
+/// 妖物死亡：传出余印，移出池子，记下死亡等 Death 阶段处理。
+pub(crate) fn kill(
+    en: &mut Enemies,
+    i: usize,
+    rank: Rank,
+    spread: &mut Spread,
+    deaths: &mut Deaths,
+    outbox: &mut SimOutbox,
+) {
+    spread.pass_on(en, i);
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
     deaths.0.push(Death {
@@ -760,6 +800,7 @@ pub(crate) fn burn(
     content: Res<GameContent>,
     stats: Res<Stats>,
     reveal: Res<Reveal>,
+    grid: Res<Grid>,
     mut en: ResMut<Enemies>,
     mut deaths: ResMut<Deaths>,
     mut log: ResMut<DamageLog>,
@@ -767,6 +808,7 @@ pub(crate) fn burn(
 ) {
     let en = &mut *en;
     let vuln = Vuln::new(&reveal, &stats, content.0.elements.zones.vuln_cap);
+    let mut spread = Spread { content: &content.0, grid: &grid, buf: Vec::new() };
     for i in 0..en.hi {
         if !en.alive[i] {
             continue;
@@ -795,7 +837,7 @@ pub(crate) fn burn(
         }
         if en.hp[i] <= 0.0 {
             let rank = content.0.enemies[en.kind[i] as usize].rank;
-            kill(en, i, rank, &mut deaths, &mut outbox);
+            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
         }
     }
 }
@@ -827,7 +869,9 @@ pub(crate) fn process_deaths(
     let frozen_xp = 1.0 + stats.get(Stat::FrozenXp);
     let gd = &c.run.gold;
     let drops = &c.run.drops;
-    let gold_mult = stats.get(Stat::GoldGain);
+    // 无尽夜 10 分钟以后铜钱减半
+    let late = director.endless.is_some() && minute >= c.run.late.after;
+    let gold_mult = stats.get(Stat::GoldGain) * if late { c.run.endless.gold } else { 1.0 };
     // 燃灯按清怪量充能：基础刷怪曲线每秒刷出的总血量 × clear_seconds 充满一次。
     // 更和夜签改了妖物生命、刷怪速度时分母一起乘上，充能节奏不随难度变快（docs/BALANCE.md 第 2.6 节）
     let clear = crate::spawn::base_spawn_hp(c, minute)
@@ -863,6 +907,9 @@ pub(crate) fn process_deaths(
         }
         let p = &mut *progress;
         p.kills += 1;
+        if late && let Some(e) = &mut director.endless {
+            e.late_kills += 1;
+        }
         p.combo = if p.combo_t > 0.0 { p.combo + 1 } else { 1 };
         p.combo_t = c.run.combo.window;
         p.best_combo = p.best_combo.max(p.combo);
@@ -944,8 +991,7 @@ pub(crate) fn process_deaths(
                 if let Some(i) = crate::spawn::spawn_enemy(c, &stats, &mut en, sp, d.kind, at.x, at.y, minute)
                 {
                     en.tags[i] |= TAG_CHILD;
-                    en.hp[i] = d.max_hp * hp;
-                    en.max_hp[i] = en.hp[i];
+                    en.set_hp(i, d.max_hp * hp);
                     en.r[i] = d.radius * radius;
                 }
             }
@@ -961,9 +1007,19 @@ pub(crate) fn process_deaths(
         if def.rank == Rank::Boss {
             director.boss = None;
             director.barrier = None;
-            flow.won_at = Some(t + c.run.win_delay);
+            // 无尽夜：夜主倒下不天明，夜续下去
+            let dawn = match &mut director.endless {
+                Some(e) => {
+                    e.downs += 1;
+                    false
+                }
+                None => {
+                    flow.won_at = Some(t + c.run.win_delay);
+                    true
+                }
+            };
             coins.pull_all();
-            outbox.0.push(SimEvent::BossDefeated { pos: d.pos });
+            outbox.0.push(SimEvent::BossDefeated { pos: d.pos, dawn });
         }
     }
 }
@@ -1029,6 +1085,7 @@ pub(crate) fn hurt_player(
     health: &mut Health,
     pos: Vec2,
     amount: f32,
+    by: HurtBy,
     ctx: &mut HurtCtx,
 ) -> bool {
     if player.iframe > 0.0 || player.dash_t > 0.0 || health.hp <= 0.0 {
@@ -1063,7 +1120,7 @@ pub(crate) fn hurt_player(
     ctx.survival.hurts += 1;
     ctx.survival.taken += dmg.min(health.hp);
     health.hp = (health.hp - dmg).max(0.0);
-    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg });
+    ctx.outbox.0.push(SimEvent::PlayerHurt { amount: dmg, by });
     if health.hp <= 0.0 && !try_rescue(ctx.content, s, ctx.survival, player, health, pos, ctx.outbox) {
         ctx.outbox.0.push(SimEvent::PlayerDied);
     }

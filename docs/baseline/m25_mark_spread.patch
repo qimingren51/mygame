@@ -1,0 +1,42 @@
+diff --git a/crates/sim/src/combat.rs b/crates/sim/src/combat.rs
+index 39aefb3..795ad61 100644
+--- a/crates/sim/src/combat.rs
++++ b/crates/sim/src/combat.rs
+@@ -412,6 +412,7 @@ pub(crate) fn resolve_hits(
+     // 反应产生的命中追加在队尾，本步一起结算
+     let mut list = std::mem::take(&mut hits.0);
+     let mut ctx = ReactCtx::new(content, &stats, &grid, progress.level, tick.secs(), &mut react);
++    let mut spread_buf: Vec<u32> = Vec::new();
+     let mut k = 0;
+     while k < list.len() {
+         let hit = list[k];
+@@ -527,6 +528,29 @@ pub(crate) fn resolve_hits(
+         {
+             mark(&mut ctx, en, i, e, base, &mut list, rng, &mut outbox);
+         }
++        // 实验：带印记的妖物死时，印记传给附近没有印记的妖物
++        if en.hp[i] <= 0.0 && en.mark[i] != 0 && en.mark_t[i] > 0.0 {
++            let spread_r: f32 = std::env::var("MARK_SPREAD_R").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0);
++            let spread_n: u32 = std::env::var("MARK_SPREAD_N").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
++            if spread_n > 0 {
++                let code = en.mark[i];
++                spread_buf.clear();
++                grid.query_circle(en, en.x[i], en.y[i], spread_r, &mut spread_buf);
++                let mut n = 0;
++                for &j in spread_buf.iter() {
++                    let j = j as usize;
++                    if j == i || !en.alive[j] || en.hp[j] <= 0.0 || en.mark_t[j] > 0.0 {
++                        continue;
++                    }
++                    en.mark[j] = code;
++                    en.mark_t[j] = content.elements.marks.duration;
++                    n += 1;
++                    if n >= spread_n {
++                        break;
++                    }
++                }
++            }
++        }
+ 
+         if en.hp[i] > 0.0 {
+             if hit.stun > 0.0 {

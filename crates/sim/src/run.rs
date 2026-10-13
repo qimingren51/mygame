@@ -22,11 +22,38 @@ impl SimView {
     }
 }
 
-/// 跑分模式：保持场上妖物数量，主角无敌，不升级，没有精英、夜主和奇遇。
+/// 一局的玩法。跑分模式：保持场上妖物数量，主角无敌，不升级，没有精英、夜主和奇遇。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RunMode {
     Normal,
-    Bench { enemies: u32 },
+    Bench {
+        enemies: u32,
+    },
+    /// 无尽夜：夜主倒下不天明，倒下才结束（docs/GAMEPLAY.md 第 3.4 节）
+    Endless,
+}
+
+/// 无尽夜的进度。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Endless {
+    /// 10 分钟以后来过几次妖潮
+    pub wave: u32,
+    /// 妖潮结束、夜主该来的时刻（秒）
+    pub boss_due: Option<f32>,
+    /// 夜主来过、倒下几次
+    pub arrivals: u32,
+    pub downs: u32,
+    /// 10 分钟以后的击杀（灯油另算）
+    pub late_kills: u32,
+}
+
+impl Endless {
+    pub fn hash_into(&self, h: &mut lantern_core::StateHasher) {
+        for v in [self.wave, self.arrivals, self.downs, self.late_kills] {
+            h.write_u32(v);
+        }
+        h.write_f32(self.boss_due.unwrap_or(-1.0));
+    }
 }
 
 /// 混进常规刷怪的妖物，比例已经在开局随机好。
@@ -158,6 +185,8 @@ pub struct Director {
     pub encircle: Vec<PendingEncircle>,
     /// 合围的妖物进入这个距离以内恢复原速
     pub rush_release: f32,
+    /// 无尽夜的进度；普通一夜是 None
+    pub endless: Option<Endless>,
 }
 
 impl Default for Director {
@@ -173,6 +202,7 @@ impl Default for Director {
             barrier: None,
             encircle: Vec::new(),
             rush_release: 0.0,
+            endless: None,
         }
     }
 }

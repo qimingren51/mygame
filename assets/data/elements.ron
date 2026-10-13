@@ -10,7 +10,8 @@
         passive: [1, 1, 2, 2, 3],
     ),
     // 印记 3 秒；每只妖物每秒最多反应一次；每一步最多结算 64 次反应（docs/GAMEPLAY.md 第 6.9 节）
-    marks: (duration: 3.0, react_cooldown: 1.0, max_per_step: 64),
+    // 余印：带印记的妖物死时，印记传给附近 60 以内还没有印记的妖物，最多 3 只（重新计 3 秒，GAMEPLAY 6.2 节）
+    marks: (duration: 3.0, react_cooldown: 1.0, max_per_step: 64, spread_radius: 60.0, spread_count: 3),
     // 易伤区最多 +150%；克制 ×1.25、同系 ×0.8（妖物带五行时才有，抢先体验起）
     zones: (vuln_cap: 1.5, counter: 1.25, same: 0.8),
     // 金·极境：追加飞剑每秒最多 30 把
@@ -96,7 +97,7 @@
         (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%",
          effect: Spread(count: 3, radius: 60.0, mult: 1.5, duration: 3.0, burn_ratio: 0.2)),
         (a: Fire, b: Earth, id: "rongyan", name: "赤地", desc: "地面烧红 3 秒，持续伤害",
-         effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 0.6, slow: 0.0, knock_mult: 1.0)),
+         effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 1.0, slow: 0.0, knock_mult: 1.0)),
         (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透",
          effect: Blades(count: 3, ratio: 0.5, pierce: 2, speed: 320.0, life: 0.8, hit_radius: 7.0)),
         (a: Metal, b: Water, id: "ningshuang", name: "凝霜", desc: "冻结 1 秒，周围减速",

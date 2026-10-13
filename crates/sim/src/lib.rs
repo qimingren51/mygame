@@ -48,7 +48,7 @@ pub use enemies::Enemies;
 pub use flow::{AppState, Flow, RunResult, RunState, SimPhase};
 pub use gems::Gems;
 pub use harness::SimHarness;
-pub use io::{HitKind, InputFrame, SimCommand, SimCommands, SimEvent, SimOutbox};
+pub use io::{HitKind, HurtBy, InputFrame, SimCommand, SimCommands, SimEvent, SimOutbox};
 pub use replay::{Replay, ReplayLog, ReplayPlayback};
 pub use run::{Director, Progress, RunMode, SimView};
 pub use stats::{Effects, Stats};

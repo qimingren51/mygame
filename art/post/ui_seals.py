@@ -58,7 +58,7 @@ SEALS = [
 ]
 # M2.5：五行反应，与 assets/data/elements.ron 的 reactions 同序（前五种相生、后五种相克）；只往后追加，前面的印章逐字节不变
 REACTIONS = [
-    ("liaoyuan", "燎原", "wood", "fire"), ("rongyan", "熔岩", "fire", "earth"), ("zhubing", "铸兵", "earth", "metal"),
+    ("liaoyuan", "燎原", "wood", "fire"), ("rongyan", "赤地", "fire", "earth"), ("zhubing", "铸兵", "earth", "metal"),
     ("ningshuang", "凝霜", "metal", "water"), ("zisheng", "滋生", "water", "wood"),
     ("zhengteng", "蒸腾", "water", "fire"), ("rongjin", "熔金", "fire", "metal"), ("duanmu", "断木", "metal", "wood"),
     ("lietu", "裂土", "wood", "earth"), ("yuni", "淤泥", "earth", "water"),

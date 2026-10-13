@@ -129,7 +129,7 @@ pub(crate) fn spawn_hud(
         Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
         children![
             (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
-            (Kills, text(&fonts.body, 18.0, PAPER, "击杀 0")),
+            (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
             text(&fonts.body, 14.0, DIM, &format!("种子 {}{omen}", setup.seed)),
             (BuffLabel, text(&fonts.body, 16.0, GOLD, "")),
         ],
@@ -146,7 +146,7 @@ pub(crate) fn spawn_hud(
             },
         ))
         .with_children(|p| {
-            p.spawn((LevelLabel, text(&fonts.body, 22.0, PAPER, "等级 1")));
+            p.spawn((LevelLabel, UiTransform::default(), text(&fonts.body, 22.0, PAPER, "等级 1")));
             p.spawn((
                 Slots,
                 Node {
@@ -208,9 +208,34 @@ pub(crate) fn spawn_hud(
         children![
             (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
             (
+                crate::hud_fx::HpBar,
+                UiTransform::default(),
                 Node { width: px(280), height: px(18), padding: UiRect::all(px(2)), ..default() },
                 skin.image("bar_track"),
                 children![
+                    // 掉血的残影：只画掉掉的那一截，比血条慢半拍缩回（hud_fx.rs）
+                    (
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(2),
+                            right: px(2),
+                            top: px(2),
+                            bottom: px(2),
+                            ..default()
+                        },
+                        children![(
+                            crate::hud_fx::HpTrail,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: percent(100),
+                                width: percent(0),
+                                height: percent(100),
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(1.0, 0.93, 0.84, 0.85)),
+                        )],
+                    ),
                     (
                         HpFill,
                         Node { width: percent(100), height: percent(100), ..default() },
@@ -231,7 +256,7 @@ pub(crate) fn spawn_hud(
                 ],
             ),
             bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
-            (UltLabel, text(&fonts.body, 13.0, DIM, "燃灯")),
+            (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
         ],
     ));
     // 左下：操作提示

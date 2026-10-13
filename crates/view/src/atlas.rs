@@ -35,6 +35,9 @@ pub struct Frame {
     pub tint: bool,
     /// 缩放为 1 时的有效半径（世界单位）：反应区域、扇形等按它缩放到想要的半径（图集 meta 的 radius_px）
     pub radius: Option<f32>,
+    /// 缩放为 1 时的可见宽度、箭头长度（世界单位）：冲锋预警的车道和箭头（meta 的 width_px、head_len_px）
+    pub width: Option<f32>,
+    pub head_len: Option<f32>,
 }
 
 /// 一个素材的一个动作。
@@ -118,6 +121,10 @@ struct FrameMetaJson {
     tint: bool,
     #[serde(default)]
     radius_px: Option<f32>,
+    #[serde(default)]
+    width_px: Option<f32>,
+    #[serde(default)]
+    head_len_px: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +216,8 @@ impl AtlasDb {
                     blend: if meta.is_some_and(|m| m.blend == "add") { Blend::Add } else { Blend::Normal },
                     tint: meta.is_some_and(|m| m.tint),
                     radius: meta.and_then(|m| m.radius_px).map(|r| r / ppu),
+                    width: meta.and_then(|m| m.width_px).map(|w| w / ppu),
+                    head_len: meta.and_then(|m| m.head_len_px).map(|h| h / ppu),
                 };
                 db.by_name.insert(name.clone(), FrameId(db.frames.len() as u32));
                 db.frames.push(frame);
@@ -265,6 +274,8 @@ impl AtlasDb {
                 blend: Blend::Normal,
                 tint: true,
                 radius: None,
+                width: None,
+                head_len: None,
             });
         }
         self.pages.push(Page { image, layout: layouts.add(layout) });

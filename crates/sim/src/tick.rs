@@ -23,7 +23,7 @@ use crate::pickups::Pickups;
 use crate::player::DashHits;
 use crate::reactions::{Discoveries, Herbs, Zones};
 use crate::reveal::Reveal;
-use crate::run::{Director, Progress, RunPlan, SimView};
+use crate::run::{Director, Endless, Progress, RunMode, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{StatsDirty, collect};
 use crate::weapons::drop::{Fissures, Seals};
@@ -116,7 +116,10 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(StepGate::default());
     commands.insert_resource(Hold::default());
     commands.insert_resource(Progress::default());
-    commands.insert_resource(Director::default());
+    commands.insert_resource(Director {
+        endless: (setup.mode == RunMode::Endless).then(Endless::default),
+        ..Default::default()
+    });
     commands.insert_resource(Enemies::default());
     commands.insert_resource(Gems::default());
     commands.insert_resource(Grid::default());
@@ -211,6 +214,7 @@ pub(crate) struct HashParams<'w, 's> {
     boss: Res<'w, BossState>,
     trail: Res<'w, Trail>,
     survival: Res<'w, Survival>,
+    director: Res<'w, Director>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -253,6 +257,9 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.boss.hash_into(&mut h);
     p.trail.hash_into(&mut h);
     p.survival.hash_into(&mut h);
+    if let Some(e) = &p.director.endless {
+        e.hash_into(&mut h);
+    }
     h.write_f32(p.progress.gold);
     h.write_f32(p.progress.xp);
     h.write_u32(p.progress.level);

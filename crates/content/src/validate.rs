@@ -420,6 +420,25 @@ impl Content {
             }
         }
         c.non_negative("run.ron", &[("win_delay", r.win_delay)])?;
+        c.positive("run.ron", &[("late.after", r.late.after)])?;
+        c.non_negative("run.ron", &[("late.spawn", r.late.spawn), ("late.hp", r.late.hp)])?;
+        let e = &r.endless;
+        c.positive("run.ron", &[("endless.every", e.every)])?;
+        c.non_negative(
+            "run.ron",
+            &[("endless.oil_per_second", e.oil_per_second), ("endless.oil_per_kill", e.oil_per_kill)],
+        )?;
+        c.fraction("run.ron", "endless.gold", e.gold)?;
+        if e.boss_growth < 1.0 {
+            return c.fail("run.ron", "endless.boss_growth 不能小于 1".into());
+        }
+        // 无尽夜照时间表里的妖潮和夜主再来
+        let has = |f: fn(&crate::PlanEvent) -> bool| r.schedule.iter().any(|s| f(&s.event));
+        if !has(|e| matches!(e, crate::PlanEvent::Surge { .. }))
+            || !has(|e| matches!(e, crate::PlanEvent::Boss { .. }))
+        {
+            return c.fail("run.ron", "schedule 里要有妖潮和夜主（无尽夜照它们再来）".into());
+        }
         let g = &r.gems;
         c.positive("run.ron", &[("gems.accel", g.accel), ("gems.max_speed", g.max_speed)])?;
         if g.cap == 0 || g.elite_split == 0 {
@@ -505,7 +524,10 @@ impl Content {
                         ("charge.damage_mult", ch.damage_mult),
                     ],
                 )?;
-                c.non_negative("enemies.ron", &[("charge.recover", ch.recover)])?;
+                c.non_negative("enemies.ron", &[("charge.recover", ch.recover), ("charge.lock", ch.lock)])?;
+                if ch.lock > ch.windup {
+                    return c.fail("enemies.ron", format!("{} 的 charge.lock 不能超过 windup", e.id));
+                }
             }
             if let Some(b) = &e.boss {
                 c.positive(
@@ -536,6 +558,13 @@ impl Content {
                             ("sweep.volley_every", sw.volley_every),
                         ],
                     )?;
+                }
+                if let Some(l) = &b.lines
+                    && [&l.arrive, &l.phase2, &l.phase3, &l.defeat, &l.retreat, &l.again]
+                        .iter()
+                        .any(|t| t.is_empty())
+                {
+                    return c.fail("enemies.ron", format!("{} 的台词不能留空", e.id));
                 }
                 if let Some(rn) = &b.rain {
                     c.positive("enemies.ron", &[("rain.every", rn.every), ("rain.radius", rn.radius)])?;
@@ -633,6 +662,7 @@ impl Content {
                 ("bonus_sword_rate", el.bonus_sword_rate),
             ],
         )?;
+        c.non_negative("elements.ron", &[("marks.spread_radius", el.marks.spread_radius)])?;
         c.unique("elements.ron", "反应", el.reactions.iter().map(|r| r.id.as_str()))?;
         for (i, r) in el.reactions.iter().enumerate() {
             if r.a == r.b {
@@ -843,6 +873,28 @@ impl Content {
                             .fail("achievements.ron", format!("成就 \"{}\" 开放的第 {t} 更不存在", a.id));
                     }
                     _ => {}
+                }
+            }
+        }
+
+        // ---- hub.ron ----
+        c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
+        for person in &self.hub {
+            if !person.lines.iter().any(|l| l.when == crate::HubWhen::Idle) {
+                return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
+            }
+            for l in &person.lines {
+                let bad = match &l.when {
+                    crate::HubWhen::Lamp(id) => self.lamp_index(id).is_none(),
+                    crate::HubWhen::Charm(id) => self.charm_index(id).is_none(),
+                    crate::HubWhen::Cleared(t) => *t == 0 || *t as usize > self.difficulty.len(),
+                    _ => false,
+                };
+                if bad || l.text.is_empty() {
+                    return c.fail(
+                        "hub.ron",
+                        format!("{} 的台词条件 {:?} 不对，或者台词是空的", person.id, l.when),
+                    );
                 }
             }
         }

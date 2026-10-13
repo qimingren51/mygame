@@ -13,6 +13,7 @@ mod choice;
 mod describe;
 mod hub;
 mod hud;
+mod hud_fx;
 mod markers;
 mod moments;
 mod pause;
@@ -69,6 +70,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SeedOverride>()
+            .init_resource::<lantern_platform::HubNews>()
             .add_systems(Startup, (load_fonts, skin::load_skin))
             .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
             .add_systems(OnExit(AppState::Run), bench::cleanup)
@@ -93,6 +95,7 @@ impl Plugin for UiPlugin {
         markers::register(app);
         toasts::register(app);
         moments::register(app);
+        hud_fx::register(app);
         results::register(app);
         pause::register(app);
     }

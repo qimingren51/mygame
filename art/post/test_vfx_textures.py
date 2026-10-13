@@ -391,7 +391,7 @@ def test_review_images():
 
 
 def test_pre_m25_unchanged():
-    """M2.5 之前的 vfx/、ground/ 产物逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
+    """快照里的 vfx/、ground/ 产物（M2.5 之前 + M2.5 第一批）逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
     testkit.check_snapshot(V.ASSETS, ("vfx", "ground"), D)
     for folder, new in (("vfx", M25_VFX), ("ground", M25_GROUND)):
         files = list(json.loads((V.ASSETS / folder / "meta.json").read_text(encoding="utf-8"))["files"])

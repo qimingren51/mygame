@@ -62,7 +62,7 @@ SNAPSHOT_M25 = HERE / "golden_m25.json"
 
 
 def check_snapshot(assets_dir: Path, folders, density: float) -> int:
-    """M2.5 新素材加入之前的快照（post/golden_m25.json，两种密度）：已有 PNG 逐字节（md5）相同；
+    """快照（post/golden_m25.json，两种密度；M2.5 之前 + M2.5 第一批）：已有 PNG 逐字节（md5）相同；
     meta.json 已有条目的内容与顺序、已有的顶层字段都不变，新条目、新顶层字段只能追加。返回核对过的 PNG 数。"""
     g = json.loads(SNAPSHOT_M25.read_text(encoding="utf-8"))
     dkey = f"{density:g}"
@@ -72,7 +72,7 @@ def check_snapshot(assets_dir: Path, folders, density: float) -> int:
         if folder not in folders:
             continue
         got = hashlib.md5((assets_dir / folder / name).read_bytes()).hexdigest()
-        assert got == want, f"{dkey} 倍 {key} 与 M2.5 之前不同（md5 {got} != {want}）"
+        assert got == want, f"{dkey} 倍 {key} 与快照不同（md5 {got} != {want}）"
         n += 1
     for folder in folders:
         meta = json.loads((assets_dir / folder / "meta.json").read_text(encoding="utf-8"))

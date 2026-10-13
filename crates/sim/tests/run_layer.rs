@@ -179,7 +179,7 @@ fn second_watch_makes_enemies_tougher_and_elites_get_affixes() {
     let mut s2 = setup(4);
     s2.tier = 2;
     let two = SimHarness::with_setup(content(), s2);
-    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.4).abs() < 1e-4);
+    assert!((two.stats().get(Stat::EnemyHp) - one.stats().get(Stat::EnemyHp) * 1.5).abs() < 1e-4);
     assert_eq!(two.stats().get(Stat::Affixes), 1.0);
     let mut s3 = setup(4);
     s3.tier = 3;
@@ -394,8 +394,8 @@ fn fox_winds_up_then_pounces_in_a_locked_direction() {
     let en = sim.enemies();
     assert_eq!(en.charge[i], CHARGE_WINDUP);
     let start = Vec2::new(en.x[i], en.y[i]);
-    // 蓄力途中主角往下走，狐狸原地转向跟着
-    let steps = (ch.windup * 60.0).round() as usize - 2;
+    // 蓄力途中主角往下走，狐狸原地转向跟着（到锁定之前）
+    let steps = ((ch.windup - ch.lock) * 60.0).round() as usize - 2;
     for _ in 0..steps {
         sim.step(InputFrame::quantize(Vec2::Y), &[]);
     }
@@ -403,12 +403,16 @@ fn fox_winds_up_then_pounces_in_a_locked_direction() {
     assert_eq!(en.charge[i], CHARGE_WINDUP);
     assert!(Vec2::new(en.x[i], en.y[i]).distance(start) < 1.0, "蓄力时不动");
     assert!(en.charge_dy[i] > 0.05, "转向跟着主角：{}", en.charge_dy[i]);
-    // 出手：方向锁定，主角再怎么走也不变
-    while sim.enemies().charge[i] == CHARGE_WINDUP {
+    // 出手前 lock 秒锁定：主角往回走，方向不再变
+    for _ in 0..4 {
         sim.step(InputFrame::quantize(Vec2::Y), &[]);
     }
-    assert_eq!(sim.enemies().charge[i], CHARGE_DASH);
     let locked = (sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]);
+    while sim.enemies().charge[i] == CHARGE_WINDUP {
+        sim.step(InputFrame::quantize(-Vec2::Y), &[]);
+        assert_eq!((sim.enemies().charge_dx[i], sim.enemies().charge_dy[i]), locked, "锁定后不再转向");
+    }
+    assert_eq!(sim.enemies().charge[i], CHARGE_DASH);
     let from = Vec2::new(sim.enemies().x[i], sim.enemies().y[i]);
     while sim.enemies().charge[i] == CHARGE_DASH {
         sim.step(InputFrame::quantize(-Vec2::Y), &[]);
@@ -470,4 +474,140 @@ fn a_pounce_hits_harder_than_a_bump() {
     assert!(bump > 0.0);
     // 减去护甲之前是 1.5 倍；默认没有护甲
     assert!((pounce / bump - mult).abs() < 0.01, "扑击 {pounce}，碰撞 {bump}");
+}
+
+/// 无尽夜（docs/BALANCE.md 第 4.7 节）：10 分钟以后每 5 分钟一次妖潮，妖潮结束时夜主再来，
+/// 生命逐次 × 1.25；夜主倒下不天明，夜续下去。
+#[test]
+fn endless_night_brings_surges_and_tougher_bosses() {
+    let c = content();
+    let mut s = setup(3);
+    s.mode = RunMode::Endless;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    sim.set_build(&[("sword", 8, false)], &[]);
+    // 跳到 15:00 前一刻，当作第一个夜主已经来过、倒下
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 15 * 60 * hz - 1;
+    {
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.arrivals, e.downs) = (1, 1);
+    }
+    let mut surge_at = None;
+    let mut boss_at = None;
+    for _ in 0..40 * hz {
+        sim.step(InputFrame::default(), &[]);
+        for ev in sim.take_events() {
+            match ev {
+                SimEvent::Surge => surge_at = Some(sim.tick()),
+                SimEvent::BossArrived { .. } => boss_at = Some(sim.tick()),
+                _ => {}
+            }
+        }
+        if boss_at.is_some() {
+            break;
+        }
+    }
+    let (surge_at, boss_at) = (surge_at.expect("15:00 妖潮"), boss_at.expect("妖潮过后夜主再来"));
+    // 事件在 15:00 那一步发出，读到时步数已经加一
+    assert_eq!(surge_at, 15 * 60 * hz + 1);
+    assert_eq!(boss_at - surge_at, 30 * hz, "妖潮 30 秒后夜主来");
+    let jiuwei = c.enemy_index("jiuwei").unwrap();
+    let handle = sim.world().resource::<Director>().boss.unwrap();
+    let i = sim.enemies().resolve(handle).unwrap();
+    let want = c.enemies[jiuwei].hp * sim.stats().get(Stat::BossHp) * 1.25;
+    assert!(
+        (sim.enemies().max_hp[i] - want).abs() < 1.0,
+        "第 2 次来的生命 × 1.25：{}",
+        sim.enemies().max_hp[i]
+    );
+    assert!(sim.world().resource::<Director>().barrier.is_some());
+
+    // 打倒它：不天明，结界撤掉，下一个妖潮（20:00）照常来
+    let p = player_pos(&sim);
+    {
+        let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
+        (en.x[i], en.y[i], en.hp[i]) = (p.x + 60.0, p.y, 0.001);
+    }
+    let mut down = false;
+    for _ in 0..5 * hz {
+        sim.step(InputFrame::default(), &[]);
+        down |= sim.take_events().iter().any(|e| matches!(e, SimEvent::BossDefeated { dawn: false, .. }));
+    }
+    assert!(down, "无尽夜里夜主倒下不天明");
+    let d = sim.world().resource::<Director>();
+    assert!(d.barrier.is_none() && d.endless.unwrap().downs == 2);
+    assert!(sim.flow().won_at.is_none() && !sim.is_over());
+}
+
+/// 10 分钟以后刷怪、生命改成线性增长（docs/BALANCE.md 第 4.1 节）。
+#[test]
+fn curves_turn_linear_after_ten_minutes() {
+    let c = content();
+    let r = &c.run;
+    let at10 = r.enemy_hp_scale.at(10.0);
+    assert_eq!(r.late_at(r.enemy_hp_scale, r.late.hp, 9.0), r.enemy_hp_scale.at(9.0));
+    assert!((r.late_at(r.enemy_hp_scale, r.late.hp, 14.0) - at10 * 2.0).abs() < 1e-4);
+    assert!((r.late_at(r.spawn.rate, r.late.spawn, 20.0) - r.spawn.rate.at(10.0) * 1.8).abs() < 1e-3);
+}
+
+/// 无尽夜的灯油：前 10 分钟照常，之后每秒 0.5、击杀 × 0.01；第一个夜主算天明 300，再来的每个 150。
+#[test]
+fn endless_oil_counts_late_time_and_bosses_separately() {
+    let mut s = setup(4);
+    s.mode = RunMode::Endless;
+    s.god = false;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 1200 * hz;
+    sim.progress_mut().kills = 30_000;
+    {
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.late_kills, e.downs) = (20_000, 3);
+    }
+    let w = sim.world_mut();
+    let mut q = w.query_filtered::<&mut lantern_sim::Health, bevy_ecs::query::With<lantern_sim::Player>>();
+    q.single_mut(w).unwrap().hp = 0.0;
+    sim.step(InputFrame::default(), &[]);
+    let r = sim.flow().result.clone().expect("倒下就结算");
+    assert!(r.endless && !r.won && r.bosses == 3);
+    // 存活 600 + 600 × 0.5；击杀 10000 × 0.05 + 20000 × 0.01；夜主 300 + 2 × 150
+    assert_eq!(&r.oil_parts[..3], &[900, 700, 600]);
+}
+
+/// 无尽夜里夜主再来时池子满了，也等腾出槽位再来，不丢、不重复。
+#[test]
+fn endless_boss_waits_for_room_too() {
+    let c = content();
+    let mut s = setup(5);
+    s.mode = RunMode::Endless;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    sim.set_build(&[], &[]);
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 20 * 60 * hz;
+    {
+        // 20:00 的妖潮已经来过，夜主该来了
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.wave, e.boss_due) = (2, Some(0.0));
+    }
+    let cap = c.run.spawn.hard_cap as usize;
+    for k in 0..cap {
+        sim.spawn("shade", Vec2::new(2000.0 + k as f32 * 30.0, 0.0)).unwrap();
+    }
+    for _ in 0..2 {
+        sim.step(InputFrame::default(), &[]);
+        assert!(sim.world().resource::<Director>().boss.is_none());
+        assert!(sim.world().resource::<Director>().endless.unwrap().boss_due.is_some(), "还记着要来");
+    }
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().kill(0);
+    sim.step(InputFrame::default(), &[]);
+    assert!(sim.world().resource::<Director>().boss.is_some(), "腾出槽位后夜主再来");
+    let e = sim.world().resource::<Director>().endless.unwrap();
+    assert!(e.boss_due.is_none() && e.arrivals == 1);
+    assert_eq!(sim.take_events().iter().filter(|e| matches!(e, SimEvent::BossArrived { .. })).count(), 1);
 }

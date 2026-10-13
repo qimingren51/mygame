@@ -14,7 +14,9 @@
 | `m25_p0_tuning.patch` | 第一版的 P0 数据校准（已收进 de0af3b） | 第 2.6、4、9 节 |
 | `m25_kite_skill.patch` | 给 `lantern-tools kite` 加 `--skill novice\|regular\|expert` 三档手法 | 第 2.6 节 |
 | `m25_p0_pressure.patch` | 疾影加快、合围收紧（数据，已收进 d454bb2） | 第 2.6 节 |
-| `m25_p0_tiers.patch` | 第三轮的更倍率：二更伤害 × 1.7；三更生命 × 2、伤害 × 2.4 | 第 2.6、9 节 |
+| `m25_p0_tiers.patch` | 第三轮的更倍率（已被第四轮取代，没收） | 第 2.6、9 节 |
+| `m25_p0_round4.patch` | 第四轮的数据：更的倍率、霜铃、符剑、灯火、铜镜灯、霜瓷灯、赤地 | 第 2.6 节 |
+| `m25_mark_spread.patch` | 余印的原型代码（印记在妖物死时传给附近 3 只）；正式实现时参数请放进 `elements.ron` | 第 2.6、7.2 节 |
 
 ## 复现原型实测
 

@@ -17,7 +17,7 @@ use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan};
 use crate::spawn::{soft_cap, spawn_enemy};
 use crate::stats::{Effects, Stats};
-use crate::{GameContent, Health, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
+use crate::{GameContent, Health, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 const TAU: f32 = std::f32::consts::TAU;
 const PI: f32 = std::f32::consts::PI;
@@ -359,7 +359,7 @@ pub(crate) fn update_foes(
         if f.pos.distance_squared(pos.0) < rr * rr {
             let dmg = f.damage;
             foes.0.remove(k);
-            hurt_player(&mut player, &mut health, pos.0, dmg, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Shot, &mut ctx);
             continue;
         }
         if f.life <= 0.0 {
@@ -390,7 +390,7 @@ pub(crate) fn update_foes(
         st.sweeps.swap_remove(k);
         ctx.outbox.0.push(SimEvent::SweepStrike { pos: origin, dir });
         if hit {
-            hurt_player(&mut player, &mut health, pos.0, dmg, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Sweep, &mut ctx);
         }
     }
     let mut k = 0;
@@ -407,7 +407,7 @@ pub(crate) fn update_foes(
         st.drops.swap_remove(k);
         ctx.outbox.0.push(SimEvent::RainStrike { pos: at });
         if hit {
-            hurt_player(&mut player, &mut health, pos.0, dmg, &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, HurtBy::Rain, &mut ctx);
         }
     }
 }
