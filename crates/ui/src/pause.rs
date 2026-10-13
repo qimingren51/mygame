@@ -10,7 +10,7 @@ use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, overlay_vignette, text};
 
-/// 菜单行：0 继续，1..=3 设置项，4 回到标题
+/// 菜单行：继续、设置项、回到标题。
 const ROWS: usize = ITEMS.len() + 2;
 
 #[derive(Resource, Default)]
@@ -32,7 +32,7 @@ pub(crate) fn register(app: &mut App) {
 fn row_node() -> Node {
     Node {
         width: percent(100),
-        padding: UiRect::axes(px(18), px(8)),
+        padding: UiRect::axes(px(18), px(3)),
         justify_content: JustifyContent::Center,
         ..default()
     }
@@ -87,22 +87,22 @@ fn spawn(
             root.spawn(overlay_vignette(&skin));
             root.spawn((
                 Node {
-                    width: px(460),
+                    width: px(580),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::axes(px(48), px(40)),
-                    row_gap: px(4),
+                    padding: UiRect::axes(px(42), px(20)),
+                    row_gap: px(2),
                     ..default()
                 },
                 skin.image("panel"),
             ))
             .with_children(|p| {
-                p.spawn(text(&fonts.title, 64.0, INK, "暂停"));
+                p.spawn(text(&fonts.title, 48.0, INK, "暂停"));
                 p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
                 let mut resume = p.spawn(row_node());
                 resume.with_children(|r| {
                     r.spawn(focus(&skin, 0));
-                    r.spawn(text(&fonts.title, 32.0, INK, "继续"));
+                    r.spawn(text(&fonts.title, 28.0, INK, "继续"));
                 });
                 hook(&mut resume, 0);
                 for (k, &item) in ITEMS.iter().enumerate() {
@@ -116,24 +116,35 @@ fn spawn(
                 let mut quit = p.spawn(row_node());
                 quit.with_children(|r| {
                     r.spawn(focus(&skin, ROWS - 1));
-                    r.spawn(text(&fonts.title, 32.0, INK, "回到标题"));
+                    r.spawn(text(&fonts.title, 28.0, INK, "回到标题"));
                 });
                 hook(&mut quit, ROWS - 1);
                 p.spawn(Node { height: px(8), ..default() });
                 p.spawn(text(&fonts.body, 14.0, INK_DIM, "回到标题时，这一局不计灯油"));
-                p.spawn(text(&fonts.body, 14.0, INK_DIM, "↑ ↓ 选择　← → 调整　Enter 确定　Esc 继续"));
+                p.spawn(crate::prompts::hint(
+                    &fonts.body,
+                    14.0,
+                    INK_DIM,
+                    "{nav} 选择 / 调整　{confirm} 确定　{back} 继续",
+                ));
             });
         });
 }
 
-fn input(
+pub(crate) fn input(
     actions: Res<Actions>,
     mut ui: ResMut<PauseUi>,
     mut settings: ResMut<Settings>,
+    mut controls: ResMut<crate::controls::Controls>,
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
 ) {
+    if controls.is_open() {
+        ui.clicked = None;
+        ui.hovered = None;
+        return;
+    }
     if let Some(h) = ui.hovered.take()
         && actions.pointer_moved
     {
@@ -155,12 +166,41 @@ fn input(
         let mut a = *actions;
         // 点击设置项等同回车（全屏切换），音量用左右键
         a.confirm |= clicked.is_some();
-        settings_ui::adjust(ITEMS[sel - 1], &a, &mut settings, &mut window);
+        settings_ui::adjust(ITEMS[sel - 1], &a, &mut settings, &mut window, &mut controls);
     }
 }
 
 fn highlight(ui: Res<PauseUi>, mut q: Query<(&PauseFocus, &mut Visibility)>) {
     for (f, mut v) in &mut q {
         v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pause_navigates_settings_and_modal_blocks_resume() {
+        let mut app = App::new();
+        app.init_resource::<Actions>()
+            .init_resource::<PauseUi>()
+            .init_resource::<Settings>()
+            .init_resource::<crate::controls::Controls>()
+            .init_resource::<NextState<RunState>>()
+            .init_resource::<NextState<AppState>>()
+            .add_systems(Update, input);
+        app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
+        for _ in 0..9 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<PauseUi>().selected, 9);
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        assert!(app.world().resource::<crate::controls::Controls>().is_open());
+        *app.world_mut().resource_mut::<Actions>() = Actions { pause: true, back: true, ..default() };
+        app.update();
+        assert!(matches!(app.world().resource::<NextState<RunState>>(), NextState::Unchanged));
     }
 }

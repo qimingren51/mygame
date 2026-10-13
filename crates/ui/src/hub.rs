@@ -211,7 +211,16 @@ fn frame(
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
             body(panel);
         });
-        p.spawn(text(&fonts.body, 18.0, PAPER, hint));
+        if hint == "{back} 返回" {
+            let mut back = p.spawn((
+                Node { padding: UiRect::axes(px(28), px(10)), ..default() },
+                skin.image("btn_focus"),
+            ));
+            clickable(&mut back, 0);
+            back.with_child(crate::prompts::hint(&fonts.body, 18.0, INK, "{confirm} / {back} 返回"));
+        } else {
+            p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, hint));
+        }
     });
 }
 
@@ -236,7 +245,7 @@ pub(crate) fn hub_panel(
         1080.0,
         "灯驿",
         &purses(profile),
-        "← → 选择　Enter　进去　　Esc　返回",
+        "{nav} 选择　{confirm} 进去　{back} 返回",
         |panel| {
             panel
                 .spawn(Node { column_gap: px(22), padding: UiRect::top(px(10)), ..default() })
@@ -265,7 +274,12 @@ pub(crate) fn hub_panel(
                                 card.spawn(para(fonts, 14.0, INK, &format!("“{line}”"), 170.0));
                             }
                             card.spawn(Node { flex_grow: 1.0, ..default() });
-                            card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
+                            card.spawn(crate::prompts::hint(
+                                &fonts.title,
+                                22.0,
+                                INK_DIM,
+                                &format!("{{pick{}}}", i + 1),
+                            ));
                         });
                         clickable(&mut card, i);
                     }
@@ -289,7 +303,7 @@ pub(crate) fn shop_panel(
         (a.inflation * 100.0).round(),
         profile.attributes_bought()
     );
-    let hint = "方向键 选择　Enter　买一级　　出发前可以单独关掉　　Esc　返回";
+    let hint = "{nav} 选择　{confirm} 买一级　{back} 返回";
     frame(commands, fonts, skin, 1120.0, "货郎 · 属性", &sub, hint, |panel| {
         panel
             .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(4), ..default() })
@@ -374,7 +388,7 @@ pub(crate) fn achievements_panel(
 ) {
     let done = c.achievements.iter().filter(|a| profile.achievements.contains(&a.id)).count();
     let sub = format!("已达成 {done} / {}", c.achievements.len());
-    frame(commands, fonts, skin, 1160.0, "灯童 · 成就", &sub, "Esc　返回", |panel| {
+    frame(commands, fonts, skin, 1160.0, "灯童 · 成就", &sub, "{back} 返回", |panel| {
         panel
             .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
             .with_children(|g| {
@@ -446,7 +460,7 @@ pub(crate) fn codex_panel(
 ) {
     let seen = (0..c.elements.reactions.len()).filter(|&k| profile.reactions & (1 << k) != 0).count();
     let sub = format!("五行谱 · 见过的反应 {seen} / {}", c.elements.reactions.len());
-    frame(commands, fonts, skin, 1120.0, "说书人 · 图鉴", &sub, "Esc　返回", |panel| {
+    frame(commands, fonts, skin, 1120.0, "说书人 · 图鉴", &sub, "{back} 返回", |panel| {
         panel
             .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
             .with_children(|g| {
@@ -513,7 +527,7 @@ pub(crate) fn prep_panel(
 ) {
     let rows = prep_rows(c, profile);
     let last = &profile.last;
-    let hint = "↑ ↓ 选择　← → 更换　Enter　出发　　Esc　返回";
+    let hint = "{nav} 选择 / 更换　{confirm} 确定　{back} 返回";
     frame(
         commands,
         fonts,

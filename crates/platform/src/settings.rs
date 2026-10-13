@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-pub const SETTINGS_VERSION: u32 = 1;
+pub const SETTINGS_VERSION: u32 = 2;
 
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -26,6 +26,7 @@ pub struct Settings {
     pub bloom: bool,
     /// 精简特效：粒子减半，不画环境萤火、夜雾和色散（配置低的机器用）
     pub lite_fx: bool,
+    pub bindings: crate::bindings::Bindings,
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -42,6 +43,7 @@ impl Default for Settings {
             hitstop: true,
             bloom: true,
             lite_fx: false,
+            bindings: Default::default(),
             path: None,
         }
     }
@@ -62,6 +64,7 @@ impl Settings {
             },
             Err(_) => Settings::default(),
         };
+        s.bindings.validate();
         s.version = SETTINGS_VERSION;
         s.path = Some(path);
         s
@@ -91,6 +94,24 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bindings_survive_save_reload_and_old_settings_gain_defaults() {
+        use crate::bindings::Action;
+        use bevy::prelude::{GamepadButton, KeyCode};
+        let dir = std::env::temp_dir().join(format!("lantern-bindings-test-{}", std::process::id()));
+        let mut settings = Settings::load(&dir);
+        settings.bindings.bind_key(Action::Dash, KeyCode::KeyJ).unwrap();
+        settings.bindings.bind_button(Action::Ult, GamepadButton::RightTrigger2).unwrap();
+        settings.save().unwrap();
+        assert_eq!(Settings::load(&dir).bindings, settings.bindings);
+        std::fs::write(dir.join("settings.ron"), "(version: 1, music_volume: 0.4)").unwrap();
+        let old = Settings::load(&dir);
+        assert_eq!(old.version, SETTINGS_VERSION);
+        assert_eq!(old.music_volume, 0.4);
+        assert_eq!(old.bindings.key(Action::Dash), KeyCode::Space);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn roundtrip_and_recover_from_corruption() {

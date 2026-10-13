@@ -163,7 +163,7 @@ fn read_events(
             }
             SimEvent::Taiji => msg(c.elements.taiji.name.clone(), c.elements.taiji.desc.clone(), PAPER, true),
             // 连斩里程碑在屏幕左边竖着题字（moments.rs）
-            SimEvent::UltReady => msg("燃灯已满", "E / 手柄 Y　释放", hex("#FFD98A"), false),
+            SimEvent::UltReady => msg("燃灯已满", "{ult} 释放", hex("#FFD98A"), false),
             SimEvent::Encounter { kind, .. } => {
                 let k = &c.events.kinds[kind as usize];
                 msg(format!("奇遇 · {}", k.name), k.hint.clone(), hex(&k.color), false)
@@ -219,7 +219,7 @@ fn read_events(
             .with_children(|t| {
                 t.spawn(text(&fonts.title, if m.big { 40.0 } else { 28.0 }, m.color, &m.title));
                 if !m.body.is_empty() {
-                    t.spawn(text(&fonts.body, 15.0, PAPER, &m.body));
+                    t.spawn(crate::prompts::hint(&fonts.body, 15.0, PAPER, &m.body));
                 }
             })
             .id();

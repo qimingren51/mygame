@@ -11,6 +11,7 @@ publish.workspace = true
 lantern_content.workspace = true
 lantern_sim.workspace = true
 bevy.workspace = true
+bevy_input.workspace = true
 directories.workspace = true
 serde.workspace = true
 ron.workspace = true

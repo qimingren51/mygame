@@ -1049,6 +1049,7 @@ dependencies = [
  "bevy_reflect",
  "derive_more",
  "log",
+ "serde",
  "smol_str",
  "thiserror 2.0.21",
 ]
@@ -3480,6 +3481,7 @@ name = "lantern_platform"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_input",
  "directories",
  "lantern_content",
  "lantern_sim",

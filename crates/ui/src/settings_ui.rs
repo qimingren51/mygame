@@ -4,7 +4,8 @@
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
-use lantern_platform::{Actions, Settings};
+use crate::controls::Controls;
+use lantern_platform::{Actions, InputDevice, Settings};
 use lantern_view::Feel;
 
 use crate::{Fonts, INK, INK_DIM, text};
@@ -18,10 +19,21 @@ pub(crate) enum Item {
     Hitstop,
     Bloom,
     Fx,
+    Keyboard,
+    Gamepad,
 }
 
-pub(crate) const ITEMS: [Item; 7] =
-    [Item::Music, Item::Sfx, Item::Fullscreen, Item::Shake, Item::Hitstop, Item::Bloom, Item::Fx];
+pub(crate) const ITEMS: [Item; 9] = [
+    Item::Music,
+    Item::Sfx,
+    Item::Fullscreen,
+    Item::Shake,
+    Item::Hitstop,
+    Item::Bloom,
+    Item::Fx,
+    Item::Keyboard,
+    Item::Gamepad,
+];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -36,12 +48,15 @@ fn label(item: Item) -> &'static str {
         Item::Hitstop => "顿帧",
         Item::Bloom => "辉光",
         Item::Fx => "特效",
+        Item::Keyboard => "键盘按键",
+        Item::Gamepad => "手柄按键",
     }
 }
 
 fn value(item: Item, s: &Settings) -> String {
     let pct = |v: f32| format!("◀　{:>3}%　▶", (v * 100.0).round() as u32);
     match item {
+        Item::Keyboard | Item::Gamepad => "设置".into(),
         Item::Music => pct(s.music_volume),
         Item::Sfx => pct(s.sfx_volume),
         Item::Shake => pct(s.shake),
@@ -60,13 +75,23 @@ fn on_off(on: bool) -> String {
 pub(crate) fn spawn_row(p: &mut ChildSpawnerCommands, fonts: &Fonts, settings: &Settings, item: Item) {
     p.spawn(Node { width: percent(100), justify_content: JustifyContent::SpaceBetween, ..default() })
         .with_children(|r| {
-            r.spawn(text(&fonts.title, 30.0, INK, label(item)));
-            r.spawn((SettingValue(item), text(&fonts.body, 20.0, INK_DIM, &value(item, settings))));
+            r.spawn(text(&fonts.title, 24.0, INK, label(item)));
+            r.spawn((SettingValue(item), text(&fonts.body, 18.0, INK_DIM, &value(item, settings))));
         });
 }
 
 /// 处理一项设置的输入：左右调整，回车切换。返回是否改动。
-pub(crate) fn adjust(item: Item, actions: &Actions, settings: &mut Settings, window: &mut Window) -> bool {
+pub(crate) fn adjust(
+    item: Item,
+    actions: &Actions,
+    settings: &mut Settings,
+    window: &mut Window,
+    controls: &mut Controls,
+) -> bool {
+    if actions.confirm && matches!(item, Item::Keyboard | Item::Gamepad) {
+        controls.open(if item == Item::Keyboard { InputDevice::Keyboard } else { InputDevice::Gamepad });
+        return false;
+    }
     let step = actions.nav.x as f32 * 0.1;
     let changed = match item {
         Item::Music if step != 0.0 => {
