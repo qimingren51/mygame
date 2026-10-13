@@ -51,6 +51,40 @@ fn reset(mut commands: Commands, q: Query<Entity, With<Moment>>) {
     }
 }
 
+/// 底色原本的不透明度（淡入淡出时按它的比例算）。
+#[derive(Component)]
+struct BaseAlpha(f32);
+
+/// 盖章：印章盖在一张宣纸方笺上（印章周围是透明的，直接盖在夜色上看不清），
+/// 从大到小砸下来。at 是屏幕百分比位置。
+fn spawn_stamp(
+    commands: &mut Commands,
+    db: &AtlasDb,
+    frame: lantern_view::atlas::FrameId,
+    size: f32,
+    at: (f32, f32),
+    rot: f32,
+    life: f32,
+) {
+    commands
+        .spawn((
+            Moment { t: 0.0, life, anim: Anim::Stamp { rot } },
+            DespawnOnExit(AppState::Run),
+            GlobalZIndex(6),
+            Node {
+                left: percent(at.0),
+                top: percent(at.1),
+                padding: UiRect::all(px(size * 0.08)),
+                border_radius: BorderRadius::all(px(size * 0.08)),
+                ..absolute()
+            },
+            BackgroundColor(PAPER.with_alpha(0.88)),
+            BaseAlpha(0.88),
+            UiTransform::from_scale(Vec2::splat(2.5)),
+        ))
+        .with_child((Node { width: px(size), height: px(size), ..default() }, db.ui_image(frame)));
+}
+
 fn absolute() -> Node {
     Node { position_type: PositionType::Absolute, ..default() }
 }
@@ -84,25 +118,16 @@ fn read_events(
             // 共鸣跨阶：朱砂印盖在屏幕上
             SimEvent::Resonance { element, tier } => {
                 let Some(frame) = db.find(RESONANCE_SEAL[element as usize]) else { continue };
-                let size = 120.0 + 16.0 * tier as f32;
-                commands.spawn((
-                    Moment { t: 0.0, life: 2.0, anim: Anim::Stamp { rot: -0.12 } },
-                    DespawnOnExit(AppState::Run),
-                    GlobalZIndex(6),
-                    Node {
-                        left: percent(64),
-                        top: percent(26),
-                        width: px(size),
-                        height: px(size),
-                        ..absolute()
-                    },
-                    UiTransform::from_scale(Vec2::splat(2.5)),
-                    db.ui_image(frame),
-                ));
+                let size = 112.0 + 16.0 * tier as f32;
+                spawn_stamp(&mut commands, &db, frame, size, (64.0, 24.0), -0.12, 2.0);
             }
-            // 反应初见：朱文印，写反应的名字
+            // 反应初见：盖那种反应的方印（美术图集里没有时写名字）
             SimEvent::Reaction { kind, first: true, .. } => {
                 let r = &c.elements.reactions[kind as usize];
+                if let Some(frame) = db.find(&format!("ui/seal_react_{}", r.id)) {
+                    spawn_stamp(&mut commands, &db, frame, 140.0, (60.0, 22.0), 0.1, 2.4);
+                    continue;
+                }
                 commands
                     .spawn((
                         Moment { t: 0.0, life: 2.4, anim: Anim::Stamp { rot: 0.1 } },
@@ -118,6 +143,7 @@ fn read_events(
                         },
                         BorderColor::all(CINNABAR),
                         BackgroundColor(PAPER.with_alpha(0.9)),
+                        BaseAlpha(0.9),
                         UiTransform::from_scale(Vec2::splat(2.5)),
                     ))
                     .with_children(|p| {
@@ -171,6 +197,7 @@ fn read_events(
                         GlobalZIndex(5),
                         node,
                         BackgroundColor(Color::srgba(0.01, 0.01, 0.02, 0.94)),
+                        BaseAlpha(0.94),
                     ));
                 }
                 // 名字写成“夜主 · 九尾”：前半是称号，后半写成大字
@@ -264,6 +291,7 @@ fn animate(
         Option<&mut BackgroundColor>,
         Option<&mut BorderColor>,
         Option<&mut TextShadow>,
+        Option<&BaseAlpha>,
     )>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -321,9 +349,10 @@ fn set_alpha(
         Option<&mut BackgroundColor>,
         Option<&mut BorderColor>,
         Option<&mut TextShadow>,
+        Option<&BaseAlpha>,
     )>,
 ) {
-    if let Ok((tc, img, bg, border, shadow)) = colors.get_mut(e) {
+    if let Ok((tc, img, bg, border, shadow, base)) = colors.get_mut(e) {
         if let Some(mut tc) = tc {
             tc.0.set_alpha(a);
         }
@@ -331,9 +360,8 @@ fn set_alpha(
             img.color.set_alpha(a);
         }
         if let Some(mut bg) = bg {
-            // 底色本来就半透明：按比例
-            let base = if bg.0.alpha() > 0.0 { 0.92 } else { 0.0 };
-            bg.0.set_alpha(base * a);
+            // 底色本来就半透明：按原来的比例
+            bg.0.set_alpha(base.map_or(1.0, |b| b.0) * a);
         }
         if let Some(mut border) = border {
             border.set_all(CINNABAR.with_alpha(a));

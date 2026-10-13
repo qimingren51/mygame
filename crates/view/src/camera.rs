@@ -152,6 +152,15 @@ impl Rig {
         1.0
     }
 
+    /// 方向冲击：临界阻尼的弹簧，用解析解推进，帧长再大也不会发散。
+    fn step_kick(&mut self, dt: f32) {
+        let w = KICK_OMEGA;
+        let decay = (-w * dt).exp();
+        let tmp = self.kick_v + self.kick * w;
+        self.kick = (self.kick + tmp * dt) * decay;
+        self.kick_v = (self.kick_v - tmp * w * dt) * decay;
+    }
+
     /// 平滑的噪声：几个不成整数比的正弦相加，-1..1。
     fn noise(&self, i: usize) -> f32 {
         let t = self.clock + self.phase[i];
@@ -279,12 +288,7 @@ pub(crate) fn update_rig(
     rig.lead += (want - rig.lead) * (1.0 - (-dt * LEAD_RATE).exp());
     rig.focus = hero + rig.lead;
 
-    // ---- 方向冲击：临界阻尼的弹簧，用解析解推进，帧长再大也不会发散
-    let w = KICK_OMEGA;
-    let decay = (-w * dt).exp();
-    let tmp = rig.kick_v + rig.kick * w;
-    rig.kick = (rig.kick + tmp * dt) * decay;
-    rig.kick_v = (rig.kick_v - tmp * w * dt) * decay;
+    rig.step_kick(dt);
 
     // ---- 震屏
     rig.trauma = (rig.trauma - dt * TRAUMA_DECAY).max(0.0);
@@ -344,4 +348,53 @@ pub(crate) fn follow_main_camera(
     dark_tf.rotation = main_tf.rotation;
     dark_tf.scale = Vec2::new(h * aspect, h).extend(1.0);
     **dark_vis = Visibility::Inherited;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trauma_is_capped() {
+        let mut rig = Rig::default();
+        for _ in 0..10 {
+            rig.trauma(0.4);
+        }
+        assert_eq!(rig.trauma, 1.0);
+    }
+
+    #[test]
+    fn hitstop_freezes_then_respects_gap() {
+        let mut rig = Rig::default();
+        rig.hitstop(0.05);
+        assert_eq!(rig.time_scale(), 0.0);
+        // 顿帧结束后，间隔内再来一次不生效
+        rig.stop = 0.0;
+        rig.hitstop(0.05);
+        assert_eq!(rig.time_scale(), 1.0);
+    }
+
+    #[test]
+    fn slowmo_eases_back_to_full_speed() {
+        let mut rig = Rig::default();
+        rig.slowmo(1.0, 0.2);
+        assert!((rig.time_scale() - 0.2).abs() < 1e-5);
+        rig.slow = 0.2;
+        let mid = rig.time_scale();
+        assert!(mid > 0.2 && mid < 1.0, "{mid}");
+        rig.slow = 1e-4;
+        assert!(rig.time_scale() > 0.99);
+    }
+
+    #[test]
+    fn kick_spring_is_stable_with_long_frames() {
+        let mut rig = Rig::default();
+        rig.kick(Vec2::X, 1.0);
+        // 读大回放时一帧可能卡几十秒
+        for dt in [0.1, 30.0, 0.016, 5.0] {
+            rig.step_kick(dt);
+            assert!(rig.kick.is_finite() && rig.kick_v.is_finite());
+        }
+        assert!(rig.kick.length() < 1e-3);
+    }
 }

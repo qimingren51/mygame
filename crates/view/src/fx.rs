@@ -155,12 +155,20 @@ pub(crate) struct FxState {
     rng: Pcg32,
     live: Vec<Live>,
     time: f32,
+    /// 石灯笼点亮的时刻（按下标），光区从小慢慢铺开
+    lamp_lit: Vec<(u8, f32)>,
     pub flash: Color,
 }
 
 impl Default for FxState {
     fn default() -> Self {
-        FxState { rng: Pcg32::new(0xf00d_2026, 3), live: Vec::new(), time: 0.0, flash: Color::NONE }
+        FxState {
+            rng: Pcg32::new(0xf00d_2026, 3),
+            live: Vec::new(),
+            time: 0.0,
+            lamp_lit: Vec::new(),
+            flash: Color::NONE,
+        }
     }
 }
 
@@ -291,7 +299,16 @@ pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, 
                 60.0,
                 0.5,
             ),
-            SimEvent::LanternLit { .. } => fx.flash(rgb(0xffd98a), 0.25),
+            SimEvent::LanternLit { index, .. } => {
+                fx.flash(rgb(0xffd98a), 0.25);
+                let now = fx.time;
+                fx.lamp_lit.push((index, now));
+            }
+            SimEvent::BossPhase { .. } => fx.flash(rgb(0xff3b30), 0.2),
+            // 五连宝箱金光一闪（三连淡一些）
+            SimEvent::ChestOpened { count, .. } if count >= 3 => {
+                fx.flash(rgb(0xffd98a), if count >= 5 { 0.3 } else { 0.15 })
+            }
             SimEvent::EncircleWarn { .. } => fx.flash(rgb(0x1a1020), 0.35),
             SimEvent::PlayerHurt { .. } => {
                 fx.flash(rgb(0xff3b30), 0.18);
@@ -496,7 +513,7 @@ pub(crate) fn collect_fx(
     // ---- 石灯笼：没点亮的暗着，站在旁边时一圈进度；点亮后成为光区
     if let (Some(lanterns), Some((frame, emit))) = (&res.lanterns, f.stone) {
         let def = &content.0.run.lanterns;
-        for l in &lanterns.0 {
+        for (i, l) in lanterns.0.iter().enumerate() {
             let p = to_screen(l.pos);
             // 没点亮的用熄灭版；没有熄灭版时把点亮的压暗
             let (body, tint) = match (l.lit, f.stone_dark) {
@@ -504,6 +521,11 @@ pub(crate) fn collect_fx(
                 (false, Some(dark)) => (dark, Color::WHITE),
                 (false, None) => (frame, Color::srgb(0.55, 0.55, 0.6)),
             };
+            // 点亮后 1.5 秒里光区从小铺开（读档或回放跳转时没有记录，直接全开）
+            let spread = fx.lamp_lit.iter().find(|&&(k, _)| k as usize == i).map_or(1.0, |&(_, t)| {
+                let u = ((now - t) / 1.5).clamp(0.0, 1.0);
+                1.0 - (1.0 - u) * (1.0 - u)
+            });
             pools.fx.push(Draw {
                 scale: Vec2::splat(1.25),
                 color: tint,
@@ -517,9 +539,9 @@ pub(crate) fn collect_fx(
                     &frames,
                     &db,
                     p + Vec2::new(0.0, 30.0),
-                    (rgb(0xffc56b).with_alpha(0.9), def.zone_radius),
+                    (rgb(0xffc56b).with_alpha(0.9), def.zone_radius * (0.25 + 0.75 * spread)),
                 );
-                let k = px(f.ring_ink, def.zone_radius * 2.0);
+                let k = px(f.ring_ink, def.zone_radius * 2.0 * spread);
                 pools.fx.push(Draw {
                     scale: Vec2::new(k, k * FLAT),
                     color: rgb(0x8a5a1c).with_alpha(0.2),

@@ -24,7 +24,7 @@ use crate::fx::hex;
 use crate::{layer, to_screen};
 
 /// 同时存在的粒子上限；满了就不再生成（先来的先演完）
-const CAP: usize = 2400;
+const CAP: usize = 1800;
 
 /// 墨色（普通混合的粒子）
 pub(crate) const INK: Color = Color::srgb(0.07, 0.075, 0.1);
@@ -291,6 +291,10 @@ impl Particles {
         self.list.clear();
     }
 
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
     fn dir(&mut self) -> Vec2 {
         Vec2::from_angle(self.rng.range_f32(0.0, TAU))
     }
@@ -345,7 +349,8 @@ impl Particles {
                 drag: 1.5,
                 size: (s, s * 0.8),
                 color: INK.with_alpha(0.9),
-                splat: true,
+                // 一半的墨滴落地留点，满地墨点太多既脏又费
+                splat: self.rng.chance(0.5),
                 ..P::new(self.f.drop, at, 2.0, layer::ACTORS + 1.2)
             };
             self.spawn(p);
@@ -545,8 +550,8 @@ pub(crate) fn element_glow(e: Option<Element>) -> Color {
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.42);
 /// 一帧里最多为多少次命中、击杀放粒子（其余照样有伤害数字和墨点）
-const HIT_BUDGET: u32 = 40;
-const KILL_BUDGET: u32 = 48;
+const HIT_BUDGET: u32 = 28;
+const KILL_BUDGET: u32 = 32;
 
 /// 本帧的计数和暴击笔触的冷却。
 #[derive(Resource, Default)]
@@ -565,6 +570,7 @@ pub(crate) fn particle_events(
     frames: Res<ActorFrames>,
     hero: Single<(&Transform, &Player, &HeroView)>,
     arsenal: Option<Res<Arsenal>>,
+    lanterns: Option<Res<lantern_sim::lanterns::Lanterns>>,
     fixed: Res<Time<Fixed>>,
     mut clock: ResMut<ParticleClock>,
     mut parts: ResMut<Particles>,
@@ -665,8 +671,8 @@ pub(crate) fn particle_events(
                                 layer::ACTORS + 1.1,
                             );
                         }
-                        parts.ink(body, 4, 1.0);
-                        parts.ash(body, def.radius * 0.6, 3, INK.with_alpha(0.7));
+                        parts.ink(body, 3, 1.0);
+                        parts.ash(body, def.radius * 0.6, 2, INK.with_alpha(0.7));
                         parts.embers(body, 4.0, eye, 1);
                     }
                 }
@@ -716,7 +722,14 @@ pub(crate) fn particle_events(
                 parts.halo(frames.ring, hero_at, 0.1, 2.2, 0.9, GOLD.with_alpha(0.9));
                 parts.embers(hero_at + Vec2::new(0.0, 20.0), 30.0, GOLD, 24);
             }
-            SimEvent::LanternLit { .. } => {}
+            // 石灯笼点亮：灯窗里冒出一股金色火星，地上一圈光
+            SimEvent::LanternLit { index, .. } => {
+                if let Some(l) = lanterns.as_ref().and_then(|ls| ls.0.get(index as usize)) {
+                    let at = to_screen(l.pos);
+                    parts.embers(at + Vec2::new(0.0, 30.0), 10.0, GOLD, 26);
+                    parts.halo(frames.ring, at, 0.2, 3.0, 1.2, GOLD.with_alpha(0.8));
+                }
+            }
             _ => {}
         }
     }

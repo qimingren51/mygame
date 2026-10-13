@@ -1,4 +1,4 @@
-//! 性能面板（F3）：帧率、帧时间、模拟每步耗时、妖物和魂火数量。
+//! 性能面板（F3）：帧率、帧时间、模拟每步耗时、画面层每帧耗时、妖物和魂火数量、精灵与粒子数量。
 //!
 //! 模拟耗时用 FixedUpdate 首尾两个计时系统测量。这只是诊断，不进入模拟逻辑，不影响可复现。
 
@@ -7,6 +7,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 use lantern_platform::Actions;
 use lantern_sim::{Enemies, Gems, RunState, SimSet};
+use lantern_view::ViewStats;
 
 use crate::{Fonts, PAPER, text};
 
@@ -56,13 +57,15 @@ struct PerfWindow {
     max_ms: f32,
     sim_ms: f64,
     sim_steps: u64,
+    view_ms: f64,
+    view_frames: u64,
     visible: bool,
 }
 
 fn spawn_panel(mut commands: Commands, fonts: Res<Fonts>) {
     commands.spawn((
         PerfText,
-        Node { position_type: PositionType::Absolute, right: px(20), top: px(44), ..default() },
+        Node { position_type: PositionType::Absolute, left: px(20), top: px(120), ..default() },
         text(&fonts.body, 14.0, PAPER, ""),
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
         Visibility::Hidden,
@@ -70,9 +73,10 @@ fn spawn_panel(mut commands: Commands, fonts: Res<Fonts>) {
 }
 
 fn update_panel(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     actions: Res<Actions>,
     timing: Res<SimTiming>,
+    view: Res<ViewStats>,
     en: Option<Res<Enemies>>,
     gems: Option<Res<Gems>>,
     mut w: ResMut<PerfWindow>,
@@ -96,18 +100,29 @@ fn update_panel(
     } else {
         0.0
     };
+    let view_ms = if view.frames > w.view_frames {
+        (view.total_ms - w.view_ms) / (view.frames - w.view_frames) as f64
+    } else {
+        0.0
+    };
     let avg = w.sum_ms / w.frames as f32;
     text.0 = format!(
-        "帧率 {:.0}　帧 {:.1} ms（最长 {:.1}）\n模拟每步 {:.2} ms\n妖物 {}　魂火 {}",
+        "帧率 {:.0}　帧 {:.1} ms（最长 {:.1}）\n模拟每步 {:.2} ms　画面层 {:.2} ms\n妖物 {}　魂火 {}\n精灵 {}　发光 {}　粒子 {}",
         1000.0 / avg.max(0.001),
         avg,
         w.max_ms,
         sim,
+        view_ms,
         en.map_or(0, |e| e.count),
         gems.map_or(0, |g| g.n),
+        view.sprites,
+        view.glows,
+        view.particles,
     );
     w.sim_ms = timing.total_ms;
     w.sim_steps = timing.steps;
+    w.view_ms = view.total_ms;
+    w.view_frames = view.frames;
     w.t = 0.0;
     w.frames = 0;
     w.sum_ms = 0.0;

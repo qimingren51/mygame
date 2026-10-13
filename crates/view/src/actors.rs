@@ -537,6 +537,13 @@ impl Draw {
     }
 }
 
+impl Pools {
+    /// 本帧要画的精灵数（妖物、影子、其他）。
+    pub(crate) fn sprite_count(&self) -> usize {
+        self.enemy.len() + self.enemy_shadow.len() + self.fx.len()
+    }
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct Pools {
     enemy: Vec<Draw>,

@@ -19,10 +19,12 @@ mod fx;
 mod ground;
 pub mod lighting;
 mod particles;
+mod stats;
 
 use atlas::AtlasDb;
 pub use atmos::{DAWN_LEN, Dawn};
 pub use camera::Feel;
+pub use stats::ViewStats;
 
 /// 图层的 z 基数（从下到上）。同一图层内再按脚底 y 微调。
 pub mod layer {
@@ -68,6 +70,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<Dawn>()
             .init_resource::<particles::ParticleClock>()
             .init_resource::<Feel>()
+            .init_resource::<ViewStats>()
             .add_systems(
                 Startup,
                 (
@@ -105,26 +108,35 @@ impl Plugin for ViewPlugin {
             .add_systems(
                 Update,
                 (
-                    interpolate,
-                    actors::animate_hero,
-                    camera::camera_events,
-                    camera::update_rig,
-                    camera::follow_main_camera,
-                    fx::apply_flash,
-                    actors::collect_draws,
-                    fx::read_fx_events,
-                    fx::collect_fx,
-                    actors::hero_glow,
-                    effects::read_events,
-                    effects::update_effects,
-                    particles::particle_events,
-                    atmos::atmos_events,
-                    atmos::update_atmos,
-                    particles::update_particles,
-                    actors::apply_pools,
-                    actors::apply_glow,
-                    ground::scroll_paper,
-                    ground::update_decor,
+                    // 镜头先定下来，后面的绘制都按这一帧的镜头算
+                    (
+                        stats::begin,
+                        interpolate,
+                        actors::animate_hero,
+                        camera::camera_events,
+                        camera::update_rig,
+                        camera::follow_main_camera,
+                        fx::apply_flash,
+                    )
+                        .chain(),
+                    (
+                        actors::collect_draws,
+                        fx::read_fx_events,
+                        fx::collect_fx,
+                        actors::hero_glow,
+                        effects::read_events,
+                        effects::update_effects,
+                        particles::particle_events,
+                        atmos::atmos_events,
+                        atmos::update_atmos,
+                        particles::update_particles,
+                        actors::apply_pools,
+                        actors::apply_glow,
+                        ground::scroll_paper,
+                        ground::update_decor,
+                        stats::end,
+                    )
+                        .chain(),
                 )
                     .chain()
                     .run_if(in_state(AppState::Run)),

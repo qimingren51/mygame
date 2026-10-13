@@ -861,10 +861,18 @@ fn spawn_evolve(
     commands
         .spawn((overlay(skin), EvoClock::default()))
         .with_children(|root| {
+            // “进化”竖印（96×160），垫一张宣纸方笺才看得清
             if let Some(seal) = db.find("ui/seal_evo") {
                 root.spawn((
                     EvoPart::Seal,
-                    Node { width: px(72), height: px(72), ..default() },
+                    Node {
+                        width: px(54.0 + 16.0),
+                        height: px(90.0 + 16.0),
+                        padding: UiRect::all(px(8)),
+                        border_radius: BorderRadius::all(px(6)),
+                        ..default()
+                    },
+                    BackgroundColor(PAPER.with_alpha(0.0)),
                     UiTransform::from_scale(Vec2::splat(2.4)),
                     db.ui_image(seal).with_color(Color::WHITE.with_alpha(0.0)),
                 ));
@@ -913,7 +921,13 @@ fn ease_out_back(x: f32) -> f32 {
 pub(crate) fn animate_evolve(
     time: Res<Time<Real>>,
     mut clocks: Query<&mut EvoClock>,
-    mut parts: Query<(&EvoPart, Option<&mut UiTransform>, Option<&mut ImageNode>, Option<&mut TextColor>)>,
+    mut parts: Query<(
+        &EvoPart,
+        Option<&mut UiTransform>,
+        Option<&mut ImageNode>,
+        Option<&mut TextColor>,
+        Option<&mut BackgroundColor>,
+    )>,
 ) {
     let Some(mut clock) = clocks.iter_mut().next() else { return };
     clock.0 += time.delta_secs().min(0.1);
@@ -926,7 +940,7 @@ pub(crate) fn animate_evolve(
     // 印：0.95 秒砸下
     let stamp = (t - 0.95) / 0.12;
     let words = smooth((t - 0.8) / 0.5);
-    for (part, tf, img, txt) in &mut parts {
+    for (part, tf, img, txt, bg) in &mut parts {
         match part {
             EvoPart::Old => {
                 if let Some(mut img) = img {
@@ -951,6 +965,9 @@ pub(crate) fn animate_evolve(
             EvoPart::Seal => {
                 if let Some(mut img) = img {
                     img.color = Color::WHITE.with_alpha(smooth(stamp * 2.0));
+                }
+                if let Some(mut bg) = bg {
+                    bg.0.set_alpha(0.88 * smooth(stamp * 2.0));
                 }
                 if let Some(mut tf) = tf {
                     let k = stamp.clamp(0.0, 1.0);
