@@ -49,6 +49,8 @@ pub struct Sfx {
     pub dawn: StaticSoundData,
     /// 精英倒下：一声沉的
     pub elite_down: StaticSoundData,
+    /// 无尽夜夜深一层：低处一声锣，一个音慢慢往下沉
+    pub deeper: StaticSoundData,
 }
 
 /// 一声鸟叫：两三个快速上滑的短音。
@@ -278,6 +280,18 @@ impl Sfx {
                 b.osc(Wave::Sine, 60.0, 0.2, 0.11, 0.38, Some((40.0, 0.1)), 0.004);
                 b.noise(0.0, 0.05, 0.06, noise(FilterKind::Low, 180.0));
             }),
+            deeper: render(5.0, |b| {
+                b.gong(36.7, 0.0, 0.2);
+                b.bell(pent(0), 0.0, 0.05, 3.5);
+                // 从 D4 沉到 D3
+                b.osc(Wave::Sine, pent(5), 0.05, 3.0, 0.07, Some((pent(0), 2.6)), 0.08);
+                b.noise(
+                    0.0,
+                    2.4,
+                    0.08,
+                    NoiseOpts { kind: FilterKind::Low, freq: 400.0, slide: Some(80.0), ..Default::default() },
+                );
+            }),
             boss_down: render(6.0, |b| {
                 b.gong(41.2, 0.0, 0.3);
                 b.drum(0.0, 0.5, 52.0);
@@ -356,8 +370,9 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 15] = [
+        let all: [(&str, &StaticSoundData); 16] = [
             ("chest5", &s.chest[2]),
+            ("deeper", &s.deeper),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),

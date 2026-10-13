@@ -130,10 +130,12 @@ pub(crate) fn atmos_events(outbox: Res<SimOutbox>, mut atmos: ResMut<Atmos>, mut
                 dawn.t = Some(0.0);
                 atmos.flare = 1.0;
             }
-            // 无尽夜：夜主倒下也不天明，梦太深，夜一更更往下沉（docs/LORE.md 第 8 节）
-            SimEvent::BossDefeated { dawn: false, .. } => {
-                atmos.flare = 0.8;
-                atmos.deeper = (atmos.deeper + 1).min(MAX_DEPTH);
+            // 无尽夜：夜主倒下也不天明，辉光一亮就过去
+            SimEvent::BossDefeated { dawn: false, .. } => atmos.flare = 0.8,
+            // 夜深一层（无尽夜 10 分钟以后每 5 分钟）：夜色先猛地压一下，再停在更暗的一层（docs/LORE.md 第 8 节）
+            SimEvent::NightDeeper { layer } => {
+                atmos.deeper = (*layer).min(MAX_DEPTH);
+                atmos.gloom = 1.0;
             }
             // 大事件时辉光猛地一亮再回落
             SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.flare = atmos.flare.max(0.8),
