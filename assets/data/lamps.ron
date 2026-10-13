@@ -1,12 +1,12 @@
 // 灯（docs/GAMEPLAY.md 第 11.4 节）：给长明火换一副灯身，相当于选角色。主角模型不变，只换灯笼和光色。
 // 起手法器还没解锁时，用这盏灯就视为已解锁。本命五行的升级选项权重 ×1.2。P0 做这 3 盏。
 [
-    (id: "red", name: "红纸灯", school: "星火", element: Fire, start_weapon: "lamp", color: "#FF9A4A",
+    (id: "red", name: "红纸灯", flavor: "最常见的纸灯笼。长明火在里面，烧得最旺。", school: "星火", element: Fire, start_weapon: "lamp", color: "#FF9A4A",
      good: "灼烧伤害 +20%", bad: "无（入门灯）", effects: [Add(BurnDamage, 0.2)], initial: true),
-    (id: "mirror", name: "铜镜灯", school: "剑修", element: Metal, start_weapon: "sword", color: "#F0E6C8",
+    (id: "mirror", name: "铜镜灯", flavor: "老灯匠见你回来了两次，给你打了一面镜子。", school: "剑修", element: Metal, start_weapon: "sword", color: "#F0E6C8",
      good: "暴击率 +10%，暴击伤害 +20%", bad: "生命上限 -15%",
      effects: [Add(CritChance, 0.10), Add(CritMult, 0.20), Mul(MaxHp, -0.08)]),
-    (id: "frost", name: "霜瓷灯", school: "寒川", element: Water, start_weapon: "bell", color: "#9FD4FF",
+    (id: "frost", name: "霜瓷灯", flavor: "去丹穴之前，带一盏凉的。", school: "寒川", element: Water, start_weapon: "bell", color: "#9FD4FF",
      good: "减速、冰冻时长 +30%；受击时 25% 冻住攻击者", bad: "移速 -5%",
      effects: [Add(SlowTime, 0.3), Add(FreezeTime, 0.3), Add(ThornFreeze, 0.25), Mul(Speed, -0.05)]),
 ]

@@ -673,7 +673,10 @@ fn spawn_charm(
         let d = &c.charms[k];
         let glyph: String = d.name.chars().next().map(String::from).unwrap_or_default();
         let icon = format!("ui/icon_charm_{}", d.id);
-        let desc = format!("{}\n代价：{}", d.good, d.bad);
+        let mut desc = format!("{}\n代价：{}", d.good, d.bad);
+        if !d.flavor.is_empty() {
+            desc.push_str(&format!("\n\n{}", d.flavor));
+        }
         plain_card(row, fonts, db, skin, i, Some(&icon), &glyph, color, &d.name, &desc, true);
     };
     commands.spawn(overlay(skin)).with_children(|root| match picked {

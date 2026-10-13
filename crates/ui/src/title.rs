@@ -4,7 +4,7 @@ use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
 use lantern_content::Content;
-use lantern_platform::{Actions, Profile, Settings};
+use lantern_platform::{Actions, HubNews, Profile, Settings};
 use lantern_sim::omens::{draw_omens, omen_good, omen_name};
 use lantern_sim::{AppState, GameContent, OmenPick};
 
@@ -89,6 +89,7 @@ fn input(
     content: Res<GameContent>,
     seed: Res<SeedOverride>,
     mut profile: ResMut<Profile>,
+    mut news: ResMut<HubNews>,
     mut settings: ResMut<Settings>,
     mut window: PrimaryWindowQuery,
     mut mode: ResMut<TitleMode>,
@@ -199,6 +200,12 @@ fn input(
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, n) {
                 *mode =
                     [TitleMode::Meta, TitleMode::Shop, TitleMode::Achievements, TitleMode::Codex][i].clone();
+                // 进去过就算见过，下次不再说“第一次”那句
+                if let Some(p) = c.hub.get(i)
+                    && profile.met.insert(p.id.clone())
+                {
+                    save(&profile);
+                }
                 open(&mut ui);
             } else if actions.back || actions.meta {
                 *mode = TitleMode::Main;
@@ -214,7 +221,11 @@ fn input(
                         let id = a.id.clone();
                         profile.buy_attribute(c, &id)
                     }
-                    None => profile.refund_attributes() > 0,
+                    None => {
+                        let back = profile.refund_attributes() > 0;
+                        news.refunded |= back;
+                        back
+                    }
                 };
                 if changed {
                     save(&profile);
@@ -257,6 +268,7 @@ fn input(
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, META_COLUMNS) {
                 let id = c.meta.nodes[i].id.clone();
                 if profile.buy_meta(c, &id) {
+                    news.meta_lit = true;
                     save(&profile);
                 }
                 ui.dirty = true;
@@ -362,6 +374,7 @@ fn redraw(
     skin: Res<Skin>,
     db: Res<AtlasDb>,
     profile: Res<Profile>,
+    news: Res<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
     mut ui: ResMut<TitleUi>,
@@ -380,7 +393,7 @@ fn redraw(
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
-        TitleMode::Hub => hub::hub_panel(&mut commands, &fonts, &skin, &db, &profile),
+        TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-use lantern_content::{AchievementWhen, Content, Element, Reward};
+use lantern_content::{AchievementWhen, Content, Element, HubWhen, Reward};
 use lantern_sim::{RunMode, RunResult, RunSetup};
 
 use crate::settings::write_atomic;
@@ -93,6 +93,8 @@ pub struct Profile {
     /// 见过的反应（按 `elements.ron` 里 reactions 的下标置位，跨局累计）
     pub reactions: u32,
     pub last: LastPick,
+    /// 灯驿里已经见过的人物（`hub.ron` 的 ID）
+    pub met: BTreeSet<String>,
     pub best: Best,
     /// 无尽夜的最长存活（按更；以后加了地区再按地区分开）
     pub endless: BTreeMap<u8, EndlessBest>,
@@ -123,12 +125,53 @@ impl Default for Profile {
             achievements: BTreeSet::new(),
             reactions: 0,
             last: LastPick::default(),
+            met: BTreeSet::new(),
             best: Best::default(),
             endless: BTreeMap::new(),
             totals: Totals::default(),
             runs: 0,
             wins: 0,
             path: None,
+        }
+    }
+}
+
+/// 灯驿里人物要说的“刚发生的事”（不存档）：结算时记下这一局带来的变化，在灯驿里点亮心灯、退还属性时也记。
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub struct HubNews {
+    pub meta_lit: bool,
+    pub refunded: bool,
+    pub achievement: bool,
+    /// 五行谱多了一种反应
+    pub reaction: bool,
+    /// 新解锁的灯
+    pub lamps: Vec<String>,
+    /// 第一次通关的那一更
+    pub cleared: Option<u8>,
+    pub endless_back: bool,
+}
+
+impl HubNews {
+    /// 一局记进存档之后：和记之前的存档比，这一局带来了什么。
+    pub fn after_run(
+        content: &Content,
+        before: &Profile,
+        now: &Profile,
+        result: &RunResult,
+        rec: &Recorded,
+    ) -> Self {
+        HubNews {
+            achievement: !rec.achievements.is_empty(),
+            reaction: now.reactions & !before.reactions != 0,
+            lamps: content
+                .lamps
+                .iter()
+                .filter(|l| now.lamp_unlocked(content, &l.id) && !before.lamp_unlocked(content, &l.id))
+                .map(|l| l.id.clone())
+                .collect(),
+            cleared: (now.cleared > before.cleared).then_some(now.cleared),
+            endless_back: result.endless,
+            ..Default::default()
         }
     }
 }
@@ -401,6 +444,46 @@ impl Profile {
     // ---- 一局结束 ----
 
     /// 记下一局的结果：货币、统计、最好成绩、成就。刷新的记录同时有几项时按 天明 > 击杀 > 存活 取一项。
+    /// 心灯全部点亮。
+    pub fn meta_full(&self, content: &Content) -> bool {
+        content.meta.nodes.iter().all(|n| self.meta_cost(content, &n.id).is_none())
+    }
+
+    /// 属性全部买满。
+    pub fn attributes_full(&self, content: &Content) -> bool {
+        content.attributes.list.iter().all(|a| self.attribute_price(content, &a.id).is_none())
+    }
+
+    /// 灯驿第 who 个人物这次说哪句（docs/LORE-TEXT.md 第 1 节）。第一次见面总说 First；
+    /// 其余几条同时满足时取排在最后的那条；都不满足时说“平时”的，按回来的次数轮着说。
+    pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
+        let person = content.hub.get(who)?;
+        let first = !self.met.contains(&person.id);
+        let hit = |w: &HubWhen| match w {
+            HubWhen::Idle => false,
+            HubWhen::First => first,
+            HubWhen::MetaLit => news.meta_lit,
+            HubWhen::MetaFull => self.meta_full(content),
+            HubWhen::Lamp(id) => news.lamps.contains(id),
+            HubWhen::Cleared(t) => news.cleared == Some(*t),
+            HubWhen::Refunded => news.refunded,
+            HubWhen::AttributesFull => self.attributes_full(content),
+            HubWhen::Achievement => news.achievement,
+            HubWhen::Charm(id) => self.basics && self.last.charm.as_ref() == Some(id),
+            HubWhen::Reaction => news.reaction,
+            HubWhen::EndlessBack => news.endless_back,
+        };
+        let pick = |only_first: bool| {
+            person.lines.iter().rev().find(|l| hit(&l.when) && (!only_first || l.when == HubWhen::First))
+        };
+        if let Some(l) = pick(true).filter(|_| first).or_else(|| pick(false)) {
+            return Some(&l.text);
+        }
+        let idle: Vec<&str> =
+            person.lines.iter().filter(|l| l.when == HubWhen::Idle).map(|l| l.text.as_str()).collect();
+        idle.get(self.runs as usize % idle.len().max(1)).copied()
+    }
+
     /// 无尽夜：通关青丘一更后开放（docs/GAMEPLAY.md 第 3.4 节）。
     pub fn endless_unlocked(&self) -> bool {
         self.cleared >= 1
@@ -490,6 +573,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("lantern-save-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// 灯驿人物的台词：第一次见面说 First，之后取满足的最后一条，都不满足时轮着说“平时”。
+    #[test]
+    fn hub_lines_follow_the_news() {
+        let c = content();
+        let mut p = Profile::default();
+        let news = HubNews::default();
+        let line = |p: &Profile, who, news: &HubNews| p.hub_line(&c, who, news).unwrap().to_string();
+        assert!(line(&p, 0, &news).starts_with("回来了？"), "第一次见老灯匠");
+        p.met.extend(["smith", "peddler", "child", "teller"].map(String::from));
+        let idle0 = line(&p, 0, &news);
+        p.runs = 1;
+        assert_ne!(line(&p, 0, &news), idle0, "平时的几句轮着说");
+        let lit = HubNews { meta_lit: true, ..Default::default() };
+        assert!(line(&p, 0, &lit).contains("东街"));
+        // 同时满足几条时取最后一条：成就、通关一更都满足，灯童说通关那句
+        let won = HubNews { achievement: true, cleared: Some(1), ..Default::default() };
+        assert!(line(&p, 2, &won).contains("狐狸也怕黑"));
+        let back = HubNews { endless_back: true, ..Default::default() };
+        assert!(line(&p, 3, &back).contains("走了多深"));
     }
 
     #[test]

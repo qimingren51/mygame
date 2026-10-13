@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 
 use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
-use lantern_platform::{Actions, Profile};
+use lantern_platform::{Actions, HubNews, Profile};
 use lantern_sim::omens::{omen_good, omen_name};
 use lantern_sim::{AppState, Arsenal, Build, Flow, GameContent, ReplayPlayback, RunSetup, RunState};
 use lantern_view::Dawn;
@@ -47,6 +47,7 @@ fn record(
     setup: Res<RunSetup>,
     playback: Option<Res<ReplayPlayback>>,
     mut profile: ResMut<Profile>,
+    mut news: ResMut<HubNews>,
 ) {
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
@@ -54,7 +55,10 @@ fn record(
         playback.is_none() && !matches!(setup.mode, lantern_sim::RunMode::Bench { .. }) && !setup.god;
     let recorded = if counts {
         let rec = RunRecord { result: &r, tier: setup.tier, attributes: !setup.attributes.is_empty() };
+        let before = profile.clone();
         let got = profile.record(c, rec);
+        // 回到灯驿时人物会说起这一局带来的变化
+        *news = HubNews::after_run(c, &before, &profile, &r, &got);
         if let Err(e) = profile.save() {
             warn!("保存存档失败：{e}");
         }

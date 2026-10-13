@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 
 use lantern_content::{Content, Reward};
-use lantern_platform::{Actions, Profile};
+use lantern_platform::{Actions, HubNews, Profile};
 use lantern_view::atlas::AtlasDb;
 
 use crate::choice::spawn_icon;
@@ -222,10 +222,12 @@ pub(crate) fn purses(profile: &Profile) -> String {
 
 pub(crate) fn hub_panel(
     commands: &mut Commands,
+    c: &Content,
     fonts: &Fonts,
     skin: &Skin,
     db: &AtlasDb,
     profile: &Profile,
+    news: &HubNews,
 ) {
     frame(
         commands,
@@ -258,6 +260,10 @@ pub(crate) fn hub_panel(
                             spawn_icon(card, db, fonts, Some(&icon), glyph, INK, 84.0);
                             card.spawn(text(&fonts.title, 40.0, INK, who));
                             card.spawn(text(&fonts.body, 16.0, INK_DIM, what));
+                            // 人物这次说的一句（docs/LORE-TEXT.md 第 1 节）
+                            if let Some(line) = profile.hub_line(c, i, news) {
+                                card.spawn(para(fonts, 14.0, INK, &format!("“{line}”"), 170.0));
+                            }
                             card.spawn(Node { flex_grow: 1.0, ..default() });
                             card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
                         });
@@ -403,6 +409,11 @@ pub(crate) fn achievements_panel(
                 }
             });
     });
+}
+
+/// 一句话描述另起一行；没有就是空的。
+fn flavor_line(flavor: &str) -> String {
+    if flavor.is_empty() { String::new() } else { format!("\n{flavor}") }
 }
 
 /// 无尽夜各更的最长存活；没打过时是空的。
@@ -574,7 +585,13 @@ pub(crate) fn prep_panel(
                             "灯",
                             l.name.clone(),
                             ink_tint(hex(&l.color)),
-                            format!("{} · 起手「{weapon}」　＋ {}　－ {}{more}", l.school, l.good, l.bad),
+                            format!(
+                                "{} · 起手「{weapon}」　＋ {}　－ {}{more}{}",
+                                l.school,
+                                l.good,
+                                l.bad,
+                                flavor_line(&l.flavor)
+                            ),
                             Some((format!("ui/icon_lamp_{}", l.id), l.name.chars().take(1).collect())),
                         )
                     }
@@ -585,7 +602,7 @@ pub(crate) fn prep_panel(
                                 "灯坠",
                                 d.name.clone(),
                                 on_paper(hex("#B07CF0")),
-                                format!("＋ {}　－ {}", d.good, d.bad),
+                                format!("＋ {}　－ {}{}", d.good, d.bad, flavor_line(&d.flavor)),
                                 Some((format!("ui/icon_charm_{}", d.id), d.name.chars().take(1).collect())),
                             )
                         }

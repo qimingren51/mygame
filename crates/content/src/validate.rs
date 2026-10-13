@@ -876,6 +876,28 @@ impl Content {
                 }
             }
         }
+
+        // ---- hub.ron ----
+        c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
+        for person in &self.hub {
+            if !person.lines.iter().any(|l| l.when == crate::HubWhen::Idle) {
+                return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
+            }
+            for l in &person.lines {
+                let bad = match &l.when {
+                    crate::HubWhen::Lamp(id) => self.lamp_index(id).is_none(),
+                    crate::HubWhen::Charm(id) => self.charm_index(id).is_none(),
+                    crate::HubWhen::Cleared(t) => *t == 0 || *t as usize > self.difficulty.len(),
+                    _ => false,
+                };
+                if bad || l.text.is_empty() {
+                    return c.fail(
+                        "hub.ron",
+                        format!("{} 的台词条件 {:?} 不对，或者台词是空的", person.id, l.when),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }

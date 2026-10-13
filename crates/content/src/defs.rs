@@ -975,6 +975,9 @@ pub struct EventsDef {
 pub struct EventDef {
     pub id: String,
     pub name: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3 节），显示在“好处 / 代价”之外的一行小字
+    #[serde(default)]
+    pub flavor: String,
     pub hint: String,
     pub color: String,
     pub weight: f32,
@@ -1102,6 +1105,9 @@ pub struct AttributeDef {
 pub struct LampDef {
     pub id: String,
     pub name: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3 节），显示在“好处 / 代价”之外的一行小字
+    #[serde(default)]
+    pub flavor: String,
     /// 对应的流派
     pub school: String,
     /// 本命五行：这一系的升级选项权重 ×1.2
@@ -1123,6 +1129,9 @@ pub struct LampDef {
 pub struct CharmDef {
     pub id: String,
     pub name: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3 节），显示在“好处 / 代价”之外的一行小字
+    #[serde(default)]
+    pub flavor: String,
     pub good: String,
     pub bad: String,
     pub effects: Vec<Effect>,
@@ -1183,4 +1192,49 @@ pub enum Reward {
     Tier(u8),
     Gold(u32),
     Oil(u32),
+}
+
+/// 灯驿的一个人物（`hub.ron`，docs/LORE-TEXT.md 第 1 节）。顺序对应灯驿里的四个位置：老灯匠、货郎、灯童、说书人。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HubPersonDef {
+    pub id: String,
+    pub name: String,
+    pub lines: Vec<HubLineDef>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HubLineDef {
+    pub when: HubWhen,
+    pub text: String,
+}
+
+/// 台词的条件。几条同时满足时取排在最后的那条；都不满足时说“平时”的，几句轮着说。
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub enum HubWhen {
+    /// 平时
+    Idle,
+    /// 第一次见到这个人物
+    First,
+    /// 刚点亮一个心灯节点
+    MetaLit,
+    /// 心灯全部点亮
+    MetaFull,
+    /// 刚解锁这盏灯
+    Lamp(String),
+    /// 刚通关这一更
+    Cleared(u8),
+    /// 刚把属性全部退还
+    Refunded,
+    /// 属性全部买满
+    AttributesFull,
+    /// 刚达成成就
+    Achievement,
+    /// 出发时挂着这枚灯坠
+    Charm(String),
+    /// 五行谱多了一种反应
+    Reaction,
+    /// 刚从无尽夜回来
+    EndlessBack,
 }

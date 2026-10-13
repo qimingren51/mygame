@@ -15,7 +15,7 @@ pub mod replays;
 mod rumble;
 pub mod settings;
 
-pub use profile::Profile;
+pub use profile::{HubNews, Profile};
 pub use settings::Settings;
 
 /// 本帧的抽象操作。由键盘和手柄合并而来，y 轴向下（与模拟一致）。

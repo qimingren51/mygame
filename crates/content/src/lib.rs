@@ -36,6 +36,8 @@ pub struct Content {
     pub lamps: Vec<LampDef>,
     pub charms: Vec<CharmDef>,
     pub achievements: Vec<AchievementDef>,
+    /// 灯驿人物的台词（纯文字，不计入内容哈希）
+    pub hub: Vec<HubPersonDef>,
     /// 全部数据文件原文的哈希（FNV-1a）。回放只能在内容相同的版本上重放。
     pub hash: u64,
 }
@@ -101,6 +103,7 @@ impl Content {
             lamps: read(data_dir, "lamps.ron", &mut hash)?,
             charms: read(data_dir, "charms.ron", &mut hash)?,
             achievements: read(data_dir, "achievements.ron", &mut hash)?,
+            hub: read(data_dir, "hub.ron", &mut 0)?,
             hash: 0,
         };
         content.hash = hash;
