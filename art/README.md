@@ -175,6 +175,25 @@ art/.venv/bin/python art/post/title_screen.py       # 标题画 + logo → out/s
 - logo 用完整版马善政字体写“提灯夜行”，加飞白、墨晕和“夜行”朱砂印。
 - 界面美术用的完整字体由 `post/ui_fonts.py` 下载并缓存到 `out/fonts/`（OFL）；`assets/fonts/` 里只是游戏用的子集。
 
+## 青丘道具（render/props_qingqiu.py）
+
+```bash
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → out/assets@2x/<道具>/，审图 review@2x/qq_props_sample.png（约 30 秒）
+```
+
+只出 2 倍。渲法同 `produce.py` 的道具（`render_asset`、`PROP_ANCHOR`、`idle_S_00` 一帧、渲染锁）；模型在 `models/qingqiu_props.py`。
+`--only a,b` 只重渲部分，`--review` 只自检和重拼审图，`--sample` 渲到 `out/qq_props_sample@2x/` 试样。EXR 中间文件放 `out/_tmp_qq/`。
+
+| 素材 | 帧（2 倍） | 内容 |
+|---|---|---|
+| `bamboo_clump` | 320² | 土丘上八竿墨竹，叶尖约 2.9 米（主角的 1.3 倍）。前排浓墨、后排淡彩石绿；竹叶是不描线的笔触。`broken_variant` |
+| `bamboo_clump_broken` | 320² | 同画布、同锚点、同纸纹：斜劈的竹桩、倒地的断竹、落叶。打碎竹丛时直接换图。`intact_variant` |
+| `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。挂点 `glow` |
+| `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光 |
+| `fox_lanterns` | 192² | 木柱、竹梁、翘角瓦檐，三盏带竹篾的青纸灯（`_emit`），柱上一条朱砂纸符。挂点 `glow`（中心）和 `glow_0..2` |
+
+发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 70，世界单位）；meta 里还有 `region: "qingqiu"`。
+
 ## 正式管线
 
 ```bash
