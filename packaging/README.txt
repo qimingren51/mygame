@@ -17,11 +17,13 @@
   Linux：  在下载目录运行 sha256sum --check --ignore-missing SHA256SUMS.txt
            确认已下载的包显示 OK；未下载的其他平台包会跳过。
   哈希必须完全一致；不一致时不要运行，请重新下载。
-  校验文件覆盖所有 ZIP 和 tar.gz 发布包，在标签发布时随包上传到 Release。
+  Release 的校验文件覆盖全部平台压缩包；手动打包时，每个平台的 Artifact
+  也附带 SHA256SUMS.txt，只校验同一 Artifact 中的压缩包。
 
 Windows SmartScreen
   未签名或信誉尚未积累的版本，首次启动可能提示「Windows 已保护你的电脑」。
   确认来自上述 GitHub Releases 且校验一致后，点击「更多信息」→「仍要运行」。
+  已签名的版本也可能出现此提示；签名不保证立即获得 SmartScreen 信誉。
 
 操作
   移动    WASD / 方向键 / 手柄左摇杆
@@ -40,6 +42,7 @@ Windows SmartScreen
 运行日志（每次启动一份，保留最近 5 份）
   Windows：%APPDATA%\lantern\logs\
   Linux：  ~/.local/share/lantern/logs/
+  Windows 可按 Win+R，输入上述日志目录并回车，打开最新的 lantern-*.log。
   启动失败和程序崩溃的原因也会记在日志中；Windows 错误对话框会给出具体日志路径。
 
 assets 文件夹必须和程序放在同一个目录里，发布版只从这里加载资源。

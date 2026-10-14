@@ -1,6 +1,7 @@
 # 打包桌面版。
 # - 推送 v* 标签（例如 v0.1.0）：打包 Linux 和 Windows 版本，发布到 GitHub Releases（标记为预发布）。
 # - 在 Actions 页面手动运行：只打包，安装包在这次运行的 Artifacts 里下载，适合测试。
+# - Windows 签名需要同时配置 WINDOWS_CERT_PFX_BASE64 和 WINDOWS_CERT_PASSWORD 两个仓库 secrets。
 name: Release
 
 on:
@@ -79,12 +80,21 @@ jobs:
           cd dist
           if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
           ls -la
+      - name: 生成发布包 SHA-256 校验文件
+        id: checksums
+        working-directory: dist
+        run: |
+          shopt -s nullglob
+          archives=(*.zip *.tar.gz)
+          if (( ${#archives[@]} == 0 )); then echo '没有找到发布包，无法生成校验文件。' >&2; exit 1; fi
+          sha256sum -- "${archives[@]}" > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: lantern-${{ matrix.platform }}
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/SHA256SUMS.txt
           if-no-files-found: error
 
   publish:
@@ -97,15 +107,23 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          merge-multiple: true
-      - name: 生成发布包 SHA-256 校验文件
+      # 保留各平台目录，避免同名 SHA256SUMS.txt 在下载时互相覆盖。
+      - name: 汇总并验证发布包 SHA-256 校验文件
+        id: checksums
         working-directory: dist
-        run: sha256sum -- *.zip *.tar.gz > SHA256SUMS.txt
+        run: |
+          : > SHA256SUMS.txt
+          for artifact in lantern-*; do
+            (cd "$artifact" && sha256sum --check SHA256SUMS.txt)
+            cat "$artifact/SHA256SUMS.txt" >> SHA256SUMS.txt
+          done
+          mv -- lantern-*/*.zip lantern-*/*.tar.gz .
+          sha256sum --check SHA256SUMS.txt
       - name: 发布到 GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --title "提灯夜行 $GITHUB_REF_NAME" \
             --generate-notes \

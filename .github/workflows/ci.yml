@@ -7,7 +7,7 @@ on:
     paths:
       - 'crates/**'
       - 'assets/**'
-      - 'packaging/windows/**'
+      - 'packaging/**'
       - 'web/lantern/icons/icon-512.png'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -15,11 +15,12 @@ on:
       - 'rustfmt.toml'
       - '.cargo/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     paths:
       - 'crates/**'
       - 'assets/**'
-      - 'packaging/windows/**'
+      - 'packaging/**'
       - 'web/lantern/icons/icon-512.png'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -27,6 +28,7 @@ on:
       - 'rustfmt.toml'
       - '.cargo/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 env:
@@ -51,6 +53,10 @@ jobs:
         run: |
           python3 -m pip install --quiet Pillow
           python3 packaging/windows/test_resources.py
+      - name: 发布包校验文件
+        run: |
+          python3 -m pip install --quiet PyYAML
+          python3 packaging/test_release.py
       - name: 界面字体子集不缺字
         run: |
           pip install --quiet fonttools
