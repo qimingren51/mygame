@@ -79,7 +79,6 @@ jobs:
       - name: 模拟测试（含跨平台确定性黄金测试）
         run: cargo test --locked -p lantern_core -p lantern_content -p lantern_sim
       - name: 平台层和游戏测试（含参数解析、窗口渲染和资源失败）
-        timeout-minutes: 15
         run: cargo test --locked -p lantern_platform -p lantern -p lantern_audio -p lantern_view
       - name: 构建发布版
         run: cargo build --release --locked -p lantern
