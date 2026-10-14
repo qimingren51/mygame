@@ -51,24 +51,16 @@ pub const NIGHT: Color = Color::srgb(0.086, 0.106, 0.173);
 pub struct ViewPlugin {
     /// 资源根目录（图集 JSON 在 `<asset_root>/atlas/`）
     pub asset_root: PathBuf,
-    /// 由主程序接入平台层：记录致命错误并提示玩家。
-    pub on_fatal_error: fn(&str) -> AppExit,
 }
 
 #[derive(Resource)]
-struct ViewAssets {
-    root: PathBuf,
-    on_fatal_error: fn(&str) -> AppExit,
-}
+struct AssetRoot(PathBuf);
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(lighting::LightingPlugin)
             .insert_resource(ClearColor(NIGHT))
-            .insert_resource(ViewAssets {
-                root: self.asset_root.clone(),
-                on_fatal_error: self.on_fatal_error,
-            })
+            .insert_resource(AssetRoot(self.asset_root.clone()))
             .init_resource::<actors::Pools>()
             .init_resource::<actors::GlowPool>()
             .init_resource::<actors::GlowRequests>()
@@ -86,14 +78,15 @@ impl Plugin for ViewPlugin {
                 (
                     setup_camera,
                     load_atlas,
-                    particles::setup_particles,
+                    particles::setup_particles.run_if(resource_exists::<AtlasDb>),
                     (
                         actors::build_frames,
                         fx::build_fx_frames,
                         ground::build_decor,
                         effects::setup_effects,
                         lighting::setup_lighting,
-                    ),
+                    )
+                        .run_if(resource_exists::<AtlasDb>),
                 )
                     .chain(),
             )
@@ -203,18 +196,18 @@ fn setup_camera(mut commands: Commands, content: Res<GameContent>) {
     ));
 }
 
-/// 读图集。失败时没法画任何东西，直接报错退出。
+/// 读图集。失败时交给主程序的 panic hook 记录日志并提示玩家，停止后续初始化。
 fn load_atlas(
     mut commands: Commands,
-    root: Res<ViewAssets>,
+    root: Res<AssetRoot>,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    mut exit: MessageWriter<AppExit>,
 ) {
-    match AtlasDb::load(&root.root, &assets, &mut layouts) {
+    match AtlasDb::load(&root.0, &assets, &mut layouts) {
         Ok(db) => commands.insert_resource(db),
         Err(e) => {
-            exit.write((root.on_fatal_error)(&format!("图集加载失败（{}）：{e}", root.root.display())));
+            // AppExit 要到帧末才生效，继续运行会让依赖图集的系统因缺少资源而再次出错。
+            panic!("图集加载失败（{}）：{e}", root.0.display());
         }
     }
 }
@@ -237,17 +230,19 @@ fn interpolate(fixed: Res<Time<Fixed>>, mut q: Query<(&Pos, &PrevPos, &mut Trans
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn atlas_failure_reports_the_path_and_exits() {
-        static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    fn atlas_failure_stops_startup_with_the_path() {
+        #[derive(Resource, Default)]
+        struct AfterAtlas(bool);
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let root = std::env::temp_dir().join(format!("提灯 图集测试-{}-{now}", std::process::id()));
         std::fs::create_dir_all(root.join("atlas")).unwrap();
 
-        // 缺清单、坏清单、缺页、坏页都必须走同一个致命错误回调。
+        // 缺清单、坏清单、缺页、坏页都必须提供原始错误并停止初始化链。
         for (index, page, expected) in [
             (None, None, "读取 atlas/index.json 失败"),
             (Some("{"), None, "atlas/index.json 格式错误"),
@@ -263,20 +258,21 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, AssetPlugin::default()))
                 .init_resource::<Assets<TextureAtlasLayout>>()
-                .insert_resource(ViewAssets {
-                    root: root.clone(),
-                    on_fatal_error: |message| {
-                        REPORTED.lock().unwrap().push(message.to_string());
-                        AppExit::error()
-                    },
-                })
-                .add_systems(Startup, load_atlas);
-            app.update();
-            assert_eq!(app.should_exit(), Some(AppExit::error()));
+                .init_resource::<AfterAtlas>()
+                .insert_resource(AssetRoot(root.clone()))
+                .add_systems(
+                    Startup,
+                    (
+                        load_atlas,
+                        (|_: Res<AtlasDb>, mut after: ResMut<AfterAtlas>| after.0 = true)
+                            .run_if(resource_exists::<AtlasDb>),
+                    )
+                        .chain(),
+                );
+            let panic = catch_unwind(AssertUnwindSafe(|| app.update())).unwrap_err();
+            let message = panic.downcast::<String>().unwrap();
             assert!(!app.world().contains_resource::<AtlasDb>());
-            let mut reported = REPORTED.lock().unwrap();
-            assert_eq!(reported.len(), 1);
-            let message = reported.pop().unwrap();
+            assert!(!app.world().resource::<AfterAtlas>().0);
             assert!(message.contains(expected), "{message}");
             assert!(message.contains(root.to_str().unwrap()));
         }

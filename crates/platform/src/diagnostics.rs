@@ -119,7 +119,7 @@ fn prune_logs(dir: &Path, current: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// 启动失败或图集无法加载时，先记录错误，再提示玩家，最后由调用方退出。
+/// 启动失败时，先记录错误，再提示玩家，最后由调用方退出。
 pub fn fatal(message: &str) -> AppExit {
     report_fatal(message, message);
     AppExit::error()

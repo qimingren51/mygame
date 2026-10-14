@@ -113,7 +113,7 @@ fn main() -> AppExit {
     .add_plugins((
         SimPlugin,
         PlatformPlugin { settings },
-        ViewPlugin { asset_root: assets.clone(), on_fatal_error: fatal },
+        ViewPlugin { asset_root: assets.clone() },
         AudioPlugin,
         UiPlugin,
     ));
