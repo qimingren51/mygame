@@ -1,4 +1,4 @@
-//! 直接启动无窗口冒烟测试，检查资源损坏时的退出码与日志（Windows 不能等待弹窗）。
+//! 启动真实窗口，检查渲染成功及资源损坏时的退出码与日志；失败不能等待 Windows 弹窗。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,8 +30,6 @@ impl TestDir {
         let mut child = Command::new(self.exe())
             .current_dir(self.0.join("工作 目录"))
             .env_remove("LANTERN_ASSETS")
-            .env_remove("DISPLAY")
-            .env_remove("WAYLAND_DISPLAY")
             .env("XDG_DATA_HOME", &self.0)
             .env("RUST_LOG", if success { "info" } else { "off" })
             .args(args)
@@ -44,7 +42,7 @@ impl TestDir {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
             }
-            if start.elapsed() > Duration::from_secs(60) {
+            if start.elapsed() > Duration::from_secs(180) {
                 child.kill().unwrap();
                 child.wait().unwrap();
                 panic!("冒烟测试超时：{args:?}");
@@ -62,7 +60,7 @@ impl TestDir {
             .find(|path| path.file_name().unwrap().to_string_lossy().ends_with(&suffix))
             .unwrap();
         let text = fs::read_to_string(log).unwrap();
-        assert_eq!(status.code(), Some(if success { 0 } else { 1 }), "{text}");
+        assert_eq!(status.code(), Some(if success { 0 } else { 1 }), "预期：{expected}\n{text}");
         assert!(text.contains(expected), "{text}");
     }
 }
@@ -87,20 +85,29 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[test]
-fn headless_package_completes_and_reports_failures() {
+fn reports_startup_errors_without_a_window() {
     let dir = TestDir::new();
-    let smoke = ["--smoke-test"];
-    dir.run(&smoke, true, "冒烟测试通过：资源加载完成，模拟运行 120 帧");
     dir.run(&["--seed", "bad", "--smoke-test"], false, "种子不是数字");
+    fs::write(dir.0.join("安装 目录/assets/data/player.ron"), "invalid").unwrap();
+    dir.run(&["--smoke-test", "--windowed"], false, "内容数据有误");
+}
+
+#[test]
+#[cfg_attr(not(windows), ignore = "需要窗口和渲染设备；Linux 可在 Xvfb + lavapipe 下运行")]
+fn rendered_package_completes_and_reports_failures() {
+    let dir = TestDir::new();
+    let smoke = ["--smoke-test", "--windowed"];
+    dir.run(&smoke, true, "冒烟测试通过：初始化完成，窗口渲染 120 帧");
     let assets = dir.0.join("安装 目录/assets");
     // 图集 JSON 正常但贴图损坏时，必须等待异步解码并报告失败。
     let image = assets.join("atlas/actors.png");
     let original = fs::read(&image).unwrap();
     fs::write(&image, b"broken png").unwrap();
     dir.run(&smoke, false, "actors.png");
-    fs::write(&image, original).unwrap();
-    fs::remove_file(image).unwrap();
+    fs::write(&image, &original).unwrap();
+    fs::remove_file(&image).unwrap();
     dir.run(&smoke, false, "actors.png");
-    fs::write(assets.join("data/player.ron"), "invalid").unwrap();
-    dir.run(&smoke, false, "内容数据有误");
+    fs::write(image, original).unwrap();
+    fs::write(assets.join("fonts/NotoSerifSC-subset.ttf"), "invalid").unwrap();
+    dir.run(&smoke, false, "NotoSerifSC-subset.ttf");
 }

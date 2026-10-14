@@ -64,6 +64,10 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      # 无 GPU 的 runner 使用 DX12 的 WARP 软件适配器。
+      WGPU_BACKEND: dx12
+      WGPU_FORCE_FALLBACK_ADAPTER: '1'
     defaults:
       run:
         shell: pwsh
@@ -74,8 +78,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 模拟测试（含跨平台确定性黄金测试）
         run: cargo test --locked -p lantern_core -p lantern_content -p lantern_sim
-      - name: 平台层和游戏测试（含参数解析、无窗口冒烟测试）
-        run: cargo test --locked -p lantern_platform -p lantern
+      - name: 平台层和游戏测试（含参数解析、窗口渲染和资源失败）
+        timeout-minutes: 15
+        run: cargo test --locked -p lantern_platform -p lantern -p lantern_audio -p lantern_view
       - name: 构建发布版
         run: cargo build --release --locked -p lantern
       - name: 检查 EXE 图标、版本信息与清单
@@ -83,45 +88,6 @@ jobs:
           python -m pip install --quiet Pillow pefile
           if ($LASTEXITCODE -ne 0) { throw '安装资源测试依赖失败' }
           python packaging/windows/test_resources.py --exe target/release/lantern.exe
-      - name: 打包、解压并从中文空格临时目录运行冒烟测试
-        timeout-minutes: 3
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:RUNNER_TEMP "提灯 冒烟-$([guid]::NewGuid())"
-          $package = Join-Path $root '打包/提灯 夜行'
-          $unpacked = Join-Path $root '解压 目录'
-          $working = Join-Path $root '临时 工作目录'
-          New-Item -ItemType Directory -Path $package, $working -Force | Out-Null
-          Copy-Item target/release/lantern.exe $package
-          Copy-Item assets $package -Recurse
-          Copy-Item packaging/README.txt $package
-          $archive = Join-Path $root '提灯 夜行.zip'
-          Compress-Archive -Path $package -DestinationPath $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
-          $exe = Join-Path $unpacked '提灯 夜行/lantern.exe'
-          "LANTERN_CI_EXE=$exe" >> $env:GITHUB_ENV
-          # 避免开发环境的覆盖路径或日志过滤影响发布包验证。
-          Remove-Item Env:LANTERN_ASSETS -ErrorAction SilentlyContinue
-          $env:RUST_LOG = 'info'
-          $start = [System.Diagnostics.ProcessStartInfo]::new()
-          $start.FileName = $exe
-          $start.WorkingDirectory = $working
-          $start.UseShellExecute = $false
-          $start.ArgumentList.Add('--smoke-test')
-          $process = [System.Diagnostics.Process]::Start($start)
-          if (-not $process.WaitForExit(60000)) {
-            $process.Kill()
-            throw '冒烟测试超时（60 秒）'
-          }
-          $logDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'lantern/logs'
-          $log = Get-ChildItem -LiteralPath $logDir -Filter "lantern-*-$($process.Id).log" | Select-Object -First 1
-          if (-not $log) { throw '冒烟测试没有生成日志' }
-          $text = Get-Content -LiteralPath $log.FullName -Raw -Encoding utf8
-          Write-Host $text
-          if ($process.ExitCode -ne 0) { throw "冒烟测试退出码：$($process.ExitCode)" }
-          if ($text -notmatch '冒烟测试通过：资源加载完成，模拟运行 120 帧') {
-            throw '冒烟测试没有完成资源加载和 120 帧模拟'
-          }
       - name: 检查发布包 EXE 只依赖系统 DLL
         run: |
           $ErrorActionPreference = 'Stop'
@@ -131,7 +97,7 @@ jobs:
           $dumpbin = Get-ChildItem "$installation/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $dumpbin) { throw '找不到 dumpbin.exe' }
-          $output = & $dumpbin.FullName /nologo /dependents $env:LANTERN_CI_EXE
+          $output = & $dumpbin.FullName /nologo /dependents target/release/lantern.exe
           if ($LASTEXITCODE -ne 0) { throw 'dumpbin 检查失败' }
           $output | Write-Host
           $dlls = @($output | ForEach-Object {
@@ -156,6 +122,46 @@ jobs:
             if ($dll -notin $systemDlls -or -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$dll"))) {
               throw "发现非系统 DLL 依赖：$dll"
             }
+          }
+      - name: 打包、解压并从中文空格临时目录运行冒烟测试
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "提灯 冒烟-$([guid]::NewGuid())"
+          $package = Join-Path $root '打包/提灯 夜行'
+          $unpacked = Join-Path $root '解压 目录'
+          $working = Join-Path $root '临时 工作目录'
+          New-Item -ItemType Directory -Path $package, $working -Force | Out-Null
+          Copy-Item target/release/lantern.exe $package
+          Copy-Item assets $package -Recurse
+          Copy-Item packaging/README.txt $package
+          $archive = Join-Path $root '提灯 夜行.zip'
+          Compress-Archive -Path $package -DestinationPath $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $exe = Join-Path $unpacked '提灯 夜行/lantern.exe'
+          # 避免开发环境的覆盖路径或日志过滤影响发布包验证。
+          Remove-Item Env:LANTERN_ASSETS -ErrorAction SilentlyContinue
+          $env:RUST_LOG = 'info'
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $exe
+          $start.WorkingDirectory = $working
+          $start.UseShellExecute = $false
+          $start.ArgumentList.Add('--smoke-test')
+          $start.ArgumentList.Add('--windowed')
+          $process = [System.Diagnostics.Process]::Start($start)
+          if (-not $process.WaitForExit(180000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw '冒烟测试超时（180 秒）'
+          }
+          $logDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'lantern/logs'
+          $log = Get-ChildItem -LiteralPath $logDir -Filter "lantern-*-$($process.Id).log" | Select-Object -First 1
+          if (-not $log) { throw '冒烟测试没有生成日志' }
+          $text = Get-Content -LiteralPath $log.FullName -Raw -Encoding utf8
+          Write-Host $text
+          if ($process.ExitCode -ne 0) { throw "冒烟测试退出码：$($process.ExitCode)" }
+          if ($text -notmatch '冒烟测试通过：初始化完成，窗口渲染 120 帧') {
+            throw '冒烟测试没有完成初始化和 120 帧窗口渲染'
           }
       - name: 保存 Windows 冒烟测试日志
         if: always()

@@ -32,4 +32,4 @@ cargo build --release -p lantern
 python3 packaging/windows/test_resources.py --exe target/release/lantern.exe
 ```
 
-Linux CI 检查仓库资源，Windows CI 同时检查最终 EXE。人工验收：查看 EXE 属性中的图标和详细信息；启动窗口后检查标题栏、任务栏和 Alt+Tab 图标，在 100% / 150% / 200% 缩放的显示器之间拖动窗口并切换全屏，确认文字清晰、鼠标点击位置正确。无窗口冒烟测试不能代替这项检查。
+Linux CI 检查仓库资源，Windows CI 同时检查最终 EXE。人工验收：查看 EXE 属性中的图标和详细信息；启动窗口后检查标题栏、任务栏和 Alt+Tab 图标，在 100% / 150% / 200% 缩放的显示器之间拖动窗口并切换全屏，确认文字清晰、鼠标点击位置正确。自动窗口渲染冒烟测试不能代替这项人工检查。

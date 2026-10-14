@@ -318,7 +318,7 @@ impl AtlasDb {
         &self.frames[id.0 as usize]
     }
 
-    /// 全部图集页的贴图句柄，供无 GPU 的冒烟测试检查异步加载结果。
+    /// 全部图集页的贴图句柄，供冒烟测试检查异步加载和贴图上传结果。
     pub fn images(&self) -> impl Iterator<Item = &Handle<Image>> {
         self.pages.iter().map(|page| &page.image)
     }

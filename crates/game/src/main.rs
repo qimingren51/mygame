@@ -23,7 +23,7 @@ mod smoke;
 #[cfg(target_os = "windows")]
 mod window_icon;
 
-const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]] [--smoke-test（无窗口运行 120 帧）]";
+const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]] [--smoke-test（初始化后渲染 120 帧）]";
 
 #[derive(Debug)]
 struct Args {
@@ -78,8 +78,8 @@ fn asset_file_path(assets: &Path) -> Result<String, String> {
 fn main() -> AppExit {
     let values: Vec<_> = std::env::args_os().skip(1).collect();
     // 参数出错也不能让自动化测试等候 Windows 弹窗。
-    let headless = values.iter().any(|value| value == "--smoke-test");
-    let logging = if headless { diagnostics::init_headless() } else { diagnostics::init() };
+    let automated = values.iter().any(|value| value == "--smoke-test");
+    let logging = if automated { diagnostics::init_headless() } else { diagnostics::init() };
     if let Err(e) = logging {
         return fatal(&e);
     }
@@ -100,12 +100,6 @@ fn main() -> AppExit {
         Ok(c) => c,
         Err(e) => return fatal(&format!("内容数据有误：{e}")),
     };
-    if args.smoke_test {
-        return match smoke::run(&assets, file_path, content, args.seed.unwrap_or(0)) {
-            Ok(()) => AppExit::Success,
-            Err(e) => fatal(&format!("冒烟测试失败：{e}")),
-        };
-    }
     let playback = match &args.replay {
         Some(path) => {
             let text = match std::fs::read_to_string(path) {
@@ -172,11 +166,17 @@ fn main() -> AppExit {
         }
     }
 
+    let smoke_test = args.smoke_test.then(smoke::SmokeTest::default);
+    if let Some(test) = &smoke_test {
+        app.add_plugins(test.clone());
+    }
+
     // 一帧最多补 4 步：卡顿时宁可变慢，也不让模拟连续追赶。
     app.world_mut()
         .resource_mut::<Time<Virtual>>()
         .set_max_delta(Duration::from_secs_f64(f64::from(MAX_CATCHUP_TICKS) / f64::from(TICK_HZ)));
-    app.run()
+    let exit = app.run();
+    if let Some(test) = smoke_test { test.finish(exit) } else { exit }
 }
 
 #[cfg(test)]
@@ -215,6 +215,10 @@ mod tests {
         let args = parse_args(["--replay", "--smoke-test"].map(OsString::from)).unwrap();
         assert!(!args.smoke_test);
         assert_eq!(args.replay, Some(PathBuf::from("--smoke-test")));
+        for values in [["--smoke-test", "--windowed"], ["--windowed", "--smoke-test"]] {
+            let args = parse_args(values.map(OsString::from)).unwrap();
+            assert!(args.smoke_test && args.windowed);
+        }
     }
 
     #[test]
