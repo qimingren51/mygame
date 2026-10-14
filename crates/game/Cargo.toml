@@ -23,7 +23,7 @@ bevy.workspace = true
 
 [features]
 # 开发模式：Bevy 的调试工具与资源热重载。调试面板（egui）在 M1 加入。
-dev = ["bevy/dev"]
+dev = ["bevy/dev", "lantern_platform/dev"]
 
 [lints]
 workspace = true

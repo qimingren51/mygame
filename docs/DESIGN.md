@@ -420,7 +420,10 @@ assets/data/
 - `release`：`lto = "thin"`、`codegen-units = 1`、`strip = true`。
 - Windows 发布版不弹出控制台窗口。
 
-**资源目录**：开发时用仓库根目录的 `assets/`，发布时用可执行文件旁边的 `assets/`。
+**资源目录**：游戏启动时只调用一次 `platform::paths::asset_dir`，用 `canonicalize` 得到绝对路径。内容数据、Bevy 的贴图与字体、图集 JSON、界面皮肤 JSON 全部复用这个根目录（图集与皮肤共用 `view::AssetRoot`），不再各自查找。
+- 发布版（没有 `debug_assertions` 且未启用 `dev`）只认 `current_exe` 所在目录旁的 `assets/`；忽略 `LANTERN_ASSETS`、`CARGO_MANIFEST_DIR` 和工作目录，也不搜索 EXE 的祖先目录。
+- 开发构建（有 `debug_assertions` 或启用 `dev`）允许用 `LANTERN_ASSETS` 显式覆盖，相对路径以工作目录为基准；覆盖无效就报错，不静默换资源。未覆盖时依次检查 EXE 旁的 `assets/`、`CARGO_MANIFEST_DIR/../../assets/`、工作目录的 `assets/`。`CARGO_MANIFEST_DIR` 优先取运行时环境变量，否则取编译时平台 crate 的目录；`cargo run --release --features dev` 同样允许开发回退。
+- 候选根目录必须存在且包含 `data/` 子目录。全部找不到时，在创建窗口前通过 `fatal` 报错，列出尝试过的绝对路径及失败原因并写入日志；具体内容与图集格式仍由各自加载器校验。
 Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无损转换为 UTF-8 时，在读取内容数据和创建窗口前调用 `fatal` 报错并写日志，不替换路径字符。资源目录编码错误及回放读取失败的诊断用转义形式保留非法编码，普通中文和空格路径不受影响。
 
 **CI（`ci.yml`）**：桌面版相关的路径有改动时运行。

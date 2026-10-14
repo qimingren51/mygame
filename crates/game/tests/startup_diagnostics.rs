@@ -43,7 +43,9 @@ fn logs_argument_content_and_replay_failures_before_window_creation() {
         let dir = TestDir::new();
         let mut command = dir.game();
         if args.is_empty() {
-            command.env("LANTERN_ASSETS", dir.0.join("不存在的资源"));
+            let assets = dir.0.join("缺少内容的资源");
+            fs::create_dir_all(assets.join("data")).unwrap();
+            command.env("LANTERN_ASSETS", assets);
         }
         let output = command.current_dir(&dir.0).args(args).output().unwrap();
         assert_eq!(output.status.code(), Some(1), "{output:?}");

@@ -18,5 +18,9 @@ ron.workspace = true
 [target.'cfg(windows)'.dependencies]
 rfd.workspace = true
 
+[features]
+# 允许开发构建从仓库或工作目录查找资源。
+dev = []
+
 [lints]
 workspace = true

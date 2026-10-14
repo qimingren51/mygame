@@ -63,6 +63,48 @@ fn reports_missing_non_utf8_replay_path_without_replacement() {
 fn reports_non_utf8_asset_path_through_fatal() {
     let dir = TestDir::new();
     let path = dir.0.join(OsStr::from_bytes(b"assets \xff"));
+    fs::create_dir_all(path.join("data")).unwrap();
     let expected = format!("资源目录不是有效的 UTF-8 路径：{path:?}");
     dir.assert_fatal(dir.game().env("LANTERN_ASSETS", path), &expected);
+}
+
+#[test]
+fn reports_missing_asset_directory_and_attempted_path_through_fatal() {
+    let dir = TestDir::new();
+    let path = dir.0.join("不存在的资源");
+    dir.assert_fatal(dir.game().env("LANTERN_ASSETS", &path), "找不到资源目录");
+    let log = fs::read_dir(dir.0.join("lantern/logs")).unwrap().next().unwrap().unwrap().path();
+    let text = fs::read_to_string(log).unwrap();
+    assert!(text.contains("已尝试的路径"), "{text}");
+    assert!(text.contains(&format!("{path:?}")), "{text}");
+}
+
+#[test]
+fn relative_assets_use_working_directory_and_are_logged_as_absolute() {
+    let dir = TestDir::new();
+    let assets = dir.0.join("中文 资源/assets");
+    fs::create_dir_all(assets.join("data")).unwrap();
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_file() {
+            fs::copy(entry.path(), assets.join("data").join(entry.file_name())).unwrap();
+        }
+    }
+    // 内容成功加载后才读取回放；用坏回放在创建窗口前结束测试。
+    fs::write(dir.0.join("回放.ron"), "(format: 1)").unwrap();
+    dir.assert_fatal(
+        dir.game()
+            .current_dir(&dir.0)
+            .env("LANTERN_ASSETS", "中文 资源/./assets/../assets")
+            .env("RUST_LOG", "info")
+            .args(["--replay", "回放.ron"]),
+        "回放格式版本 1",
+    );
+    let log = fs::read_dir(dir.0.join("lantern/logs")).unwrap().next().unwrap().unwrap().path();
+    assert!(
+        fs::read_to_string(log)
+            .unwrap()
+            .contains(&format!("资源目录：{}", assets.canonicalize().unwrap().display()))
+    );
 }

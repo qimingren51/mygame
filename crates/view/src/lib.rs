@@ -53,8 +53,9 @@ pub struct ViewPlugin {
     pub asset_root: PathBuf,
 }
 
+/// 启动时确定的绝对资源根目录，供图集和界面皮肤共用。
 #[derive(Resource)]
-struct AssetRoot(PathBuf);
+pub struct AssetRoot(pub PathBuf);
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {

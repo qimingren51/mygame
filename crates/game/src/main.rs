@@ -74,7 +74,10 @@ fn main() -> AppExit {
         Ok(a) => a,
         Err(msg) => return fatal(&msg),
     };
-    let assets = paths::asset_dir();
+    let assets = match paths::asset_dir() {
+        Ok(path) => path,
+        Err(msg) => return fatal(&msg),
+    };
     let file_path = match asset_file_path(&assets) {
         Ok(path) => path,
         Err(msg) => return fatal(&msg),

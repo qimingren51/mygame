@@ -27,5 +27,7 @@
   Linux：  ~/.local/share/lantern/logs/
   启动失败和程序崩溃的原因也会记在日志中；Windows 错误对话框会给出具体日志路径。
 
-assets 文件夹必须和程序放在同一个目录里。
+assets 文件夹必须和程序放在同一个目录里，发布版只从这里加载资源。
+从快捷方式或其他工作目录启动也一样；LANTERN_ASSETS 等开发环境变量不会改变发布版的资源目录。
+找不到资源目录时，错误提示和日志会列出尝试过的路径。
 字体：马善政楷书、思源宋体（Noto Serif SC），SIL Open Font License，许可证见 assets/fonts/。
