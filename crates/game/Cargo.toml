@@ -21,7 +21,11 @@ lantern_ui.workspace = true
 lantern_platform.workspace = true
 bevy.workspace = true
 
-[target.'cfg(target_os = "windows")'.build-dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
+winit.workspace = true
+
+[build-dependencies]
+# 依赖在宿主机编译；build.rs 仅对 Windows 目标调用资源编译器。
 winresource.workspace = true
 
 [features]

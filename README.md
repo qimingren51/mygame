@@ -41,6 +41,8 @@ cargo run                  # 第一次编译 Bevy 需要几分钟
 cargo test --workspace
 ```
 
+Windows EXE 图标、版本信息和应用清单会在构建时嵌入；图标来源、重新生成和验证方法见 [Windows 程序资源](packaging/windows/README.md)。
+
 操作：WASD / 方向键 / 手柄左摇杆移动，空格 / 手柄 A 闪避，Esc 暂停，F11 全屏，F3 性能面板。标题界面按 B 跑分（250 到 5000 只妖物，结果存到数据目录的 `bench/`）。
 
 ## 网页小游戏

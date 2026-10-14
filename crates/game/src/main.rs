@@ -20,6 +20,8 @@ use lantern_ui::{ReplaySeek, SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
 
 mod smoke;
+#[cfg(target_os = "windows")]
+mod window_icon;
 
 const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]] [--smoke-test（无窗口运行 120 帧）]";
 
@@ -159,6 +161,9 @@ fn main() -> AppExit {
         AudioPlugin,
         UiPlugin,
     ));
+
+    #[cfg(target_os = "windows")]
+    app.add_systems(Update, window_icon::set_window_icon);
 
     if let Some(p) = playback {
         app.insert_resource(p);

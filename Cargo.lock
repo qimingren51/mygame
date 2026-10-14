@@ -3439,6 +3439,7 @@ dependencies = [
  "lantern_sim",
  "lantern_ui",
  "lantern_view",
+ "winit",
  "winresource",
 ]
 
