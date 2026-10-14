@@ -13,6 +13,8 @@ use bevy::prelude::*;
 use crate::paths;
 
 static LOG: OnceLock<LogFile> = OnceLock::new();
+#[cfg(windows)]
+static SHOW_ERROR_DIALOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 const KEEP_LOGS: usize = 5;
 
 struct LogFile {
@@ -43,6 +45,13 @@ impl LogFile {
 /// 每次启动新建日志，保留最近五份。主程序随后禁用 Bevy 的 `LogPlugin`，避免重复初始化。
 pub fn init() -> Result<(), String> {
     init_at(&paths::log_dir())
+}
+
+/// 自动化测试保留完整日志和 panic hook，但不显示阻塞式错误弹窗。
+pub fn init_headless() -> Result<(), String> {
+    #[cfg(windows)]
+    SHOW_ERROR_DIALOG.store(false, std::sync::atomic::Ordering::Relaxed);
+    init()
 }
 
 fn init_at(dir: &Path) -> Result<(), String> {
@@ -140,7 +149,7 @@ fn report_fatal(message: &str, details: &str) {
         use std::sync::atomic::{AtomicBool, Ordering};
         // Bevy 的工作线程可能同时 panic，只弹一次，其他错误仍写入日志。
         static SHOWN: AtomicBool = AtomicBool::new(false);
-        if !SHOWN.swap(true, Ordering::Relaxed) {
+        if SHOW_ERROR_DIALOG.load(Ordering::Relaxed) && !SHOWN.swap(true, Ordering::Relaxed) {
             rfd::MessageDialog::new()
                 .set_title("提灯夜行 — 致命错误")
                 .set_description(description)

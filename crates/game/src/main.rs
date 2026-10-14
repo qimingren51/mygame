@@ -19,7 +19,9 @@ use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
 use lantern_ui::{ReplaySeek, SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
 
-const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]]";
+mod smoke;
+
+const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]] [--smoke-test（无窗口运行 120 帧）]";
 
 #[derive(Debug)]
 struct Args {
@@ -27,10 +29,11 @@ struct Args {
     windowed: bool,
     replay: Option<PathBuf>,
     from: Option<u32>,
+    smoke_test: bool,
 }
 
 fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String> {
-    let mut args = Args { seed: None, windowed: false, replay: None, from: None };
+    let mut args = Args { seed: None, windowed: false, replay: None, from: None, smoke_test: false };
     let mut it = values.into_iter();
     while let Some(a) = it.next() {
         match a.to_str() {
@@ -41,6 +44,7 @@ fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String
                 );
             }
             Some("--windowed") => args.windowed = true,
+            Some("--smoke-test") => args.smoke_test = true,
             Some("--replay") => {
                 args.replay = Some(it.next().ok_or("--replay 后面要跟回放文件的路径")?.into())
             }
@@ -56,6 +60,9 @@ fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String
             _ => return Err(format!("不认识的参数：{a:?}\n{USAGE}")),
         }
     }
+    if args.smoke_test && (args.replay.is_some() || args.from.is_some()) {
+        return Err("--smoke-test 不能与 --replay 或 --from 一起使用".into());
+    }
     Ok(args)
 }
 
@@ -67,10 +74,14 @@ fn asset_file_path(assets: &Path) -> Result<String, String> {
 }
 
 fn main() -> AppExit {
-    if let Err(e) = diagnostics::init() {
+    let values: Vec<_> = std::env::args_os().skip(1).collect();
+    // 参数出错也不能让自动化测试等候 Windows 弹窗。
+    let headless = values.iter().any(|value| value == "--smoke-test");
+    let logging = if headless { diagnostics::init_headless() } else { diagnostics::init() };
+    if let Err(e) = logging {
         return fatal(&e);
     }
-    let args = match parse_args(std::env::args_os().skip(1)) {
+    let args = match parse_args(values) {
         Ok(a) => a,
         Err(msg) => return fatal(&msg),
     };
@@ -87,6 +98,12 @@ fn main() -> AppExit {
         Ok(c) => c,
         Err(e) => return fatal(&format!("内容数据有误：{e}")),
     };
+    if args.smoke_test {
+        return match smoke::run(&assets, file_path, content, args.seed.unwrap_or(0)) {
+            Ok(()) => AppExit::Success,
+            Err(e) => fatal(&format!("冒烟测试失败：{e}")),
+        };
+    }
     let playback = match &args.replay {
         Some(path) => {
             let text = match std::fs::read_to_string(path) {
@@ -168,6 +185,7 @@ mod tests {
         assert!(!args.windowed);
         assert_eq!(args.replay, None);
         assert_eq!(args.from, None);
+        assert!(!args.smoke_test);
 
         let args = parse_args(
             ["--seed", "42", "--windowed", "--replay", "回放 目录/夜行.ron", "--from", "12"]
@@ -178,6 +196,33 @@ mod tests {
         assert!(args.windowed);
         assert_eq!(args.replay, Some(PathBuf::from("回放 目录/夜行.ron")));
         assert_eq!(args.from, Some(12));
+    }
+
+    #[test]
+    fn parses_smoke_test_with_seed_in_either_order() {
+        assert!(parse_args(["--smoke-test".into()]).unwrap().smoke_test);
+        for values in [["--smoke-test", "--seed", "42"], ["--seed", "42", "--smoke-test"]] {
+            let args = parse_args(values.map(OsString::from)).unwrap();
+            assert!(args.smoke_test);
+            assert_eq!(args.seed, Some(42));
+        }
+        // 路径值不能被当作开关。
+        let args = parse_args(["--replay", "--smoke-test"].map(OsString::from)).unwrap();
+        assert!(!args.smoke_test);
+        assert_eq!(args.replay, Some(PathBuf::from("--smoke-test")));
+    }
+
+    #[test]
+    fn rejects_smoke_test_values_and_replay_options() {
+        for values in [
+            vec!["--smoke-test", "120"],
+            vec!["--smoke-test=120"],
+            vec!["--smoke-test", "--seed", "abc"],
+            vec!["--smoke-test", "--replay", "回放.ron"],
+            vec!["--from", "12", "--smoke-test"],
+        ] {
+            assert!(parse_args(values.into_iter().map(OsString::from)).is_err());
+        }
     }
 
     #[test]

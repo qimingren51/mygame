@@ -318,6 +318,11 @@ impl AtlasDb {
         &self.frames[id.0 as usize]
     }
 
+    /// 全部图集页的贴图句柄，供无 GPU 的冒烟测试检查异步加载结果。
+    pub fn images(&self) -> impl Iterator<Item = &Handle<Image>> {
+        self.pages.iter().map(|page| &page.image)
+    }
+
     /// 这一帧所在的整页贴图。
     pub fn image(&self, id: FrameId) -> Handle<Image> {
         self.pages[self.frame(id).page].image.clone()

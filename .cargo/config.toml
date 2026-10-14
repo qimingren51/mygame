@@ -1,0 +1,3 @@
+# Windows 安装包只依赖系统 DLL，不要求玩家安装 Visual C++ 运行库。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -373,6 +373,7 @@ const MENU: [(&str, &str); 5] =
 pub(crate) fn panel() -> impl Bundle {
     (
         TitlePanel,
+        crate::responsive::FitViewport,
         DespawnOnExit(AppState::Title),
         Node {
             position_type: PositionType::Absolute,
@@ -440,6 +441,8 @@ fn redraw(
         TitleMode::Scroll { dawn, .. } => {
             if let Some(region) = c.regions.iter().find(|r| r.id == crate::scroll::REGION) {
                 let mut root = commands.spawn(panel());
+                // 卷轴已经使用视口百分比和自适应字号，不再套固定画布。
+                root.remove::<crate::responsive::FitViewport>();
                 clickable(&mut root, 0);
                 let root = root.id();
                 crate::scroll::spawn(&mut commands, root, &assets, &fonts, region, *dawn, window.width());
@@ -494,21 +497,17 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
             if best.won { "　·　已迎来天明" } else { "" }
         )
     };
-    commands
-        .spawn((
-            TitlePanel,
-            DespawnOnExit(AppState::Title),
-            Node {
-                position_type: PositionType::Absolute,
-                left: percent(7),
-                top: percent(12),
-                bottom: percent(8),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Start,
-                row_gap: px(10),
-                ..default()
-            },
-        ))
+    commands.spawn(panel()).with_children(|root| {
+        root.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: percent(7),
+            top: percent(12),
+            bottom: percent(8),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Start,
+            row_gap: px(10),
+            ..default()
+        })
         .with_children(|p| {
             p.spawn((
                 Node { width: px(520), height: px(172), ..default() },
@@ -544,6 +543,7 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
                 concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"), "　　F11　全屏"),
             ));
         });
+    });
 }
 
 pub(crate) fn dim_layer() -> impl Bundle {

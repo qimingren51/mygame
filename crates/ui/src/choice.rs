@@ -313,6 +313,7 @@ pub(crate) struct CardFocus(usize);
 fn overlay(skin: &Skin) -> impl Bundle {
     (
         ChoiceRoot,
+        crate::responsive::FitViewport,
         DespawnOnExit(lantern_sim::AppState::Run),
         GlobalZIndex(10),
         Node {
@@ -488,7 +489,15 @@ fn spawn_level_up(
                 card(row, c, fonts, db, skin, arsenal, build, i, o);
             }
         });
-        root.spawn(Node { column_gap: px(36), ..default() }).with_children(|foot| {
+        root.spawn(Node {
+            max_width: percent(90),
+            flex_wrap: FlexWrap::Wrap,
+            justify_content: JustifyContent::Center,
+            column_gap: px(36),
+            row_gap: px(8),
+            ..default()
+        })
+        .with_children(|foot| {
             foot.spawn(text(&fonts.body, 16.0, PAPER, "1-4 / ← → + Enter　选择"));
             foot.spawn((
                 RerollLabel,

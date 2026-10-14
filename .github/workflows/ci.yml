@@ -11,6 +11,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - 'rustfmt.toml'
+      - '.cargo/**'
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - 'rustfmt.toml'
+      - '.cargo/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
 
@@ -54,6 +56,9 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v5
       - name: 安装 Rust（版本见 rust-toolchain.toml）
@@ -61,5 +66,88 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 模拟测试（含跨平台确定性黄金测试）
         run: cargo test --locked -p lantern_core -p lantern_content -p lantern_sim
-      - name: 检查游戏能在 Windows 上编译
-        run: cargo check --locked -p lantern
+      - name: 平台层和游戏测试（含参数解析、无窗口冒烟测试）
+        run: cargo test --locked -p lantern_platform -p lantern
+      - name: 构建发布版
+        run: cargo build --release --locked -p lantern
+      - name: 打包、解压并从中文空格临时目录运行冒烟测试
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "提灯 冒烟-$([guid]::NewGuid())"
+          $package = Join-Path $root '打包/提灯 夜行'
+          $unpacked = Join-Path $root '解压 目录'
+          $working = Join-Path $root '临时 工作目录'
+          New-Item -ItemType Directory -Path $package, $working -Force | Out-Null
+          Copy-Item target/release/lantern.exe $package
+          Copy-Item assets $package -Recurse
+          Copy-Item packaging/README.txt $package
+          $archive = Join-Path $root '提灯 夜行.zip'
+          Compress-Archive -Path $package -DestinationPath $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $exe = Join-Path $unpacked '提灯 夜行/lantern.exe'
+          "LANTERN_CI_EXE=$exe" >> $env:GITHUB_ENV
+          # 避免开发环境的覆盖路径或日志过滤影响发布包验证。
+          Remove-Item Env:LANTERN_ASSETS -ErrorAction SilentlyContinue
+          $env:RUST_LOG = 'info'
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $exe
+          $start.WorkingDirectory = $working
+          $start.UseShellExecute = $false
+          $start.ArgumentList.Add('--smoke-test')
+          $process = [System.Diagnostics.Process]::Start($start)
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw '冒烟测试超时（60 秒）'
+          }
+          $logDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'lantern/logs'
+          $log = Get-ChildItem -LiteralPath $logDir -Filter "lantern-*-$($process.Id).log" | Select-Object -First 1
+          if (-not $log) { throw '冒烟测试没有生成日志' }
+          $text = Get-Content -LiteralPath $log.FullName -Raw -Encoding utf8
+          Write-Host $text
+          if ($process.ExitCode -ne 0) { throw "冒烟测试退出码：$($process.ExitCode)" }
+          if ($text -notmatch '冒烟测试通过：资源加载完成，模拟运行 120 帧') {
+            throw '冒烟测试没有完成资源加载和 120 帧模拟'
+          }
+      - name: 检查发布包 EXE 只依赖系统 DLL
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw '找不到 Visual C++ 工具' }
+          $dumpbin = Get-ChildItem "$installation/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dumpbin) { throw '找不到 dumpbin.exe' }
+          $output = & $dumpbin.FullName /nologo /dependents $env:LANTERN_CI_EXE
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin 检查失败' }
+          $output | Write-Host
+          $dlls = @($output | ForEach-Object {
+            if ($_ -match '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { $Matches[1].ToLowerInvariant() }
+          } | Sort-Object -Unique)
+          if ($dlls.Count -eq 0) { throw '没有解析到 DLL 依赖，拒绝跳过检查' }
+          # 显式白名单，不能因为 CI 装了运行库、System32 恰好有某个 DLL 就放行。
+          $systemDlls = @(
+            'advapi32.dll', 'avrt.dll', 'bcrypt.dll', 'bcryptprimitives.dll',
+            'cfgmgr32.dll', 'combase.dll', 'comctl32.dll', 'comdlg32.dll', 'crypt32.dll',
+            'd3d12.dll', 'dcomp.dll', 'dinput8.dll', 'dwmapi.dll', 'dwrite.dll', 'dxgi.dll',
+            'gdi32.dll', 'hid.dll', 'imm32.dll', 'iphlpapi.dll', 'kernel32.dll',
+            'msvcrt.dll', 'netapi32.dll', 'ntdll.dll', 'ole32.dll', 'oleaut32.dll', 'opengl32.dll',
+            'pdh.dll', 'powrprof.dll', 'propsys.dll', 'psapi.dll', 'rpcrt4.dll', 'secur32.dll',
+            'setupapi.dll', 'shcore.dll', 'shell32.dll', 'shlwapi.dll', 'synchronization.dll',
+            'ucrtbase.dll', 'uiautomationcore.dll',
+            'user32.dll', 'userenv.dll', 'uxtheme.dll', 'version.dll', 'winmm.dll',
+            'wintrust.dll', 'ws2_32.dll', 'wtsapi32.dll', 'xinput1_4.dll'
+          )
+          foreach ($dll in $dlls) {
+            if ($dll -match '^(api-ms-win-|ext-ms-win-)[a-z0-9-]+\.dll$') { continue }
+            if ($dll -notin $systemDlls -or -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$dll"))) {
+              throw "发现非系统 DLL 依赖：$dll"
+            }
+          }
+      - name: 保存 Windows 冒烟测试日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-logs
+          path: ~/AppData/Roaming/lantern/logs/*.log
+          if-no-files-found: ignore

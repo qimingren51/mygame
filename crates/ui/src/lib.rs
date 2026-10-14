@@ -20,6 +20,7 @@ mod moments;
 mod pause;
 mod perf;
 mod replay_ui;
+mod responsive;
 mod results;
 mod scroll;
 mod settings_ui;
@@ -91,6 +92,7 @@ impl Plugin for UiPlugin {
             );
         perf::register(app);
         replay_ui::register(app);
+        responsive::register(app);
         title::register(app);
         title_fx::register(app);
         choice::register(app);
