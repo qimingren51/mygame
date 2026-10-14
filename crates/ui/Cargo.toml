@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+lantern_audio.workspace = true
 lantern_core.workspace = true
 lantern_content.workspace = true
 lantern_sim.workspace = true

@@ -3508,6 +3508,7 @@ name = "lantern_ui"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "lantern_audio",
  "lantern_content",
  "lantern_core",
  "lantern_platform",

@@ -125,7 +125,11 @@ impl Music {
         self.step = 0;
         self.bar = 0;
         self.next = self.now + 0.1;
-        let (level, boss) = match mode {
+        self.update_drone(track);
+    }
+
+    fn update_drone(&mut self, track: Option<&mut TrackHandle>) {
+        let (level, boss) = match self.mode {
             MusicMode::None => (0.0, self.drone_is_boss),
             MusicMode::Title => (0.05, false),
             MusicMode::Play => (0.04, false),
@@ -159,6 +163,10 @@ impl Music {
         self.now = now;
         if self.mode == MusicMode::None || track.is_none() {
             return;
+        }
+        // 启动时没有设备也会切换音乐模式；轨道恢复后补上当时未能启动的持续音。
+        if self.drone_handle.is_none() {
+            self.update_drone(track.as_deref_mut());
         }
         if self.next < now {
             self.next = now + 0.05;
@@ -241,5 +249,44 @@ impl Music {
                 Self::note(&mut track, &inst.gong, at, 1.0, 0.12 * GAIN);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kira::backend::mock::MockBackend;
+    use kira::track::TrackBuilder;
+    use kira::{AudioManager, AudioManagerSettings};
+
+    #[test]
+    fn output_recovery_resumes_current_music_without_reseeding_or_catch_up() {
+        let mut music = Music::new(Instruments::new());
+        let mut manager = AudioManager::<MockBackend>::new(AudioManagerSettings::default()).unwrap();
+        for mode in [MusicMode::Title, MusicMode::Play, MusicMode::Boss] {
+            music.set_mode(mode, Some(42), None);
+            music.intensity = 2;
+            let motif = music.motif;
+            let rng = music.rng.clone();
+            let step = music.step;
+            // 无设备运行很久，恢复时只安排眼前的一拍，不补播静音期间的音符。
+            music.tick(music.now + 3600.0, None);
+            assert!(music.drone_handle.is_none());
+            let mut track = manager.add_sub_track(TrackBuilder::new()).unwrap();
+            music.tick(music.now + 0.1, Some(&mut track));
+            assert!(music.drone_handle.take().is_some());
+            assert!(track.num_sounds() >= 2);
+            assert_eq!(music.mode, mode);
+            assert_eq!(music.intensity, 2);
+            assert_eq!(music.motif, motif);
+            assert_eq!(music.rng, rng);
+            assert_eq!(music.step, step + 1);
+        }
+
+        music.set_mode(MusicMode::None, None, None);
+        let mut track = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        music.tick(music.now + 0.1, Some(&mut track));
+        assert!(music.drone_handle.is_none());
+        assert_eq!(track.num_sounds(), 0);
     }
 }

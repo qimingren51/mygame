@@ -26,10 +26,12 @@ use lantern_sim::{
 };
 
 mod music;
+mod retry;
 mod sfx;
 mod synth;
 
 use music::{Music, MusicMode};
+use retry::RetryBackoff;
 use sfx::{Instruments, Sfx};
 use synth::pent;
 
@@ -46,6 +48,7 @@ impl Plugin for AudioPlugin {
                 Update,
                 (
                     apply_settings,
+                    retry_audio,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
                     run_music_mode.run_if(in_state(AppState::Run)),
@@ -54,6 +57,13 @@ impl Plugin for AudioPlugin {
                     .chain(),
             );
     }
+}
+
+/// 音频输出是否可用；用户把音量调为零不算设备不可用。
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioStatus {
+    Ready,
+    NoDevice,
 }
 
 /// 线性音量（0–1）换成分贝。
@@ -71,6 +81,7 @@ fn sfx_db(v: f32) -> Decibels {
 pub struct Audio {
     /// 管理器被丢掉时声音就停了，一直留着
     _manager: Option<AudioManager>,
+    retry: RetryBackoff,
     sfx_track: Option<TrackHandle>,
     music_track: Option<TrackHandle>,
     /// 混响发送轨（一直留着，否则发送就断了）
@@ -97,6 +108,57 @@ pub struct Audio {
 }
 
 impl Audio {
+    /// 只重建输出，不重复合成采样，也不重置音乐的模式、种子和旋律。
+    fn init_output(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())?;
+        // 一个大殿般的混响：余音长、高频收一点
+        let reverb = manager
+            .add_send_track(SendTrackBuilder::new().with_effect(
+                ReverbBuilder::new().feedback(0.84).damping(0.55).stereo_width(1.0).mix(Mix::WET),
+            ))
+            .ok();
+        let send = reverb.as_ref().map(SendTrackHandle::id);
+        let ducked = self.duck_until.is_some();
+        let mut sfx = TrackBuilder::new()
+            .volume(if ducked { Decibels::SILENCE } else { sfx_db(self.sfx_vol) })
+            .with_effect(
+                CompressorBuilder::new()
+                    .threshold(-10.0)
+                    .ratio(3.0)
+                    .attack_duration(Duration::from_millis(4))
+                    .release_duration(Duration::from_millis(120)),
+            );
+        let mut music =
+            TrackBuilder::new().volume(if ducked { Decibels::SILENCE } else { db(self.music_vol) });
+        let filter =
+            music.add_effect(FilterBuilder::new().cutoff(if self.muffled { 650.0 } else { 18_000.0 }));
+        if let Some(id) = send {
+            sfx = sfx.with_send(id, Decibels(-11.0));
+            music = music.with_send(id, Decibels(-9.0));
+        }
+        // 两条轨都建好才视为恢复，失败时丢掉本次创建的管理器，继续静音重试。
+        let sfx_track = manager.add_sub_track(sfx)?;
+        let music_track = manager.add_sub_track(music)?;
+        self._manager = Some(manager);
+        self.sfx_track = Some(sfx_track);
+        self.music_track = Some(music_track);
+        self.music_filter = Some(filter);
+        self._reverb = reverb;
+        Ok(())
+    }
+
+    fn try_init_output(&mut self, now: Duration) -> AudioStatus {
+        let status = match self.init_output() {
+            Ok(()) => AudioStatus::Ready,
+            Err(e) => {
+                warn!("没有可用的音频输出，静音运行并稍后重试：{e}");
+                AudioStatus::NoDevice
+            }
+        };
+        self.retry.finish(now, status == AudioStatus::Ready);
+        status
+    }
+
     /// 同名音效的最短间隔。
     fn can(&mut self, name: &'static str, gap: f64) -> bool {
         let now = self.now;
@@ -184,48 +246,17 @@ impl Audio {
 
 fn init_audio(world: &mut World) {
     let settings = world.get_resource::<Settings>().cloned().unwrap_or_default();
-    let mut manager = match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            warn!("没有可用的音频输出，静音运行：{e}");
-            None
-        }
-    };
-    let (mut sfx_track, mut music_track, mut music_filter, mut reverb) = (None, None, None, None);
-    if let Some(m) = &mut manager {
-        // 一个大殿般的混响：余音长、高频收一点
-        reverb = m
-            .add_send_track(SendTrackBuilder::new().with_effect(
-                ReverbBuilder::new().feedback(0.84).damping(0.55).stereo_width(1.0).mix(Mix::WET),
-            ))
-            .ok();
-        let send = reverb.as_ref().map(SendTrackHandle::id);
-        let mut sfx = TrackBuilder::new().volume(sfx_db(settings.sfx_volume)).with_effect(
-            CompressorBuilder::new()
-                .threshold(-10.0)
-                .ratio(3.0)
-                .attack_duration(Duration::from_millis(4))
-                .release_duration(Duration::from_millis(120)),
-        );
-        let mut music = TrackBuilder::new().volume(db(settings.music_volume));
-        music_filter = Some(music.add_effect(FilterBuilder::new().cutoff(18_000.0)));
-        if let Some(id) = send {
-            sfx = sfx.with_send(id, Decibels(-11.0));
-            music = music.with_send(id, Decibels(-9.0));
-        }
-        sfx_track = m.add_sub_track(sfx).ok();
-        music_track = m.add_sub_track(music).ok();
-    }
-    world.insert_non_send(Audio {
-        _manager: manager,
-        sfx_track,
-        music_track,
-        _reverb: reverb,
+    let mut audio = Audio {
+        _manager: None,
+        retry: RetryBackoff::default(),
+        sfx_track: None,
+        music_track: None,
+        _reverb: None,
         sfx_vol: settings.sfx_volume,
         music_vol: settings.music_volume,
         duck_until: None,
         next_heart: 0.0,
-        music_filter,
+        music_filter: None,
         sfx: Sfx::new(),
         music: Music::new(Instruments::new()),
         last: Vec::new(),
@@ -234,7 +265,23 @@ fn init_audio(world: &mut World) {
         gem_last: 0.0,
         muffled: false,
         last_phase: None,
-    });
+    };
+    let now = world.resource::<Time<Real>>().elapsed();
+    world.insert_resource(audio.try_init_output(now));
+    world.insert_non_send(audio);
+}
+
+/// 使用真实时间，暂停或选择升级时仍能恢复音频。
+fn retry_audio(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>, mut status: ResMut<AudioStatus>) {
+    let now = time.elapsed();
+    if !audio.retry.is_due(now) {
+        return;
+    }
+    let next = audio.try_init_output(now);
+    status.set_if_neq(next);
+    if next == AudioStatus::Ready {
+        info!("音频输出已恢复");
+    }
 }
 
 /// 设置里的音量变了就跟着改。

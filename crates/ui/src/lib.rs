@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use lantern_platform::Actions;
 use lantern_sim::{AppState, RunState};
 
+mod audio_status;
 mod bench;
 mod choice;
 mod describe;
@@ -93,6 +94,7 @@ impl Plugin for UiPlugin {
                         .run_if(resource_exists::<bench::BenchRun>),
                 ),
             );
+        audio_status::register(app);
         perf::register(app);
         replay_ui::register(app);
         responsive::register(app);
