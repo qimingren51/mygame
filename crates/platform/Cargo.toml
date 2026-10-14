@@ -15,5 +15,8 @@ directories.workspace = true
 serde.workspace = true
 ron.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+rfd.workspace = true
+
 [lints]
 workspace = true

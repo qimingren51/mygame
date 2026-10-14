@@ -12,7 +12,7 @@ use bevy::window::{MonitorSelection, PresentMode, WindowMode, WindowResolution};
 use lantern_audio::AudioPlugin;
 use lantern_content::Content;
 use lantern_core::step::{MAX_CATCHUP_TICKS, TICK_HZ};
-use lantern_platform::{PlatformPlugin, Profile, Settings, paths};
+use lantern_platform::{PlatformPlugin, Profile, Settings, diagnostics, diagnostics::fatal, paths};
 use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
 use lantern_ui::{ReplaySeek, SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
@@ -48,21 +48,16 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-/// 启动前出错时：打印到终端，同时写进数据目录，Windows 发布版没有控制台也能找到原因。
-fn fatal(msg: &str) -> AppExit {
-    eprintln!("{msg}");
-    let dir = paths::data_dir().join("logs");
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("startup-error.txt"), msg);
-    AppExit::error()
-}
-
 fn main() -> AppExit {
+    if let Err(e) = diagnostics::init() {
+        return fatal(&e);
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(msg) => return fatal(&msg),
     };
     let assets = paths::asset_dir();
+    info!("资源目录：{}", assets.display());
     let content = match Content::load(&assets.join("data")) {
         Ok(c) => c,
         Err(e) => return fatal(&format!("内容数据有误：{e}")),
@@ -78,7 +73,7 @@ fn main() -> AppExit {
                 Err(e) => return fatal(&e),
             };
             if replay.content_hash != content.hash {
-                eprintln!(
+                warn!(
                     "注意：回放录制时的内容数据与当前不同（游戏版本 {}），重放结果可能不一致",
                     replay.game_version
                 );
@@ -108,6 +103,7 @@ fn main() -> AppExit {
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin { primary_window: Some(window), ..default() })
+            .disable::<bevy::log::LogPlugin>()
             .set(AssetPlugin { file_path: assets.to_string_lossy().into_owned(), ..default() }),
     )
     .insert_resource(Time::<Fixed>::from_hz(f64::from(TICK_HZ)))
@@ -117,7 +113,7 @@ fn main() -> AppExit {
     .add_plugins((
         SimPlugin,
         PlatformPlugin { settings },
-        ViewPlugin { asset_root: assets.clone() },
+        ViewPlugin { asset_root: assets.clone(), on_fatal_error: fatal },
         AudioPlugin,
         UiPlugin,
     ));

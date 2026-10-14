@@ -55,7 +55,7 @@ impl Settings {
             Ok(text) => match ron::from_str::<Settings>(&text) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("设置文件损坏，改用默认值：{e}");
+                    bevy::log::warn!("设置文件损坏，改用默认值：{e}");
                     let _ = std::fs::rename(&path, path.with_extension("ron.broken"));
                     Settings::default()
                 }

@@ -23,11 +23,20 @@ pub fn asset_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("assets"))
 }
 
-/// 存档、设置、回放、日志所在目录。
+/// 存档、设置、回放所在目录。
 /// Linux：`~/.local/share/lantern/`；Windows：`%APPDATA%\lantern\data\`。
 /// 取不到系统目录时退回到当前目录下的 `lantern-data/`。
 pub fn data_dir() -> PathBuf {
     directories::ProjectDirs::from("", "", "lantern")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("lantern-data"))
+}
+
+/// 日志目录：Windows 为 `%APPDATA%\lantern\logs`，其他平台为数据目录下的 `logs`。
+pub fn log_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(dirs) = directories::BaseDirs::new() {
+        return dirs.data_dir().join("lantern").join("logs");
+    }
+    data_dir().join("logs")
 }

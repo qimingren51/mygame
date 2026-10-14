@@ -9,6 +9,7 @@ use bevy::window::{CursorMoved, MonitorSelection, PrimaryWindow, WindowMode};
 
 use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands, SimPhase};
 
+pub mod diagnostics;
 pub mod paths;
 pub mod profile;
 pub mod replays;

@@ -18,9 +18,14 @@
   --seed <数字>   指定种子，同一种子加同一操作，结果完全一样
   --windowed      以窗口模式启动
 
-数据位置（设置、存档、日志）
+数据位置（设置、存档）
   Windows：%APPDATA%\lantern\data\
   Linux：  ~/.local/share/lantern/
+
+运行日志（每次启动一份，保留最近 5 份）
+  Windows：%APPDATA%\lantern\logs\
+  Linux：  ~/.local/share/lantern/logs/
+  启动失败和程序崩溃的原因也会记在日志中；Windows 错误对话框会给出具体日志路径。
 
 assets 文件夹必须和程序放在同一个目录里。
 字体：马善政楷书、思源宋体（Noto Serif SC），SIL Open Font License，许可证见 assets/fonts/。

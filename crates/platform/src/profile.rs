@@ -218,7 +218,7 @@ impl Profile {
             Ok(text) => match ron::from_str::<Profile>(&text) {
                 Ok(p) => p,
                 Err(e) => {
-                    eprintln!("存档损坏，改用空存档（原文件改名为 save.ron.broken）：{e}");
+                    bevy::log::warn!("存档损坏，改用空存档（原文件改名为 save.ron.broken）：{e}");
                     let _ = std::fs::rename(&path, path.with_extension("ron.broken"));
                     Profile::default()
                 }
