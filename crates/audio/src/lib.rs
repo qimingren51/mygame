@@ -15,7 +15,12 @@ use kira::effect::filter::{FilterBuilder, FilterHandle};
 use kira::effect::reverb::ReverbBuilder;
 use kira::sound::static_sound::StaticSoundData;
 use kira::track::{SendTrackBuilder, SendTrackHandle, TrackBuilder, TrackHandle};
-use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Mix, Panning, StartTime, Tween};
+use kira::{AudioManager, AudioManagerSettings, Decibels, Mix, Panning, StartTime, Tween};
+
+#[cfg(not(test))]
+use kira::DefaultBackend;
+#[cfg(test)]
+use tests::TestBackend as DefaultBackend;
 
 use lantern_core::step::TICK_HZ;
 use lantern_platform::Settings;
@@ -30,8 +35,11 @@ mod retry;
 mod sfx;
 mod synth;
 
+#[cfg(test)]
+mod tests;
+
 use music::{Music, MusicMode};
-use retry::RetryBackoff;
+use retry::AudioRetry;
 use sfx::{Instruments, Sfx};
 use synth::pent;
 
@@ -59,12 +67,9 @@ impl Plugin for AudioPlugin {
     }
 }
 
-/// 音频输出是否可用；用户把音量调为零不算设备不可用。
+/// 此资源存在时音频输出不可用；恢复后移除。用户把音量调为零不算设备不可用。
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AudioStatus {
-    Ready,
-    NoDevice,
-}
+pub struct AudioUnavailable;
 
 /// 线性音量（0–1）换成分贝。
 fn db(v: f32) -> Decibels {
@@ -80,8 +85,8 @@ fn sfx_db(v: f32) -> Decibels {
 /// kira 的后端在部分平台上不能跨线程传递，所以作为 NonSend 资源放在主线程。
 pub struct Audio {
     /// 管理器被丢掉时声音就停了，一直留着
-    _manager: Option<AudioManager>,
-    retry: RetryBackoff,
+    _manager: Option<AudioManager<DefaultBackend>>,
+    retry: AudioRetry,
     sfx_track: Option<TrackHandle>,
     music_track: Option<TrackHandle>,
     /// 混响发送轨（一直留着，否则发送就断了）
@@ -147,16 +152,16 @@ impl Audio {
         Ok(())
     }
 
-    fn try_init_output(&mut self, now: Duration) -> AudioStatus {
-        let status = match self.init_output() {
-            Ok(()) => AudioStatus::Ready,
+    fn try_init_output(&mut self, now: Duration) -> bool {
+        let ready = match self.init_output() {
+            Ok(()) => true,
             Err(e) => {
                 warn!("没有可用的音频输出，静音运行并稍后重试：{e}");
-                AudioStatus::NoDevice
+                false
             }
         };
-        self.retry.finish(now, status == AudioStatus::Ready);
-        status
+        self.retry.finish(now, ready);
+        ready
     }
 
     /// 同名音效的最短间隔。
@@ -248,7 +253,7 @@ fn init_audio(world: &mut World) {
     let settings = world.get_resource::<Settings>().cloned().unwrap_or_default();
     let mut audio = Audio {
         _manager: None,
-        retry: RetryBackoff::default(),
+        retry: AudioRetry::default(),
         sfx_track: None,
         music_track: None,
         _reverb: None,
@@ -267,19 +272,20 @@ fn init_audio(world: &mut World) {
         last_phase: None,
     };
     let now = world.resource::<Time<Real>>().elapsed();
-    world.insert_resource(audio.try_init_output(now));
+    if !audio.try_init_output(now) {
+        world.insert_resource(AudioUnavailable);
+    }
     world.insert_non_send(audio);
 }
 
 /// 使用真实时间，暂停或选择升级时仍能恢复音频。
-fn retry_audio(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>, mut status: ResMut<AudioStatus>) {
+fn retry_audio(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>, mut commands: Commands) {
     let now = time.elapsed();
     if !audio.retry.is_due(now) {
         return;
     }
-    let next = audio.try_init_output(now);
-    status.set_if_neq(next);
-    if next == AudioStatus::Ready {
+    if audio.try_init_output(now) {
+        commands.remove_resource::<AudioUnavailable>();
         info!("音频输出已恢复");
     }
 }
