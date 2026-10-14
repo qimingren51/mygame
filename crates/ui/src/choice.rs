@@ -13,6 +13,7 @@ use lantern_sim::{Arsenal, Build, GameContent, Offer, RunState, SimCommand, SimC
 use lantern_view::atlas::AtlasDb;
 
 use crate::describe::{OfferInfo, Rarity, element_color, hex, offer_info, offer_note};
+use crate::responsive::{CARD_GAP, CARD_WIDTH, FitViewport, PANEL_WIDTH_PERCENT};
 use crate::skin::Skin;
 use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
@@ -313,7 +314,7 @@ pub(crate) struct CardFocus(usize);
 fn overlay(skin: &Skin) -> impl Bundle {
     (
         ChoiceRoot,
-        crate::responsive::FitViewport,
+        crate::responsive::FitViewport::default(),
         DespawnOnExit(lantern_sim::AppState::Run),
         GlobalZIndex(10),
         Node {
@@ -389,8 +390,13 @@ fn card(
         Card,
         Rise::after(0.04 + i as f32 * 0.07),
         Node {
-            width: px(240),
-            min_height: px(340),
+            width: percent(100),
+            max_width: px(CARD_WIDTH),
+            min_width: px(0),
+            flex_basis: px(220),
+            flex_grow: 1.0,
+            flex_shrink: 0.0,
+            // 高度由文字决定，同一行的卡片拉齐，长提示不会穿出纸面。
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             padding: UiRect::axes(px(22), px(20)),
@@ -420,8 +426,11 @@ fn card(
                 row.spawn(text(&fonts.body, 14.0, INK_DIM, &info.kind));
             });
         spawn_icon(card, db, fonts, info.icon.as_deref(), &info.glyph, on_paper(info.color), 88.0);
-        card.spawn(text(&fonts.title, 36.0, on_paper(info.color), &info.name));
-        card.spawn((text(&fonts.body, 16.0, INK, &info.desc), Node { max_width: px(196), ..default() }));
+        card.spawn((
+            text(&fonts.title, 36.0, on_paper(info.color), &info.name),
+            Node { max_width: percent(100), ..default() },
+        ));
+        card.spawn((text(&fonts.body, 16.0, INK, &info.desc), Node { max_width: percent(100), ..default() }));
         card.spawn(text(&fonts.body, 13.0, INK_DIM, &el));
         card.spawn(Node { flex_grow: 1.0, ..default() });
         if let Some(n) = note {
@@ -441,7 +450,7 @@ fn card(
                 if !n.body.is_empty() {
                     b.spawn((
                         text(&fonts.body, 13.0, INK_DIM, &n.body),
-                        Node { max_width: px(176), ..default() },
+                        Node { max_width: percent(100), ..default() },
                     ));
                 }
             });
@@ -452,7 +461,7 @@ fn card(
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
 }
 
-fn spawn_level_up(
+pub(super) fn spawn_level_up(
     commands: &mut Commands,
     c: &Content,
     fonts: &Fonts,
@@ -467,8 +476,11 @@ fn spawn_level_up(
     rerolls: u32,
     banishes: u32,
 ) {
-    commands.spawn(overlay(skin)).with_children(|root| {
+    let mut root = commands.spawn(overlay(skin));
+    root.insert(FitViewport::Upgrades(offers.len()));
+    root.with_children(|root| {
         root.spawn(Node {
+            max_width: percent(PANEL_WIDTH_PERCENT),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             ..default()
@@ -484,7 +496,16 @@ fn spawn_level_up(
             };
             head.spawn(text(&fonts.body, 18.0, if inspired { hex("#FFD98A") } else { DIM }, &sub));
         });
-        root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+        root.spawn(Node {
+            width: percent(PANEL_WIDTH_PERCENT),
+            max_width: px(CARD_WIDTH * offers.len() as f32 + CARD_GAP * offers.len().saturating_sub(1) as f32),
+            flex_wrap: FlexWrap::Wrap,
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            column_gap: px(CARD_GAP),
+            row_gap: px(CARD_GAP),
+            ..default()
+        }).with_children(|row| {
             for (i, &o) in offers.iter().enumerate() {
                 card(row, c, fonts, db, skin, arsenal, build, i, o);
             }

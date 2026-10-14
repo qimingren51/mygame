@@ -29,6 +29,9 @@ mod title;
 mod title_fx;
 mod toasts;
 
+#[cfg(test)]
+mod layout_tests;
+
 pub use perf::SimTiming;
 pub use replay_ui::ReplaySeek;
 

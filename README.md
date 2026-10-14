@@ -10,6 +10,28 @@
 - **架构设计**：[docs/DESIGN.md](docs/DESIGN.md)
 - **进度**：M0（工程与发布管线）进行中，里程碑见设计文档第 17 节。
 
+### 下载校验与 Windows SmartScreen
+
+从同一次 GitHub Release 下载发布包和 `SHA256SUMS.txt`，放在同一目录，先校验再解压运行。校验文件包含所有 ZIP 和 Linux tar.gz 发布包的 SHA-256。
+
+Windows 在 PowerShell 中运行（把文件名换成实际下载的 ZIP）：
+
+```powershell
+Get-FileHash .\lantern-v0.1.0-windows-x86_64.zip -Algorithm SHA256
+```
+
+将输出的 `Hash` 与 `SHA256SUMS.txt` 中相同文件名那一行的哈希逐字比较（忽略大小写），必须完全一致；不一致时不要运行，请重新下载。
+
+Linux 在下载目录运行，确认已下载的包显示 `OK`（未下载的其他平台包会跳过）：
+
+```bash
+sha256sum --check --ignore-missing SHA256SUMS.txt
+```
+
+Windows 首次启动可能出现 SmartScreen「Windows 已保护你的电脑」，未签名或信誉尚未积累的版本都可能遇到。确认来自本仓库的 GitHub Releases 且校验一致后，点击「更多信息」→「仍要运行」。
+
+发布维护：在仓库 Actions secrets 中同时配置 `WINDOWS_CERT_PFX_BASE64`（含私钥的 PFX 文件的 Base64）和 `WINDOWS_CERT_PASSWORD`（PFX 密码），工作流就会在打包前用 SignTool 签名、添加 RFC3161 时间戳并验签；签名或验证失败会终止发布。缺少任一 secret 时打印提示并生成未签名包。`SHA256SUMS.txt` 在标签发布时生成，随压缩包一起上传到 Release。
+
 ### 从源码运行
 
 需要 Rust（版本由 `rust-toolchain.toml` 自动选择）。Linux 另外需要 `libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config`。

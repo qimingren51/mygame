@@ -43,6 +43,31 @@ jobs:
           key: release
       - name: 构建
         run: cargo build --release --locked -p lantern
+      - name: Windows Authenticode 签名（可选）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:WINDOWS_CERT_PFX_BASE64 -or -not $env:WINDOWS_CERT_PASSWORD) {
+            Write-Host '未同时配置 WINDOWS_CERT_PFX_BASE64 和 WINDOWS_CERT_PASSWORD，跳过 Authenticode 签名。'
+            exit 0
+          }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw '找不到 Windows SDK 的 signtool.exe' }
+          $pfx = Join-Path $env:RUNNER_TEMP "lantern-signing-$([guid]::NewGuid()).pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 target/release/lantern.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode 签名或 RFC3161 时间戳失败' }
+            & $signtool.FullName verify /pa /all /tw /v target/release/lantern.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode 签名或时间戳验证失败' }
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+          }
       - name: 打包
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::7}"; fi
@@ -73,6 +98,9 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: 生成发布包 SHA-256 校验文件
+        working-directory: dist
+        run: sha256sum -- *.zip *.tar.gz > SHA256SUMS.txt
       - name: 发布到 GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
