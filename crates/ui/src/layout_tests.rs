@@ -84,13 +84,13 @@ fn assert_fits_after_resize(app: &mut App) {
                 continue;
             }
             count += 1;
-            assert!(node.size().min_element() > 0.0, "unmeasured text: {}", text.0);
+            assert!(node.size().min_element() > 0.0, "字的大小无效：{}", text.0);
             let min = transform.transform_point2(-node.size() / 2.0);
             let max = transform.transform_point2(node.size() / 2.0);
             assert!(
                 min.cmpge(Vec2::splat(-1.0)).all()
                     && max.cmple(Vec2::new(width as f32, height as f32) + Vec2::ONE).all(),
-                "{} at {width}x{height} / {dpi}: {min:?}..{max:?}",
+                "超出窗口：{}，{width}x{height} / {dpi}，{min:?}..{max:?}",
                 text.0
             );
             // 文字在窗口内还不够，卡内文字也不能穿出纸面。
@@ -104,7 +104,7 @@ fn assert_fits_after_resize(app: &mut App) {
                     let card_max = transform.transform_point2(card.size() / 2.0);
                     assert!(
                         min.cmpge(card_min - Vec2::ONE).all() && max.cmple(card_max + Vec2::ONE).all(),
-                        "{} outside card at {width}x{height} / {dpi}: {min:?}..{max:?}, card {card_min:?}..{card_max:?}",
+                        "超出卡片：{}，{width}x{height} / {dpi}，{min:?}..{max:?}，卡片 {card_min:?}..{card_max:?}",
                         text.0
                     );
                     break;
