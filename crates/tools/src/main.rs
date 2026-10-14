@@ -7,7 +7,8 @@
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--tier 1] [--meta none|half|full] [--lamp <id>]
 //!       [--skill novice|regular|expert|circle] [--school <流派>|all] [--combo <反应>|all] [--csv <目录>]
 
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -47,16 +48,18 @@ fn data_dir() -> PathBuf {
         .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"), PathBuf::from)
 }
 
-fn flag(args: &[String], name: &str, default: u64) -> Result<u64, String> {
+fn flag(args: &[OsString], name: &str, default: u64) -> Result<u64, String> {
     match args.iter().position(|a| a == name) {
-        Some(i) => {
-            args.get(i + 1).and_then(|v| v.parse().ok()).ok_or_else(|| format!("{name} 后面要跟一个数字"))
-        }
+        Some(i) => args
+            .get(i + 1)
+            .and_then(|v| v.to_str())
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("{name} 后面要跟一个数字")),
         None => Ok(default),
     }
 }
 
-fn bench(args: &[String]) -> Result<(), String> {
+fn bench(args: &[OsString]) -> Result<(), String> {
     let enemies = flag(args, "--enemies", 5000)? as u32;
     let seconds = flag(args, "--seconds", 20)?;
     let seed = flag(args, "--seed", 1)?;
@@ -92,9 +95,9 @@ fn bench(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn replay(args: &[String]) -> Result<(), String> {
-    let path = args.first().ok_or("replay 后面要跟回放文件的路径")?;
-    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 {path} 失败：{e}"))?;
+fn replay(args: &[OsString]) -> Result<(), String> {
+    let path = Path::new(args.first().ok_or("replay 后面要跟回放文件的路径")?);
+    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 {path:?} 失败：{e}"))?;
     let replay = Replay::parse(&text)?;
     let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
     if replay.content_hash != content.hash {
@@ -206,7 +209,7 @@ fn source_name(c: &Content, s: Source) -> String {
 }
 
 /// 机器人打若干局，汇总成长曲线和伤害来源（docs/BALANCE.md 第 11 节）。
-fn balance(args: &[String]) -> Result<(), String> {
+fn balance(args: &[OsString]) -> Result<(), String> {
     let runs = flag(args, "--runs", 20)?;
     let seed0 = flag(args, "--seed", 1)?;
     let god = args.iter().any(|a| a == "--god");
@@ -271,8 +274,8 @@ fn balance(args: &[String]) -> Result<(), String> {
 
 /// 机器人打一局并存成回放，用来在游戏里看后期的画面（`lantern --replay <文件> --from <秒>`）。
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match args.first().map(String::as_str) {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let result = match args.first().and_then(|arg| arg.to_str()) {
         Some("bench") => bench(&args[1..]),
         Some("replay") => replay(&args[1..]),
         Some("balance") => balance(&args[1..]),

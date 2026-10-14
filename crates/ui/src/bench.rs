@@ -3,6 +3,7 @@
 //! 方便把结果发回来（docs/DESIGN.md 第 16、17 节，M1 的门槛就是这份结果）。
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::render::renderer::RenderAdapterInfo;
@@ -113,7 +114,7 @@ pub(crate) fn drive(
     let saved = save_report(&report);
     let mut card = vec![report.clone()];
     card.push(match saved {
-        Ok(path) => format!("已保存到 {path}"),
+        Ok(path) => format!("已保存到 {}", path.display()),
         Err(e) => format!("保存失败：{e}"),
     });
     commands.spawn((
@@ -151,14 +152,14 @@ fn format_report(results: &[StageResult], gpu: &str, w: u32, h: u32) -> String {
     s
 }
 
-fn save_report(report: &str) -> Result<String, String> {
+fn save_report(report: &str) -> Result<PathBuf, String> {
     let dir = paths::data_dir().join("bench");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let path = dir.join(format!("bench-{stamp}.txt"));
     std::fs::write(&path, report).map_err(|e| e.to_string())?;
-    Ok(path.display().to_string())
+    Ok(path)
 }
 
 /// 跑完后按 Enter 回到标题。

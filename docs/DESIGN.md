@@ -409,6 +409,7 @@ assets/data/
 | `cargo run -p lantern -- --replay <文件> [--from <秒>]` | 在游戏里观看回放；`--from` 开局后一帧里跑到那一秒再开始看 |
 | `cargo run -p lantern --features dev` | 开发模式：调试面板、热重载 |
 
+- **命令行路径**：游戏和工具用 `std::env::args_os()` 读取参数；`--replay`、`replay <文件>`、`--record`、`--csv` 保留为 `OsString` / `Path` / `PathBuf`，支持中文、空格及非 UTF-8 路径。数字和文字参数单独校验，非法编码返回错误。Unix 回归测试用 `OsStr::from_bytes` 覆盖实际回放读写、CSV 输出及启动错误日志。
 - **场景测试**用来验证具体规则，例如“火系 6 点时，妖物死亡会爆炸”：搭一个最小的模拟场景，跑若干步，断言结果。`lantern_sim::harness` 提供开局、改构筑、放妖物、读伤害记录等辅助函数；`tests/build.rs`、`tests/weapons.rs`、`tests/gameplay.rs` 覆盖五行共鸣、相生、太极、进化、宝箱、各法器和机器人打完整局。
 - **画面测试**：云端没有显卡，但装了 Mesa 的软件 Vulkan（lavapipe）和 Xvfb。在 Xvfb 里用 `VK_ICD_FILENAMES=…/lvp_icd.json` 启动 `lantern --windowed`，用 `xdotool` 按键（先 `windowfocus`）、`import -window root` 截图，可以逐个检查界面；`XDG_DATA_HOME` 指到临时目录就能用一份测试存档。画面的实际观感和帧率以你在自己电脑上运行的结果为准。
 
@@ -420,6 +421,7 @@ assets/data/
 - Windows 发布版不弹出控制台窗口。
 
 **资源目录**：开发时用仓库根目录的 `assets/`，发布时用可执行文件旁边的 `assets/`。
+Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无损转换为 UTF-8 时，在读取内容数据和创建窗口前调用 `fatal` 报错并写日志，不替换路径字符。资源目录编码错误及回放读取失败的诊断用转义形式保留非法编码，普通中文和空格路径不受影响。
 
 **CI（`ci.yml`）**：桌面版相关的路径有改动时运行。
 - Linux：`fmt`、`clippy -D warnings`、`test`。
