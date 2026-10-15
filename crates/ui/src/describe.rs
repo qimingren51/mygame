@@ -58,6 +58,8 @@ pub(crate) struct OfferInfo {
     pub color: Color,
     pub name: String,
     pub desc: String,
+    /// 一句话描述（LORE-TEXT 3.5、3.6 节）；只在头一回见到时写，升级和补给留空
+    pub flavor: String,
     pub element: Option<Element>,
 }
 
@@ -98,6 +100,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
         color,
         name: name.into(),
         desc,
+        flavor: String::new(),
         element: None,
     };
     match offer {
@@ -119,6 +122,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 color: element_color(c, def.element),
                 name: evo.name.clone(),
                 desc: evo.desc.clone(),
+                flavor: evo.flavor.clone(),
                 element: Some(def.element),
             }
         }
@@ -132,6 +136,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 color: element_color(c, def.element),
                 name: def.name.clone(),
                 desc: def.desc.clone(),
+                flavor: def.flavor.clone(),
                 element: Some(def.element),
             }
         }
@@ -147,15 +152,21 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 color: element_color(c, def.element),
                 name: def.name.clone(),
                 desc: weapon_upgrade_text(&def.levels[lv - 1], &def.levels[lv.min(def.levels.len() - 1)]),
+                flavor: String::new(),
                 element: Some(def.element),
             }
         }
         Offer::NewPassive(d) | Offer::PassiveUp(d) => {
-            let (def, kind, rarity) = match offer {
-                Offer::NewPassive(_) => (&c.passives[d], "心法 · 新".to_string(), Rarity::Ling),
+            let (def, kind, rarity, new) = match offer {
+                Offer::NewPassive(_) => (&c.passives[d], "心法 · 新".to_string(), Rarity::Ling, true),
                 _ => {
                     let p = build.passives[d];
-                    (&c.passives[p.def], format!("心法 · Lv{} → {}", p.level, p.level + 1), Rarity::Fan)
+                    (
+                        &c.passives[p.def],
+                        format!("心法 · Lv{} → {}", p.level, p.level + 1),
+                        Rarity::Fan,
+                        false,
+                    )
                 }
             };
             OfferInfo {
@@ -166,6 +177,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 color: passive_color(c, def.element),
                 name: def.name.clone(),
                 desc: format!("{}。", def.desc),
+                flavor: if new { def.flavor.clone() } else { String::new() },
                 element: def.element,
             }
         }

@@ -811,6 +811,9 @@ pub struct WeaponDef {
     pub icon: String,
     pub element: Element,
     pub desc: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
+    #[serde(default)]
+    pub flavor: String,
     pub behavior: WeaponBehavior,
     /// 第 1 级到满级
     pub levels: Vec<WeaponLevel>,
@@ -823,6 +826,9 @@ pub struct WeaponDef {
 pub struct EvolutionDef {
     pub name: String,
     pub desc: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
+    #[serde(default)]
+    pub flavor: String,
     /// 需要的心法 ID
     pub passive: String,
     pub behavior: WeaponBehavior,
@@ -839,6 +845,9 @@ pub struct PassiveDef {
     #[serde(default)]
     pub element: Option<Element>,
     pub desc: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 3.6 节），卡片上说明下面的一行小字
+    #[serde(default)]
+    pub flavor: String,
     pub max_level: u32,
     /// 每级都加一次的效果
     #[serde(default)]
