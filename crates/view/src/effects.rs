@@ -57,6 +57,7 @@ pub(crate) struct PropLight {
 #[derive(Component)]
 pub(crate) struct DamageNumber {
     t: f32,
+    fresh: bool,
     start: Vec2,
     scale: f32,
     crit: bool,
@@ -128,7 +129,7 @@ pub(crate) fn spawn_number_pool(mut commands: Commands, mut fx: ResMut<Effects>)
                     TextFont::from(font.clone()).with_font_size(NUMBER_RASTER),
                     TextColor(NUMBER_COLOR),
                     Anchor::CENTER,
-                    DamageNumber { t: NUMBER_LIFE, start: Vec2::ZERO, scale: 0.0, crit: false },
+                    DamageNumber { t: NUMBER_LIFE, fresh: false, start: Vec2::ZERO, scale: 0.0, crit: false },
                     Transform::default(),
                     Visibility::Hidden,
                     DespawnOnExit(AppState::Run),
@@ -213,6 +214,7 @@ pub(crate) fn read_events(
                 let big = (damage.max(1.0).log10() * 1.2).min(4.0);
                 *num = DamageNumber {
                     t: 0.0,
+                    fresh: true,
                     start: to_screen(pos) + jitter,
                     scale: if crit { 15.0 + big * 1.5 } else { 8.0 + big } / NUMBER_RASTER,
                     crit,
@@ -296,32 +298,7 @@ pub(crate) fn update_effects(
     props: Query<(&PropLight, &Transform), (Without<DamageNumber>, Without<Ink>, Without<FloatWord>)>,
 ) {
     let dt = time.delta_secs();
-    for (mut num, mut tf, mut color, mut vis) in &mut numbers {
-        if *vis == Visibility::Hidden {
-            continue;
-        }
-        num.t += dt;
-        if num.t >= NUMBER_LIFE {
-            *vis = Visibility::Hidden;
-            continue;
-        }
-        let k = num.t / NUMBER_LIFE;
-        // 先弹起再慢慢上浮，最后淡出；暴击像盖章一样从大砸到小，略微歪一点
-        let (pop, rise) = if num.crit {
-            let s = (num.t / 0.09).min(1.0);
-            (1.0 + 1.1 * (1.0 - s) * (1.0 - s), 4.0 + 8.0 * k)
-        } else {
-            (1.0 + 0.35 * (1.0 - (k * 6.0).min(1.0)), 6.0 + 14.0 * k)
-        };
-        tf.translation =
-            (num.start + Vec2::new(0.0, rise)).extend(layer::NUMBERS + if num.crit { 1.0 } else { 0.0 });
-        tf.scale = Vec3::splat(num.scale * pop);
-        tf.rotation = if num.crit { Quat::from_rotation_z(-0.08) } else { Quat::IDENTITY };
-        let priority = if num.crit { Priority::Critical } else { Priority::Normal };
-        color
-            .0
-            .set_alpha((if k < 0.6 { 1.0 } else { 1.0 - (k - 0.6) / 0.4 }) * feedback.visibility(priority));
-    }
+    update_numbers(dt, &feedback, &mut numbers);
     for (mut w, mut tf, mut color, mut vis) in &mut words {
         if *vis == Visibility::Hidden {
             continue;
@@ -363,6 +340,103 @@ pub(crate) fn update_effects(
         glow.light(&frames, &db, base + prop.offset, (prop.color, prop.radius));
         if let Some(emit) = prop.emit {
             glow.emit(emit, base, false, Color::WHITE);
+        }
+    }
+}
+
+fn update_numbers(
+    dt: f32,
+    feedback: &Feedback,
+    numbers: &mut Query<(&mut DamageNumber, &mut Transform, &mut TextColor, &mut Visibility), Without<Ink>>,
+) {
+    for (mut num, mut tf, mut color, mut vis) in numbers {
+        if *vis == Visibility::Hidden {
+            continue;
+        }
+        // 虚拟时间的当帧增量在顿帧申请前已确定，新数字先画出完整的盖章峰值。
+        if !std::mem::take(&mut num.fresh) {
+            num.t += dt;
+        }
+        if num.t >= NUMBER_LIFE {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        let k = num.t / NUMBER_LIFE;
+        // 先弹起再慢慢上浮，最后淡出；暴击像盖章一样从大砸到小，略微歪一点
+        let (pop, rise) = if num.crit {
+            let s = (num.t / 0.09).min(1.0);
+            (1.0 + 1.1 * (1.0 - s) * (1.0 - s), 4.0 + 8.0 * k)
+        } else {
+            (1.0 + 0.35 * (1.0 - (k * 6.0).min(1.0)), 6.0 + 14.0 * k)
+        };
+        tf.translation =
+            (num.start + Vec2::new(0.0, rise)).extend(layer::NUMBERS + if num.crit { 1.0 } else { 0.0 });
+        tf.scale = Vec3::splat(num.scale * pop);
+        tf.rotation = if num.crit { Quat::from_rotation_z(-0.08) } else { Quat::IDENTITY };
+        let priority = if num.crit { Priority::Critical } else { Priority::Normal };
+        color
+            .0
+            .set_alpha((if k < 0.6 { 1.0 } else { 1.0 - (k - 0.6) / 0.4 }) * feedback.visibility(priority));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_and_reused_numbers_show_the_full_first_frame_then_follow_virtual_time() {
+        for dt in [1.0 / 60.0, 1.0 / 30.0, 0.8] {
+            for crit in [false, true] {
+                let mut app = App::new();
+                app.init_resource::<Time>().init_resource::<Feedback>().add_systems(
+                    Update,
+                    |time: Res<Time>,
+                     feedback: Res<Feedback>,
+                     mut numbers: Query<
+                        (&mut DamageNumber, &mut Transform, &mut TextColor, &mut Visibility),
+                        Without<Ink>,
+                    >| update_numbers(time.delta_secs(), &feedback, &mut numbers),
+                );
+                let e = app
+                    .world_mut()
+                    .spawn((
+                        DamageNumber { t: NUMBER_LIFE, fresh: false, start: Vec2::ZERO, scale: 0.0, crit },
+                        Transform::default(),
+                        TextColor(Color::WHITE),
+                        Visibility::Hidden,
+                    ))
+                    .id();
+                // 同一个池槽重复启用，也必须重新显示零年龄的峰值。
+                for start in [Vec2::new(10.0, 20.0), Vec2::new(30.0, 40.0)] {
+                    *app.world_mut().get_mut::<DamageNumber>(e).unwrap() =
+                        DamageNumber { t: 0.0, fresh: true, start, scale: 0.5, crit };
+                    *app.world_mut().get_mut::<Visibility>(e).unwrap() = Visibility::Inherited;
+                    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+                    app.update();
+                    assert_eq!(app.world().get::<DamageNumber>(e).unwrap().t, 0.0);
+                    assert_eq!(*app.world().get::<Visibility>(e).unwrap(), Visibility::Inherited);
+                    let tf = app.world().get::<Transform>(e).unwrap();
+                    assert_eq!(tf.translation.truncate(), start + Vec2::Y * if crit { 4.0 } else { 6.0 });
+                    assert_eq!(tf.scale, Vec3::splat(0.5 * if crit { 2.1 } else { 1.35 }));
+                    assert_eq!(app.world().get::<TextColor>(e).unwrap().0.alpha(), 1.0);
+
+                    // 下一帧顿帧令虚拟 dt 为零，之后恢复时必须正常增长，不能卡在零年龄。
+                    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::ZERO);
+                    app.update();
+                    assert_eq!(app.world().get::<DamageNumber>(e).unwrap().t, 0.0);
+                    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(20));
+                    app.update();
+                    assert!((app.world().get::<DamageNumber>(e).unwrap().t - 0.02).abs() < 1e-6);
+                    assert!(
+                        app.world().get::<Transform>(e).unwrap().scale.x
+                            < 0.5 * if crit { 2.1 } else { 1.35 }
+                    );
+                    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+                    app.update();
+                    assert_eq!(*app.world().get::<Visibility>(e).unwrap(), Visibility::Hidden);
+                }
+            }
         }
     }
 }

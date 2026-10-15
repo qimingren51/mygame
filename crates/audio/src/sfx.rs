@@ -304,6 +304,7 @@ impl Sfx {
                 b.bell(pent(19), 0.24, 0.07, 1.5);
             }),
             ult: render(4.0, |b| {
+                // 燃灯结算时立刻出重音，噪声起音和鼓、锣、低频对齐。
                 b.noise(
                     0.0,
                     0.4,
@@ -313,12 +314,12 @@ impl Sfx {
                         freq: 400.0,
                         slide: Some(5000.0),
                         q: 1.0,
-                        attack: 0.3,
+                        attack: 0.008,
                     },
                 );
-                b.drum(0.33, 0.9, 70.0);
+                b.drum(0.0, 0.9, 70.0);
                 b.noise(
-                    0.33,
+                    0.0,
                     0.9,
                     0.3,
                     NoiseOpts {
@@ -328,7 +329,25 @@ impl Sfx {
                         ..Default::default()
                     },
                 );
-                b.gong(55.0, 0.33, 0.22);
+                b.gong(55.0, 0.0, 0.22);
+                // 次级尾声在 120ms 接上，不推迟主重音。
+                b.noise(
+                    0.12,
+                    0.4,
+                    0.06,
+                    NoiseOpts {
+                        kind: FilterKind::High,
+                        freq: 400.0,
+                        slide: Some(5000.0),
+                        q: 1.0,
+                        attack: 0.008,
+                    },
+                );
+                // 主重音同起会叠峰，整段统一留出余量，保留各层音量比例。
+                let peak = b.data.iter().map(|s| s.abs()).fold(0.95, f32::max);
+                for sample in &mut b.data {
+                    *sample *= 0.95 / peak;
+                }
             }),
             ult_ready: render(1.6, |b| {
                 b.bell(pent(15), 0.0, 0.08, 1.2);
@@ -616,6 +635,17 @@ impl Sfx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ult_main_accent_starts_within_one_frame() {
+        let sound = Sfx::new().ult;
+        let peak = sound.frames.iter().map(|f| f.left.abs()).fold(0.0, f32::max);
+        // 测半峰值重音，不能让很轻的前导噪声冒充起音。
+        assert!(peak > 0.5);
+        let onset = sound.frames.iter().position(|f| f.left.abs() >= peak * 0.5).unwrap();
+        let onset_secs = onset as f32 / sound.sample_rate as f32;
+        assert!(onset_secs <= 0.0167, "燃灯主重音在 {onset_secs:.4}s 才起音");
+    }
 
     /// 每个音效都要有声音，而且基本不削波（合成时已经夹在 ±1，碰到边就是削波了）。
     #[test]

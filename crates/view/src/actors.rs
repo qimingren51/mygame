@@ -19,6 +19,7 @@ use lantern_sim::{
 };
 
 use crate::atlas::{AnimMeta, AtlasDb, FrameId};
+use crate::hero_feedback::HeroFeedback;
 use crate::lighting::{AddMaterial, FrameMeshes, LIGHT_LAYER};
 use crate::{MainCamera, layer, to_screen};
 
@@ -76,6 +77,7 @@ pub(crate) struct HeroFrames {
     idle: HeroAnim,
     walk: HeroAnim,
     dash: HeroAnim,
+    hurt: HeroAnim,
     death: HeroAnim,
     shadow_scale: f32,
     /// 灯笼叠层（按 `lamps.ron` 的下标）：和主角同画布、同锚点的逐帧叠画（docs/DESIGN.md 第 15 节）
@@ -99,8 +101,10 @@ impl LanternLayer {
                 })
                 .collect()
         };
-        let anims =
-            ["idle", "walk", "dash", "death"].into_iter().map(|a| (a, seq(a, ""), seq(a, "_emit"))).collect();
+        let anims = ["idle", "walk", "dash", "hurt", "death"]
+            .into_iter()
+            .map(|a| (a, seq(a, ""), seq(a, "_emit")))
+            .collect();
         LanternLayer { anims, light: crate::fx::hex(color) }
     }
 
@@ -267,6 +271,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         idle: hero_anim(&db, "idle"),
         walk: hero_anim(&db, "walk"),
         dash: hero_anim(&db, "dash"),
+        hurt: hero_anim(&db, "hurt"),
         death: hero_anim(&db, "death"),
         shadow_scale: shadow_scale(&db, "hero", shadow),
         lanterns: content.0.lamps.iter().map(|l| LanternLayer::load(&db, &l.id, &l.color)).collect(),
@@ -398,6 +403,7 @@ impl GlowRequests {
 /// 主角的画面状态。
 #[derive(Component, Default)]
 pub(crate) struct HeroView {
+    pub(crate) feedback: HeroFeedback,
     dir: usize,
     /// 待机、闪避、倒地动画的计时
     clock: f32,
@@ -482,6 +488,8 @@ fn pick_dir(current: usize, facing: Vec2) -> usize {
 #[allow(clippy::type_complexity)]
 pub(crate) fn animate_hero(
     time: Res<Time>,
+    real: Res<Time<Real>>,
+    outbox: Res<SimOutbox>,
     hero: Res<HeroFrames>,
     db: Res<AtlasDb>,
     content: Res<GameContent>,
@@ -496,7 +504,8 @@ pub(crate) fn animate_hero(
 ) {
     // 这一局的灯；无灯不画，也不退回红纸灯（docs/DESIGN.md 第 15 节）
     let layer = setup.and_then(|s| hero.lanterns.get(s.lamp_index(&content.0)));
-    let over = run.is_some_and(|s| *s.get() == RunState::Over);
+    let over = run.as_ref().is_some_and(|s| *s.get() == RunState::Over);
+    let paused = run.as_ref().is_some_and(|s| !matches!(s.get(), RunState::Playing | RunState::Over));
     let dt = time.delta_secs();
     for (player, tf, mut view, mut sprite, mut anchor) in &mut q {
         let pos = tf.translation.truncate();
@@ -507,10 +516,21 @@ pub(crate) fn animate_hero(
             view.dying = true;
             view.clock = 0.0;
         }
+        let dying = view.dying || outbox.0.iter().any(|e| matches!(e, SimEvent::PlayerDied));
+        view.feedback.update(
+            &outbox.0,
+            if paused { std::time::Duration::ZERO } else { real.delta() },
+            player.iframe,
+            dying,
+        );
+        let alpha = if dying { 1.0 } else { view.feedback.alpha(player.iframe) };
+        sprite.color.set_alpha(alpha);
         view.clock += dt;
         let (anim, frame) = if view.dying {
             let n = hero.death.frames[view.dir].len().max(1);
             (&hero.death, ((view.clock * hero.death.fps) as usize).min(n - 1))
+        } else if let Some(frame) = view.feedback.hurt_frame(hero.hurt.fps) {
+            (&hero.hurt, frame)
         } else if player.dash_t > 0.0 {
             (&hero.dash, (view.clock * hero.dash.fps) as usize)
         } else if player.moved > 0.01 {
@@ -545,6 +565,7 @@ pub(crate) fn animate_hero(
             match lantern_frame {
                 Some(id) => {
                     db.set(id, &mut s, &mut a);
+                    s.color.set_alpha(alpha);
                     t.translation = tf.translation + Vec3::new(0.0, 0.0, 1e-5);
                     vis.set_if_neq(Visibility::Inherited);
                 }
@@ -573,7 +594,7 @@ pub(crate) fn hero_glow(
     frames: Res<ActorFrames>,
     stats: Option<Res<Stats>>,
     outbox: Res<lantern_sim::SimOutbox>,
-    q: Query<(&Transform, &HeroView, Option<&lantern_sim::Health>)>,
+    q: Query<(&Transform, &HeroView, &Sprite, Option<&lantern_sim::Health>)>,
     mut flare: ResMut<LanternFlare>,
     mut glow: ResMut<GlowRequests>,
     readability: Res<crate::telegraphs::Readability>,
@@ -593,14 +614,14 @@ pub(crate) fn hero_glow(
     let low = q
         .iter()
         .next()
-        .and_then(|(_, _, h)| h)
+        .and_then(|(_, _, _, h)| h)
         .map_or(0.0, |h| ((0.3 - h.hp / h.max.max(1.0)) / 0.2).clamp(0.0, 1.0));
     let gutter = low * (0.08 * (t * 11.0).sin() + 0.06 * (t * 23.7).sin() - 0.1).min(0.0);
     let flicker = 1.0 + 0.025 * (t * 7.3).sin() + 0.015 * (t * 17.9).sin() + 0.12 * flare.flare + gutter;
     let (warm, base) = LANTERN_LIGHT;
     let radius =
         stats.map_or(base, |s| base * s.get(Stat::Area).sqrt() * s.get(Stat::Light)) * flicker * ignite;
-    for (tf, view, _) in &q {
+    for (tf, view, sprite, _) in &q {
         // 灯的光色淡淡地染进暖光里，纸面不至于整片变色
         let color = view.light.map_or(warm, |c| mix(warm, c, 0.45));
         let pos = tf.translation.truncate();
@@ -614,7 +635,7 @@ pub(crate) fn hero_glow(
             .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
         glow.light(&frames, &db, pos + socket, (color, radius));
         if let Some(emit) = view.emit {
-            glow.emit(emit, pos, false, Color::WHITE);
+            glow.emit(emit, pos, false, Color::WHITE.with_alpha(sprite.color.alpha()));
         }
         // 灯笼周围一团暖光晕，拾魂火时更亮
         glow.add(

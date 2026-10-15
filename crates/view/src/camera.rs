@@ -73,7 +73,6 @@ pub(crate) struct Rig {
     stop_ready: f32,
     stop_priority: Priority,
     stop_fresh: bool,
-    time_fresh: bool,
     slow_priority: Priority,
     slow: f32,
     slow_len: f32,
@@ -103,7 +102,6 @@ impl Default for Rig {
             stop_ready: 0.0,
             stop_priority: Priority::Ambient,
             stop_fresh: false,
-            time_fresh: false,
             slow_priority: Priority::Ambient,
             slow: 0.0,
             slow_len: 0.0,
@@ -157,7 +155,6 @@ impl Rig {
             self.stop_ready = self.stop_ready.max(STOP_GAP + secs);
         }
         self.stop_fresh = true;
-        self.time_fresh = true;
         self.stop = self.stop.max(secs);
     }
 
@@ -167,7 +164,6 @@ impl Rig {
             return;
         }
         self.slow_priority = priority;
-        self.time_fresh = true;
         self.slow = secs;
         self.slow_len = secs;
         self.slow_scale = scale;
@@ -175,11 +171,6 @@ impl Rig {
 
     fn advance_time(&mut self, dt: f32) {
         self.stop_fresh = false;
-        // 事件刚到达时不扣掉上一帧耗时，低帧率也至少能看到一次完整停顿。
-        if self.time_fresh {
-            self.time_fresh = false;
-            return;
-        }
         let after_stop = (dt - self.stop).max(0.0);
         self.stop = (self.stop - dt).max(0.0);
         self.slow = (self.slow - after_stop).max(0.0);
@@ -216,14 +207,26 @@ impl Rig {
     }
 }
 
+/// 收新事件前推进旧顿帧、慢镜和冷却；计时用完整现实帧长，不受镜头积分上限影响。
+pub(crate) fn advance_rig_time(
+    real: Res<Time<Real>>,
+    run: Option<Res<State<RunState>>>,
+    mut rig: ResMut<Rig>,
+) {
+    // 暂停时不倒数；结算时照常倒数，免得一直慢着。
+    let paused = run.is_some_and(|s| *s.get() == RunState::Paused);
+    rig.advance_time(if paused { 0.0 } else { real.delta_secs() });
+}
+
 /// 模拟事件 → 震屏、冲击、缩放、顿帧、慢镜（docs/FEEL.md 第 2 节的手感表）。
 pub(crate) fn camera_events(
     outbox: Res<SimOutbox>,
     feedback: Res<Feedback>,
     mut rig: ResMut<Rig>,
-    player: Single<&Player>,
+    player: Single<(&Player, &Pos)>,
 ) {
-    let impulse = camera_impulse(&outbox.0, player.facing);
+    let (player, pos) = *player;
+    let impulse = camera_impulse(&outbox.0, player.facing, pos.0);
     apply_impulse(&mut rig, &feedback, impulse);
 }
 
@@ -274,7 +277,7 @@ struct Impulse {
     scale: f32,
 }
 
-fn camera_impulse(events: &[SimEvent], facing: Vec2) -> Impulse {
+fn camera_impulse(events: &[SimEvent], facing: Vec2, hero: Vec2) -> Impulse {
     let mut best = Impulse::default();
     let mut stop: f32 = 0.0;
     // 救命（回光、九转金丹）和终幕的慢镜、推镜：同一帧还挨了打也要留着
@@ -290,9 +293,9 @@ fn camera_impulse(events: &[SimEvent], facing: Vec2) -> Impulse {
                 cue.trauma = 0.3;
                 cue.stop = 0.06;
             }
-            SimEvent::PlayerHurt { .. } => {
+            SimEvent::PlayerHurt { from, .. } => {
                 cue.trauma = 0.32;
-                cue.jolt = 0.6;
+                cue.kick = -to_screen(crate::atmos::hurt_from(hero, from)) * 0.6;
                 cue.stop = 0.045;
             }
             SimEvent::Dash { .. } => cue.kick = -to_screen(facing).normalize_or_zero() * 0.3,
@@ -418,22 +421,17 @@ pub(crate) fn update_rig(
     real: Res<Time<Real>>,
     fixed: Res<Time<Fixed>>,
     feel: Res<Feel>,
-    run: Option<Res<State<RunState>>>,
     mut rig: ResMut<Rig>,
     mut time: ResMut<Time<Virtual>>,
     player: Single<(&Pos, &PrevPos, &Player)>,
     mut cam: Single<(&mut Transform, &mut Projection), With<MainCamera>>,
 ) {
     let dt = real.delta_secs().min(0.1);
-    let paused = run.is_some_and(|s| *s.get() == RunState::Paused);
     let rig = &mut *rig;
     rig.clock += dt;
     rig.protected_left = (rig.protected_left - dt).max(0.0);
 
-    // ---- 时间：暂停时顿帧、慢镜不倒数（结算时照常倒数，免得一直慢着）
-    if !paused {
-        rig.advance_time(dt);
-    }
+    // ---- 时间：旧计时已在收事件前推进，新请求完整保留到下一帧。
     let scale = if feel.hitstop { rig.time_scale() } else { 1.0 };
     if (time.relative_speed() - scale).abs() > 1e-4 {
         time.set_relative_speed(scale);
@@ -535,6 +533,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn hurt_kicks_away_from_the_source_and_overlap_has_no_direction() {
+        let hero = Vec2::new(60.0, -90.0);
+        for offset in [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::ONE, Vec2::ZERO] {
+            let event = SimEvent::PlayerHurt { amount: 10.0, by: HurtBy::Rain, from: hero + offset };
+            let impulse = camera_impulse(&[event], Vec2::X, hero);
+            assert_eq!(impulse.jolt, 0.0);
+            assert!(impulse.kick.distance(-to_screen(offset).normalize_or_zero() * 0.6) < 1e-5);
+            assert_eq!(impulse.priority, Priority::Hurt);
+            assert_eq!(impulse.trauma, 0.32);
+            assert_eq!(impulse.stop, 0.045);
+        }
+    }
+
     /// 走实际的事件筛选、镜头申请和闪屏绘制链，不需要窗口或渲染插件。
     fn feedback_app(lite: bool) -> (App, Entity) {
         let content = lantern_content::Content::load(
@@ -552,7 +564,10 @@ mod tests {
             .init_resource::<Feedback>()
             .init_resource::<Rig>()
             .init_resource::<FxState>()
-            .add_systems(Update, (prepare_feedback, camera_events, read_fx_events, apply_flash).chain());
+            .add_systems(
+                Update,
+                (prepare_feedback, advance_rig_time, camera_events, read_fx_events, apply_flash).chain(),
+            );
         app.world_mut().spawn((Player::default(), Pos::default(), PrevPos::default()));
         app.world_mut().spawn((
             MainCamera,
@@ -586,7 +601,7 @@ mod tests {
                     let (mut app, flash) = feedback_app(lite);
                     app.world_mut().resource_mut::<SimOutbox>().0 = events.to_vec();
                     app.update();
-                    let stop = camera_impulse(&[attack], Vec2::X).stop.max(0.045);
+                    let stop = camera_impulse(&[attack], Vec2::X, Vec2::ZERO).stop.max(0.045);
                     assert_hurt_feedback(&app, flash, stop);
                 }
             }
@@ -603,13 +618,6 @@ mod tests {
             let (mut app, flash) = feedback_app(false);
             app.world_mut().resource_mut::<SimOutbox>().0 = vec![attack];
             app.update();
-            {
-                let mut rig = app.world_mut().resource_mut::<Rig>();
-                rig.advance_time(0.0);
-                rig.advance_time(0.12);
-                assert!(rig.stop_ready > 0.0);
-                assert_eq!(rig.stop, 0.0);
-            }
             app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f32(0.12));
             app.world_mut().resource_mut::<SimOutbox>().0 = vec![hurt()];
             app.update();
@@ -641,7 +649,7 @@ mod tests {
     fn rescue_keeps_its_slow_motion_when_hurt_wins_the_frame() {
         let rescue = SimEvent::LastStand { pos: Vec2::ZERO };
         for events in [vec![hurt(), rescue], vec![rescue, hurt()]] {
-            let cue = camera_impulse(&events, Vec2::X);
+            let cue = camera_impulse(&events, Vec2::X, Vec2::ZERO);
             assert_eq!(cue.priority, Priority::Hurt);
             assert_eq!((cue.slow, cue.scale), (0.9, 0.3));
             assert_eq!((cue.zoom, cue.hold), (0.1, 0.4));
@@ -673,7 +681,7 @@ mod tests {
             assert_eq!(rig.zoom_to, 0.08);
             assert_eq!(rig.zoom_hold, 1.2);
         }
-        let fatal = camera_impulse(&[hurt(), SimEvent::PlayerDied], Vec2::X);
+        let fatal = camera_impulse(&[hurt(), SimEvent::PlayerDied], Vec2::X, Vec2::ZERO);
         assert_eq!(fatal.priority, Priority::Death);
         assert_eq!(fatal.stop, 0.045);
     }
@@ -682,13 +690,17 @@ mod tests {
     fn only_large_crits_request_global_hitstop() {
         for (damage, stop) in [(1.0, 0.0), (999.0, 0.0), (1000.0, 0.035), (2000.0, 0.035)] {
             let mut rig = Rig::default();
-            apply_impulse(&mut rig, &Feedback::default(), camera_impulse(&[crit(damage)], Vec2::X));
+            apply_impulse(
+                &mut rig,
+                &Feedback::default(),
+                camera_impulse(&[crit(damage)], Vec2::X, Vec2::ZERO),
+            );
             assert_eq!(rig.stop, stop);
             assert_eq!(rig.time_scale(), if stop > 0.0 { 0.0 } else { 1.0 });
             assert_eq!(rig.trauma, 0.1);
             if stop == 0.0 {
                 assert_eq!(rig.stop_ready, 0.0);
-                assert!(!rig.time_fresh);
+                assert!(!rig.stop_fresh);
             }
         }
     }
@@ -761,9 +773,9 @@ mod tests {
     #[test]
     fn slow_frame_does_not_consume_a_new_stop_or_the_following_slowmo() {
         let mut rig = Rig::default();
+        rig.advance_time(0.2);
         rig.hitstop(0.12, Priority::Finale);
         rig.slowmo(1.6, 0.2, Priority::Finale);
-        rig.advance_time(0.2);
         assert_eq!(rig.stop, 0.12);
         assert_eq!(rig.time_scale(), 0.0);
         rig.advance_time(0.12);
@@ -774,17 +786,123 @@ mod tests {
     }
 
     #[test]
+    fn new_stop_keeps_its_full_duration_then_uses_unclamped_real_time() {
+        for dt in [1.0 / 60.0, 1.0 / 30.0, 0.2] {
+            let (mut app, _) = feedback_app(false);
+            app.add_systems(Update, update_rig.after(camera_events));
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.world_mut().resource_mut::<SimOutbox>().0 = vec![crit(1000.0)];
+            app.update();
+            let rig = app.world().resource::<Rig>();
+            assert_eq!(rig.stop, 0.035);
+            assert_eq!(rig.stop_ready, STOP_GAP + 0.035);
+            assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 0.0);
+
+            app.world_mut().resource_mut::<SimOutbox>().0.clear();
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(10));
+            app.update();
+            assert!((app.world().resource::<Rig>().stop - 0.025).abs() < 1e-6);
+
+            // 长帧用完整现实时间扣除，不能被镜头的 100ms 积分上限拖长。
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(250));
+            app.update();
+            let rig = app.world().resource::<Rig>();
+            assert_eq!(rig.stop, 0.0);
+            assert_eq!(rig.stop_ready, 0.0);
+            assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 1.0);
+        }
+    }
+
+    #[test]
+    fn old_timers_advance_before_new_requests_and_cooldown_can_expire_this_frame() {
+        let (mut app, _) = feedback_app(false);
+        {
+            let mut rig = app.world_mut().resource_mut::<Rig>();
+            rig.hitstop(0.035, Priority::Critical);
+            rig.slowmo(1.6, 0.2, Priority::Finale);
+        }
+        app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(250));
+        app.world_mut().resource_mut::<SimOutbox>().0 = vec![crit(1000.0)];
+        app.update();
+        let rig = app.world().resource::<Rig>();
+        assert_eq!(rig.stop, 0.035);
+        assert_eq!(rig.stop_ready, STOP_GAP + 0.035);
+        assert!((rig.slow - (1.6 - (0.25 - 0.035))).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pause_preserves_hitstop_and_slowmo_timers() {
+        let (mut app, _) = feedback_app(false);
+        app.insert_resource(State::new(RunState::Paused));
+        {
+            let mut rig = app.world_mut().resource_mut::<Rig>();
+            rig.hitstop(0.12, Priority::Finale);
+            rig.slowmo(1.6, 0.2, Priority::Finale);
+        }
+        app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs(1));
+        app.update();
+        let rig = app.world().resource::<Rig>();
+        assert_eq!(rig.stop, 0.12);
+        assert_eq!(rig.slow, 1.6);
+        assert_eq!(rig.stop_ready, STOP_GAP + 0.12);
+    }
+
+    #[test]
+    fn crit_and_elite_kill_keep_longest_stop_in_either_order() {
+        let kill = SimEvent::Kill {
+            pos: Vec2::ZERO,
+            kind: 0,
+            rank: Rank::Elite,
+            incoming_dir: Vec2::ZERO,
+            target: lantern_sim::enemies::EnemyHandle::from_raw(0),
+            weapon: None,
+        };
+        for events in [[crit(1000.0), kill], [kill, crit(1000.0)]] {
+            let (mut app, _) = feedback_app(false);
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(33));
+            app.world_mut().resource_mut::<SimOutbox>().0 = events.to_vec();
+            app.update();
+            assert_eq!(app.world().resource::<Rig>().stop, 0.06);
+        }
+    }
+
+    #[test]
+    fn flash_shows_peak_on_event_frame_then_decays_even_at_low_fps() {
+        for dt in [1.0 / 60.0, 1.0 / 30.0, 1.0 / 15.0, 0.2] {
+            for (event, peak) in [
+                (hurt(), 0.18),
+                (SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult }, 0.24),
+            ] {
+                let (mut app, flash) = feedback_app(false);
+                app.world_mut()
+                    .resource_mut::<Time<Real>>()
+                    .advance_by(std::time::Duration::from_secs_f32(dt));
+                app.world_mut().resource_mut::<SimOutbox>().0 = vec![event];
+                app.update();
+                assert_eq!(app.world().get::<Sprite>(flash).unwrap().color.alpha(), peak);
+                app.world_mut().resource_mut::<SimOutbox>().0.clear();
+                app.update();
+                let alpha = app.world().get::<Sprite>(flash).unwrap().color.alpha();
+                assert!((alpha - (peak - dt * 3.0).max(0.0)).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
     fn frame_arbitration_ignores_event_order_and_small_event_count() {
         let small = SimEvent::Strike { pos: Vec2::ZERO, radius: 50.0, fx: StrikeFx::Seal { evolved: true } };
         let climax = SimEvent::BossDefeated { pos: Vec2::ZERO, dawn: true };
         let mut events = vec![small; 500];
         events.push(SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult });
         events.push(climax);
-        let expected = camera_impulse(&[climax], Vec2::X);
-        assert_eq!(camera_impulse(&events, Vec2::X), expected);
+        let expected = camera_impulse(&[climax], Vec2::X, Vec2::ZERO);
+        assert_eq!(camera_impulse(&events, Vec2::X, Vec2::ZERO), expected);
         events.reverse();
-        assert_eq!(camera_impulse(&events, Vec2::X), expected);
-        assert_eq!(camera_impulse(&vec![small; 500], Vec2::X), camera_impulse(&[small], Vec2::X));
+        assert_eq!(camera_impulse(&events, Vec2::X, Vec2::ZERO), expected);
+        assert_eq!(
+            camera_impulse(&vec![small; 500], Vec2::X, Vec2::ZERO),
+            camera_impulse(&[small], Vec2::X, Vec2::ZERO)
+        );
     }
 
     #[test]

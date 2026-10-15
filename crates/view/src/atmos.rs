@@ -5,20 +5,22 @@
 //! - 天明：击败夜主后，光照图的底色在 3 秒内从夜色变成晨光，剩下的妖物化成墨烟
 //!   （docs/GAMEPLAY.md 第 4.2、14 节）。只改画面，模拟照常结束。
 
-use std::f32::consts::TAU;
+use std::f32::consts::{FRAC_PI_3, TAU};
 
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::PrimitiveTopology;
 use bevy::post_process::bloom::Bloom;
 use bevy::post_process::effect_stack::{ChromaticAberration, Vignette};
 use bevy::prelude::*;
 
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{Health, Player, Pos, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Health, Player, Pos, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
 use crate::particles::{INK, Particles};
-use crate::{Feel, MainCamera, layer};
+use crate::{Feel, MainCamera, layer, to_screen};
 
 /// 无尽夜：夜主每退去一次夜色暗多少、最多几层
 const DEPTH_STEP: f32 = 0.06;
@@ -79,6 +81,8 @@ pub(crate) struct Atmos {
     depth: f32,
     /// 上一下挨打来自哪边（模拟坐标里的单位向量，y 向下，和屏幕 UV 一致）；来源就在脚下时为零
     hurt_dir: Vec2,
+    /// 短弧从收到事件时开始计时，首帧保持峰值。
+    hurt_at: Option<f64>,
     heart: f32,
 }
 
@@ -114,6 +118,7 @@ impl Default for Atmos {
             depth: 0.0,
             heart: 0.0,
             hurt_dir: Vec2::ZERO,
+            hurt_at: None,
         }
     }
 }
@@ -121,6 +126,7 @@ impl Default for Atmos {
 pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.hurt = 0.0;
     atmos.hurt_dir = Vec2::ZERO;
+    atmos.hurt_at = None;
     atmos.flare = 0.0;
     atmos.gloom = 0.0;
     atmos.deeper = 0;
@@ -157,22 +163,38 @@ fn vignette_center(dir: Vec2, hurt: f32) -> Vec2 {
     Vec2::splat(0.5) - dir * 0.16 * hurt
 }
 
+/// 模拟坐标里的来袭方向；来源重合时保留无方向冲击。
+pub(crate) fn hurt_from(hero: Vec2, from: Vec2) -> Vec2 {
+    (from - hero).normalize_or_zero()
+}
+
+/// 短弧朝向来袭侧，转到画面坐标后求角度。
+fn hurt_arc_angle(dir: Vec2) -> Option<f32> {
+    (dir != Vec2::ZERO).then(|| {
+        let screen = to_screen(dir);
+        screen.y.atan2(screen.x)
+    })
+}
+
 pub(crate) fn atmos_events(
     outbox: Res<SimOutbox>,
     mut atmos: ResMut<Atmos>,
     mut dawn: ResMut<Dawn>,
     hero: Query<&Pos, With<Player>>,
+    real: Res<Time<Real>>,
 ) {
     for ev in &outbox.0 {
         match ev {
             // 伤害从哪儿来：妖物、弹幕、扇形的顶点、狐火雨的落点（模拟坐标）
             SimEvent::PlayerHurt { from, .. } => {
                 atmos.hurt = 1.0;
-                atmos.hurt_dir = hero.single().map_or(Vec2::ZERO, |p| (*from - p.0).normalize_or_zero());
+                atmos.hurt_dir = hero.single().map_or(Vec2::ZERO, |p| hurt_from(p.0, *from));
+                atmos.hurt_at = Some(real.elapsed_secs_f64());
             }
             SimEvent::Sacrifice { .. } => {
                 atmos.hurt = 1.0;
                 atmos.hurt_dir = Vec2::ZERO;
+                atmos.hurt_at = None;
             }
             SimEvent::BossArrived { .. } => atmos.press(3.0, 0.45),
             // 夜主换阶段：短一些、浅一些，打着仗不能黑太久
@@ -352,6 +374,64 @@ fn smooth(x: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// 独立于装饰特效预算，受伤方向在精简模式下也保留。
+#[derive(Component)]
+pub(crate) struct HurtArc;
+
+pub(crate) fn spawn_hurt_arc(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let mut positions = Vec::new();
+    for i in 0..24 {
+        let a = -FRAC_PI_3 * 0.5 + FRAC_PI_3 * i as f32 / 24.0;
+        let b = -FRAC_PI_3 * 0.5 + FRAC_PI_3 * (i + 1) as f32 / 24.0;
+        let [inner_a, outer_a, inner_b, outer_b] = [
+            Vec2::from_angle(a) * 27.0,
+            Vec2::from_angle(a) * 29.0,
+            Vec2::from_angle(b) * 27.0,
+            Vec2::from_angle(b) * 29.0,
+        ];
+        positions
+            .extend([inner_a, outer_a, outer_b, inner_a, outer_b, inner_b].map(|p| p.extend(0.0).to_array()));
+    }
+    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    commands.spawn((
+        HurtArc,
+        Mesh2d(meshes.add(mesh)),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgba(1.0, 0.3, 0.2, 0.75)))),
+        Transform::default(),
+        Visibility::Hidden,
+        DespawnOnExit(AppState::Run),
+    ));
+}
+
+pub(crate) fn draw_hurt_arc(
+    atmos: Res<Atmos>,
+    real: Res<Time<Real>>,
+    hero: Single<&Transform, With<Player>>,
+    arc: Single<
+        (&mut Transform, &MeshMaterial2d<ColorMaterial>, &mut Visibility),
+        (With<HurtArc>, Without<Player>),
+    >,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let (mut tf, material, mut visibility) = arc.into_inner();
+    let age = atmos.hurt_at.map_or(f64::INFINITY, |at| real.elapsed_secs_f64() - at);
+    let Some(angle) = hurt_arc_angle(atmos.hurt_dir).filter(|_| age < 0.3) else {
+        *visibility = Visibility::Hidden;
+        return;
+    };
+    *visibility = Visibility::Visible;
+    tf.translation = hero.translation.truncate().extend(layer::TELEGRAPH + 1.0);
+    tf.rotation = Quat::from_rotation_z(angle);
+    if let Some(mut material) = materials.get_mut(&material.0) {
+        material.color.set_alpha(0.75 * (1.0 - age as f32 / 0.3).clamp(0.0, 1.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,5 +444,26 @@ mod tests {
         assert!(vignette_center(Vec2::Y, 1.0).y < 0.5);
         // 受伤的一跳退完就回到正中
         assert_eq!(vignette_center(Vec2::X, 0.0), Vec2::splat(0.5));
+    }
+
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
+    #[test]
+    fn hurt_arc_points_to_the_actual_source_in_screen_coordinates() {
+        let hero = Vec2::new(123.0, -456.0);
+        for (offset, angle) in [
+            (Vec2::X, 0.0),
+            (Vec2::Y, -FRAC_PI_2),
+            (Vec2::NEG_X, PI),
+            (Vec2::NEG_Y, FRAC_PI_2),
+            (Vec2::ONE, -FRAC_PI_4),
+            (Vec2::NEG_ONE, 3.0 * FRAC_PI_4),
+        ] {
+            let dir = hurt_from(hero, hero + offset * 37.0);
+            let actual = hurt_arc_angle(dir).unwrap();
+            assert!(Vec2::from_angle(actual).distance(Vec2::from_angle(angle)) < 1e-5);
+            assert!((dir.length() - 1.0).abs() < 1e-5);
+        }
+        assert_eq!(hurt_arc_angle(hurt_from(hero, hero)), None);
     }
 }

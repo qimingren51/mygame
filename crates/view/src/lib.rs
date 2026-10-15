@@ -18,6 +18,7 @@ mod effects;
 mod feedback;
 mod fx;
 mod ground;
+mod hero_feedback;
 mod impact;
 pub mod lighting;
 mod mist;
@@ -69,7 +70,7 @@ pub struct SceneAssets {
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(lighting::LightingPlugin)
+        app.add_plugins((lighting::LightingPlugin, hero_feedback::HeroFeedbackPlugin))
             .insert_resource(ClearColor(NIGHT))
             .insert_resource(AssetRoot(self.asset_root.clone()))
             .init_resource::<actors::Pools>()
@@ -116,6 +117,7 @@ impl Plugin for ViewPlugin {
                     camera::reset_rig,
                     particles::reset_particles,
                     atmos::reset_atmos,
+                    atmos::spawn_hurt_arc,
                 ),
             )
             .add_systems(
@@ -145,6 +147,7 @@ impl Plugin for ViewPlugin {
                         feedback::prepare_feedback,
                         interpolate,
                         actors::animate_hero,
+                        camera::advance_rig_time,
                         camera::camera_events,
                         camera::update_rig,
                         camera::follow_main_camera,
@@ -159,14 +162,14 @@ impl Plugin for ViewPlugin {
                         fx::apply_flash,
                         fx::collect_fx,
                         actors::hero_glow,
+                        hero_feedback::draw,
                         effects::read_events,
                         effects::update_effects,
                     )
                         .chain(),
                     (
                         particles::particle_events,
-                        atmos::atmos_events,
-                        atmos::update_atmos,
+                        (atmos::atmos_events, atmos::draw_hurt_arc, atmos::update_atmos).chain(),
                         mist::update_mist,
                         particles::update_particles,
                         telegraphs::draw,
