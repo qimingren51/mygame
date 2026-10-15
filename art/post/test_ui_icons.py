@@ -4,7 +4,7 @@
 每次运行先重新生成，再单独渲染一遍逐像素比对（确定性）。
 不设 LANTERN_ART_DENSITY 时自动在 1 倍、2 倍各跑一遍（子进程）；设了就只测那一种密度。
 
-前 25 个图标（第一批）必须逐字节不变（OLD_MD5），meta 里它们的条目也不变；第二批与印章追加在后面。
+前 25 个图标（第一批）必须逐字节不变（OLD_MD5；kfix 有意重画的万剑归宗、疾行已换成新 md5），meta 里它们的条目也不变；第二批与印章追加在后面。
 M2.5（第三批，ui_icons_m25.py 与五行反应印）追加在最后；M2.5 之前的全部图标、印章与 meta 条目按 post/golden_m25.json 核对。
 
 用法（在仓库根目录下）：
@@ -112,16 +112,17 @@ def ron_entries(name: str) -> list[dict]:
         out.append({"id": m.group(1), "name": m.group(2), "el": el.group(1).lower() if el else None})
     return out
 
+# kfix（PORTING-NOTES 第 8 节的已知问题）有意重画了万剑归宗 icon_sword_evo、疾行 icon_jixing，这两项换成了新的 md5
 OLD_MD5 = {  # 前 25 个图标在第二批加入之前的 md5（1 倍、2 倍），必须逐字节不变
     "1": {
         "icon_bell.png": "34886ab3d1c1f4c0b548b53255aacf6a", "icon_bell_evo.png": "369f88a9ad6aa71910d981e20ac76b4b", "icon_changming.png": "c9272b2ee0d6ded3f69c8314be914407",
         "icon_crane.png": "91f95f2c0d98c77ad4a6a4227355d43c", "icon_crane_evo.png": "6379ad6d19489958c934f147fa402a0e", "icon_el_earth.png": "4e22db580deb13e7dc5ec2853d383a44",
         "icon_el_fire.png": "5bcfa7e231007743120384ceb469fe92", "icon_el_metal.png": "c95b3f87207e21565af4314497191d0c", "icon_el_water.png": "32cafc3d8fa68e588b6ac152b91d6ef8",
         "icon_el_wood.png": "76af9e9bfbb64654ad1ec36aee7619c6", "icon_houde.png": "65535dbfc1ebfcf6cd78e44451d3fddb", "icon_jianyi.png": "5c7cdc90f626ab4e4385e19aad175938",
-        "icon_jingxin.png": "acb82f974f3176973187def4d917c0aa", "icon_jixing.png": "30cf5fb8e3abee1ae3023789fd4f739f", "icon_lamp.png": "6c2d48a9512c705d99cbcd04d2f2e13c",
+        "icon_jingxin.png": "acb82f974f3176973187def4d917c0aa", "icon_jixing.png": "bf85fd72627c979d071e1778f2a05f6f", "icon_lamp.png": "6c2d48a9512c705d99cbcd04d2f2e13c",
         "icon_lamp_evo.png": "112f67882b358c8911177a07af4b85be", "icon_luxin.png": "87a99a74350088ddb829176482edb2c9", "icon_panshi.png": "8dedb06d621e8ada350e63ba2f1db09b",
         "icon_ruimu.png": "bfc64a6e9ff4086b40a60c87f4d8484b", "icon_seal.png": "a514fd98bb8c7505a706a342f3f36cc9", "icon_seal_evo.png": "b8295c126c1d5ac7e6cf1d81bb5ee922",
-        "icon_sword.png": "93e3fd8d53117e7a3f10fa236d6a95f4", "icon_sword_evo.png": "6c3a2a0c4d776a803297e03b464c6016", "icon_yinhun.png": "191facf0689b12ed12426e2c8485e0d0",
+        "icon_sword.png": "93e3fd8d53117e7a3f10fa236d6a95f4", "icon_sword_evo.png": "aac1a0141261cbfe146d5e60ffb61b3a", "icon_yinhun.png": "191facf0689b12ed12426e2c8485e0d0",
         "icon_zhezhi.png": "7e868917804e8e8498c635fc16580794",
     },
     "2": {
@@ -129,10 +130,10 @@ OLD_MD5 = {  # 前 25 个图标在第二批加入之前的 md5（1 倍、2 倍�
         "icon_crane.png": "5e27f4a9534bfb6903b5376568ab5064", "icon_crane_evo.png": "6caa37a65add78084d74d1f7c263aa0f", "icon_el_earth.png": "c32a568055b1cfc654b6cea301be2930",
         "icon_el_fire.png": "7acaaa9fad7e2b94e6adc678f1593812", "icon_el_metal.png": "94291526968c85fad06df3fdc9caeab4", "icon_el_water.png": "405c9d795d03a39a87d01334e8d28410",
         "icon_el_wood.png": "b90e7643a4375e323218bcd0d5e4e66e", "icon_houde.png": "9556de568dafdc34c20765e3a72871dc", "icon_jianyi.png": "1eedbcc7ac6b41f32b3daab523ed286f",
-        "icon_jingxin.png": "27405d77ef86f61a4477f87463eab126", "icon_jixing.png": "6114687594a049f0e4cfd5eaa78f547c", "icon_lamp.png": "6e1f745dbb5f83cf68198cec575b526c",
+        "icon_jingxin.png": "27405d77ef86f61a4477f87463eab126", "icon_jixing.png": "ee4c030296250f0057b634d78002a77c", "icon_lamp.png": "6e1f745dbb5f83cf68198cec575b526c",
         "icon_lamp_evo.png": "f936479b00bd4b6c1c25be7186244157", "icon_luxin.png": "c4ee4753720d6ca9cf8545cffe9ebff2", "icon_panshi.png": "c3f275c946c7c4c26270ad41fd9eba16",
         "icon_ruimu.png": "9bb23093ee6ce2320a98e9c90ffa90d4", "icon_seal.png": "3c4709433598ace102d5cf5cb90cfb23", "icon_seal_evo.png": "61bb26e43e95b258bab537ce7ac09242",
-        "icon_sword.png": "ff1f5ca80e0f3a87debf8dec2afb8d0d", "icon_sword_evo.png": "ac0c9985a6a867500fc8558750068923", "icon_yinhun.png": "30082822154d8db6ae225979569dcf48",
+        "icon_sword.png": "ff1f5ca80e0f3a87debf8dec2afb8d0d", "icon_sword_evo.png": "b208f432f29eba06f9b78f015b1b7cf0", "icon_yinhun.png": "30082822154d8db6ae225979569dcf48",
         "icon_zhezhi.png": "72ad815804e033e9d9e641c5f119b653",
     },
 }

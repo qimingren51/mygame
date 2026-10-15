@@ -478,20 +478,18 @@ def em_sword(P, evo):
     if not evo:
         paint_sword(P, Fr(31.0, 33.0, -45.0, 1.0))
         return
-    # 万剑归宗：三把剑剑尖汇向右上一点，金光放射
-    T = np.array([45.5, 18.5])
-    for k in range(10):
-        a = 2 * math.pi * k / 10 + 0.2
-        r0, r1 = 2.2, 5.2 + 1.5 * (k % 2)
-        stroke(P, W.seg_pts(T + r0 * np.array([math.cos(a), math.sin(a)]), T + r1 * np.array([math.cos(a), math.sin(a)]), n=10), 0.42, TENG, 0.9)
-    glow(P, T[0], T[1], 6.0, mixc(TENG, WHITE, 0.5), 0.6)
-    for ang, sc, tip in ((-79.0, 0.56, T + [-2.2, -0.6]), (-11.0, 0.56, T + [0.6, 2.2])):
+    # 万剑归宗：三把剑排成扇面，剑尖齐齐汇向上方一点，汇处一团金光（只三把，汇聚一眼看得出）
+    T = np.array([32.0, 11.8])
+    glow(P, T[0], T[1] + 1.0, 8.0, mixc(TENG, WHITE, 0.45), 0.75)
+    for ang, sc, tip in ((-56.0, 0.74, T + [-1.6, 2.4]), (-124.0, 0.74, T + [1.6, 2.4])):
         a = math.radians(ang)
         o = tip - 21.5 * sc * np.array([math.cos(a), math.sin(a)])
         paint_sword(P, Fr(o[0], o[1], ang, sc), evo=True, tassel=False)
-    a = math.radians(-45.0)
-    o = T - 21.5 * 0.95 * np.array([math.cos(a), math.sin(a)])
-    paint_sword(P, Fr(o[0], o[1], -45.0, 0.95), evo=True)
+    a = math.radians(-90.0)
+    o = T - 21.5 * 0.96 * np.array([math.cos(a), math.sin(a)])
+    paint_sword(P, Fr(o[0], o[1], -90.0, 0.96), evo=True)
+    sparkle(P, T[0], T[1] - 0.6, 4.6, mixc(TENG, WHITE, 0.25), 0.62)
+    P.dot(T[0], T[1] - 0.6, 1.0, WHITE)
 
 
 def em_bell(P, evo):
@@ -719,23 +717,42 @@ def em_zhezhi(P, evo):
     stroke(P, fr(W.seg_pts(e1, e2, n=20)), 0.6, INK_LINE)
 
 
+def cloud_curl(cx, cy, r0, r1, th0, turn, n=90):
+    """云头的卷：从 th0（弧度）起顺时针卷进去，半径由 r0 收到 r1。"""
+    th = th0 + np.linspace(0.0, turn, n)
+    r = r0 + (r1 - r0) * np.linspace(0.0, 1.0, n) ** 0.9
+    return np.stack([cx + r * np.cos(th), cy + r * np.sin(th)], -1)
+
+
 def em_jixing(P, evo):
-    """疾行：一朵祥云（三团云头，白底墨勾，主云头里一个卷），左边拖出几道疾风。"""
-    puffs = ((38.0, 27.5, 8.2), (28.5, 31.5, 6.2), (46.0, 33.5, 5.2), (36.5, 35.5, 6.0))
-    for (x, y, r) in puffs:
-        d, t = P.sdf(W.ellipse_pts(x + 0.8, y + 1.0, r, r * 0.9, 48))
-        P.fill(d, JIAO, 0.15)
-    for (x, y, r) in puffs:
-        d, t = P.sdf(W.wobble(W.ellipse_pts(x, y, r, r * 0.9, 48), P.rng, 0.05, spacing=0.3))
-        P.fill(d, shade_lr(P, 20, 52, mixc(PAPER, WHITE, 0.8), mixc(PAPER, QING, 0.35)), pool=0.25, pool_rgb=QING, pool_w=0.8)
-        P.outline(d, t, 1.15, INK_LINE, jitter=0.2)
-    cx, cy = 38.0, 27.5
-    th = np.linspace(0.0, 1.6 * math.pi, 80)
-    r = 1.0 + 4.6 * th / th[-1]
-    spiral = np.stack([cx + r * np.cos(th + 1.2), cy + 0.9 * r * np.sin(th + 1.2)], -1)
-    stroke(P, spiral, np.interp(np.linspace(0, 1, 80), [0, 0.3, 1.0], [0.4, 0.9, 1.0]), INK_LINE)
-    for (x0, y0, L, rgb) in ((9.5, 38.0, 16.0, EL_INK["wood"]), (12.5, 43.0, 14.0, NONG), (15.0, 29.0, 9.0, ZHONG), (14.0, 47.5, 9.0, EL_INK["wood"])):
-        stroke(P, V.bezier([(x0, y0), (x0 + L / 2, y0 - 0.5), (x0 + L, y0 - 1.2)], 30), 1.15 * W.brush_profile(30, 0.2, 1.0, 0.0)[::-1], rgb, 0.95, dry=0.45, dry_start=0.0)
+    """疾行：一缕被风扯开的水墨云气——右边一个浓墨卷成的云头，淡墨的云身往左拖成长尾、尾上飞白，
+    下面再跟一小卷云和一道石绿的疾风，整团往右赶。"""
+    # 云身：淡墨晕开的一片，右头圆、左尾尖
+    body = W.catmull_closed([(11.0, 33.6), (20.0, 29.4), (30.0, 25.6), (38.5, 22.6), (45.5, 23.8), (49.2, 29.6), (47.2, 35.6),
+                             (41.0, 38.0), (33.0, 37.2), (24.0, 36.6), (16.5, 35.6)], 8)
+    d, _ = P.sdf(W.wobble(body, P.rng, 0.25, spacing=0.3))
+    n = V.noise1(P.rng, P.X.shape, 2.2 * P.ss)
+    k = np.clip(0.55 + 0.25 * n, 0, 1) * smoothstep(8.0, 30.0, P.X)  # 越往尾巴越淡
+    wash = mixc(mixc(DAN, ZHONG, 0.3), QING, 0.25)
+    P.lay.over(wash, smoothstep(0.9, -1.4, d) * (0.3 + 0.55 * k))
+    P.lay.over(mixc(wash, ZHONG, 0.5), 0.55 * np.exp(np.minimum(d, 0.0) / 0.9) * (d < 0.6) * k)  # 水痕：边上积一道
+    # 主笔：云头卷心起笔，卷出来顺势往左一扫，尾梢飞白（笔是倒着写的：越往尾越干）
+    tail = V.bezier([(9.5, 34.6), (21.0, 31.0), (31.0, 22.6), (41.0, 22.8)], 70)
+    curl = cloud_curl(41.6, 29.6, 6.8, 1.6, math.radians(-95.0), math.radians(320.0))
+    path = V.arc_resample(np.vstack([tail, curl[1:]]), 200)[::-1]
+    tt = np.linspace(0, 1, len(path))
+    hw = np.interp(tt, [0.0, 0.25, 0.58, 0.82, 1.0], [0.55, 2.0, 2.5, 1.3, 0.25])
+    stroke(P, path, hw, JIAO, 1.0, dry=0.5, dry_start=0.5, jitter=0.06)
+    # 小卷云：左下跟着一个小的，尾巴也往左拖
+    tail2 = V.bezier([(12.5, 41.6), (20.0, 41.8), (25.0, 37.2), (29.6, 37.0)], 50)
+    curl2 = cloud_curl(29.8, 40.6, 3.6, 1.0, math.radians(-92.0), math.radians(300.0), n=60)
+    path2 = V.arc_resample(np.vstack([tail2, curl2[1:]]), 120)[::-1]
+    t2 = np.linspace(0, 1, len(path2))
+    stroke(P, path2, np.interp(t2, [0.0, 0.4, 0.75, 1.0], [0.45, 1.5, 0.9, 0.2]), mixc(NONG, ZHONG, 0.3), 0.95, dry=0.5, dry_start=0.45)
+    # 疾风：石绿的两道干笔，前头（右）粗、往左拖细、越拖越干
+    for (x0, y0, L, al) in ((14.0, 47.6, 27.0, 0.95), (36.0, 44.4, 12.0, 0.8)):
+        pts = V.bezier([(x0 + L, y0 - 1.3), (x0 + L / 2, y0 - 0.4), (x0, y0)], 40)
+        stroke(P, pts, 1.25 * W.brush_profile(40, 1.0, 0.2, 0.0), EL_INK["wood"], al, dry=0.45, dry_start=0.2)
 
 
 def _old_jixing(P, evo):
@@ -915,6 +932,27 @@ FOX_STOPS = [
 
 def lum3(rgb):
     return np.asarray(rgb)[..., :3] @ np.array([0.299, 0.587, 0.114])
+
+
+SOUL_RIM = mixc(mixc(HUAQING, JIAO, 0.45), QING, 0.2)  # 魂火在纸上的描边：冷的淡墨蓝
+
+
+def soul_wisp(P, ctrl, rb):
+    """一团魂火（同游戏里的魂火：小泪滴形的冷白鬼火，圆头是亮核，尾巴细长、末梢一甩）。
+    ctrl 是从圆头中心到尾梢的贝塞尔控制点（尾巴就是它飞来的路），rb 是圆头半径。"""
+    pts = np.asarray(ctrl, dtype=np.float64)
+    path = V.bezier(pts, 40)
+    h = pts[0]
+    u = pts[0] - pts[1]
+    u = u / np.hypot(*u)  # 圆头朝着的方向
+    tt = np.linspace(0, 1, 40)
+    hw = rb * np.interp(tt, [0.0, 0.18, 0.6, 1.0], [1.0, 0.78, 0.36, 0.06])
+    g = path[8]
+    glow(P, g[0], g[1], 2.4 * rb + 2.5, mixc(SOUL, PAPER, 0.25), 0.55)
+    stroke(P, path, hw + 0.7, SOUL_RIM, 0.95, jitter=0.04)
+    stroke(P, path, hw, mixc(SOUL, WHITE, 0.2), 1.0, jitter=0.04)
+    stroke(P, path[:22], hw[:22] * 0.42, mixc(SOUL, WHITE, 0.75), 0.9, jitter=0.0)
+    P.dot(h[0] + u[0] * 0.2 * rb, h[1] + u[1] * 0.2 * rb, 0.62 * rb, WHITE, 0.95)
 
 
 def sparkle(P: W.Painter, x, y, L, rgb=TENG, hw=0.5, alpha=1.0):
@@ -1345,27 +1383,23 @@ def em_buff_swift(P):
 
 
 def em_buff_soul(P):
-    """聚魂：三缕魂火从三面旋着聚向当中一团白亮的魂光。"""
-    tq = ACC_INK["soul"]
-    tq_d = mixc(tq, mixc(HUAQING, JIAO, 0.4), 0.55)
-    cx, cy = 32.0, 32.5
-    glow(P, cx, cy, 14.0, mixc(SOUL, PAPER, 0.3), 0.85)
-    for (x, y, r) in ((14.5, 25.0, 0.8), (48.5, 21.0, 0.7), (46.0, 46.0, 0.9), (19.0, 44.5, 0.6), (31.0, 12.0, 0.6)):
-        P.dot(x, y, r + 0.45, tq_d)
-        P.dot(x, y, r, mixc(SOUL, WHITE, 0.4))
-    for (a_deg, sc, sweep) in ((-100.0, 1.15, 1.25), (30.0, 0.9, 1.5), (140.0, 0.75, 1.1)):
-        a0 = math.radians(a_deg)
-        js = np.linspace(0, 1, 40)
-        ang = a0 + sweep * js
-        rad = 7.5 + (9.0 + 4.0 * sc) * js
-        path = np.stack([cx + rad * np.cos(ang), cy + rad * np.sin(ang)], -1)
-        hw = sc * np.interp(js, [0.0, 0.12, 0.35, 1.0], [2.2, 3.4, 2.4, 0.2])
-        stroke(P, path, hw + 0.75, tq_d, jitter=0.03)
-        stroke(P, path, hw, mixc(tq, WHITE, 0.25), jitter=0.03)
-        stroke(P, path[:12], hw[:12] * 0.5, mixc(SOUL, WHITE, 0.5), 0.9)
-        P.dot(path[3, 0], path[3, 1], 1.3 * sc, WHITE, 0.95)
-    shape(P, W.ellipse_pts(cx, cy, 4.6, 4.6, 40), mixc(SOUL, WHITE, 0.5), ol=0.9, ol_rgb=tq_d, pool=0.35, pool_rgb=tq, mottle=0.0)
-    P.dot(cx - 0.8, cy - 0.8, 1.6, WHITE)
+    """摄物（网页版旧名聚魂，meta 的 name 仍沿用）：魂火和铜钱从左边远处被一股劲吸过来，都朝右边一点飞、汇成一束，
+    那一点是一团冷白的光（径直飞来，不打旋，不像风车）。"""
+    cx, cy = 41.5, 31.5
+    glow(P, cx, cy, 12.0, mixc(SOUL, PAPER, 0.3), 0.9)
+    tq_d = mixc(ACC_INK["soul"], mixc(HUAQING, JIAO, 0.4), 0.55)
+    # 吸力：上下两道淡的弧线收向那一点
+    for (y0, bend) in ((19.0, -2.0), (44.0, 2.0)):
+        pts = V.bezier([(12.5, y0), (26.0, y0 + bend * 0.4 + (cy - y0) * 0.25), (36.0, cy + (y0 - cy) * 0.22), (cx - 3.0, cy + (y0 - cy) * 0.08)], 40)
+        stroke(P, pts, 0.6 * W.brush_profile(40, 0.2, 0.6, 0.0), mixc(tq_d, PAPER, 0.35), 0.7, dry=0.35, dry_start=0.0)
+    for (x, y, r) in ((20.0, 24.0, 3.4), (21.5, 40.5, 3.0)):
+        coin(P, x, y, r, ol=0.8)
+    for ctrl, rb in ((((33.0, 31.6), (27.0, 31.8), (22.0, 30.2), (15.5, 31.4)), 3.0),
+                     (((34.6, 24.8), (30.6, 22.6), (28.4, 18.6), (24.6, 17.0)), 2.2),
+                     (((34.2, 38.4), (30.4, 40.6), (28.8, 44.4), (25.0, 45.6)), 2.0)):
+        soul_wisp(P, ctrl, rb)
+    shape(P, W.ellipse_pts(cx, cy, 3.8, 3.8, 40), mixc(SOUL, WHITE, 0.5), ol=0.85, ol_rgb=SOUL_RIM, pool=0.35, pool_rgb=mixc(SOUL, HUAQING, 0.4), mottle=0.0)
+    P.dot(cx - 0.8, cy - 0.8, 1.3, WHITE)
 
 
 def em_buff_iron(P):
@@ -1616,17 +1650,17 @@ def em_hud_pause(P):
 
 
 def em_hud_dash(P):
-    """闪：一只快靴向前一蹬，身后三道疾痕、几点扬尘。"""
-    for (y, x0, x1, hwm, rgb) in ((26.0, 13.0, 29.0, 1.3, ZHONG), (33.0, 10.5, 28.0, 1.8, NONG), (40.0, 14.0, 27.0, 1.2, ZHONG)):
-        stroke(P, W.seg_pts((x0, y), (x1, y - 0.6), n=40), hwm * np.linspace(0.1, 1.0, 40) ** 0.7, rgb, 0.95, dry=0.4, dry_start=0.0)
-    fr = Fr(28.5, 42.5, -12.0, 1.0)
+    """闪：一只大大的浓墨快靴向前一蹬（剪影要在 24 像素下认得出），靴口一道朱砂，身后两道粗的疾痕。"""
+    for (y, x0, x1, hwm) in ((28.0, 7.5, 25.0, 2.3), (37.0, 9.0, 24.0, 2.0)):
+        stroke(P, W.seg_pts((x1, y - 0.5), (x0, y), n=40), hwm * W.brush_profile(40, 1.0, 0.1, 0.0), mixc(NONG, JIAO, 0.3), 0.95, jitter=0.1)
+    fr = Fr(25.5, 45.0, -14.0, 1.2)
     boot = [(0.0, 0.0), (-0.2, -9.0), (-1.0, -17.5), (7.0, -18.5), (8.0, -9.5), (13.5, -7.0), (18.0, -5.0), (20.5, -2.0), (19.0, 0.2)]
     sil = fr(W.catmull_closed(boot, 5))
     _, Vv = fr.uv(P)
-    _, m = shape(P, sil, mixc(mixc(NONG, ZHONG, 0.5), JIAO, smoothstep(-18.0, 0.0, Vv) * 0.6), ol=OL, ol_rgb=JIAO, pool=0.25, pool_rgb=JIAO, mottle=0.05)
-    stroke(P, fr(V.bezier([(0.5, -0.4), (10.0, 0.6), (19.0, -0.4)], 30)), 1.0, mixc(PAPER, WHITE, 0.5), 1.0, clip=m)
-    stroke(P, fr(W.seg_pts((-0.8, -15.5), (7.3, -16.4), n=20)), 0.9, ZHUSHA, 1.0, clip=m)
-    for (x, y, r, al) in ((26.0, 44.5, 1.7, 0.6), (21.5, 46.0, 1.3, 0.5), (17.5, 44.0, 0.9, 0.4)):
+    _, m = shape(P, sil, mixc(mixc(NONG, JIAO, 0.5), JIAO, smoothstep(-18.0, 0.0, Vv) * 0.7), ol=OL * 1.2, ol_rgb=JIAO, pool=0.3, pool_rgb=JIAO, mottle=0.04)
+    stroke(P, fr(V.bezier([(1.0, -1.2), (10.0, -0.4), (18.5, -1.4)], 30)), 0.75, mixc(ZHONG, DAN, 0.4), 0.9, clip=m)
+    stroke(P, fr(W.seg_pts((-0.6, -15.2), (7.4, -16.2), n=20)), 1.25, ZHUSHA, 1.0, clip=m)
+    for (x, y, r, al) in ((21.0, 46.5, 1.6, 0.55), (16.5, 45.2, 1.1, 0.45)):
         P.dot(x, y, r, DAN, al)
 
 

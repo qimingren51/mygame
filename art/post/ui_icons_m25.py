@@ -154,36 +154,39 @@ def em_hanyi(P):
 
 
 def em_dengxin(P):
-    """灯芯：地上一盏小油灯（灯芯上一朵火），照亮脚下一圈（照见圈，俯看是扁圆），圈边上立着一圈灯焰。"""
-    cx, cy, rx, ry = 32.0, 38.5, 16.5, 8.6
-    pts = [(cx + rx * math.cos(a), cy + ry * math.sin(a), a) for a in np.linspace(0, 2 * math.pi, 14, endpoint=False) + 0.11]
-    back = [p for p in pts if math.sin(p[2]) < 0.0]
-    front = [p for p in pts if math.sin(p[2]) >= 0.0]
-
-    def tongues(group, k0):
-        for i, (x, y, a) in enumerate(sorted(group, key=lambda q: q[1])):
-            depth = 0.5 + 0.5 * math.sin(a)  # 0 后、1 前
-            h = (8.0 + 3.5 * depth) * (1.0 if (i + k0) % 2 == 0 else 0.78)
-            flame(P, x, y + 0.8, h, 2.1 + 0.9 * depth, lean=0.35 * math.cos(a), ol=0.6, core=depth > 0.4)
-
-    tongues(back, 0)
-    # 照见圈：暖白的地面，边上一道朱砂兑藤黄的焰带
-    dd = np.hypot((P.X - cx) / rx, (P.Y - cy) / ry)
-    P.lay.over(mixc(mixc(col(S.LANTERN_LIGHT), WHITE, 0.35), PAPER, 0.25), 0.9 * smoothstep(1.02, 0.6, dd))
-    ring = W.ellipse_pts(cx, cy, rx, ry, 160)
-    stroke(P, V.arc_resample(np.vstack([ring, ring[:1]]), 240), 1.0, mixc(ZHUSHA, TENG, 0.3), 1.0)
-    # 灯盏：浅碟、碟沿一道金、灯芯斜搭在碟沿
-    lx, ly = cx, cy - 2.5
-    bronze = mixc(mixc(ZHESHI, NONG, 0.35), SHILV, 0.12)
-    P.dot(lx + 0.5, ly + 5.6, 5.5, JIAO, 0.25, ry=1.4)
-    dish = W.catmull_closed([(lx - 7.0, ly), (lx + 7.0, ly), (lx + 4.5, ly + 3.4), (lx, ly + 4.1), (lx - 4.5, ly + 3.4)], 8)
-    shape(P, dish, shade_lr(P, lx - 7, lx + 7, mixc(bronze, GOLD_HI, 0.35), mixc(bronze, JIAO, 0.35)), ol=1.0, pool=0.3)
-    shape(P, W.ellipse_pts(lx, ly, 6.8, 1.3, 40), mixc(TENG, ZHESHI, 0.45), ol=0.6, ol_rgb=mixc(GOLD_DK, JIAO, 0.4), pool=0.2, wob=0.02)
-    shape(P, [(lx - 1.8, ly + 3.9), (lx + 1.8, ly + 3.9), (lx + 2.9, ly + 5.8), (lx - 2.9, ly + 5.8)], mixc(bronze, JIAO, 0.25), ol=0.7, wob=0.02)
-    stroke(P, V.bezier([(lx - 2.8, ly + 0.4), (lx - 0.5, ly - 1.4), (lx + 1.2, ly - 3.0)], 16), 0.6, JIAO)
-    glow(P, lx + 1.2, ly - 8.0, 6.0, mixc(TENG, WHITE, 0.4), 0.8)
-    flame(P, lx + 1.2, ly - 2.8, 11.5, 3.5, lean=0.4, ol=0.75)
-    tongues(front, 1)
+    """灯芯：一盏高足油灯——灯盏里一汪油、一根灯芯搭出盏沿，芯上一朵又高又静的火苗；灯脚下淡淡一圈暖光（照见圈）。"""
+    fx, fb, fh, fw = 33.0, 26.4, 18.0, 3.9  # 火苗：底中点、高、最宽处的半宽
+    glow(P, fx, fb - 7.5, 15.0, mixc(TENG, PAPER, 0.3), 0.6)
+    # 照见圈：灯脚下一圈淡淡的暖光
+    dd = np.hypot((P.X - 32.0) / 16.0, (P.Y - 48.0) / 4.2)
+    P.lay.over(mixc(mixc(col(S.LANTERN_LIGHT), WHITE, 0.3), PAPER, 0.3), 0.75 * smoothstep(1.0, 0.45, dd))
+    stroke(P, V.bezier([(17.5, 49.2), (32.0, 52.6), (46.5, 49.2)], 40), 0.55 * W.brush_profile(40, 0.4, 0.4), mixc(ZHUSHA, TENG, 0.35), 0.8)
+    bronze = mixc(mixc(ZHESHI, NONG, 0.45), SHILV, 0.1)
+    b_hi, b_lo = mixc(bronze, GOLD_HI, 0.35), mixc(bronze, JIAO, 0.45)
+    ol_c = mixc(GOLD_DK, JIAO, 0.55)
+    # 灯脚、灯柱（中间一个节）、托盘
+    foot = W.catmull_closed([(24.0, 48.6), (26.0, 45.4), (30.6, 44.0), (33.4, 44.0), (38.0, 45.4), (40.0, 48.6), (32.0, 49.6)], 8)
+    shape(P, foot, shade_lr(P, 24, 40, b_hi, b_lo), ol=1.1, ol_rgb=ol_c, pool=0.3, pool_rgb=JIAO)
+    shape(P, [(30.9, 32.5), (33.1, 32.5), (33.5, 44.6), (30.5, 44.6)], shade_lr(P, 30.5, 33.5, b_hi, b_lo), ol=0.9, ol_rgb=ol_c, pool=0.2, wob=0.02)
+    shape(P, W.ellipse_pts(32.0, 39.0, 3.2, 1.5, 30), shade_lr(P, 29, 35, b_hi, b_lo), ol=0.8, ol_rgb=ol_c, pool=0.25, wob=0.02)
+    # 灯盏：浅碗，盏沿一道金，里面一汪油
+    dish = W.catmull_closed([(20.5, 28.6), (43.5, 28.6), (41.0, 31.6), (36.0, 33.4), (28.0, 33.4), (23.0, 31.6)], 8)
+    shape(P, dish, shade_lr(P, 21, 43, b_hi, b_lo), ol=1.15, ol_rgb=ol_c, pool=0.3, pool_rgb=JIAO)
+    shape(P, W.ellipse_pts(32.0, 28.6, 11.4, 1.9, 48), mixc(TENG, ZHESHI, 0.4), ol=0.7, ol_rgb=ol_c, pool=0.2, wob=0.02)
+    shape(P, W.ellipse_pts(31.5, 28.8, 9.4, 1.15, 40), mixc(mixc(ZHESHI, TENG, 0.35), JIAO, 0.25), ol=0.0, pool=0.3, pool_rgb=mixc(ZHESHI, JIAO, 0.5), mottle=0.0, wob=0.0)
+    # 灯芯：一截棉芯泡在油里，头搭出来，烧黑的芯头伸进火苗底
+    stroke(P, V.bezier([(24.5, 29.2), (29.0, 29.6), (32.0, 28.6), (fx, fb + 0.3)], 24), 0.75 * W.brush_profile(24, 0.6, 0.7, 0.0), mixc(W_ZHESHI, PAPER, 0.3), 0.95)
+    stroke(P, V.bezier([(31.0, 28.9), (32.2, 28.0), (fx, fb - 1.4)], 12), 0.55, JIAO)
+    # 火苗：上尖下圆的一滴，直直往上、不摇，外朱砂、里藤黄、芯近白；底下一点暗（贴着芯头）
+    ctrl = [(fx, fb), (fx + 0.72 * fw, fb - 0.07 * fh), (fx + fw, fb - 0.24 * fh), (fx + 0.82 * fw, fb - 0.45 * fh),
+            (fx + 0.4 * fw, fb - 0.72 * fh), (fx, fb - fh), (fx - 0.4 * fw, fb - 0.72 * fh), (fx - 0.82 * fw, fb - 0.45 * fh),
+            (fx - fw, fb - 0.24 * fh), (fx - 0.72 * fw, fb - 0.07 * fh)]
+    heat = np.exp(-(((P.X - fx) / (0.9 * fw)) ** 2 + ((P.Y - (fb - 0.3 * fh)) / (0.42 * fh)) ** 2))
+    _, m = shape(P, W.catmull_closed(ctrl, 8), V.ramp(np.clip(0.15 + heat, 0, 1), V.FLAME_STOPS), ol=0.8, ol_rgb=mixc(ZHUSHA, JIAO, 0.5),
+                 pool=0.3, pool_rgb=ZHUSHA, mottle=0.0, wob=0.02)
+    core = [(fx, fb - 1.6), (fx + 0.42 * fw, fb - 0.2 * fh), (fx + 0.3 * fw, fb - 0.42 * fh), (fx, fb - 0.62 * fh), (fx - 0.3 * fw, fb - 0.42 * fh), (fx - 0.42 * fw, fb - 0.2 * fh)]
+    shape(P, W.catmull_closed(core, 8), mixc(TENG, WHITE, 0.7), ol=0, pool=0.3, pool_rgb=TENG, mottle=0.0, wob=0.0)
+    P.dot(fx, fb - 1.0, 1.0, mixc(ZHUSHA_DK, JIAO, 0.4), 0.8, ry=0.8, clip=m)
 
 
 def em_zaiwu(P):
@@ -266,38 +269,36 @@ def em_qinggong(P):
         stroke(P, W.seg_pts((x, y), (x + L, y - 0.6), n=20), 0.7 * np.linspace(0.2, 1.0, 20), ZHONG, 0.7, dry=0.4, dry_start=0.0)
 
 
+SOUL_RIM, soul_wisp = U.SOUL_RIM, U.soul_wisp  # 魂火（ui_icons 里的那一份，古灯增益“摄物”也用）
+
+
 def em_juhun(P):
-    """聚魂：一只青瓷魂瓶，三团魂火从上方旋落进瓶口，瓶口透出青光。"""
-    tq = U.ACC_INK["soul"]
-    tq_d = mixc(tq, mixc(HUAQING, JIAO, 0.4), 0.55)
-    glow(P, 32.0, 27.0, 13.0, mixc(SOUL, PAPER, 0.35), 0.6)
+    """聚魂：一只青瓷魂瓶，几团魂火从左右两边横着飞来、拖着细尾聚进瓶口（不是从瓶里冒出来），瓶口透出冷光。"""
     cel = mixc(mixc(W_SHILV, PAPER, 0.35), QING, 0.15)
     cel_d = mixc(mixc(SHILV, HUAQING, 0.4), ZHONG, 0.35)
-    body = W.catmull_closed([(27.0, 30.5), (21.0, 34.0), (19.0, 40.0), (21.5, 46.0), (26.0, 49.5), (38.0, 49.5), (42.5, 46.0), (45.0, 40.0), (43.0, 34.0), (37.0, 30.5)], 8)
+    ol_c = mixc(SHILV, JIAO, 0.7)
+    dy = 4.0  # 瓶子整体下移，瓶口落在圆心附近
+    body = W.catmull_closed([(27.0, 30.5 + dy), (21.5, 34.0 + dy), (19.5, 40.0 + dy), (22.0, 45.5 + dy), (26.5, 48.5 + dy), (37.5, 48.5 + dy), (42.0, 45.5 + dy), (44.5, 40.0 + dy), (42.5, 34.0 + dy), (37.0, 30.5 + dy)], 8)
     rgb = shade_lr(P, 19.0, 45.0, mixc(cel, WHITE, 0.3), cel_d)
-    _, m = shape(P, body, rgb, ol=OL, ol_rgb=mixc(SHILV, JIAO, 0.7), pool=0.3, pool_rgb=cel_d, mottle=0.05, mottle_rgb=cel_d)
-    for y in (37.0, 39.0):
+    _, m = shape(P, body, rgb, ol=OL, ol_rgb=ol_c, pool=0.3, pool_rgb=cel_d, mottle=0.05, mottle_rgb=cel_d)
+    for y in (37.0 + dy, 39.0 + dy):
         stroke(P, V.bezier([(19.5, y), (32.0, y + 2.0), (44.5, y)], 30), 0.35, mixc(SHILV, JIAO, 0.45), 0.7, clip=m)
-    for x in np.arange(23.0, 43.0, 3.2):
-        P.dot(x, 42.6 + 0.4 * math.sin(x), 0.45, mixc(SHILV, JIAO, 0.4), 0.7, clip=m)
-    stroke(P, V.bezier([(22.5, 36.0), (21.5, 41.0), (24.0, 46.0)], 20), 0.8 * W.brush_profile(20, 0.4, 0.3), WHITE, 0.75, clip=m)
-    neck = [(27.5, 26.5), (36.5, 26.5), (37.5, 31.0), (26.5, 31.0)]
-    shape(P, neck, shade_lr(P, 26.0, 38.0, cel, cel_d), ol=1.0, ol_rgb=mixc(SHILV, JIAO, 0.7), pool=0.25, pool_rgb=cel_d)
-    shape(P, W.ellipse_pts(32.0, 26.3, 6.6, 1.9, 40), mixc(cel, WHITE, 0.2), ol=0.9, ol_rgb=mixc(SHILV, JIAO, 0.7), pool=0.2, wob=0.02)
-    shape(P, W.ellipse_pts(32.0, 26.4, 4.4, 1.1, 30), mixc(tq, WHITE, 0.45), ol=0.0, pool=0.4, pool_rgb=tq, mottle=0.0, wob=0.0)
-    for (hx, hy, sc, sweep) in ((22.5, 18.5, 0.95, 2.6), (32.5, 13.5, 1.05, 2.2), (42.0, 18.0, 0.95, 2.6)):
-        # 魂火：圆头朝瓶口，火舌尾巴甩向外上方，头前一道淡淡的去路
-        dx, dy = 32.0 - hx, 25.0 - hy
-        L = math.hypot(dx, dy)
-        ux, uy = dx / L, dy / L
-        tail = [(hx, hy), (hx - ux * 4.0 - uy * sweep * 2.0, hy - uy * 4.0 + ux * sweep * 2.0), (hx - ux * 9.0 + uy * sweep * 1.2, hy - uy * 9.0 - ux * sweep * 1.2)]
-        path = V.bezier(tail, 30)
-        hw = sc * np.interp(np.linspace(0, 1, 30), [0.0, 0.25, 1.0], [3.6, 2.8, 0.25])
-        stroke(P, path, hw + 0.75, tq_d)
-        stroke(P, path, hw, mixc(tq, WHITE, 0.3))
-        stroke(P, path[:10], hw[:10] * 0.45, mixc(SOUL, WHITE, 0.6), 0.9)
-        P.dot(hx + ux * 0.6, hy + uy * 0.6, 1.5 * sc, WHITE, 0.95)
-        stroke(P, W.seg_pts((hx + ux * 3.5, hy + uy * 3.5), (hx + ux * 7.0, hy + uy * 7.0), n=12), np.linspace(0.12, 0.5, 12), mixc(tq, WHITE, 0.2), 0.6)
+    stroke(P, V.bezier([(22.8, 36.0 + dy), (21.8, 41.0 + dy), (24.2, 45.5 + dy)], 20), 0.8 * W.brush_profile(20, 0.4, 0.3), WHITE, 0.75, clip=m)
+    neck = [(27.5, 26.5 + dy), (36.5, 26.5 + dy), (37.5, 31.0 + dy), (26.5, 31.0 + dy)]
+    shape(P, neck, shade_lr(P, 26.0, 38.0, cel, cel_d), ol=1.0, ol_rgb=ol_c, pool=0.25, pool_rgb=cel_d)
+    mx, my = 32.0, 26.3 + dy
+    shape(P, W.ellipse_pts(mx, my, 6.6, 1.9, 40), mixc(cel, WHITE, 0.2), ol=0.9, ol_rgb=ol_c, pool=0.2, wob=0.02)
+    glow(P, mx, my - 0.5, 7.5, mixc(SOUL, WHITE, 0.3), 0.75)
+    shape(P, W.ellipse_pts(mx, my + 0.1, 4.4, 1.1, 30), mixc(SOUL, WHITE, 0.55), ol=0.0, pool=0.4, pool_rgb=mixc(SOUL, HUAQING, 0.4), mottle=0.0, wob=0.0)
+    # 魂火：左右各一团大的、上方两侧各一团小的，圆头都朝着瓶口，尾巴往两边横着拖（左右对称，不是一个方向转的风车）
+    for ctrl, rb in ((((21.5, 28.5), (16.5, 26.6), (13.5, 23.0), (10.8, 24.2)), 3.1),
+                     (((42.5, 27.8), (47.5, 26.0), (50.0, 22.6), (52.8, 23.6)), 2.9),
+                     (((26.0, 20.0), (21.8, 18.8), (19.2, 15.6), (16.4, 16.4)), 2.1),
+                     (((38.2, 19.2), (42.4, 18.0), (44.6, 14.8), (47.4, 15.6)), 1.9)):
+        soul_wisp(P, ctrl, rb)
+    for (x, y, r) in ((16.0, 37.5, 0.7), (48.0, 36.0, 0.6), (33.5, 12.5, 0.6)):  # 远处几点还没聚过来的魂
+        P.dot(x, y, r + 0.45, SOUL_RIM, 0.8)
+        P.dot(x, y, r, mixc(SOUL, WHITE, 0.5))
 
 
 # ============================================================== 夜签
@@ -643,32 +644,68 @@ def em_hub_peddler(P):
         P.dot(ex - 0.5, ey - 0.6, 0.6, mixc(PAPER, WHITE, 0.5))
 
 
-def em_hub_lampboy(P):
-    """灯童：一盏孩子拖着玩的兔子灯（白纸身、朱砂勾的眼和耳、两个小轮），脖子上挂一把小金锁。"""
-    glow(P, 32.0, 31.0, 15.0, mixc(col(S.LANTERN_LIGHT), PAPER, 0.35), 0.6)
-    stroke(P, V.bezier([(9.5, 39.0), (12.0, 44.0), (18.0, 42.5)], 24), 0.4, ZHUSHA, 0.9)
-    body = W.catmull_closed([(18.0, 36.0), (21.0, 28.0), (29.0, 24.5), (38.0, 25.0), (44.5, 28.5), (47.5, 34.0), (45.0, 41.0), (36.0, 43.0), (25.0, 43.0), (19.0, 41.0)], 8)
-    rr = np.hypot((P.X - 32.0) / 14.0, (P.Y - 33.0) / 9.0)
-    _, m = shape(P, body, mixc(mixc(PAPER, WHITE, 0.85), mixc(col(S.LANTERN_LIGHT), PAPER, 0.3), smoothstep(0.2, 1.0, 1.0 - rr) * 0.8), ol=OL, pool=0.3, pool_rgb=mixc(W_ZHUSHA, PAPER, 0.3), mottle=0.0)
+def paint_rabbit_lantern(P, ox, oy, s):
+    """兔子灯（白纸身、朱砂勾的眼和耳、两个小轮、拖绳）：按原 64 设计坐标画，(32, 33) 落在 (ox, oy)，缩放 s。"""
+    def q(pts):
+        p = np.asarray(pts, dtype=np.float64)
+        return np.stack([ox + s * (p[..., 0] - 32.0), oy + s * (p[..., 1] - 33.0)], -1)
+
+    def qp(x, y):
+        return (ox + s * (x - 32.0), oy + s * (y - 33.0))
+
+    ol = OL * min(1.0, 0.5 + 0.5 * s)
+    glow(P, *qp(32.0, 31.0), 15.0 * s, mixc(col(S.LANTERN_LIGHT), PAPER, 0.35), 0.6)
+    stroke(P, V.bezier(q([(9.5, 39.0), (12.0, 44.0), (18.0, 42.5)]), 24), 0.4 * s + 0.1, ZHUSHA, 0.9)
+    body = W.catmull_closed(q([(18.0, 36.0), (21.0, 28.0), (29.0, 24.5), (38.0, 25.0), (44.5, 28.5), (47.5, 34.0), (45.0, 41.0), (36.0, 43.0), (25.0, 43.0), (19.0, 41.0)]), 8)
+    cx, cy = qp(32.0, 33.0)
+    rr = np.hypot((P.X - cx) / (14.0 * s), (P.Y - cy) / (9.0 * s))
+    _, m = shape(P, body, mixc(mixc(PAPER, WHITE, 0.85), mixc(col(S.LANTERN_LIGHT), PAPER, 0.3), smoothstep(0.2, 1.0, 1.0 - rr) * 0.8), ol=ol, pool=0.3, pool_rgb=mixc(W_ZHUSHA, PAPER, 0.3), mottle=0.0)
     for k in (-0.5, 0.0, 0.5):
         xs = np.linspace(-0.95, 0.95, 30)
-        stroke(P, np.stack([32.0 + k * 14.0 + 0 * xs, 33.5 + 8.0 * xs * 0.95], -1), 0.3, mixc(W_ZHUSHA, ZHUSHA, 0.3), 0.5, clip=m)
+        stroke(P, q(np.stack([32.0 + k * 14.0 + 0 * xs, 33.5 + 8.0 * xs * 0.95], -1)), 0.3 * s, mixc(W_ZHUSHA, ZHUSHA, 0.3), 0.5, clip=m)
     # 头、耳
-    head = W.catmull_closed([(39.0, 27.0), (43.0, 21.5), (49.0, 21.0), (52.0, 25.0), (50.0, 30.0), (44.0, 31.0)], 8)
-    shape(P, head, mixc(PAPER, WHITE, 0.85), ol=OL, pool=0.25, pool_rgb=mixc(W_ZHUSHA, PAPER, 0.3), mottle=0.0)
+    head = W.catmull_closed(q([(39.0, 27.0), (43.0, 21.5), (49.0, 21.0), (52.0, 25.0), (50.0, 30.0), (44.0, 31.0)]), 8)
+    shape(P, head, mixc(PAPER, WHITE, 0.85), ol=ol, pool=0.25, pool_rgb=mixc(W_ZHUSHA, PAPER, 0.3), mottle=0.0)
     for (base, tip) in (((44.0, 22.0), (40.0, 11.0)), ((47.5, 21.5), (47.0, 10.5))):
-        _, me = shape(P, W.almond(base, tip, 4.0, 24, bulge=0.45), mixc(PAPER, WHITE, 0.85), ol=1.0, pool=0.2, pool_rgb=W_ZHUSHA, mottle=0.0)
-        stroke(P, W.seg_pts(np.array(base) + (np.array(tip) - base) * 0.2, np.array(base) + (np.array(tip) - base) * 0.8, n=12), 0.8, mixc(W_ZHUSHA, ZHUSHA, 0.5), 0.9, clip=me)
-    P.dot(48.0, 24.5, 1.1, ZHUSHA)
-    P.dot(51.0, 27.0, 0.6, ZHUSHA)
-    stroke(P, V.bezier([(19.5, 31.0), (16.0, 28.5), (17.0, 25.0)], 16), 0.9, mixc(W_ZHUSHA, ZHUSHA, 0.4))
+        b, t = np.array(qp(*base)), np.array(qp(*tip))
+        _, me = shape(P, W.almond(b, t, 4.0 * s, 24, bulge=0.45), mixc(PAPER, WHITE, 0.85), ol=1.0 * min(1.0, 0.5 + 0.5 * s), pool=0.2, pool_rgb=W_ZHUSHA, mottle=0.0)
+        stroke(P, W.seg_pts(b + (t - b) * 0.2, b + (t - b) * 0.8, n=12), 0.8 * s, mixc(W_ZHUSHA, ZHUSHA, 0.5), 0.9, clip=me)
+    P.dot(*qp(48.0, 24.5), 1.1 * s + 0.1, ZHUSHA)
+    P.dot(*qp(51.0, 27.0), 0.6 * s + 0.05, ZHUSHA)
+    stroke(P, V.bezier(q([(19.5, 31.0), (16.0, 28.5), (17.0, 25.0)]), 16), 0.9 * s, mixc(W_ZHUSHA, ZHUSHA, 0.4))
     for x in (24.0, 40.0):
-        shape(P, W.ellipse_pts(x, 45.0, 3.4, 3.4, 30), mixc(ZHUSHA, ZHUSHA_DK, 0.3), ol=0.9, ol_rgb=ZHUSHA_DK, pool=0.2)
-        P.dot(x, 45.0, 1.0, TENG)
-    # 小金锁
-    stroke(P, V.bezier([(41.0, 30.5), (39.5, 35.0), (37.5, 36.5)], 16), 0.3, ZHUSHA)
-    lock = W.catmull_closed([(33.5, 36.0), (37.0, 35.0), (40.5, 36.0), (40.0, 39.5), (37.0, 41.0), (34.0, 39.5)], 6)
-    shape(P, lock, mixc(TENG, GOLD_HI, 0.3), ol=0.75, ol_rgb=GOLD_DK, pool=0.4, pool_rgb=GOLD_DK)
+        wx, wy = qp(x, 45.0)
+        shape(P, W.ellipse_pts(wx, wy, 3.4 * s, 3.4 * s, 30), mixc(ZHUSHA, ZHUSHA_DK, 0.3), ol=0.9 * min(1.0, 0.5 + 0.5 * s), ol_rgb=ZHUSHA_DK, pool=0.2)
+        P.dot(wx, wy, 1.0 * s, TENG)
+
+
+def tally_zheng(P, x0, y0, sz, n, hw, rgb):
+    """一个“正”字的前 n 笔（计数用的正字，手写、略斜）：(x0, y0) 是左上角，sz 是字宽。"""
+    k = sz / 10.0
+    strokes = [((0.6, 0.4), (9.6, 0.0)), ((5.1, 0.2), (5.0, 9.6)), ((5.0, 4.9), (8.8, 4.7)), ((1.6, 5.2), (1.7, 9.6)), ((0.0, 9.8), (10.0, 9.4))]
+    for (a, b) in strokes[:n]:
+        pa = (x0 + k * a[0], y0 + k * a[1])
+        pb = (x0 + k * b[0], y0 + k * b[1])
+        stroke(P, W.seg_pts(pa, pb, n=14), hw * W.brush_profile(14, 1.0, 0.5, 0.2), rgb, 0.95, jitter=0.08)
+
+
+def em_hub_lampboy(P):
+    """灯童：门框边上用炭笔记的“正”字（你回来几次，他就在墙上添一道），门口放着他拖着玩的兔子灯。"""
+    r = np.hypot(P.X - C, P.Y - C)
+    inside = smoothstep(25.0 + P.aa, 25.0 - P.aa, r)
+    # 门框：左边一根木柱（出圆的部分藏在墨圈下），柱脚一道门槛
+    wood_l, wood_d = mixc(ZHESHI, NONG, 0.35), mixc(ZHESHI, JIAO, 0.6)
+    post = [(9.0, 4.0), (17.6, 4.0), (17.0, 60.0), (9.0, 60.0)]
+    d, t = P.sdf(W.wobble(post, P.rng, 0.04, spacing=0.3))
+    P.fill(d, shade_lr(P, 10.0, 17.5, wood_l, wood_d), pool=0.3, pool_rgb=JIAO, pool_w=0.8, clip=inside)
+    for x in (12.0, 14.6):
+        stroke(P, W.seg_pts((x, 6.0), (x - 0.2, 58.0), n=40), 0.22, mixc(wood_d, JIAO, 0.4), 0.7, clip=inside * P.cover(d))
+    P.outline(d, t, OL, INK_LINE, jitter=0.2, clip=inside)
+    stroke(P, W.seg_pts((15.0, 49.6), (50.0, 49.8), n=40), 1.0 * W.brush_profile(40, 0.8, 0.3), mixc(ZHESHI, ZHONG, 0.45), 0.85, clip=inside)
+    # 墙上的正字：一个写满，下一个写了两笔（炭笔，浓墨）
+    tally_zheng(P, 20.5, 13.5, 8.2, 5, 0.85, JIAO)
+    tally_zheng(P, 20.5, 26.5, 8.2, 2, 0.85, JIAO)
+    paint_rabbit_lantern(P, 38.5, 37.5, 0.8)
 
 
 def em_hub_storyteller(P):

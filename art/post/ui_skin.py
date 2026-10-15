@@ -618,16 +618,74 @@ INK_RIM = mixc(DAN, QING, 0.3)  # 夜色上的边框墨：淡墨，夜里看得�
 
 
 def make_panel_dark() -> Image.Image:
-    """夜墨面板（HUD 底板、提示框）：128×96，切片 32，中间与四边拉伸。约 86% 不透明，
-    一笔淡墨干笔边：左上角起笔，绕一圈回到左上角收笔，留一个小缺口。"""
+    """夜墨面板（HUD 底板、提示框）：128×96，切片 32，中间与四边拉伸。中间是约 88% 不透明的浓夜墨，压字的地方匀净。
+    边框是一笔淡墨，四边轻重不一（上边轻，下边、左边重），四个角各有各的笔意：左上起笔圆钝、墨积得浓，
+    右上转角笔快没墨、扫出几丝飞白，右下顿笔留一个墨团，左下转角略出一点锋，绕回左上角收笔、散成干丝。
+    墨底的浓淡也收在四个角里：左上起笔处洇开一大团淡墨、边上干出一道水痕，右下一块墨被纸吸走的浅斑，
+    右上、左下是墨的颗粒；四条边上只有很淡的一层往里渐淡的洇痕。
+    拉伸的规矩：中间、四条边沿长度方向都一样（只随离边远近渐变），所有不规则的东西都收在四个 32² 的角里。"""
     Wd, H, m, r, L = 128, 96, 4, 12, 32
     c = Canvas(Wd, H, 201, 4)
+    X, Y = c.X, c.Y
     d, _ = rrect(c, m, m, Wd - m, H - m, r)
     fill = smoothstep(0.6 + c.aa, -0.6 - c.aa, d)
-    pool = smoothstep(-7.0, -1.5, d)  # 墨在边上积得浓一点
-    c.over(mixc(NIGHT_INK, JIAO, 0.35 * pool), fill * (0.85 + 0.09 * pool))
-    loop(c, m, m, Wd - m, H - m, r, center=-2.4, hw=(1.5, 1.1, 1.9, 1.25), seed=202, rgb=INK_RIM, alpha=0.72,
-         press=0.7, dry=0.04, seam=(-5.0, 7.0, 13.0, 20.0, 0.3, 0.75), tone=ZHONG, tone_k=0.5, slices=(L, L))
+    e = -d  # 离边的距离（里面为正）
+    # 按离哪条边最近在四边的取值之间过渡（rrect 的 θ 在里面的矩形里恒为 0，不能用来分边）
+    dist = np.stack([Y - m, Wd - m - X, H - m - Y, X - m])
+    wts = np.exp(-(dist - dist.min(0)) / 3.0)
+    wts = wts / wts.sum(0)
+
+    def side_k(top, right, bottom, left):
+        return np.tensordot(np.array([top, right, bottom, left]), wts, axes=1)
+
+    def corner_win(cx_, cy_):  # 角里的东西离切片线 3 px 前淡尽
+        wx = smoothstep(L - 3.0, L - 16.0, np.abs(X - cx_))
+        wy = smoothstep(L - 3.0, L - 16.0, np.abs(Y - cy_))
+        return wx * wy
+
+    nb = noise(np.random.default_rng(205), X.shape, 3.5 * c.ss)
+    nb2 = noise(np.random.default_rng(208), X.shape, 1.4 * c.ss)
+    nf = noise(np.random.default_rng(206), X.shape, 0.8 * c.ss)
+    inner = smoothstep(2.5, 6.0, e)
+    light = side_k(0.1, 0.12, 0.17, 0.15) * np.exp(-np.maximum(e - 3.0, 0.0) / 3.5) * smoothstep(1.0, 4.0, e)
+    # 左上：一大团淡墨洇开，边上一道干痕（不规则）
+    f_tl = np.hypot(X - (m + 5.0), (Y - (m + 5.0)) * 1.12) / 20.0 * (1.0 + 0.18 * nb + 0.05 * nb2)
+    w_tl = corner_win(0.0, 0.0) * inner
+    light = light + 0.42 * smoothstep(1.0, 0.3, f_tl) ** 1.2 * w_tl
+    dark = 0.75 * np.exp(-(((f_tl - 1.0) / 0.045) ** 2)) * w_tl
+    # 右下：墨被纸吸走的浅斑，边缘一道浅痕
+    f_br = np.hypot(X - (Wd - m - 10.0), Y - (H - m - 9.0)) / 12.0 * (1.0 + 0.22 * nb + 0.06 * nb2)
+    w_br = corner_win(Wd, H) * inner
+    light = light + 0.3 * smoothstep(1.0, 0.25, f_br) * w_br
+    dark = dark + 0.5 * np.exp(-(((f_br - 1.0) / 0.055) ** 2)) * w_br
+    # 右上、左下：墨的颗粒
+    gw = (corner_win(Wd, 0.0) + corner_win(0.0, H)) * inner * smoothstep(20.0, 6.0, e)
+    gran = 0.22 * np.clip(nf + 0.4 * nb2, -1.6, 1.6) * gw
+    light = np.clip(light + np.maximum(gran, 0), 0, 1)
+    dark = np.clip(dark + np.maximum(-gran, 0), 0, 1)
+    rgb = mixc(mixc(NIGHT_INK, mixc(ZHONG, QING, 0.3), light), JIAO, dark)
+    c.over(rgb, fill * 0.88)
+    # 边框：先画在单独一层，再在右上角按笔毛纹扣出几丝飞白
+    cb = Canvas(Wd, H, 209, c.ss)
+    loop(cb, m, m, Wd - m, H - m, r, center=-2.3, hw=(1.25, 1.75, 2.6, 2.15), seed=202, rgb=INK_RIM, alpha=0.85,
+         press=1.1, dry=0.05, seam=(-4.0, 9.0, 16.0, 21.0, 0.22, 0.9), tone=ZHONG, tone_k=0.6, slices=(L, L))
+    acx, acy = Wd - m - r, m + r  # 右上圆角的圆心
+    rho = np.hypot(X - acx, Y - acy)
+    phi = np.degrees(np.arctan2(Y - acy, X - acx))  # 顶 -90 → 右 0
+    streak = samp1(tex1(np.random.default_rng(210), 12, 0.7), np.clip((rho - (r + 2.3)) / 2.2, -1, 1))
+    streak = rank01(streak + 0.25 * noise(np.random.default_rng(211), X.shape, (0.8 * c.ss, 3.0 * c.ss)))
+    dry_tr = 0.62 * np.exp(-(((phi + 40.0) / 26.0) ** 2)) * corner_win(Wd, 0.0)
+    keep = 1.0 - smoothstep(0.0, 0.08, dry_tr) * (1.0 - smoothstep(dry_tr - 0.06, dry_tr + 0.06, streak))  # 干度≈0 处一点不断
+    c.over(cb.lay.p / np.maximum(cb.lay.a, 1e-6)[..., None], cb.lay.a * keep)
+    # 左上起笔：圆钝的笔头，墨积得浓
+    head = np.hypot((X - (m + 2.6)) / 3.0, (Y - (m + 11.0)) / 4.4)
+    c.over(mixc(INK_RIM, PAPER, 0.12), 0.7 * smoothstep(1.0, 0.55, head + 0.12 * nb2))
+    # 右下顿笔：笔在转角停了一下，留一个墨团
+    knot = np.hypot((X - (Wd - m - 4.0)) / 3.6, (Y - (H - m - 4.0)) / 3.2)
+    c.over(mixc(INK_RIM, ZHONG, 0.2), 0.75 * smoothstep(1.0, 0.45, knot + 0.15 * nb2))
+    # 左下转角略出一点锋：一小笔往外挑
+    seg_stroke(c, V.bezier([(m + 2.6, H - m - 14.0), (m + 1.2, H - m - 4.0), (m - 1.6, H - m + 1.4)], 24), 1.2, seed=212,
+               rgb=INK_RIM, alpha=0.7, taper=(1.0, 0.15))
     return finish(c, band_x=(L, L), band_y=(L, L))
 
 
@@ -941,25 +999,38 @@ def make_slot(big: bool, kind: str) -> Image.Image:
 # ============================================================== 进度条
 
 
+def bar_dry(c: Canvas, S_: dict, x1: float, tail_len: float, seed: int, amount: float, n: int = 7) -> np.ndarray:
+    """进度条收笔的飞白：横跨笔画只有 n 根粗笔毛（每根几像素宽），越往笔尾越干、下沿先干（笔往上提，下面的毛先离纸），
+    上沿一直是顺的，所以条缩到 10 像素高还看得出尾巴下面劈开的几道。只在收笔段（带外）里，返回乘到覆盖度上的系数。"""
+    tt = smoothstep(x1 - tail_len, x1, c.X)
+    Tc = samp1(tex1(np.random.default_rng(seed), n, 0.6), S_["s"])
+    dd = amount * tt**1.3 * (0.25 + 0.75 * np.clip(S_["s"], 0.0, 1.0) ** 1.5) * smoothstep(-0.85, -0.4, S_["s"])
+    return 1.0 - (1.0 - smoothstep(dd - 0.08, dd + 0.08, Tc)) * smoothstep(0.0, 0.08, dd)
+
+
 def make_track() -> Image.Image:
-    """进度条的底槽：一笔压低的夜墨，上半更深（凹下去），边上一道淡墨。128×36，左右 24 的横向九宫格。"""
+    """进度条的底槽：一笔压低的夜墨，上半更深（凹下去），边上一道淡墨。128×36，左右 24 的横向九宫格。
+    笔头要在细条（10–12 逻辑像素高，两端缩到原来的 1/3 左右）里也认得出：起笔斜落、方头、墨积得浓，
+    收笔收细到四成多、往上提，尾巴下沿劈开几道粗的飞白。"""
     Wd, H, L = 128, 36, 24
     c = Canvas(Wd, H, 800, 4)
-    S_ = hstroke(c, 4.0, 124.0, 18.0, 13.5, band=(L, Wd - L), seed=801, head_len=18.0, tail_len=18.0, slant=0.2, blunt=2.4,
-                 taper=0.9, lift=0.0, dry=0.0, dry_tail=0.3, edge_soft=0.7, rough=0.05, tail_round=True)
+    S_ = hstroke(c, 4.0, 124.0, 18.0, 13.5, band=(L, Wd - L), seed=801, head_len=19.0, tail_len=20.0, slant=0.72, blunt=2.8,
+                 taper=0.45, lift=0.24, dry=0.0, dry_tail=0.3, edge_soft=0.7, rough=0.05, tail_rx=0.95, pool=0.6)
+    cov = S_["cov"] * bar_dry(c, S_, 124.0, 20.0, 802, 0.42)
     s = S_["s"]
-    rgb = mixc(NIGHT_INK, JIAO, np.clip(0.65 * smoothstep(0.5, -0.9, s), 0, 1))
-    c.over(rgb, S_["cov"] * 0.88)
+    rgb = mixc(NIGHT_INK, JIAO, np.clip(0.65 * smoothstep(0.5, -0.9, s) + 0.5 * S_["pool"], 0, 1))
+    c.over(rgb, cov * 0.88)
     e = np.maximum(S_["edge"], 0.0)
     c.over(mixc(DAN, QING, 0.2), 0.4 * np.exp(-(e**2) / (2 * 1.8**2)) * (1 - S_["shape"]))  # 洇出的一圈淡墨
-    edge = S_["shape"] * smoothstep(0.6, 0.97, np.abs(s)) * (1 - 0.35 * (s < 0))
+    edge = cov * smoothstep(0.6, 0.97, np.abs(s)) * (1 - 0.35 * (s < 0))
     c.over(INK_RIM, edge * 0.6 * smoothstep(0.15, 0.45, S_["T"]))
     return finish(c, band_x=(L, L))
 
 
 def make_fill(kind: str) -> Image.Image:
-    """进度条的填充：一笔颜料，上沿略亮、下沿积色，左端方中带圆、右端圆收略干。中段沿 x 完全一致，
-    游戏按百分比改宽度，任何宽度两端都是笔头。hp 朱砂 / xp 藤黄 / boss 绛紫 / unlock 石绿 / shield 淡花青（细条）。"""
+    """进度条的填充：一笔颜料，上沿略亮、下沿积色。中段沿 x 完全一致，游戏按百分比改宽度，任何宽度两端都是笔头。
+    笔头画得粗放，条再细也认得出：起笔斜落、方头、颜料在起笔处积得深；收笔收细到四成、往上提，
+    尾巴下沿劈开几道粗的飞白（细条上也看得见），大尺寸时还有一层细的笔毛飞白。hp 朱砂 / xp 藤黄 / boss 绛紫 / unlock 石绿 / shield 淡花青（细条）。"""
     shield = kind == "shield"
     Wd, H, L = (96, 12, 10) if shield else (96, 28, 20)
     c = Canvas(Wd, H, 820 + len(kind), 4)
@@ -967,16 +1038,21 @@ def make_fill(kind: str) -> Image.Image:
     hi = mixc(base, WHITE if kind in ("xp", "shield") else PAPER_LT, 0.38)
     lo = mixc(base, JIAO, 0.38)
     if shield:
-        S_ = hstroke(c, 2.0, 94.0, 6.0, 3.7, band=(L, Wd - L), seed=830, head_len=7.0, tail_len=7.0, slant=0.2, blunt=2.2,
-                     taper=0.8, lift=0.0, dry=0.0, dry_tail=0.3, edge_soft=0.5, rough=0.04, tail_round=True)
+        x1, tail = 94.0, 8.0
+        S_ = hstroke(c, 2.0, x1, 6.0, 3.7, band=(L, Wd - L), seed=830, head_len=8.0, tail_len=tail, slant=0.7, blunt=2.6,
+                     taper=0.42, lift=0.2, dry=0.0, dry_tail=0.3, edge_soft=0.45, rough=0.04, tail_rx=0.95, pool=0.5)
+        cov = S_["cov"] * bar_dry(c, S_, x1, tail, 832, 0.5, n=5)
     else:
-        S_ = hstroke(c, 3.0, 93.0, 14.0, 10.5, band=(L, Wd - L), seed=831 + len(kind), head_len=16.0, tail_len=16.0,
-                     slant=0.22, blunt=2.6, taper=0.8, lift=0.0, dry=0.0, dry_tail=0.4, edge_soft=0.6, rough=0.05,
-                     tail_round=True)
+        x1, tail = 93.0, 17.0
+        S_ = hstroke(c, 3.0, x1, 14.0, 10.5, band=(L, Wd - L), seed=831 + len(kind), head_len=17.0, tail_len=tail,
+                     slant=0.85, blunt=3.0, taper=0.4, lift=0.3, dry=0.0, dry_tail=0.45, edge_soft=0.6, rough=0.05,
+                     tail_rx=0.95, pool=0.55)
+        cov = S_["cov"] * bar_dry(c, S_, x1, tail, 840 + len(kind), 0.55)
     s, T = S_["s"], S_["T"]
     rgb = mixc(base, lo, np.clip(smoothstep(0.1, 1.0, s) * 0.85 + 0.25 * (0.5 - T), 0, 1))
     rgb = mixc(rgb, hi, np.clip(smoothstep(-0.2, -0.85, s) * 0.8 + 0.3 * (T - 0.6), 0, 1))
-    c.over(rgb, S_["cov"])
+    rgb = mixc(rgb, lo, np.clip(0.8 * S_["pool"], 0, 1))
+    c.over(rgb, cov)
     return finish(c, band_x=(L, L))
 
 
