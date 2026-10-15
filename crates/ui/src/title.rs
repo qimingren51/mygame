@@ -281,8 +281,12 @@ fn input(
             let n = c.meta.nodes.len();
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, META_COLUMNS) {
                 let id = c.meta.nodes[i].id.clone();
+                let first = profile.meta.get(&id).copied().unwrap_or(0) == 0;
                 if profile.buy_meta(c, &id) {
                     news.meta_lit = true;
+                    if first {
+                        news.lit.push(id);
+                    }
                     save(&profile);
                 }
                 ui.dirty = true;
