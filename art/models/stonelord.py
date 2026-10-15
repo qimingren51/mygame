@@ -5,7 +5,9 @@
   - 方脸、浓眉压眼（眼睛 EYE['stonelord'] 在眉下发光），胸前垂一把长髯（重墨石色）
   - 明光铠：胸甲上刻出鳞状甲片（Freestyle 边标记），正中一面圆形护心镜（赭石镜框）；赭石腰带、圆扣
   - 披膊：肩上两层外张的弧形护甲；战裙：前、侧、后几片甲裙垂到膝，甲片一排排
-  - 右手（-X）立持青龙偃月刀：赭石长杆，弯月大刃、刃背有缺口和一个圆环，刃下一缕朱砂刀穗
+  - 右手（-X）立持青龙偃月刀：右臂垂在身侧握杆，刀杆竖在身侧略偏后、杆头微向外倾，刀刃朝身后外侧
+    （E 向画面上刀在身体左边、刃口朝左），不挡长髯和护心镜；赭石长杆，弯月大刃、刃背有缺口和一个圆环，
+    刃下一缕朱砂刀穗
   - 石色清墨/淡墨/重墨，赭石点缀，身上有裂纹
 动画 move：8 帧缓慢的重踏。帧 FRAME["elite"]，锚点 BIG_ENEMY_ANCHOR。只渲染 E。
 """
@@ -19,7 +21,7 @@ from pathlib import Path
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 ART = Path(__file__).resolve().parents[1]
 for p in (ART, ART / "models"):
@@ -95,6 +97,13 @@ def _plate_skirt_rows(center_deg, width_deg, r_top, z_top, length, flare=0.10, n
             row.append(Vector((r * math.cos(th), r * math.sin(th) * sy, z_top - length * t)))
         rows.append(row)
     return rows
+
+
+# 右臂（肩坐标系，肩在上身 (-0.42, 0, 0.70)）：上臂垂下略向后，前臂垂在身侧；握杆处在髋侧略偏后
+ELBOW_R = Vector((-0.10, 0.05, -0.42))
+GRIP_R = Vector((-0.12, 0.02, -0.72))
+POLE_DIR = Vector((-0.08, 0.10, 1.0))  # 杆：竖直，杆头略向外、向后倾，刀头让开盔
+BLADE_EDGE = Vector((-0.75, 0.66, 0.0))  # 刃口朝身后外侧：E 向画面上整片刀面朝左展开
 
 
 def build_stonelord():
@@ -186,13 +195,18 @@ def build_stonelord():
             pd = flat(f"LordPauldron{nm}{k_}", B.lathe([(0.0, 0.10), (r * 0.6, 0.08), (r, -0.02), (r * 1.08, -0.12)], 9),
                       stone, sh, loc=(0.03 * sx * k_, 0, z), rot=(0, math.radians(-rot * sx), 0))
             _mark_edges(pd, 40 + k_ + sx, keep=0.5, horizontal_only=True)
-        K.limb(f"LordArmU{nm}", (0.05 * sx, 0, -0.08), (0.08 * sx, -0.10, -0.44), 0.12, 0.10, stone, "outer", sh)
-        if sx < 0:  # 右前臂伸向前握杆
-            K.limb("LordArmFR", (0.08 * sx, -0.10, -0.44), (-0.02, -0.46, -0.50), 0.10, 0.09, stone, "outer", sh)
-        flat(f"LordBracer{nm}", B.lathe([(0.10, -0.20), (0.11, -0.05), (0.09, 0.0)], 8), stone, sh,
-             loc=(0.08 * sx, -0.10, -0.44), rot=(math.radians(-40), 0, 0))
+        elbow = ELBOW_R if sx < 0 else Vector((0.08 * sx, -0.10, -0.44))
+        K.limb(f"LordArmU{nm}", (0.05 * sx, 0, -0.08), elbow, 0.12, 0.10, stone, "outer", sh)
+        if sx < 0:  # 右前臂垂在身侧握杆
+            K.limb("LordArmFR", elbow, GRIP_R, 0.10, 0.09, stone, "outer", sh)
+            br = flat("LordBracerR", B.lathe([(0.10, -0.20), (0.11, -0.05), (0.09, 0.0)], 8), stone, sh, loc=elbow)
+            br.rotation_mode = "QUATERNION"
+            br.rotation_quaternion = Vector((0, 0, -1)).rotation_difference((GRIP_R - elbow).normalized())
+        else:
+            flat(f"LordBracer{nm}", B.lathe([(0.10, -0.20), (0.11, -0.05), (0.09, 0.0)], 8), stone, sh,
+                 loc=elbow, rot=(math.radians(-40), 0, 0))
         obj(f"LordHand{nm}", K.ellipsoid((0.08, 0.09, 0.08), 8, 6), stone, "outer", sh,
-            loc=(-0.02, -0.50, -0.50) if sx < 0 else (0.02, -0.16, -0.66), smooth=False)
+            loc=GRIP_R if sx < 0 else (0.02, -0.16, -0.66), smooth=False)
         parts[f"arm_{nm}"] = sh
         hip = B.empty(f"LordHip{nm}", pelvis, loc=(0.19 * sx, 0, -0.05))
         K.limb(f"LordThigh{nm}", (0, 0, 0), (0.02 * sx, -0.04, -0.46), 0.17, 0.14, stone, "outer", hip)
@@ -201,20 +215,27 @@ def build_stonelord():
         _mark_edges(gr, 20 + sx, keep=0.4)
         flat(f"LordBoot{nm}", K.ellipsoid((0.14, 0.23, 0.08), 8, 4), dark, knee, loc=(0, -0.07, -0.47))
         parts[f"hip_{nm}"], parts[f"knee_{nm}"] = hip, knee
-    # 青龙偃月刀：右手立持，杆略前倾
+    # 青龙偃月刀：右手垂在身侧立持，杆竖直略向外倾；刃口朝身后外侧（E 向画面上朝左），刀头在盔的左后方
     armR = parts["arm_R"]
-    grip = Vector((-0.02, -0.50, -0.50))
-    pole_dir = Vector((-0.05, -0.42, 1.0)).normalized()  # 向前倾：刀头立在头的前方，不和盔重叠
-    a, b = grip - pole_dir * 0.95, grip + pole_dir * 1.02
+    grip = GRIP_R
+    pole_dir = POLE_DIR.normalized()
+    a, b = grip - pole_dir * 0.95, grip + pole_dir * 1.02  # 杆尾离地约 8 厘米
     K.limb("LordPole", a, b, 0.032, 0.030, ochre, "inner", armR)
     K.limb("LordPoleCollar", b - pole_dir * 0.04, b + pole_dir * 0.08, 0.05, 0.045, ochre, "inner", armR)
+    edge = BLADE_EDGE - pole_dir * BLADE_EDGE.dot(pole_dir)  # 刃口方向（刀的局部 -Y），和杆垂直
+    edge.normalize()
+    ly = -edge
+    lx = ly.cross(pole_dir).normalized()
+    rot = Matrix((lx, ly, pole_dir)).transposed().to_quaternion()  # 局部 X、Y、Z → 世界
     blade = flat("LordBlade", _crescent_blade_build(0.62), stone, armR)
     blade.location = b + pole_dir * 0.06
     blade.rotation_mode = "QUATERNION"
-    blade.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(pole_dir)
+    blade.rotation_quaternion = rot
     ring = obj("LordRing", B.lathe([(0.045, -0.008), (0.052, 0.0), (0.045, 0.008)], 14), ochre, "inner", armR,
-               loc=b + pole_dir * 0.36 + Vector((0, 0.10, 0)), rot=(0, math.radians(90), 0))
-    tas = K.curve_points(b + Vector((0, 0.03, 0.0)), b + Vector((0, 0.08, -0.22)), bend=Vector((0, 0.03, 0)), n=6)
+               loc=b + pole_dir * 0.36 - edge * 0.10)
+    ring.rotation_mode = "QUATERNION"
+    ring.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(lx)  # 环面和刀面同一平面
+    tas = K.curve_points(b - edge * 0.03, b - edge * 0.08 + Vector((0, 0, -0.22)), bend=-edge * 0.03, n=6)
     obj("LordBladeTassel", K.tube_build(tas, K.bushy(0.035, peak=0.3), 8), red, "inner", armR)
     sockets = {"eyes": sock, "feet": B.empty("LordFeet", root)}
     parts["sockets"] = sockets

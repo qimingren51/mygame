@@ -787,5 +787,467 @@
       46
     ]
   ],
-  "note": "坐标都是 1920×1080 底图上的像素，rect = [x, y, w, h]（左上角 + 宽高）。合成顺序：hub.png → 各灯 body → flame（普通混合）→ core + glow（叠加：画面 += RGB × alpha）→ dawn（普通混合）→ dawn 的 glow（叠加）。PNG 都是直通（非预乘）alpha。flame.base 是火苗底部中点（缩放、抖动绕这一点）。dawn mask 与 dawn 图同尺寸：黑 = 最先亮，白 = 最后，按阈值铺开。characters：rect 是点击区；label 是名字和行当那块文字的上沿中点；light = [x, y, 半径, 强度]，选中时在这里加一团暖色的叠加聚光，强度是这团光中心的亮度（灯童在门洞的暗处，给得大一些）。text_safe：画面里安静、够暗的区域，放标题行（灯驿 + 灯油、铜钱）和底部提示。safe：游戏按铺满窗口、居中裁切显示，16:10 与 21:9 都留得住的区域；人物、心灯、匾额、text_safe 都在里面。"
+  "note": "坐标都是 1920×1080 底图上的像素，rect = [x, y, w, h]（左上角 + 宽高）。合成顺序：hub.png → 各灯 body → flame（普通混合）→ core + glow（叠加：画面 += RGB × alpha）→ dawn（普通混合）→ dawn 的 glow（叠加）。PNG 都是直通（非预乘）alpha。flame.base 是火苗底部中点（缩放、抖动绕这一点）。dawn mask 与 dawn 图同尺寸：黑 = 最先亮，白 = 最后，按阈值铺开。characters：rect 是点击区；label 是名字和行当那块文字的上沿中点；light = [x, y, 半径, 强度]，选中时在这里加一团暖色的叠加聚光，强度是这团光中心的亮度（灯童在门洞的暗处，给得大一些）。text_safe：画面里安静、够暗的区域，放标题行（灯驿 + 灯油、铜钱）和底部提示。safe：游戏按铺满窗口、居中裁切显示，16:10 与 21:9 都留得住的区域；人物、心灯、匾额、text_safe 都在里面。",
+  "road_lamps": [
+    {
+      "body": {
+        "file": "road_0.png",
+        "rect": [
+          1282,
+          800,
+          22,
+          56
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_0_flame.png",
+        "rect": [
+          1290,
+          807,
+          14,
+          16
+        ],
+        "blend": "normal",
+        "base": [
+          1297.0,
+          818.3
+        ]
+      },
+      "core": {
+        "file": "road_0_core.png",
+        "rect": [
+          1285,
+          803,
+          24,
+          25
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_0_glow.png",
+        "rect": [
+          1254,
+          777,
+          86,
+          87
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_1.png",
+        "rect": [
+          1021,
+          804,
+          23,
+          56
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_1_flame.png",
+        "rect": [
+          1030,
+          811,
+          14,
+          16
+        ],
+        "blend": "normal",
+        "base": [
+          1037.0,
+          822.3
+        ]
+      },
+      "core": {
+        "file": "road_1_core.png",
+        "rect": [
+          1025,
+          807,
+          24,
+          25
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_1_glow.png",
+        "rect": [
+          994,
+          781,
+          86,
+          87
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_2.png",
+        "rect": [
+          1313,
+          833,
+          26,
+          67
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_2_flame.png",
+        "rect": [
+          1323,
+          842,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          1330.5,
+          854.9
+        ]
+      },
+      "core": {
+        "file": "road_2_core.png",
+        "rect": [
+          1316,
+          837,
+          29,
+          29
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_2_glow.png",
+        "rect": [
+          1278,
+          805,
+          105,
+          105
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_3.png",
+        "rect": [
+          986,
+          833,
+          32,
+          68
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_3_flame.png",
+        "rect": [
+          986,
+          842,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          993.5,
+          854.9
+        ]
+      },
+      "core": {
+        "file": "road_3_core.png",
+        "rect": [
+          979,
+          837,
+          29,
+          29
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_3_glow.png",
+        "rect": [
+          941,
+          805,
+          105,
+          105
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_4.png",
+        "rect": [
+          1388,
+          834,
+          31,
+          65
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_4_flame.png",
+        "rect": [
+          1388,
+          842,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          1395.7,
+          854.7
+        ]
+      },
+      "core": {
+        "file": "road_4_core.png",
+        "rect": [
+          1381,
+          837,
+          29,
+          29
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_4_glow.png",
+        "rect": [
+          1344,
+          806,
+          103,
+          103
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_5.png",
+        "rect": [
+          696,
+          835,
+          32,
+          66
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_5_flame.png",
+        "rect": [
+          696,
+          842,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          703.5,
+          854.9
+        ]
+      },
+      "core": {
+        "file": "road_5_core.png",
+        "rect": [
+          689,
+          837,
+          29,
+          29
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_5_glow.png",
+        "rect": [
+          651,
+          805,
+          105,
+          105
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_6.png",
+        "rect": [
+          1661,
+          832,
+          25,
+          65
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_6_flame.png",
+        "rect": [
+          1671,
+          841,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          1678.2,
+          853.5
+        ]
+      },
+      "core": {
+        "file": "road_6_core.png",
+        "rect": [
+          1664,
+          836,
+          28,
+          28
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_6_glow.png",
+        "rect": [
+          1628,
+          806,
+          101,
+          100
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_7.png",
+        "rect": [
+          518,
+          832,
+          27,
+          67
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_7_flame.png",
+        "rect": [
+          529,
+          841,
+          15,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          536.5,
+          853.9
+        ]
+      },
+      "core": {
+        "file": "road_7_core.png",
+        "rect": [
+          522,
+          836,
+          29,
+          29
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_7_glow.png",
+        "rect": [
+          484,
+          804,
+          105,
+          105
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_8.png",
+        "rect": [
+          230,
+          832,
+          31,
+          64
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_8_flame.png",
+        "rect": [
+          230,
+          839,
+          15,
+          18
+        ],
+        "blend": "normal",
+        "base": [
+          237.8,
+          852.1
+        ]
+      },
+      "core": {
+        "file": "road_8_core.png",
+        "rect": [
+          224,
+          835,
+          28,
+          28
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_8_glow.png",
+        "rect": [
+          187,
+          804,
+          102,
+          102
+        ],
+        "blend": "add"
+      }
+    },
+    {
+      "body": {
+        "file": "road_9.png",
+        "rect": [
+          166,
+          830,
+          28,
+          64
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "road_9_flame.png",
+        "rect": [
+          179,
+          838,
+          14,
+          17
+        ],
+        "blend": "normal",
+        "base": [
+          186.1,
+          850.9
+        ]
+      },
+      "core": {
+        "file": "road_9_core.png",
+        "rect": [
+          172,
+          834,
+          28,
+          28
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "road_9_glow.png",
+        "rect": [
+          136,
+          804,
+          100,
+          99
+        ],
+        "blend": "add"
+      }
+    }
+  ]
 }

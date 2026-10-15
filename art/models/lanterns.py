@@ -354,13 +354,16 @@ def _build_mirror(lp, M) -> Head:
         pend.rotation_euler = (math.atan(0.05 + 0.30 * wind) + 0.06 * math.sin(phase - 1.0),
                                (0.08 + 0.12 * wind) * math.sin(phase), 0)
 
-    return Head("mirror", lp, core, animate, {"axis": "X", "roll": lambda f: -84 - 3 * (f - 3)})
+    # 落地：镜背的镜钮比镜缘低 2 厘米，倾 7° 左右镜缘和镜钮一起着地（再平就架在镜钮上、镜缘悬空）
+    return Head("mirror", lp, core, animate, {"axis": "X", "roll": lambda f: -82.5 - 0.5 * (f - 3)})
 
 
 # ---------------------------------------------------------------- 霜瓷灯
 # 罐形：肩宽、下收（和红纸灯上下对称的椭圆拉开）
 FROST_PROFILE = [(0.0, -0.150), (0.050, -0.148), (0.075, -0.130), (0.095, -0.090), (0.112, -0.030), (0.121, 0.030),
                  (0.117, 0.075), (0.099, 0.108), (0.070, 0.126), (0.0, 0.130)]
+FROST_LATTICE = (13.0, 0.19, 0.49)  # 冰裂纹：(格子密度 /米, 格条宽, 格条不透明度 < 0.5)；原来 (17, 0.11, 0.45)
+FROST_BAR = S.mix(A["huaqing"], I["nong"], 0.6)  # 格条：近墨的花青（原来是花青淡彩，叠在冰蓝灯芯上几乎看不出）
 
 
 def _crystal_build(length, width):
@@ -383,8 +386,10 @@ def _build_frost(lp, M) -> Head:
     ice = T("FrostIce", ramp=ICE_RAMP, wash=0.1, edge=-0.3, seed=42.0)
     blue = T("FrostTassel", FROST_BLUE, edge=0.3, seed=43.0)
     core = B.emissive_material("FrostCore", CORE_HEX["frost"], 1.0)
-    window = screen_window_material("FrostWindow", porcelain, radius=0.080, lattice=(17.0, 0.11, 0.45),
-                                    bar_hex=W["huaqing"])
+    # 冰裂纹：格子大一点、格条粗一点、颜色近墨，游戏大小也看得出裂纹；
+    # 格条不透明度仍低于 0.5，物体编号通道照样透过格条看到灯芯，发光遮罩还是整个圆窗
+    window = screen_window_material("FrostWindow", porcelain, radius=0.080, lattice=FROST_LATTICE,
+                                    bar_hex=FROST_BAR)
     obj = B.mesh_object
     c = Vector((0, 0, C_Z))
     lid_top = 0.184
@@ -418,13 +423,22 @@ def _build_frost(lp, M) -> Head:
         tas.rotation_euler = (math.atan(0.03 + 0.25 * wind) + 0.05 * math.sin(phase - 1.0),
                               (0.06 + 0.10 * wind) * math.sin(phase), 0)
 
-    return Head("frost", lp, core, animate, {"axis": "Y", "roll": lambda f: 80 + 6 * (f - 3)})
+    # 落地：侧躺不超过 84°，再翻过去盖沿的冰凌先着地，瓷身被架空
+    return Head("frost", lp, core, animate, {"axis": "Y", "roll": lambda f: 80 + 2 * (f - 3)})
 
 
 # ================================================================ 落地
 def drop_head(head: Head, root, frame: int, center: Vector) -> None:
-    """死亡时灯笼脱手：灯芯中心放到 center（root 坐标），按灯的落地方式侧躺（直接设世界矩阵）。"""
+    """死亡时灯笼脱手：灯芯中心放到 center（root 坐标），按灯的落地方式侧躺（直接设世界矩阵），
+    再整体上下挪，让最低的顶点正好落在地面（root 的 z=0）：原来铜镜灯平躺时镜背、霜瓷灯翻过去时冰凌
+    会插进地里 2–3 厘米（画面上约 2px）。灯芯因此比 center 略高（铜镜灯约 3 厘米，其余 1 厘米以内），
+    lantern 挂点挂在第一盏灯（红纸灯）下，跟着它走。"""
     roll = math.radians(head.drop["roll"](frame))
     rot = Matrix.Rotation(roll, 4, head.drop["axis"])
     pivot = center - (rot.to_3x3() @ Vector((0, 0, C_Z)))
-    head.pivot.matrix_world = root.matrix_world @ (Matrix.Translation(pivot) @ rot)
+    local = Matrix.Translation(pivot) @ rot
+    head.pivot.matrix_world = root.matrix_world @ local
+    bpy.context.view_layer.update()
+    inv = root.matrix_world.inverted()
+    low = min((inv @ (o.matrix_world @ v.co)).z for o in head.objects() for v in o.data.vertices)
+    head.pivot.matrix_world = root.matrix_world @ (Matrix.Translation(Vector((0, 0, -low))) @ local)

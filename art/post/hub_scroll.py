@@ -144,6 +144,15 @@ CHARACTERS = [
 ]
 
 
+# 路灯：灯童说“回来一回，路边就添一盏灯”。守灯人每回来一次，门外路边多亮一盏，最多 10 盏；底图里没有，全在叠层里。
+# 按点亮的顺序：先是出门那条石板路两边（近门的两盏小一些，往前的两盏大一些），再沿着院前的路往两边排开，
+# 都站在名字和提示文字之间的空地上。(立杆点 x, 地面 y, 大小, 灯挂在杆的哪一边 ±1)
+ROAD_LAMPS = [
+    (1290.0, 852.0, 0.82, 1), (1030.0, 856.0, 0.82, 1), (1322.0, 896.0, 1.0, 1), (1002.0, 896.0, 1.0, -1),
+    (1404.0, 895.0, 0.98, -1), (712.0, 896.0, 1.0, -1), (1670.0, 893.0, 0.96, 1), (528.0, 895.0, 1.0, 1),
+    (246.0, 892.0, 0.97, -1), (178.0, 890.0, 0.95, 1),
+]
+
 def meta_ids() -> list[str]:
     """心灯节点的 id，按 meta.ron 的文件顺序。"""
     return re.findall(r'\(id: "([a-z0-9_]+)"', META_RON.read_text(encoding="utf-8"))
@@ -1510,6 +1519,121 @@ def flame_layer(base, h, w, R, seed: int):
     return np.dstack([rgb_s, a_s]), (x0, y0, bw, bh), {"base": [round(bx_, 1), round(by_, 1)]}
 
 
+# ============================================================== 叠层：路灯
+
+
+def road_geom(i: int) -> dict:
+    """第 i 盏路灯的几何：杆脚、杆顶、灯笼中心和半径。"""
+    x0, yb, sc, side = ROAD_LAMPS[i]
+    hp = 56.0 * sc  # 杆高
+    lean = 1.5 * sc * side
+    xt, yt = x0 + lean, yb - hp
+    rx, ry = 6.5 * sc, 8.0 * sc
+    hx, hy = xt + 7.0 * sc * side, yt - 1.5 * sc  # 挂钩尖
+    lx, ly = hx, hy + 3.0 * sc + ry + 2.0 * sc
+    return {"x0": x0, "yb": yb, "s": sc, "side": side, "xt": xt, "yt": yt, "hx": hx, "hy": hy, "lx": lx, "ly": ly, "rx": rx, "ry": ry}
+
+
+def paint_road_lamp(P: Hub, g: dict, rng) -> None:
+    """一盏路灯（白天的画法，画在宣纸上）：一块垫脚石、一根略斜的木杆，杆头一弯小钩，挂一盏小纸灯；脚下一团影、几根草。"""
+    x0, yb, sc, side = g["x0"], g["yb"], g["s"], g["side"]
+    # 脚下的影、垫脚石
+    wash(P, [(x0 - 9 * sc, yb + 1), (x0 + 4 * sc, yb - 2.5 * sc), (x0 + 17 * sc, yb + 1), (x0 + 4 * sc, yb + 3.5 * sc)], ZHONG, 0.55,
+         soft=1.4, ring=0.0)
+    stone = [(x0 - 7 * sc, yb + 0.5), (x0 + 7.5 * sc, yb + 0.5), (x0 + 5.5 * sc, yb - 5 * sc), (x0 - 5 * sc, yb - 5.5 * sc)]
+    fill(P, stone, mixc(DAN, ZHONG, 0.4), 0.9, mode="glaze", rim=0.3, smooth=False)
+    brush(P, [(x0 - 7.5 * sc, yb), (x0 - 5 * sc, yb - 5.5 * sc), (x0 + 5.5 * sc, yb - 5 * sc), (x0 + 7.5 * sc, yb)], 0.8 * sc, color=JIAO,
+          smooth=False, nail=0.4, tail=0.2, press=0.6)
+    # 木杆：一笔下来，杆脚按重、往上收；杆头一弯小钩
+    brush(P, [(g["xt"], g["yt"]), (x0 + 0.4 * (g["xt"] - x0), yb - 30 * sc), (x0, yb - 4 * sc)], 1.7 * sc,
+          color=mixc(JIAO, NONG, 0.4), nail=0.3, tail=0.0, press=0.8, dry=0.3, dry_start=0.5)
+    brush(P, [(g["xt"], g["yt"] + 1), (g["xt"] + 3.5 * sc * side, g["yt"] - 4.5 * sc), (g["hx"], g["hy"])], 0.9 * sc, color=JIAO,
+          nail=0.5, tail=0.4, press=1.0)
+    lx, ly, rx, ry = g["lx"], g["ly"], g["rx"], g["ry"]
+    line(P, [(g["hx"], g["hy"]), (lx, ly - ry - 1.5 * sc)], 0.45, color=NONG, alpha=0.9, smooth=False, taper=False, dry=0.0)
+    # 小纸灯：留白的灯身、焦墨勾边、上下两道箍、一缕穗（点亮的样子在叠层里另画）
+    ellipse(P, lx, ly, rx, ry, PLASTER, 0.97)
+    th = np.linspace(-0.3, 2 * math.pi - 0.3, 40)
+    brush(P, np.stack([lx + rx * np.cos(th), ly + ry * np.sin(th)], -1), 0.6 * sc, color=JIAO, nail=0.3, tail=0.2, press=0.5)
+    for (yc, wc) in ((ly - ry - 1.2 * sc, rx * 0.6), (ly + ry + 1.2 * sc, rx * 0.55)):
+        line(P, [(lx - wc, yc), (lx + wc, yc)], 1.4 * sc, color=JIAO, alpha=0.95, smooth=False, taper=False, dry=0.1, jitter=0.05)
+    line(P, [(lx, ly + ry + 2 * sc), (lx + 0.5, ly + ry + 8 * sc)], 0.5 * sc, color=NONG, alpha=0.85, smooth=False)
+    # 杆脚几根草
+    for k in range(int(rng.integers(3, 5))):
+        ln = sc * rng.uniform(7, 14)
+        a = math.radians(rng.uniform(-35, 30))
+        bx = x0 + rng.uniform(-8, 8) * sc
+        ts = np.linspace(0, 1, 8)
+        pts = np.stack([bx + math.sin(a) * ln * ts, yb - 1 - math.cos(a) * ln * ts], -1)
+        P.stroke(pts, np.interp(ts, [0, 0.3, 1], [0.9 * sc, 1.0 * sc, 0.2]), JIAO, 0.85, jitter=0.1, near=True)
+
+
+def road_lamp_layers(R: dict, i: int) -> dict:
+    """第 i 盏路灯的四层（和心灯同一套）：body = 整盏灯（垫脚石、木杆、点亮的纸灯、脚下的影），普通混合；
+    flame（普通，base = 火苗底部中点）；core、glow（叠加）。底图里没有这盏灯，所以 body 是整个画出来的。"""
+    P, paper0 = R["P"], R["paper0"]
+    g = road_geom(i)
+    sc = g["s"]
+    x0, yb = g["x0"], g["yb"]
+    sl = (slice(int(yb - 90 * sc), int(yb + 16)), slice(int(x0 - 46 * sc), int(x0 + 46 * sc)))
+    # 在干净的宣纸上画（画完把这块画布和随机数、遮罩都还回去，底图和别的层不受影响）
+    saved = (P.rgb[sl].copy(), P.near[sl].copy(), P.rng)
+    P.rgb[sl] = paper0[sl]
+    P.rng = np.random.default_rng(SEED + 900 + i)
+    P.begin("road")
+    paint_road_lamp(P, g, P.rng)
+    cov = np.clip(P.end("road")[sl], 0, 1)
+    day = P.rgb[sl].copy()
+    P.rgb[sl], P.near[sl], P.rng = saved
+    # 颜料本身的颜色（去掉底下的纸）× 那里的长夜光照（含人物的灯光）+ 这盏灯自己照在杆头上的光
+    pap = paper0[sl]
+    C = np.clip((day - pap * (1 - cov[..., None])) / np.maximum(cov, 0.03)[..., None], 0, 1)
+    Y, X = P.Y[sl], P.X[sl]
+    d = np.hypot(X - g["lx"], Y - g["ly"])
+    own = (0.9 * np.exp(-(d / (14 * sc)) ** 2) + 0.35 * np.exp(-(d / (34 * sc)) ** 2))[..., None] * LAMP_LIGHT
+    lit = np.clip(R["lm"][sl] + own, 0, 1.3)
+    rel, vig = R["fin"]["rel"][sl], R["fin"]["vig"][sl]
+    gain = 1.3 + 1.6 * (1 - smoothstep(0.08, 0.6, (C * lit).mean(-1)))
+    rgb = C * lit * (1 + gain * (rel - 1))[..., None] * vig[..., None]
+    # 点亮的纸灯：纸透出光（心灯灯身的配色），墨边留着
+    dx, dy = (X - g["lx"]) / g["rx"], (Y - g["ly"]) / g["ry"]
+    rho = np.hypot(dx, dy)
+    inside = smoothstep(0.9, 0.72, rho)
+    hot = np.exp(-((dx / 0.6) ** 2 + ((dy - 0.15) / 0.7) ** 2))
+    paper_lit = mixc(mixc(col("#EE9E4E"), col("#FFD48C"), hot), col("#B45E24"), smoothstep(0.35, 0.95, rho) * (1 - hot))
+    paper_lit = paper_lit * (1 + 0.8 * (rel - 1))[..., None] * vig[..., None]
+    rgb = mixc(rgb, paper_lit, inside)
+    a = np.maximum(cov, inside)
+    a[a < 0.01] = 0.0
+    ys, xs = np.nonzero(a)
+    y0, y1, xa, xb = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    rect = (sl[1].start + xa, sl[0].start + y0, xb - xa, y1 - y0)
+    out = {"body": (np.dstack([np.clip(rgb[y0:y1, xa:xb], 0, 1), a[y0:y1, xa:xb]]), rect, {})}
+    # 火苗、内圈、外圈：和心灯同一个做法，小一号
+    rx, ry, lx, ly = g["rx"], g["ry"], g["lx"], g["ly"]
+    fh, fw = ry * 0.95, rx * 0.6
+    base = (lx, ly + ry * 0.42)
+    out["flame"] = flame_layer(base, fh, fw, R, seed=SEED + 950 + i)
+    cxc, cyc = lx, base[1] - fh * 0.45
+    rc = max(rx, ry) * 1.1
+    cb = crop_box(cxc, cyc, rc * 1.6, rc * 1.6)
+    Xc, Yc = np.meshgrid(np.arange(cb[0], cb[0] + cb[2]) + 0.5, np.arange(cb[1], cb[1] + cb[3]) + 0.5)
+    dc = np.hypot((Xc - cxc) / rc, (Yc - cyc) / (rc * 1.25))
+    ac = ADD_PEAK * np.exp(-(dc / 0.55) ** 2) * V.bump_window(dc / 1.6)
+    out["core"] = (np.dstack([np.broadcast_to(ADD_COLOR, ac.shape + (3,)), ac]), cb, {"blend": "add"})
+    Rg = 52.0 * sc
+    gcx, gcy = lx, ly + 6 * sc  # 光往下落一点，照着杆和地
+    gb = crop_box(gcx, gcy, Rg, Rg)
+    Xg, Yg = np.meshgrid(np.arange(gb[0], gb[0] + gb[2]) + 0.5, np.arange(gb[1], gb[1] + gb[3]) + 0.5)
+    dg = np.hypot(Xg - gcx, (Yg - gcy) * 1.1)
+    rb = max(rx, ry)
+    ag = (0.5 * np.exp(-(dg / (1.6 * rb)) ** 2) + 0.5 * np.exp(-(dg / (3.2 * rb)) ** 2)) * V.bump_window(dg / Rg)
+    body_full = smoothstep(1.05, 0.8, np.hypot((Xg - lx) / rx, (Yg - ly) / ry))
+    ag = ADD_PEAK * ag * (1 - 0.7 * body_full)
+    out["glow"] = (np.dstack([np.broadcast_to(ADD_COLOR, ag.shape + (3,)), ag]), gb, {"blend": "add"})
+    return out
+
+
 # ============================================================== 叠层：晨光
 
 
@@ -1635,17 +1759,19 @@ def quantize(layers):
     return {k: (np.round(v[0] * 255) / 255.0, v[1], v[2]) for k, v in layers.items()}
 
 
-def composite(base_img: Image.Image, lamps: dict, dawns: dict, lit: list[str], dawn_ids: list[str]) -> Image.Image:
-    """底图 → 灯身 → 火苗（普通）→ 内圈 + 外圈（叠加）→ 晨光（普通）→ 晨光金线（叠加）。"""
+def composite(base_img: Image.Image, lamps: dict, dawns: dict, lit: list[str], dawn_ids: list[str], road: list | None = None,
+              n_road: int = 0) -> Image.Image:
+    """底图 → 灯身 → 火苗（普通）→ 内圈 + 外圈（叠加）→ 晨光（普通）→ 晨光金线（叠加）。路灯（前 n_road 盏）和心灯一起叠。"""
     out = np.asarray(base_img, np.float64) / 255.0
     out = out.copy()
-    for lid in lit:
-        blend_normal(out, *lamps[lid]["body"][:2])
-    for lid in lit:
-        blend_normal(out, *lamps[lid]["flame"][:2])
-    for lid in lit:
-        blend_add(out, *lamps[lid]["core"][:2])
-        blend_add(out, *lamps[lid]["glow"][:2])
+    groups = [lamps[lid] for lid in lit] + list((road or [])[:n_road])
+    for e in groups:
+        blend_normal(out, *e["body"][:2])
+    for e in groups:
+        blend_normal(out, *e["flame"][:2])
+    for e in groups:
+        blend_add(out, *e["core"][:2])
+        blend_add(out, *e["glow"][:2])
     out = np.clip(out, 0, 1)
     for rid in dawn_ids:
         blend_normal(out, *dawns[rid]["main"][:2])
@@ -1767,6 +1893,83 @@ def review_dawn_fix(base: Image.Image, old_dir: Path, dawns: dict, path: Path) -
     out.save(path, optimize=True)
 
 
+def label_block(c: dict) -> tuple:
+    """名字和行当那块文字大约占的地方（label 点往两边各 110、往下 46 像素）。"""
+    x, y = c["label"]
+    return (x - 110, y, 220, 46)
+
+
+def review_road(base: Image.Image, lamps, dawns, road, ids, path: Path) -> None:
+    """路灯：上一行心灯不亮，下一行心灯全亮；三列是路灯 0 / 3 / 10 盏。下面一条是院前那一带放大（10 盏 + 心灯全亮）。"""
+    sw, sh = 960, 540
+    f = font("serif", 22)
+    counts = [0, 3, len(road)]
+    out = Image.new("RGB", (sw * 3 + 40, (sh + 46) * 2 + 40 + 255 + 46), (26, 26, 28))
+    d = ImageDraw.Draw(out)
+    full = None
+    for r, lit in enumerate(([], ids)):
+        for c, n in enumerate(counts):
+            im = composite(base, lamps, dawns, lit, [], road, n)
+            if r == 1 and c == 2:
+                full = im
+            x, y = 10 + c * (sw + 10), 8 + r * (sh + 46)
+            d.text((x, y), f"路灯 {n} 盏 · 心灯{'全亮' if lit else '不亮'}", font=f, fill=(225, 225, 225))
+            out.paste(im.resize((sw, sh), Image.LANCZOS), (x, y + 34))
+    band = full.crop((100, 760, 1820, 930))
+    band = band.resize((band.width * 3 // 2, band.height * 3 // 2), Image.LANCZOS)
+    y = 8 + 2 * (sh + 46)
+    d.text((10, y), "院前那一带放大 1.5 倍（x 100–1820，y 760–930；心灯全亮、路灯 10 盏）", font=f, fill=(225, 225, 225))
+    out.paste(band, (10, y + 34))
+    out.save(path, optimize=True)
+
+
+def review_road_ui(full: Image.Image, path: Path) -> None:
+    """路灯 10 盏 + 心灯全亮 + 青丘天明，缩到 1280×720 写上名字：橙框 = 名字块（label ±110、往下 46），淡蓝框 = 人物点击区，
+    红框 = text_safe，黄框 = 路灯的灯身 rect。下面是院前那一带放大 2 倍（原图像素）。"""
+    k = 1280 / W
+    im = full.resize((1280, 720), Image.LANCZOS).convert("RGBA")
+    txt = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    dr = ImageDraw.Draw(txt)
+    fn, fr = font("serif", 26), font("serif", 16)
+    paper = S.hex_to_rgb(S.PAPER)
+    for c in CHARACTERS:
+        x, y = c["label"][0] * k, c["label"][1] * k
+        bb = fn.getbbox(c["name"])
+        dr.text((x - (bb[2] - bb[0]) / 2 - bb[0], y), c["name"], font=fn, fill=paper + (255,))
+        bb2 = fr.getbbox(c["role"])
+        dr.text((x - (bb2[2] - bb2[0]) / 2 - bb2[0], y + 32), c["role"], font=fr, fill=paper + (190,))
+    bx, by, _, _ = TEXT_SAFE[1]
+    dr.text((bx * k + 8, by * k + 14), "←/→ 选人　Enter 进去　Esc 返回", font=fr, fill=paper + (200,))
+    sh = txt.split()[3].filter(ImageFilter.GaussianBlur(3))
+    shadow = Image.new("RGBA", im.size, (8, 9, 14, 0))
+    shadow.putalpha(sh.point(lambda v: int(v * 0.7)))
+    im.alpha_composite(shadow)
+    im.alpha_composite(txt)
+    plain = im.convert("RGB")
+    bd = ImageDraw.Draw(im)
+    for c in CHARACTERS:
+        for (x, y, w, h), colr in ((c["rect"], (80, 160, 220, 200)), (label_block(c), (240, 150, 40, 230))):
+            bd.rectangle([x * k, y * k, (x + w) * k, (y + h) * k], outline=colr, width=1)
+    for (x, y, w, h) in TEXT_SAFE:
+        bd.rectangle([x * k, y * k, (x + w) * k, (y + h) * k], outline=(220, 50, 50, 255), width=1)
+    for i in range(len(ROAD_LAMPS)):
+        g = road_geom(i)
+        bd.text((g["x0"] * k - 4, g["yb"] * k + 2), str(i), font=font("serif", 12), fill=(250, 230, 120, 255))
+    boxed = im.convert("RGB")
+    band = full.crop((140, 780, 1760, 910))
+    band = band.resize((band.width, band.height * 1), Image.LANCZOS)
+    f = font("serif", 18)
+    out = Image.new("RGB", (max(1280 * 2 + 20, band.width), 720 + 40 + band.height + 40), (26, 26, 28))
+    out.paste(plain, (0, 34))
+    out.paste(boxed, (1300, 34))
+    d = ImageDraw.Draw(out)
+    d.text((8, 6), "1280×720：心灯全亮、路灯 10 盏、青丘天明，写上名字和提示", font=f, fill=(225, 225, 225))
+    d.text((1308, 6), "同上加框：橙 = 名字块，淡蓝 = 点击区，红 = text_safe，数字 = 路灯点亮顺序", font=f, fill=(225, 225, 225))
+    d.text((8, 760), "院前那一带原大（x 140–1760，y 780–910）", font=f, fill=(225, 225, 225))
+    out.paste(band, (0, 790))
+    out.save(path, optimize=True)
+
+
 def review_ui(full: Image.Image, path: Path) -> None:
     """缩到 1280×720 的样子：名字 + 行当写在 label 处，人物 0 加一团模拟聚光，红框是文字安全区；
     下面一张是居中纸色面板 + 60% 压暗。"""
@@ -1838,7 +2041,7 @@ def review_ui(full: Image.Image, path: Path) -> None:
 # ============================================================== 写文件
 
 
-def write_outputs(R: dict, lamps: dict, dawns: dict, out: Path = OUT) -> dict:
+def write_outputs(R: dict, lamps: dict, dawns: dict, out: Path = OUT, road: list | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     R["img"].save(out / "hub.png", optimize=True)
     man = {"size": [W, H], "safe": list(SAFE), "characters": [], "lamps": {}, "dawn": {}, "text_safe": [list(r) for r in TEXT_SAFE]}
@@ -1869,6 +2072,18 @@ def write_outputs(R: dict, lamps: dict, dawns: dict, out: Path = OUT) -> dict:
                    "强度是这团光中心的亮度（灯童在门洞的暗处，给得大一些）。"
                    "text_safe：画面里安静、够暗的区域，放标题行（灯驿 + 灯油、铜钱）和底部提示。"
                    "safe：游戏按铺满窗口、居中裁切显示，16:10 与 21:9 都留得住的区域；人物、心灯、匾额、text_safe 都在里面。")
+    if road:  # 路灯：按点亮顺序，第 n 盏 = 第 n+1 次回来（新加的键，原有的键和值都不动）
+        man["road_lamps"] = []
+        for n, e in enumerate(road):
+            entry = {}
+            for part, suffix in (("body", ""), ("flame", "_flame"), ("core", "_core"), ("glow", "_glow")):
+                arr, rect, extra = e[part]
+                fn = f"road_{n}{suffix}.png"
+                to_img(arr).save(out / fn, optimize=True)
+                entry[part] = {"file": fn, "rect": list(map(int, rect)), "blend": extra.get("blend", "normal")}
+                if "base" in extra:
+                    entry[part]["base"] = extra["base"]
+            man["road_lamps"].append(entry)
     (out / "hub.json").write_text(json.dumps(man, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return man
 
@@ -1888,6 +2103,15 @@ def load_layers(man: dict, out: Path = OUT) -> tuple[dict, dict]:
     return lamps, dawns
 
 
+def load_road(man: dict, out: Path = OUT) -> list:
+    """按 hub.json 读回路灯各层。"""
+    def rd(fn):
+        return np.asarray(Image.open(out / fn).convert("RGBA"), np.float64) / 255.0
+
+    return [{part: (rd(v["file"]), tuple(v["rect"]), {k: v[k] for k in ("blend", "base") if k in v}) for part, v in e.items()}
+            for e in man.get("road_lamps", [])]
+
+
 def arg(argv: list[str], name: str, default=None):
     return argv[argv.index(name) + 1] if name in argv else default
 
@@ -1904,11 +2128,13 @@ def main(argv: list[str]) -> int:
     print(f"[hub] 画 {R['t_paint']:.1f}s，打光收尾共 {R['t_total']:.1f}s")
     lamps = {lid: quantize(lamp_layers(R, lid)) for lid in R["ids"]}
     dawns = {rid: quantize(dawn_layers(R, rid)) for rid in REGIONS}
+    road = [quantize(road_lamp_layers(R, i)) for i in range(len(ROAD_LAMPS))]  # 最后画：不影响底图和原有各层
     print(f"[hub] 叠层 {time.perf_counter() - t0:.1f}s")
     base = R["img"]
     if not sample:
-        man = write_outputs(R, lamps, dawns, out)
+        man = write_outputs(R, lamps, dawns, out, road)
         lamps, dawns = load_layers(man, out)  # 审图用写出去的文件合成
+        road = load_road(man, out)
         base = Image.open(out / "hub.png").convert("RGB")
         n = sum(1 for _ in out.glob("*.png"))
         mb = sum(p_.stat().st_size for p_ in out.iterdir()) / 1024 / 1024
@@ -1922,6 +2148,8 @@ def main(argv: list[str]) -> int:
     review_figures(R, review / f"{pre}_figures.png", compare=sample)
     ims = review_states(base, lamps, dawns, R["ids"], review / f"{pre}_states.png")
     review_ui(ims[2], review / f"{pre}_ui_720.png")
+    review_road(base, lamps, dawns, road, R["ids"], review / f"{pre}_road.png")
+    review_road_ui(composite(base, lamps, dawns, R["ids"], ["qingqiu"], road, len(road)), review / f"{pre}_road_ui_720.png")
     if "--dawn-compare" in argv:  # 晨光改前改后的对比（旧的输出目录）
         review_dawn_fix(base, Path(arg(argv, "--dawn-compare")), dawns, review / "hub_review_dawn_fix.png")
     print(f"[review] → {review}/{pre}_*.png，共 {time.perf_counter() - t0:.1f}s")
