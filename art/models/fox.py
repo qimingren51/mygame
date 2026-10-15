@@ -1,6 +1,7 @@
 """狐妖两种：赤面狐（精英，半立的狐妖，破袍、白色能面狐面具）和 夜主 · 九尾（首领，九尾巨狐）。
 
-赤面狐：半直立前倾，穿淡彩朱砂的破袍（袖口、下摆参差），白色狐面具上有朱砂纹，眼睛 EYE['fox'] 从面具眼缝里透出；
+赤面狐：半直立前倾，穿淡彩朱砂的狩衣（上身蓬松、腰带勒出腰身、正面打结垂两条带尾，胸前几道衣褶，
+  下摆两侧开衩外撇、露出白色内衣；袖口、下摆参差），白色狐面具上有朱砂纹，眼睛 EYE['fox'] 从面具眼缝里透出；
   浓墨毛色的耳朵、腿和三条大尾巴（尾尖朱砂）。动画 move：8 帧潜行小跑。帧 FRAME["elite"]（160px）。
 九尾：四足巨狐，着地潜行。楔形头骨 + 锥形吻部，白色面纹（吻、下颌、两颊，颊毛向后炸开）、黑鼻头、嘴线，
   杏仁细缝眼（藤黄发光、朱砂细边）、眼上朱砂火焰纹，宽底大三角耳（内耳白）；粗颈后飘鬃毛；
@@ -105,26 +106,37 @@ def build_fox():
     body = B.empty("FoxBody", yaw)
     parts = {"root": root, "body": body, "M": M, "tails": []}
     obj = B.mesh_object
-    # 躯干（前倾 30°，细腰）+ 交领
+    # 躯干（前倾 30°）：狩衣上身蓬松、腰带处勒细（不再是一根筒），胸前几道衣褶（边标记）+ 交领
     torso = B.empty("FoxTorso", body, loc=(0, 0.14, 1.00), rot=(math.radians(30), 0, 0))
     parts["torso"] = torso
-    obj("FoxChest", B.lathe([(0.16, 0.0), (0.17, 0.20), (0.21, 0.45), (0.25, 0.62), (0.22, 0.70), (0.10, 0.76),
-                             (0.0, 0.78)], 20, scale_y=0.72), M["robe"], "outer", torso, sharp_deg=0)
+    chest = obj("FoxChest", B.lathe(FOX_CHEST, FOX_CHEST_SEGS, scale_y=0.72, radial=_fox_pleats), M["robe"], "outer",
+                torso, sharp_deg=0)
+    _mark_folds(chest, FOX_FOLDS, 0.19, 0.58)
     for sx in (-1, 1):  # 白色交领：两道斜线在胸前交叉
         pts = [Vector((0.08 * sx, -0.10, 0.74)), Vector((0.02 * sx, -0.17, 0.60)), Vector((-0.07 * sx, -0.17, 0.42))]
         obj(f"FoxCollarV{sx:+d}", K.strip_build(pts, 0.05, 0.012, side_hint=Vector((1, 0, 0)), taper=(1.0, 0.8)),
             M["under"], "inner", torso)
     obj("FoxCollar", B.lathe([(0.09, 0.0), (0.12, 0.04), (0.09, 0.08)], 16), M["robe_dark"], "inner", torso,
         loc=(0, -0.02, 0.70))
-    obj("FoxSash", B.lathe([(0.175, 0.0), (0.185, 0.05), (0.175, 0.10)], 20, scale_y=0.85), M["robe_dark"], "inner",
-        torso, loc=(0, 0, 0.10))
-    # 狩衣下摆：白色内衣长、外袍短，几片层叠飘动
+    # 腰带：勒在最细处，加宽；镜头一侧的前腰打个结，垂两条带尾
+    obj("FoxSash", B.lathe([(0.150, 0.0), (0.164, 0.045), (0.164, 0.075), (0.150, 0.12)], 24, scale_y=0.80),
+        M["robe_dark"], "inner", torso, loc=(0, 0, 0.10))
+    knot = Vector((-0.07, -0.118, 0.16))
+    obj("FoxSashKnot", K.ellipsoid((0.045, 0.028, 0.038), 10, 6), M["robe_dark"], "inner", torso, loc=knot)
+    # 带尾顺着外撇的下摆往前下方垂（世界里每垂 1 往前 0.62），换到前倾 30° 的躯干坐标里
+    hang = Vector((0, -0.881, -0.472))
+    for k_, (dx, ln) in enumerate(((-0.025, 0.30), (0.03, 0.24))):
+        pts = [knot + Vector((dx * t, -0.012, 0)) + hang * (ln * t) + Vector((0.012 * math.sin(3 * t + k_), 0, 0))
+               for t in (i_ / 5 for i_ in range(6))]
+        obj(f"FoxSashEnd{k_}", K.strip_build(pts, 0.05, 0.010, side_hint=Vector((1, 0, 0)), taper=(0.9, 0.7)),
+            M["robe_dark"], "inner", torso)
+    # 狩衣下摆：白色内衣长、外袍短，几片层叠飘动。外袍四片之间两侧开衩（各约 45°），下摆外撇，开衩里露出白色内衣
     rags = []
     # 长度只到膝下，露出趾行的小腿和爪
     for i, (c, w, ln, mat, r, fl) in enumerate(((-90, 90, 0.60, "under", 0.16, 0.20), (90, 100, 0.62, "under", 0.16, 0.20),
                                                 (0, 60, 0.58, "under", 0.16, 0.18), (180, 60, 0.58, "under", 0.16, 0.18),
-                                                (-55, 75, 0.44, "robe", 0.19, 0.16), (-125, 75, 0.44, "robe", 0.19, 0.16),
-                                                (55, 85, 0.47, "robe", 0.19, 0.16), (125, 85, 0.47, "robe", 0.19, 0.16))):
+                                                (-52, 66, 0.44, "robe", 0.19, 0.27), (-128, 66, 0.44, "robe", 0.19, 0.27),
+                                                (55, 74, 0.47, "robe", 0.19, 0.27), (125, 74, 0.47, "robe", 0.19, 0.27))):
         ob = obj(f"FoxRag{i}", K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, seed=i, tatter=0.10, flare=fl)),
                  M[mat], "outer", body, loc=(0, 0.14, 0), sharp_deg=0)
         rags.append((ob, c, w, i, ln, r, fl))
@@ -162,6 +174,40 @@ def build_fox():
     parts["sockets"] = sockets
     bpy.context.view_layer.update()
     return root, parts, sockets
+
+
+# 狩衣上身（躯干坐标，前倾 30°）：下接下摆处略鼓，腰带处勒细（0.135），往上蓬松到胸口最宽，再收到领口
+FOX_CHEST = [(0.20, 0.0), (0.18, 0.07), (0.142, 0.13), (0.135, 0.17), (0.16, 0.23), (0.215, 0.36), (0.25, 0.50),
+             (0.258, 0.61), (0.22, 0.70), (0.10, 0.76), (0.0, 0.78)]
+FOX_CHEST_SEGS = 24
+FOX_FOLDS = (135.0, 165.0, 195.0, 240.0)  # 衣褶所在的经线（度，0 = +X，180 = 镜头一侧 -X，270 = 正前方）
+
+
+def _fox_pleats(th, z):
+    """衣褶：腰带以上蓬松处，几道褶的地方略鼓（半径倍数）。"""
+    if not 0.19 < z < 0.62:
+        return 1.0
+    k = 0.0
+    for a in FOX_FOLDS:
+        d = abs((math.degrees(th) - a + 180) % 360 - 180)
+        k = max(k, max(0.0, 1 - d / 12))
+    return 1 + 0.05 * k * math.sin(math.pi * (z - 0.19) / 0.43)
+
+
+def _mark_folds(ob, angles, z0, z1, tol=1.0):
+    """衣褶的墨线：angles 这几条经线上、z0..z1 之间的竖边标成 Freestyle 边标记（画 1.1px 内线）。"""
+    me = ob.data
+    attr = me.attributes.get("freestyle_edge") or me.attributes.new("freestyle_edge", "BOOLEAN", "EDGE")
+    vals = []
+    for e in me.edges:
+        v0, v1 = (me.vertices[i].co for i in e.vertices)
+        hit = False
+        if abs(v0.z - v1.z) > 1e-4 and z0 <= min(v0.z, v1.z) and max(v0.z, v1.z) <= z1:
+            a0 = math.degrees(math.atan2(v0.y / 0.72, v0.x)) % 360
+            a1 = math.degrees(math.atan2(v1.y / 0.72, v1.x)) % 360
+            hit = any(abs((a0 - a + 180) % 360 - 180) < tol and abs((a1 - a + 180) % 360 - 180) < tol for a in angles)
+        vals.append(hit)
+    attr.data.foreach_set("value", vals)
 
 
 def _fox_tail(root, ang, ln, phase, tph, xo=0.0):
@@ -257,7 +303,12 @@ def _brush(t):
 
 BODY_BANDS = [(0.0, S.INK["nong"]), (0.36, S.INK["dan"]), (0.74, S.PAPER)]  # 背浓墨 → 侧淡墨 → 胸腹白
 HEAD_BANDS = [(0.0, S.INK["nong"]), (0.40, S.INK["dan"]), (0.56, S.PAPER)]  # 额浓墨 → 淡墨 → 白色面纹
-LEG_BANDS = [(0.0, S.INK["dan"]), (0.22, S.INK["nong"])]  # 大臂/大腿接侧腹的淡墨，往下是浓墨“袜子”
+# 腿：大臂/大腿接侧腹的淡墨，往下是深色“袜子”。袜子原来是浓墨三档（重/浓/焦），游戏里几乎全黑、近腿远腿糊成一团：
+# 近侧（镜头一侧，-X）的两条腿整体提亮一档（淡墨暗档 / 重墨 / 浓墨），远侧的再暗一档、反差小一点（像隔着一层夜气）
+_DAN = S.shade_ramp(S.INK["dan"])  # 淡墨三档
+LEG_BANDS = [(0.0, S.INK["dan"]), (0.26, [_DAN[2], S.INK["zhong"], S.INK["nong"]])]  # 近侧
+LEG_BANDS_FAR = [(0.0, [_DAN[1], _DAN[2], S.INK["zhong"]]), (0.26, [S.INK["zhong"], S.INK["nong"], S.INK["nong"]])]
+LEG_JOINT = {True: [_DAN[2], S.INK["zhong"], S.INK["nong"]], False: [S.INK["zhong"], S.INK["nong"], S.INK["nong"]]}
 HEAD_S = 1.3  # 头整体放大（风格化：游戏尺寸下先读出狐狸头）
 BODY_SHIFT = 0.28  # 身体相对锚点沿 +Y（向后）的偏移，见 build_boss
 
@@ -437,7 +488,7 @@ def _leg_build(path, radii, fades=None):
 
 # 四肢（髋/肩坐标系，地面在 -髋高）：前腿 肩 → 肘（略后）→ 细前臂 → 腕 → 短掌 → 小爪；
 # 后腿 粗大腿（髋部肌肉）→ 膝（向前）→ 细小腿 → 跗关节（向后）→ 长跖骨 → 小爪。
-FRONT_HIP, HIND_HIP = (0.22, -0.58, 1.70), (0.25, 0.62, 1.86)
+FRONT_HIP, HIND_HIP = (0.26, -0.58, 1.70), (0.28, 0.62, 1.86)  # 左右再分开一点：近腿、远腿在画面上错开
 FRONT_LEG = ([(0, 0.0, 0.12), (0, 0.08, -0.50), (0, 0.04, -0.82), (0, -0.01, -1.36), (0, -0.08, -1.58)],
              [0.19, 0.10, 0.064, 0.058, 0.050])
 HIND_LEG = ([(0, 0.04, 0.10), (0, -0.20, -0.78), (0, 0.03, -1.00), (0, 0.26, -1.22), (0, 0.15, -1.74)],
@@ -452,8 +503,12 @@ def build_boss():
     ruff_mat = K.banded_toon_material("BossRuffInk", RUFF_BANDS, edge=0.3, seed=59.0)
     body_mat = K.banded_toon_material("BossBodyInk", BODY_BANDS, edge=0.3, noise_amt=0.12, seed=60.0)
     head_mat = K.banded_toon_material("BossHeadInk", HEAD_BANDS, edge=0.3, noise_amt=0.08, seed=61.0)
-    leg_mat = K.banded_toon_material("BossLegInk", LEG_BANDS, edge=0.3, noise_amt=0.10, seed=62.0)
-    paw_mat = K.toon("BossPaw", I["dan"], edge=0.35, seed=63.0)
+    leg_mat = {True: K.banded_toon_material("BossLegInk", LEG_BANDS, edge=0.3, noise_amt=0.10, seed=62.0),
+               False: K.banded_toon_material("BossLegInkFar", LEG_BANDS_FAR, edge=0.3, noise_amt=0.10, seed=62.0)}
+    joint_mat = {near: K.toon(f"BossJoint{'Near' if near else 'Far'}", ramp=LEG_JOINT[near], edge=0.4, seed=64.0)
+                 for near in (True, False)}
+    paw_mat = {True: K.toon("BossPaw", I["dan"], edge=0.35, seed=63.0),
+               False: K.toon("BossPawFar", ramp=S.shade_ramp(I["dan"])[1:] + [I["zhong"]], edge=0.35, seed=63.0)}
     root = B.empty("BossRoot")
     yaw = K.yaw_pivot("BossYaw", root, -20)
     # 四爪着地潜行（不悬浮）。整个身体相对锚点后移 0.28 米：尾根回到原来的位置 (0, 1.28, 1.94)，
@@ -498,15 +553,16 @@ def build_boss():
     # 四肢；肘后、跗后各一簇毛；小椭圆爪 + 墨色趾缝
     legs = {}
     for nm, sx, front in (("FL", 1, True), ("FR", -1, True), ("HL", 1, False), ("HR", -1, False)):
+        near = sx < 0  # E 向时右侧（-X）朝镜头
         hx, hy, hz = FRONT_HIP if front else HIND_HIP
         hip = B.empty(f"BossHip{nm}", body, loc=(hx * sx, hy, hz))
         path, radii = FRONT_LEG if front else HIND_LEG
         fades: list = []
-        leg = obj(f"BossLeg{nm}", _leg_build(path, radii, fades), leg_mat, "outer", hip, sharp_deg=0)
+        leg = obj(f"BossLeg{nm}", _leg_build(path, radii, fades), leg_mat[near], "outer", hip, sharp_deg=0)
         B.set_point_attr(leg, "fade", fades)
         j = Vector(path[3])  # 腕 / 跗关节略鼓
-        obj(f"BossJoint{nm}", K.ellipsoid((radii[3] * 1.12, radii[3] * 1.3, radii[3] * 1.2), 10, 6), M["fur"], "outer",
-            hip, loc=j)
+        obj(f"BossJoint{nm}", K.ellipsoid((radii[3] * 1.12, radii[3] * 1.3, radii[3] * 1.2), 10, 6), joint_mat[near],
+            "outer", hip, loc=j)
         tuft_at = Vector(path[1]) + Vector((0, 0.06, -0.02)) if front else j + Vector((0, 0.04, 0.02))
         tuft_dir = Vector((0, 0.20, -0.10)) if front else Vector((0, 0.17, -0.07))
         fades = []
@@ -516,7 +572,7 @@ def build_boss():
         B.set_point_attr(tf, "fade", fades)
         ground = -hz
         paw_c = Vector((0, path[-1][1] - 0.05, ground + 0.05))
-        obj(f"BossPaw{nm}", K.ellipsoid((0.075, 0.11, 0.05), 12, 6), paw_mat, "outer", hip, loc=paw_c)
+        obj(f"BossPaw{nm}", K.ellipsoid((0.075, 0.11, 0.05), 12, 6), paw_mat[near], "outer", hip, loc=paw_c)
         for t_ in (-1, 0, 1):  # 墨色趾缝：沿爪的前上表面
             pts = [paw_c + Vector((0.024 * t_, y_, 0.05 * math.sqrt(max(0.0, 1 - (y_ / 0.11) ** 2)) + 0.008))
                    for y_ in (-0.03, -0.07, -0.10)]
