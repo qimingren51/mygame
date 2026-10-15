@@ -62,7 +62,17 @@ pub(crate) fn register(app: &mut App) {
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
         .add_systems(
             Update,
-            (input, redraw, highlight, crate::scroll::animate).chain().run_if(in_state(AppState::Title)),
+            (
+                input,
+                redraw,
+                highlight,
+                crate::scroll::animate,
+                crate::hub_scene::sync_scene,
+                crate::hub_scene::refresh_scene,
+                crate::cover::fit_covers,
+            )
+                .chain()
+                .run_if(in_state(AppState::Title)),
         );
 }
 
@@ -281,8 +291,12 @@ fn input(
             let n = c.meta.nodes.len();
             if let Some(i) = list_nav(&mut ui, &actions, clicked, n, META_COLUMNS) {
                 let id = c.meta.nodes[i].id.clone();
+                let first = profile.meta.get(&id).copied().unwrap_or(0) == 0;
                 if profile.buy_meta(c, &id) {
                     news.meta_lit = true;
+                    if first {
+                        news.lit.push(id);
+                    }
                     save(&profile);
                 }
                 ui.dirty = true;
@@ -387,17 +401,13 @@ pub(crate) fn panel() -> impl Bundle {
     )
 }
 
-/// 标题画：一直铺在标题界面的最底下，夜签和心灯面板盖在上面。
+/// 标题画：一直铺在标题界面的最底下，夜签和心灯面板盖在上面。按“铺满再居中裁边”缩放，不拉伸。
 fn spawn_background(mut commands: Commands, skin: Res<Skin>) {
     commands.spawn((
         DespawnOnExit(AppState::Title),
         GlobalZIndex(-1),
-        Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: percent(100),
-            ..default()
-        },
+        Node { position_type: PositionType::Absolute, ..default() },
+        crate::cover::Cover(Vec2::new(1920.0, 1080.0)),
         ImageNode::new(skin.title.clone()).with_mode(NodeImageMode::Stretch),
         crate::title_fx::TitleBg,
         UiTransform::default(),
@@ -416,6 +426,7 @@ fn redraw(
     mode: Res<TitleMode>,
     assets: Res<AssetServer>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    scene: Option<Res<crate::hub_scene::HubScene>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
 ) {
@@ -432,7 +443,19 @@ fn redraw(
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
-        TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        TitleMode::Hub => match &scene {
+            Some(scene) => crate::hub_scene::labels(
+                &mut commands,
+                scene,
+                c,
+                &fonts,
+                &profile,
+                &news,
+                ui.selected,
+                Vec2::new(window.width(), window.height()),
+            ),
+            None => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),

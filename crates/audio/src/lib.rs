@@ -515,6 +515,17 @@ fn play_sim_events(
                 let s = a.sfx.warn_big.clone();
                 a.play(&s);
             }
+            // 竹丛打碎：一刀砍倒一片时不要连成一串
+            SimEvent::BambooBroken { pos } if a.can("bamboo", 0.07) => {
+                let rate = 0.9 + (a.now * 6007.0).fract() * 0.25;
+                let s = a.sfx.bamboo.clone();
+                a.play_at(&s, rate, -3.0, place(pos));
+            }
+            // 狐火烧平结界里的竹丛：跟着夜主登场的警报晚一点着起来
+            SimEvent::BambooBurned { .. } => {
+                let s = a.sfx.burn.clone();
+                a.play_later(&s, 0.3);
+            }
             // 无尽夜夜深一层：和妖潮的警报同时来，晚半拍沉下去
             SimEvent::NightDeeper { .. } => {
                 let s = a.sfx.deeper.clone();

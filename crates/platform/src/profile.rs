@@ -155,6 +155,10 @@ pub struct HubNews {
     /// 第一次通关的那一更
     pub cleared: Option<u8>,
     pub endless_back: bool,
+    /// 这次在心灯里从 0 级点亮的节点（灯驿长卷上那盏灯的点亮动画用，播完由画面清掉）
+    pub lit: Vec<String>,
+    /// 上一局第一次在这个地区迎来天明（地区 ID；灯驿长卷上那座山的晨光铺开用，播完清掉）
+    pub dawn: Option<String>,
 }
 
 impl HubNews {
@@ -177,6 +181,10 @@ impl HubNews {
                 .collect(),
             cleared: (now.cleared > before.cleared).then_some(now.cleared),
             endless_back: result.endless,
+            // P0 只有青丘：通关过一更就算这里天明过（以后按地区记通关）
+            dawn: (before.cleared == 0 && now.cleared >= 1)
+                .then(|| content.regions.first().map(|r| r.id.clone()))
+                .flatten(),
             ..Default::default()
         }
     }
@@ -630,6 +638,21 @@ mod tests {
         assert!(line(&p, 2, &won).contains("狐狸也怕黑"));
         let back = HubNews { endless_back: true, ..Default::default() };
         assert!(line(&p, 3, &back).contains("走了多深"));
+    }
+
+    /// 第一次天明的那一局带上地区，灯驿长卷上那座山铺开晨光；以后再赢不带。
+    #[test]
+    fn first_dawn_brings_the_region() {
+        let c = content();
+        let mut p = Profile::default();
+        let won = result(true, 600.0, 3000, 400, 50);
+        let news = |p: &mut Profile| {
+            let before = p.clone();
+            let got = p.record(&c, RunRecord { result: &won, tier: 1, attributes: false });
+            HubNews::after_run(&c, &before, p, &won, &got)
+        };
+        assert_eq!(news(&mut p).dawn.as_deref(), Some("qingqiu"));
+        assert_eq!(news(&mut p).dawn, None);
     }
 
     #[test]

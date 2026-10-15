@@ -12,6 +12,7 @@ lantern_core.workspace = true
 lantern_content.workspace = true
 lantern_sim.workspace = true
 lantern_view.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 lantern_platform.workspace = true
 bevy.workspace = true

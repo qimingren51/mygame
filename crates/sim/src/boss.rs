@@ -40,8 +40,9 @@ impl Foes {
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_u32(self.0.len() as u32);
         for f in &self.0 {
-            h.write_f32(f.pos.x);
-            h.write_f32(f.pos.y);
+            for v in [f.pos.x, f.pos.y, f.vel.x, f.vel.y, f.life] {
+                h.write_f32(v);
+            }
         }
     }
 
@@ -102,10 +103,28 @@ pub struct BossState {
 
 impl BossState {
     pub fn hash_into(&self, h: &mut StateHasher) {
-        h.write_u32(u32::from(self.phase));
+        h.write_u32(u32::from(self.phase) | u32::from(self.enraged) << 8);
+        for v in [self.refill_t, self.sweep_t, self.rain_t] {
+            h.write_f32(v);
+        }
         h.write_u32(self.illusions.len() as u32);
+        for m in &self.illusions {
+            for v in [m.pos.x, m.pos.y, m.angle, m.volley_t, m.seen] {
+                h.write_f32(v);
+            }
+        }
         h.write_u32(self.sweeps.len() as u32);
+        for s in &self.sweeps {
+            for v in [s.origin.x, s.origin.y, s.dir, s.t] {
+                h.write_f32(v);
+            }
+        }
         h.write_u32(self.drops.len() as u32);
+        for d in &self.drops {
+            for v in [d.pos.x, d.pos.y, d.t] {
+                h.write_f32(v);
+            }
+        }
     }
 }
 
