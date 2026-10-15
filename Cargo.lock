@@ -3512,6 +3512,7 @@ dependencies = [
  "lantern_platform",
  "lantern_sim",
  "lantern_view",
+ "serde",
  "serde_json",
 ]
 

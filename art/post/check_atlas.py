@@ -12,7 +12,8 @@
   - animations 引用的帧都存在；角色元数据里每个动画、每个方向都有序列；
   - ui/ 开头的帧不裁边（矩形 = 原图大小，界面代码不处理裁边）；
   - skin/skin.json（九宫格皮肤）与文件一致，slice 合法；screens/ 的图尺寸正确；
-  - screens/hub/hub.json（灯驿长卷）文件齐全、坐标在画面内，人物与 hub.ron、心灯与 meta.ron 对得上。
+  - screens/hub/hub.json（灯驿长卷）文件齐全、尺寸与 rect 一致、在画面和安全区内，
+    人物与 hub.ron、心灯与 meta.ron 对得上，心灯四层齐全，晨光配同尺寸的 mask。
 有错误时退出码为 1。
 """
 
@@ -132,54 +133,78 @@ def ron_ids(path: Path) -> list[str]:
 
 
 def check_hub(path: Path, errors: list[str], info: list[str]) -> int:
-    """灯驿长卷 screens/hub/hub.json：文件齐全、尺寸一致、坐标在画面内，人物和心灯与内容数据对得上。返回文件总字节数。"""
+    """灯驿长卷 screens/hub/hub.json：文件齐全、尺寸与 rect 一致、都在画面内，人物和心灯与内容数据对得上。
+    每一层都写 rect: [x, y, w, h]（底图像素）；心灯四层 body、flame（带 base）、core、glow；晨光图配同尺寸的 mask。
+    返回文件总字节数。"""
     d = path.parent
     hub = json.loads(path.read_text(encoding="utf-8"))
     W, H = hub["size"]
     total = path.stat().st_size
 
-    def inside(what: str, x, y, w=0, h=0):
-        if x < 0 or y < 0 or x + w > W or y + h > H:
-            errors.append(f"hub: {what} 超出 {W}×{H}（{x}, {y}, {w}, {h}）")
+    def inside(what: str, x, y, w=0, h=0, area=(0, 0, W, H)):
+        ax, ay, aw, ah = area
+        if x < ax or y < ay or x + w > ax + aw or y + h > ay + ah:
+            where = "安全区" if area != (0, 0, W, H) else f"{W}×{H} 的画面"
+            errors.append(f"hub: {what}（{x}, {y}, {w}, {h}）超出{where}")
 
-    def image(what: str, file: str, pos, mode: str | None = None):
+    def layer(what: str, spec: dict, mode: str | None = None, blend: str | None = None, file: str | None = None):
+        """一层叠图：文件在、尺寸等于 rect 的宽高、rect 在画面内、颜色模式和混合方式对。"""
         nonlocal total
+        file = file or spec["file"]
         png = d / file
         if not png.exists():
             errors.append(f"hub: {what} 的 {file} 不存在")
             return
         total += png.stat().st_size
+        x, y, w, h = spec["rect"]
         with Image.open(png) as im:
             if mode and im.mode != mode:
                 errors.append(f"hub: {file} 应为 {mode}，实际 {im.mode}")
-            inside(f"{what}（{file}）", pos[0], pos[1], *im.size)
-            return im.size
+            if im.size != (w, h):
+                errors.append(f"hub: {file} 实际 {im.size[0]}×{im.size[1]}，rect 写的是 {w}×{h}")
+        inside(f"{what}（{file}）", x, y, w, h)
+        if blend and spec.get("blend") != blend:
+            errors.append(f"hub: {what} 的 blend 应为 {blend}，实际 {spec.get('blend')}")
 
-    if image("底图", "hub.png", (0, 0), "RGB") not in (None, (W, H)):
-        errors.append(f"hub: hub.png 尺寸与 size {W}×{H} 不一致")
+    layer("底图", {"file": "hub.png", "rect": [0, 0, W, H]}, "RGB")
+    safe = tuple(hub.get("safe", (0, 0, W, H)))
+    inside("safe", *safe)
     chars = [c["id"] for c in hub.get("characters", [])]
     want = ron_ids(ROOT / "assets" / "data" / "hub.ron")
     if chars != want:
         errors.append(f"hub: characters {chars} 应与 hub.ron 的顺序 {want} 一致")
     for c in hub.get("characters", []):
-        inside(f"{c['id']} 的 rect", *c["rect"])
-        inside(f"{c['id']} 的 label", *c["label"])
-        inside(f"{c['id']} 的 light", *c["light"][:2])
+        inside(f"{c['id']} 的 rect", *c["rect"], area=safe)
+        inside(f"{c['id']} 的 label", *c["label"], area=safe)
+        inside(f"{c['id']} 的 light", *c["light"][:2], area=safe)
     lamps = hub.get("lamps", {})
     nodes = ron_ids(ROOT / "assets" / "data" / "meta.ron")
     if sorted(lamps) != sorted(nodes):
         errors.append(f"hub: lamps 的节点 {sorted(lamps)} 应与 meta.ron {sorted(nodes)} 一致")
     for lid, lp in lamps.items():
-        image(f"心灯 {lid}", lp["file"], lp["pos"], "RGBA")
-        image(f"心灯 {lid} 的光晕", lp["glow"], lp["glow_pos"])
+        missing = [k for k in ("body", "flame", "core", "glow") if k not in lp]
+        if missing:
+            errors.append(f"hub: 心灯 {lid} 缺少 {missing}")
+            continue
+        layer(f"心灯 {lid} 的灯身", lp["body"], "RGBA", "normal")
+        layer(f"心灯 {lid} 的火苗", lp["flame"], "RGBA", "normal")
+        layer(f"心灯 {lid} 的内圈光", lp["core"], "RGBA", "add")
+        layer(f"心灯 {lid} 的光晕", lp["glow"], "RGBA", "add")
+        inside(f"心灯 {lid} 的灯身", *lp["body"]["rect"], area=safe)
+        bx, by = lp["flame"].get("base", (-1, -1))
+        fx, fy, fw, fh = lp["flame"]["rect"]
+        if not (fx <= bx <= fx + fw and fy <= by <= fy + fh):
+            errors.append(f"hub: 心灯 {lid} 的火苗 base {bx, by} 不在火苗 rect 里")
     for rid, dp in hub.get("dawn", {}).items():
-        image(f"晨光 {rid}", dp["file"], dp["pos"], "RGBA")
-        if dp.get("blend") not in ("normal", "add"):
-            errors.append(f"hub: 晨光 {rid} 的 blend 应为 normal 或 add")
+        layer(f"晨光 {rid}", dp, "RGBA", "normal")
+        if "mask" not in dp:
+            errors.append(f"hub: 晨光 {rid} 缺少 mask")
+        else:
+            layer(f"晨光 {rid} 的 mask", dp, "L", file=dp["mask"])
         if "glow" in dp:
-            image(f"晨光 {rid} 的辉光", dp["glow"], dp["glow_pos"])
+            layer(f"晨光 {rid} 的辉光", dp["glow"], "RGBA", "add")
     for r in hub.get("text_safe", []):
-        inside("text_safe", *r)
+        inside("text_safe", *r, area=safe)
     info.append(f"screens/hub: {len(chars)} 个人物、{len(lamps)} 盏心灯、{len(hub.get('dawn', {}))} 处晨光，"
                 f"{total / 1024 / 1024:.1f} MB")
     return total

@@ -15,6 +15,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use lantern_content::{BlastKind, Element, Rank};
 use lantern_core::Pcg32;
+use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
 
@@ -403,6 +404,51 @@ impl Particles {
         }
     }
 
+    /// 竹叶：从竹梢弹出去，打着转慢慢飘落（普通混合，在暗层之下）。
+    pub fn leaves(&mut self, at: Vec2, n: u32) {
+        for _ in 0..self.n(n) {
+            let d = self.dir();
+            let green = BAMBOO_LEAF.mix(&INK, self.rng.range_f32(0.0, 0.45));
+            let p = P {
+                vel: Vec2::new(d.x * self.rng.range_f32(40.0, 110.0), self.rng.range_f32(20.0, 90.0)),
+                accel: Vec2::new(0.0, -70.0),
+                drag: 2.6,
+                // 灰片拉长就是一片竹叶
+                size: (self.rng.range_f32(1.5, 2.2), 0.9),
+                stretch: 2.4,
+                color: green.with_alpha(0.95),
+                fade_in: 0.02,
+                rot: self.rng.range_f32(0.0, TAU),
+                spin: self.rng.range_f32(-9.0, 9.0),
+                ..P::new(
+                    self.f.ash,
+                    at + d * self.rng.range_f32(0.0, 14.0),
+                    self.rng.range_f32(0.9, 1.7),
+                    layer::ACTORS + 1.5,
+                )
+            };
+            self.spawn(p);
+        }
+    }
+
+    /// 竹片：断口崩出去的细条，快而短（普通混合）。
+    pub fn splinters(&mut self, at: Vec2, n: u32) {
+        for _ in 0..self.n(n) {
+            let d = self.dir();
+            let p = P {
+                vel: Vec2::new(d.x, d.y.abs() * 0.8 + 0.2) * self.rng.range_f32(120.0, 220.0),
+                accel: Vec2::new(0.0, -260.0),
+                drag: 3.5,
+                size: (self.rng.range_f32(0.55, 0.8), 0.35),
+                stretch: 1.3,
+                color: BAMBOO_SPLINTER,
+                align: true,
+                ..P::new(self.f.streak, at, self.rng.range_f32(0.25, 0.45), layer::ACTORS + 1.5)
+            };
+            self.spawn(p);
+        }
+    }
+
     /// 地上扬起的尘（闪避、落印）。
     pub fn dust(&mut self, at: Vec2, n: u32, power: f32, color: Color) {
         for _ in 0..self.n(n) {
@@ -582,6 +628,7 @@ pub(crate) fn particle_events(
     hero: Single<(&Transform, &Player, &HeroView)>,
     arsenal: Option<Res<Arsenal>>,
     lanterns: Option<Res<lantern_sim::lanterns::Lanterns>>,
+    bamboo: Option<Res<Bamboo>>,
     fixed: Res<Time<Fixed>>,
     mut clock: ResMut<ParticleClock>,
     mut parts: ResMut<Particles>,
@@ -591,6 +638,7 @@ pub(crate) fn particle_events(
     clock.trail_cd -= dt;
     let (htf, pl, view) = *hero;
     let hero_at = htf.translation.truncate();
+    let mut bamboo_bursts = 0;
     let kills = outbox.0.iter().filter(|e| matches!(e, SimEvent::Kill { .. })).count() as u32;
     // 击杀很多时每只少放一些，总量不超过预算
     let per_kill = if kills == 0 { 0.0 } else { (KILL_BUDGET as f32 / kills as f32).min(1.0) };
@@ -733,6 +781,44 @@ pub(crate) fn particle_events(
                 parts.halo(frames.ring, hero_at, 0.1, 2.2, 0.9, GOLD.with_alpha(0.9));
                 parts.embers(hero_at + Vec2::new(0.0, 20.0), 30.0, GOLD, 24);
             }
+            // 竹丛打碎：竹梢的叶子四散飘落，断口崩出几根竹片，脚下起一小团尘（一刀砍倒一片时限量）
+            SimEvent::BambooBroken { pos } if bamboo_bursts < BAMBOO_BUDGET => {
+                bamboo_bursts += 1;
+                let at = to_screen(pos);
+                parts.leaves(at + Vec2::new(0.0, 46.0), 12);
+                parts.splinters(at + Vec2::new(0.0, 14.0), 5);
+                parts.dust(at, 4, 0.8, DUST);
+            }
+            // 夜主登场，狐火把结界里的竹丛烧平：每丛起一股狐火和焦烟，结界边上烧起一圈
+            SimEvent::BambooBurned { pos, radius } => {
+                if let Some(b) = &bamboo {
+                    let mut n = 0;
+                    for c in b.near() {
+                        if c.state != ClumpState::Burned || c.pos.distance(pos) > radius + 10.0 || n >= 24 {
+                            continue;
+                        }
+                        n += 1;
+                        let at = to_screen(c.pos);
+                        parts.sparks(at + Vec2::new(0.0, 16.0), FOXFIRE, 8, 170.0, Vec2::new(0.0, 0.8));
+                        parts.halo(
+                            frames.ring,
+                            at + Vec2::new(0.0, 8.0),
+                            0.15,
+                            0.9,
+                            0.45,
+                            FOXFIRE.with_alpha(0.55),
+                        );
+                        parts.embers(at + Vec2::new(0.0, 28.0), 22.0, FOXFIRE, 14);
+                        parts.smoke(at + Vec2::new(0.0, 24.0), 1.6, INK.with_alpha(0.55), 3);
+                        parts.ash(at + Vec2::new(0.0, 18.0), 16.0, 6, INK.with_alpha(0.75));
+                    }
+                }
+                let center = to_screen(pos);
+                for k in 0..36 {
+                    let a = k as f32 / 36.0 * TAU;
+                    parts.embers(center + Vec2::from_angle(a) * radius, 6.0, FOXFIRE, 1);
+                }
+            }
             // 石灯笼点亮：灯窗里冒出一股金色火星，地上一圈光
             SimEvent::LanternLit { index, .. } => {
                 if let Some(l) = lanterns.as_ref().and_then(|ls| ls.0.get(index as usize)) {
@@ -786,4 +872,10 @@ pub(crate) fn particle_events(
 }
 
 const DUST: Color = Color::srgba(0.42, 0.38, 0.32, 0.4);
+/// 竹叶（再往墨色里随机调一点）、竹片、狐火
+const BAMBOO_LEAF: Color = Color::srgb(0.38, 0.55, 0.34);
+const BAMBOO_SPLINTER: Color = Color::srgb(0.82, 0.78, 0.58);
+const FOXFIRE: Color = Color::srgb(1.0, 0.42, 0.35);
+/// 一帧最多放几丛竹子的碎叶（一刀砍倒一片竹林时）
+const BAMBOO_BUDGET: u32 = 6;
 const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);

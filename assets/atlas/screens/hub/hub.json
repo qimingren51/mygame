@@ -1,0 +1,787 @@
+{
+  "size": [
+    1920,
+    1080
+  ],
+  "safe": [
+    96,
+    128,
+    1728,
+    824
+  ],
+  "characters": [
+    {
+      "id": "smith",
+      "name": "老灯匠",
+      "rect": [
+        262,
+        618,
+        262,
+        196
+      ],
+      "label": [
+        392,
+        822
+      ],
+      "light": [
+        400,
+        716,
+        175
+      ]
+    },
+    {
+      "id": "peddler",
+      "name": "货郎",
+      "rect": [
+        668,
+        566,
+        352,
+        258
+      ],
+      "label": [
+        846,
+        830
+      ],
+      "light": [
+        850,
+        700,
+        190
+      ]
+    },
+    {
+      "id": "child",
+      "name": "灯童",
+      "rect": [
+        1084,
+        668,
+        154,
+        132
+      ],
+      "label": [
+        1160,
+        806
+      ],
+      "light": [
+        1160,
+        742,
+        125
+      ]
+    },
+    {
+      "id": "teller",
+      "name": "说书人",
+      "rect": [
+        1436,
+        580,
+        230,
+        196
+      ],
+      "label": [
+        1548,
+        808
+      ],
+      "light": [
+        1546,
+        700,
+        165
+      ]
+    }
+  ],
+  "lamps": {
+    "luck": {
+      "body": {
+        "file": "lamp_luck.png",
+        "rect": [
+          495,
+          403,
+          40,
+          44
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_luck_flame.png",
+        "rect": [
+          505,
+          409,
+          20,
+          28
+        ],
+        "blend": "normal",
+        "base": [
+          515.0,
+          433.0
+        ]
+      },
+      "core": {
+        "file": "lamp_luck_core.png",
+        "rect": [
+          486,
+          395,
+          58,
+          59
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_luck_glow.png",
+        "rect": [
+          397,
+          307,
+          236,
+          236
+        ],
+        "blend": "add"
+      }
+    },
+    "seal": {
+      "body": {
+        "file": "lamp_seal.png",
+        "rect": [
+          669,
+          395,
+          36,
+          50
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_seal_flame.png",
+        "rect": [
+          677,
+          403,
+          20,
+          31
+        ],
+        "blend": "normal",
+        "base": [
+          687.0,
+          429.2
+        ]
+      },
+      "core": {
+        "file": "lamp_seal_core.png",
+        "rect": [
+          653,
+          386,
+          68,
+          68
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_seal_glow.png",
+        "rect": [
+          550,
+          283,
+          274,
+          274
+        ],
+        "blend": "add"
+      }
+    },
+    "wick": {
+      "body": {
+        "file": "lamp_wick.png",
+        "rect": [
+          327,
+          425,
+          36,
+          50
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wick_flame.png",
+        "rect": [
+          335,
+          433,
+          20,
+          31
+        ],
+        "blend": "normal",
+        "base": [
+          345.0,
+          459.2
+        ]
+      },
+      "core": {
+        "file": "lamp_wick_core.png",
+        "rect": [
+          311,
+          416,
+          68,
+          68
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wick_glow.png",
+        "rect": [
+          208,
+          313,
+          274,
+          274
+        ],
+        "blend": "add"
+      }
+    },
+    "afterglow": {
+      "body": {
+        "file": "lamp_afterglow.png",
+        "rect": [
+          835,
+          433,
+          40,
+          44
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_afterglow_flame.png",
+        "rect": [
+          845,
+          439,
+          20,
+          28
+        ],
+        "blend": "normal",
+        "base": [
+          855.0,
+          463.0
+        ]
+      },
+      "core": {
+        "file": "lamp_afterglow_core.png",
+        "rect": [
+          826,
+          425,
+          58,
+          59
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_afterglow_glow.png",
+        "rect": [
+          737,
+          337,
+          236,
+          236
+        ],
+        "blend": "add"
+      }
+    },
+    "ember": {
+      "body": {
+        "file": "lamp_ember.png",
+        "rect": [
+          421,
+          502,
+          38,
+          40
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_ember_flame.png",
+        "rect": [
+          430,
+          507,
+          20,
+          27
+        ],
+        "blend": "normal",
+        "base": [
+          440.0,
+          529.1
+        ]
+      },
+      "core": {
+        "file": "lamp_ember_core.png",
+        "rect": [
+          414,
+          496,
+          52,
+          52
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_ember_glow.png",
+        "rect": [
+          334,
+          416,
+          212,
+          212
+        ],
+        "blend": "add"
+      }
+    },
+    "slot": {
+      "body": {
+        "file": "lamp_slot.png",
+        "rect": [
+          733,
+          510,
+          38,
+          40
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_slot_flame.png",
+        "rect": [
+          742,
+          515,
+          20,
+          27
+        ],
+        "blend": "normal",
+        "base": [
+          752.0,
+          537.1
+        ]
+      },
+      "core": {
+        "file": "lamp_slot_core.png",
+        "rect": [
+          726,
+          504,
+          52,
+          52
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_slot_glow.png",
+        "rect": [
+          646,
+          424,
+          212,
+          212
+        ],
+        "blend": "add"
+      }
+    },
+    "wu_metal": {
+      "body": {
+        "file": "lamp_wu_metal.png",
+        "rect": [
+          242,
+          360,
+          40,
+          44
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wu_metal_flame.png",
+        "rect": [
+          252,
+          366,
+          20,
+          28
+        ],
+        "blend": "normal",
+        "base": [
+          262.0,
+          390.0
+        ]
+      },
+      "core": {
+        "file": "lamp_wu_metal_core.png",
+        "rect": [
+          233,
+          352,
+          58,
+          59
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wu_metal_glow.png",
+        "rect": [
+          144,
+          264,
+          236,
+          236
+        ],
+        "blend": "add"
+      }
+    },
+    "wu_wood": {
+      "body": {
+        "file": "lamp_wu_wood.png",
+        "rect": [
+          918,
+          356,
+          40,
+          44
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wu_wood_flame.png",
+        "rect": [
+          928,
+          362,
+          20,
+          28
+        ],
+        "blend": "normal",
+        "base": [
+          938.0,
+          386.0
+        ]
+      },
+      "core": {
+        "file": "lamp_wu_wood_core.png",
+        "rect": [
+          909,
+          348,
+          58,
+          59
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wu_wood_glow.png",
+        "rect": [
+          820,
+          260,
+          236,
+          236
+        ],
+        "blend": "add"
+      }
+    },
+    "wu_water": {
+      "body": {
+        "file": "lamp_wu_water.png",
+        "rect": [
+          412,
+          309,
+          36,
+          50
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wu_water_flame.png",
+        "rect": [
+          420,
+          317,
+          20,
+          31
+        ],
+        "blend": "normal",
+        "base": [
+          430.0,
+          343.2
+        ]
+      },
+      "core": {
+        "file": "lamp_wu_water_core.png",
+        "rect": [
+          396,
+          300,
+          68,
+          68
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wu_water_glow.png",
+        "rect": [
+          293,
+          197,
+          274,
+          274
+        ],
+        "blend": "add"
+      }
+    },
+    "wu_fire": {
+      "body": {
+        "file": "lamp_wu_fire.png",
+        "rect": [
+          752,
+          305,
+          36,
+          50
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wu_fire_flame.png",
+        "rect": [
+          760,
+          313,
+          20,
+          31
+        ],
+        "blend": "normal",
+        "base": [
+          770.0,
+          339.2
+        ]
+      },
+      "core": {
+        "file": "lamp_wu_fire_core.png",
+        "rect": [
+          736,
+          296,
+          68,
+          68
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wu_fire_glow.png",
+        "rect": [
+          633,
+          193,
+          274,
+          274
+        ],
+        "blend": "add"
+      }
+    },
+    "wu_earth": {
+      "body": {
+        "file": "lamp_wu_earth.png",
+        "rect": [
+          584,
+          290,
+          40,
+          44
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_wu_earth_flame.png",
+        "rect": [
+          594,
+          296,
+          20,
+          28
+        ],
+        "blend": "normal",
+        "base": [
+          604.0,
+          320.0
+        ]
+      },
+      "core": {
+        "file": "lamp_wu_earth_core.png",
+        "rect": [
+          575,
+          282,
+          58,
+          59
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_wu_earth_glow.png",
+        "rect": [
+          486,
+          194,
+          236,
+          236
+        ],
+        "blend": "add"
+      }
+    },
+    "oil": {
+      "body": {
+        "file": "lamp_oil.png",
+        "rect": [
+          254,
+          503,
+          36,
+          50
+        ],
+        "blend": "normal"
+      },
+      "flame": {
+        "file": "lamp_oil_flame.png",
+        "rect": [
+          262,
+          511,
+          20,
+          31
+        ],
+        "blend": "normal",
+        "base": [
+          272.0,
+          537.2
+        ]
+      },
+      "core": {
+        "file": "lamp_oil_core.png",
+        "rect": [
+          238,
+          494,
+          68,
+          68
+        ],
+        "blend": "add"
+      },
+      "glow": {
+        "file": "lamp_oil_glow.png",
+        "rect": [
+          135,
+          391,
+          274,
+          274
+        ],
+        "blend": "add"
+      }
+    }
+  },
+  "dawn": {
+    "changyang": {
+      "file": "dawn_changyang.png",
+      "rect": [
+        103,
+        209,
+        178,
+        243
+      ],
+      "blend": "normal",
+      "mask": "dawn_changyang_mask.png",
+      "glow": {
+        "file": "dawn_changyang_glow.png",
+        "rect": [
+          101,
+          284,
+          182,
+          116
+        ],
+        "blend": "add"
+      }
+    },
+    "zhangwei": {
+      "file": "dawn_zhangwei.png",
+      "rect": [
+        588,
+        97,
+        265,
+        336
+      ],
+      "blend": "normal",
+      "mask": "dawn_zhangwei_mask.png",
+      "glow": {
+        "file": "dawn_zhangwei_glow.png",
+        "rect": [
+          593,
+          171,
+          262,
+          219
+        ],
+        "blend": "add"
+      }
+    },
+    "beiming": {
+      "file": "dawn_beiming.png",
+      "rect": [
+        858,
+        226,
+        207,
+        241
+      ],
+      "blend": "normal",
+      "mask": "dawn_beiming_mask.png",
+      "glow": {
+        "file": "dawn_beiming_glow.png",
+        "rect": [
+          861,
+          301,
+          207,
+          123
+        ],
+        "blend": "add"
+      }
+    },
+    "youdu": {
+      "file": "dawn_youdu.png",
+      "rect": [
+        1064,
+        221,
+        232,
+        339
+      ],
+      "blend": "normal",
+      "mask": "dawn_youdu_mask.png",
+      "glow": {
+        "file": "dawn_youdu_glow.png",
+        "rect": [
+          1061,
+          294,
+          239,
+          176
+        ],
+        "blend": "add"
+      }
+    },
+    "danxue": {
+      "file": "dawn_danxue.png",
+      "rect": [
+        1323,
+        155,
+        221,
+        340
+      ],
+      "blend": "normal",
+      "mask": "dawn_danxue_mask.png",
+      "glow": {
+        "file": "dawn_danxue_glow.png",
+        "rect": [
+          1329,
+          230,
+          202,
+          201
+        ],
+        "blend": "add"
+      }
+    },
+    "qingqiu": {
+      "file": "dawn_qingqiu.png",
+      "rect": [
+        1574,
+        207,
+        239,
+        191
+      ],
+      "blend": "normal",
+      "mask": "dawn_qingqiu_mask.png",
+      "glow": {
+        "file": "dawn_qingqiu_glow.png",
+        "rect": [
+          1598,
+          282,
+          215,
+          111
+        ],
+        "blend": "add"
+      }
+    }
+  },
+  "text_safe": [
+    [
+      110,
+      140,
+      470,
+      64
+    ],
+    [
+      200,
+      904,
+      1520,
+      46
+    ]
+  ],
+  "note": "坐标都是 1920×1080 底图上的像素，rect = [x, y, w, h]（左上角 + 宽高）。合成顺序：hub.png → 各灯 body → flame（普通混合）→ core + glow（叠加：画面 += RGB × alpha）→ dawn（普通混合）→ dawn 的 glow（叠加）。PNG 都是直通（非预乘）alpha。flame.base 是火苗底部中点（缩放、抖动绕这一点）。dawn mask 与 dawn 图同尺寸：黑 = 最先亮，白 = 最后，按阈值铺开。characters：rect 是点击区；label 是名字和行当那块文字的上沿中点；light = [x, y, 半径]，选中时加的聚光。text_safe：画面里安静、够暗的区域，放标题行（灯驿 + 灯油、铜钱）和底部提示。safe：游戏按铺满窗口、居中裁切显示，16:10 与 21:9 都留得住的区域；人物、心灯、匾额、text_safe 都在里面。"
+}

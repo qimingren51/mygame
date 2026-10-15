@@ -10,9 +10,11 @@ use lantern_sim::{AppState, RunState};
 
 mod bench;
 mod choice;
+mod cover;
 mod describe;
 mod hub;
 mod hub_fx;
+mod hub_scene;
 mod hud;
 mod hud_fx;
 mod markers;
@@ -99,6 +101,7 @@ impl Plugin for UiPlugin {
         moments::register(app);
         hud_fx::register(app);
         hub_fx::register(app);
+        hub_scene::register(app);
         results::register(app);
         pause::register(app);
     }

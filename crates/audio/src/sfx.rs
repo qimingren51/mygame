@@ -51,6 +51,23 @@ pub struct Sfx {
     pub elite_down: StaticSoundData,
     /// 无尽夜夜深一层：低处一声锣，一个音慢慢往下沉
     pub deeper: StaticSoundData,
+    /// 竹丛打碎：一声脆的“咔嚓”，后面跟几下竹片的噼啪
+    pub bamboo: StaticSoundData,
+    /// 狐火烧平竹丛：呼地一下着起来，噼里啪啦
+    pub burn: StaticSoundData,
+    // 下面四个是界面上的事（卷轴、灯驿），等界面到音频的通道（UiCue）接上以后播
+    /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub scroll_unroll: StaticSoundData,
+    /// 卷轴旁白浮出一行：很轻的一声高音（按行升调播放）
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub scroll_line: StaticSoundData,
+    /// 灯驿里点亮一盏心灯：呼地着起来，一个暖的和音
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub lamp_lit: StaticSoundData,
+    /// 灯驿远山晨光铺开：一串往上走的拨弦，末尾几声鸟叫
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub dawn_spread: StaticSoundData,
 }
 
 /// 一声鸟叫：两三个快速上滑的短音。
@@ -280,6 +297,84 @@ impl Sfx {
                 b.osc(Wave::Sine, 60.0, 0.2, 0.11, 0.38, Some((40.0, 0.1)), 0.004);
                 b.noise(0.0, 0.05, 0.06, noise(FilterKind::Low, 180.0));
             }),
+            bamboo: render(0.5, |b| {
+                b.noise(0.0, 0.035, 0.22, noise(FilterKind::High, 2600.0));
+                b.wood(0.0, 0.14, 1250.0);
+                b.wood(0.018, 0.1, 1650.0);
+                b.wood(0.045, 0.08, 900.0);
+                b.wood(0.0, 0.07, 320.0);
+                for (k, t) in [0.08, 0.12, 0.17, 0.23].into_iter().enumerate() {
+                    b.noise(t, 0.012, 0.09 - k as f32 * 0.018, noise(FilterKind::High, 3800.0));
+                }
+            }),
+            scroll_unroll: render(3.4, |b| {
+                b.pluck(pent(5), 0.0, 0.11, 2.6);
+                b.pluck(pent(10), 0.02, 0.05, 2.2);
+                // 纸响：一串短的带通噪声颗粒，越推越轻
+                for k in 0..18 {
+                    let t = 0.05 + k as f32 * 0.095 + (k * 53 % 7) as f32 * 0.008;
+                    let f = 2200.0 + (k * 211 % 9) as f32 * 220.0;
+                    let vol = 0.05 * (1.0 - k as f32 / 22.0);
+                    b.noise(
+                        t,
+                        0.07 + (k % 3) as f32 * 0.02,
+                        vol,
+                        NoiseOpts { freq: f, q: 1.6, ..Default::default() },
+                    );
+                }
+                b.wood(1.8, 0.09, 380.0);
+                b.wood(1.84, 0.05, 520.0);
+            }),
+            scroll_line: render(1.6, |b| {
+                b.bell(pent(15), 0.0, 0.035, 1.4);
+                b.sine(pent(20), 0.02, 0.35, 0.008);
+            }),
+            lamp_lit: render(2.6, |b| {
+                b.noise(
+                    0.0,
+                    0.35,
+                    0.12,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 200.0,
+                        slide: Some(1600.0),
+                        attack: 0.05,
+                        ..Default::default()
+                    },
+                );
+                for (i, d) in [10, 14, 17].into_iter().enumerate() {
+                    b.bell(pent(d), 0.12 + i as f32 * 0.05, 0.06, 2.2);
+                }
+                for k in 0..4 {
+                    b.noise(0.2 + k as f32 * 0.13, 0.01, 0.03, noise(FilterKind::High, 3400.0));
+                }
+            }),
+            dawn_spread: render(4.5, |b| {
+                for (i, d) in [10, 12, 13, 15, 17, 18, 20].into_iter().enumerate() {
+                    b.pluck(pent(d), i as f32 * 0.32, 0.07, 2.4);
+                }
+                for (t, f) in [(2.4, 3600.0), (2.75, 4100.0), (3.3, 3800.0)] {
+                    chirp(b, t, f, 0.035);
+                }
+            }),
+            burn: render(2.2, |b| {
+                b.noise(
+                    0.0,
+                    1.1,
+                    0.2,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 300.0,
+                        slide: Some(2400.0),
+                        attack: 0.25,
+                        ..Default::default()
+                    },
+                );
+                for k in 0..14 {
+                    let t = 0.15 + k as f32 * 0.11 + (k * 37 % 7) as f32 * 0.013;
+                    b.noise(t, 0.01, 0.06, noise(FilterKind::High, 3000.0 + (k * 131 % 5) as f32 * 400.0));
+                }
+            }),
             deeper: render(5.0, |b| {
                 b.gong(36.7, 0.0, 0.2);
                 b.bell(pent(0), 0.0, 0.05, 3.5);
@@ -370,9 +465,15 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 16] = [
+        let all: [(&str, &StaticSoundData); 22] = [
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),
+            ("bamboo", &s.bamboo),
+            ("burn", &s.burn),
+            ("scroll_unroll", &s.scroll_unroll),
+            ("scroll_line", &s.scroll_line),
+            ("lamp_lit", &s.lamp_lit),
+            ("dawn_spread", &s.dawn_spread),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),

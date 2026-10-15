@@ -16,7 +16,7 @@ use crate::spatial::Grid;
 use crate::stats::{Effects, Stats};
 use crate::{GameContent, Health, HurtBy, Player, Pos, SimOutbox, SimRng, Tick};
 
-/// 以玩家为中心重建空间网格。
+/// 以玩家为中心重建空间网格（妖物移动、互推之后，docs/DESIGN.md 第 6.3 节）。
 pub(crate) fn build_grid(
     view: Res<SimView>,
     player: Single<&Pos, With<Player>>,

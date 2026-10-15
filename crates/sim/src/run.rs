@@ -47,6 +47,51 @@ pub struct Endless {
     pub late_kills: u32,
 }
 
+impl Director {
+    pub fn hash_into(&self, h: &mut lantern_core::StateHasher) {
+        for v in
+            [self.spawn_acc, self.next_pack, self.surge_t, self.surge_mult, self.boss_mult, self.boss_since]
+        {
+            h.write_f32(v);
+        }
+        h.write_u32(self.boss.map_or(u32::MAX, |b| b.raw()));
+        let (c, r) = self.barrier.unwrap_or((bevy_math::Vec2::ZERO, -1.0));
+        for v in [c.x, c.y, r, self.rush_release] {
+            h.write_f32(v);
+        }
+        h.write_u32(self.encircle.len() as u32);
+        for e in &self.encircle {
+            h.write_u32(e.index as u32);
+            h.write_f32(e.at);
+        }
+        if let Some(e) = &self.endless {
+            e.hash_into(h);
+        }
+    }
+}
+
+impl RunPlan {
+    /// 时间表的进度（配比开局就定了，由种子决定，不用写）。
+    pub fn hash_into(&self, h: &mut lantern_core::StateHasher) {
+        h.write_u32(self.schedule.len() as u32);
+        for s in &self.schedule {
+            h.write_u32(s.index as u32 | u32::from(s.done) << 31);
+            h.write_f32(s.at);
+        }
+    }
+}
+
+impl Progress {
+    pub fn hash_into(&self, h: &mut lantern_core::StateHasher) {
+        for v in [self.level, self.pending_levels, self.kills, self.combo, self.best_combo] {
+            h.write_u32(v);
+        }
+        for v in [self.xp, self.combo_t, self.ult, self.gold] {
+            h.write_f32(v);
+        }
+    }
+}
+
 impl Endless {
     pub fn hash_into(&self, h: &mut lantern_core::StateHasher) {
         for v in [self.wave, self.arrivals, self.downs, self.late_kills] {
