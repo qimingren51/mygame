@@ -134,7 +134,11 @@ fn start(
     dawns: Query<(Entity, &HubDawn, &HubImage, &HubDawnMask)>,
     mut reveals: ResMut<Assets<DawnReveal>>,
     mut cues: MessageWriter<UiCue>,
+    transition: Option<Res<crate::transition::InkTransition>>,
 ) {
+    if transition.is_some_and(|t| t.active()) {
+        return;
+    }
     anim.clock += time.delta_secs().min(0.1);
     let clock = anim.clock;
     anim.lighting.retain(|(_, at)| clock - at < LIGHT_LEN + 1.0);

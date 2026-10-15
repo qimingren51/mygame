@@ -21,6 +21,7 @@ pub(crate) enum Item {
     Fx,
     Keyboard,
     Gamepad,
+    DebugTools,
 }
 
 pub(crate) const ITEMS: [Item; 9] = [
@@ -34,6 +35,8 @@ pub(crate) const ITEMS: [Item; 9] = [
     Item::Keyboard,
     Item::Gamepad,
 ];
+
+pub(crate) const ADVANCED_ITEMS: [Item; 1] = [Item::DebugTools];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -50,6 +53,7 @@ fn label(item: Item) -> &'static str {
         Item::Fx => "特效",
         Item::Keyboard => "键盘按键",
         Item::Gamepad => "手柄按键",
+        Item::DebugTools => "性能调试",
     }
 }
 
@@ -64,6 +68,7 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Hitstop => on_off(s.hitstop),
         Item::Bloom => on_off(s.bloom),
         Item::Fx => if s.lite_fx { "精简" } else { "完整" }.into(),
+        Item::DebugTools => on_off(s.debug_tools),
     }
 }
 
@@ -116,6 +121,10 @@ pub(crate) fn adjust(
         }
         Item::Fx if actions.nav.x != 0 || actions.confirm => {
             settings.lite_fx = !settings.lite_fx;
+            true
+        }
+        Item::DebugTools if actions.nav.x != 0 || actions.confirm => {
+            settings.debug_tools = !settings.debug_tools;
             true
         }
         Item::Fullscreen if actions.nav.x != 0 || actions.confirm => {

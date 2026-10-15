@@ -26,12 +26,12 @@ const PAPER_TILE: f32 = 256.0;
 #[derive(Component)]
 pub(crate) struct Paper;
 
-pub(crate) fn spawn_paper(mut commands: Commands, assets: Res<AssetServer>, db: Res<AtlasDb>) {
+pub(crate) fn spawn_paper(mut commands: Commands, assets: Res<crate::SceneAssets>, db: Res<AtlasDb>) {
     commands.spawn((
         Paper,
         DespawnOnExit(AppState::Run),
         Sprite {
-            image: assets.load("atlas/paper.png"),
+            image: assets.paper.clone(),
             custom_size: Some(Vec2::splat(PAPER_TILE * 8.0)),
             image_mode: SpriteImageMode::Tiled {
                 tile_x: true,

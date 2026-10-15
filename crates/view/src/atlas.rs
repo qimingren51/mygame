@@ -186,6 +186,11 @@ struct PageJson {
 }
 
 impl AtlasDb {
+    /// 预载检查使用同一批强句柄，避免离开标题后再请求图集。
+    pub fn images(&self) -> impl Iterator<Item = &Handle<Image>> {
+        self.pages.iter().map(|page| &page.image)
+    }
+
     /// 从 `<assets>/atlas/` 读取全部图集。失败时返回人能看懂的错误。
     pub fn load(
         asset_root: &Path,

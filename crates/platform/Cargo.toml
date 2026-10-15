@@ -16,5 +16,8 @@ directories.workspace = true
 serde.workspace = true
 ron.workspace = true
 
+[features]
+dev = []
+
 [lints]
 workspace = true

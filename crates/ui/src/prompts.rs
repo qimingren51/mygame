@@ -46,7 +46,6 @@ pub(crate) fn render(template: &str, active: &ActiveInput, settings: &Settings) 
             &if active.device == InputDevice::Keyboard { i.to_string() } else { String::new() },
         );
     }
-    result = result.replace("{bench}", if active.device == InputDevice::Keyboard { "B" } else { "" });
     result.replace("{fullscreen}", if active.device == InputDevice::Keyboard { "F11 全屏" } else { "" })
 }
 

@@ -7,7 +7,8 @@ use lantern_content::{Element, Rank};
 use lantern_core::step::TICK_HZ;
 use lantern_sim::encounters::Encounters;
 use lantern_sim::{
-    AppState, Arsenal, Build, Director, Enemies, GameContent, Health, Player, Progress, RunSetup, Tick,
+    AppState, Arsenal, Build, Director, Enemies, GameContent, Health, Player, Progress, RunMode, RunSetup,
+    RunState, SimPhase, Tick,
 };
 use lantern_view::atlas::AtlasDb;
 
@@ -64,6 +65,14 @@ pub(crate) struct ComboLabel;
 #[derive(Component)]
 pub(crate) struct BuffLabel;
 
+#[derive(Component)]
+pub(crate) struct ControlHints;
+
+#[derive(Component)]
+pub(crate) struct HudFooter;
+
+pub(crate) const FOOTER_BOTTOM: f32 = 14.0;
+
 const BAR_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
 
@@ -119,18 +128,18 @@ pub(crate) fn spawn_hud(
             skin.image("bar_fill_xp")
         )],
     ));
-    // 左上：用时、击杀、种子、夜签
+    // 左上：用时、击杀、夜签；种子号收进性能面板。
     let omen = setup
         .omen
         .as_ref()
-        .map_or(String::new(), |o| format!("　夜签 · {}", lantern_sim::omens::omen_name(c, o)));
+        .map_or(String::new(), |o| format!("夜签 · {}", lantern_sim::omens::omen_name(c, o)));
     commands.spawn((
         run.clone(),
         Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
         children![
             (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
             (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
-            text(&fonts.body, 14.0, DIM, &format!("种子 {}{omen}", setup.seed)),
+            text(&fonts.body, 14.0, DIM, &omen),
             (BuffLabel, text(&fonts.body, 16.0, GOLD, "")),
         ],
     ));
@@ -196,14 +205,16 @@ pub(crate) fn spawn_hud(
         abs(None, Some(28.0), Some(260.0), None),
         children![(ComboLabel, text(&fonts.title, 36.0, GOLD, ""))],
     ));
-    // 底部中间：生命、护盾、燃灯
+    // 底部共用纵向布局：提示换行时向上让位，不与生命、燃灯相互覆盖。
     commands.spawn((
-        run.clone(),
+        run,
+        HudFooter,
         Node {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             row_gap: px(4),
-            ..abs(Some(0.0), Some(0.0), None, Some(40.0))
+            padding: UiRect::horizontal(px(20)),
+            ..abs(Some(0.0), Some(0.0), None, Some(FOOTER_BOTTOM))
         },
         children![
             (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
@@ -281,19 +292,42 @@ pub(crate) fn spawn_hud(
                     ),
                 ],
             ),
+            (
+                ControlHints,
+                Node {
+                    display: Display::None,
+                    max_width: percent(100),
+                    margin: UiRect::top(px(10)),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                crate::prompts::hint(
+                    &fonts.body,
+                    16.0,
+                    DIM,
+                    "{move} 移动　{dash} 闪避　{ult} 燃灯　{pause} 暂停"
+                ),
+            ),
         ],
     ));
-    // 左下：操作提示
-    commands.spawn((
-        run,
-        abs(Some(20.0), None, None, Some(14.0)),
-        children![crate::prompts::hint(
-            &fonts.body,
-            16.0,
-            DIM,
-            "{move} 移动　{dash} 闪避　{ult} 燃灯　{pause} 暂停"
-        )],
-    ));
+}
+
+/// 结算的底部收益区不再透出战斗按键；模拟结束的当帧就收起，无须等状态切换。
+pub(crate) fn update_control_hints(
+    state: Res<State<RunState>>,
+    phase: Res<SimPhase>,
+    setup: Res<RunSetup>,
+    mut hints: Query<&mut Node, With<ControlHints>>,
+) {
+    let visible = *state.get() == RunState::Playing
+        && *phase == SimPhase::Play
+        && !matches!(setup.mode, RunMode::Bench { .. });
+    for mut node in &mut hints {
+        let display = if visible { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -534,4 +568,43 @@ pub(crate) fn update_slots(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    /// 操作提示只在正常游玩时显示（按键文字由 prompts 按设备填）。
+    #[test]
+    fn hints_show_only_while_playing() {
+        let mut app = App::new();
+        app.insert_resource(State::new(RunState::Playing))
+            .insert_resource(SimPhase::Play)
+            .insert_resource(RunSetup::new(1, RunMode::Normal))
+            .add_systems(Update, update_control_hints);
+        let hints = app.world_mut().spawn((ControlHints, Node::default())).id();
+        let shown = |app: &App| app.world().get::<Node>(hints).unwrap().display == Display::Flex;
+        app.update();
+        assert!(shown(&app));
+        // 模拟先结束、界面状态下一帧才切换；这一帧也不能残留提示。
+        app.insert_resource(SimPhase::Over);
+        app.update();
+        assert!(!shown(&app));
+        for state in [RunState::Over, RunState::Paused] {
+            app.insert_resource(SimPhase::Play);
+            app.insert_resource(State::new(state));
+            app.update();
+            assert!(!shown(&app));
+        }
+        app.insert_resource(State::new(RunState::Playing));
+        app.insert_resource(SimPhase::LevelUp);
+        app.update();
+        assert!(!shown(&app));
+        app.insert_resource(SimPhase::Play);
+        app.update();
+        assert!(shown(&app));
+        app.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: 250 }));
+        app.update();
+        assert!(!shown(&app));
+    }
 }

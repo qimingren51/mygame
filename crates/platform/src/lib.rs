@@ -3,6 +3,7 @@
 //! 输入先汇总成与设备无关的 [`Actions`]，界面读它导航菜单；游戏进行中再转换成模拟的
 //! [`InputFrame`] 和 [`SimCommand`]。
 
+use bevy::input::InputSystems;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
@@ -32,8 +33,6 @@ pub struct Actions {
     pub pause: bool,
     pub quit_to_title: bool,
     pub toggle_fullscreen: bool,
-    /// 标题界面：开始跑分
-    pub bench: bool,
     /// 显示 / 隐藏性能面板
     pub toggle_perf: bool,
     /// 燃灯
@@ -62,11 +61,19 @@ pub struct PlatformPlugin {
     pub settings: Settings,
 }
 
+/// 界面遮罩可在汇总操作后、提交模拟输入前拦截操作。
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputSet {
+    Gather,
+    Feed,
+}
+
 impl Plugin for PlatformPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.settings.clone())
             .init_resource::<Actions>()
             .add_message::<UiCue>()
+            .configure_sets(PreUpdate, (InputSet::Gather, InputSet::Feed).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
         input::register(app);
         replays::register(app);

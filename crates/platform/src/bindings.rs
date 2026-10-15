@@ -156,7 +156,6 @@ impl Bindings {
                 | KeyCode::ArrowRight
                 | KeyCode::F3
                 | KeyCode::F11
-                | KeyCode::KeyB
                 | KeyCode::AltLeft
                 | KeyCode::AltRight
                 | KeyCode::SuperLeft

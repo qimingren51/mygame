@@ -57,6 +57,12 @@ pub struct ViewPlugin {
 #[derive(Resource)]
 struct AssetRoot(PathBuf);
 
+/// 局内单独使用的贴图，在标题期间保留并预载。
+#[derive(Resource)]
+pub struct SceneAssets {
+    pub paper: Handle<Image>,
+}
+
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(lighting::LightingPlugin)
@@ -214,6 +220,7 @@ fn load_atlas(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    commands.insert_resource(SceneAssets { paper: assets.load("atlas/paper.png") });
     match AtlasDb::load(&root.0, &assets, &mut layouts) {
         Ok(db) => commands.insert_resource(db),
         Err(e) => {

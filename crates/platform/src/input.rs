@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use bevy::input::{InputSystems, mouse::MouseWheel};
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::CursorMoved;
 
@@ -11,9 +11,10 @@ use crate::{Action, Actions, ActiveInput, Rebind, Settings};
 use lantern_sim::{RunState, SimPhase};
 
 pub(crate) fn register(app: &mut App) {
-    app.init_resource::<ActiveInput>()
-        .init_resource::<Rebind>()
-        .add_systems(PreUpdate, (gather, crate::feed_sim).chain().after(InputSystems));
+    app.init_resource::<ActiveInput>().init_resource::<Rebind>().add_systems(
+        PreUpdate,
+        (gather.in_set(crate::InputSet::Gather), crate::feed_sim.in_set(crate::InputSet::Feed)),
+    );
 }
 
 #[derive(Default)]
@@ -212,7 +213,6 @@ fn gather(
         pick: DIGITS.iter().zip(NUMPAD).position(|(&k, n)| keys.any_just_pressed([k, n])).map(|i| i as u8),
         pointer_moved: pointer_moved && active.device == InputDevice::Keyboard,
         toggle_fullscreen,
-        bench: keys.just_pressed(KeyCode::KeyB),
         toggle_perf: keys.just_pressed(KeyCode::F3),
     };
 }

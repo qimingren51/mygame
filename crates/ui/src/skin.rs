@@ -62,6 +62,10 @@ pub(crate) fn load_skin(mut commands: Commands, assets: Res<AssetServer>) {
 }
 
 impl Skin {
+    pub(crate) fn images(&self) -> impl Iterator<Item = &Handle<Image>> {
+        self.items.iter().map(|item| &item.image).chain([&self.title, &self.logo])
+    }
+
     fn item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|i| i.name == name)
     }

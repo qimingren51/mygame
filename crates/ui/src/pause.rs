@@ -133,6 +133,7 @@ fn spawn(
 
 pub(crate) fn input(
     actions: Res<Actions>,
+    transition: Res<crate::transition::InkTransition>,
     mut ui: ResMut<PauseUi>,
     mut settings: ResMut<Settings>,
     mut controls: ResMut<crate::controls::Controls>,
@@ -140,7 +141,7 @@ pub(crate) fn input(
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
 ) {
-    if controls.is_open() {
+    if controls.is_open() || transition.active() {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -187,6 +188,7 @@ mod tests {
             .init_resource::<PauseUi>()
             .init_resource::<Settings>()
             .init_resource::<crate::controls::Controls>()
+            .init_resource::<crate::transition::InkTransition>()
             .init_resource::<NextState<RunState>>()
             .init_resource::<NextState<AppState>>()
             .add_systems(Update, input);
