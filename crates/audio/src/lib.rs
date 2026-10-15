@@ -25,6 +25,7 @@ use lantern_sim::{
     AppState, Director, Health, Player, Pos, RunSetup, RunState, SimEvent, SimOutbox, SimPhase, Tick,
 };
 
+mod ambience;
 mod music;
 mod sfx;
 mod synth;
@@ -56,6 +57,7 @@ impl Plugin for AudioPlugin {
                 )
                     .chain(),
             );
+        ambience::register(app);
     }
 }
 
@@ -116,6 +118,7 @@ pub struct Audio {
     music_filter: Option<FilterHandle>,
     sfx: Sfx,
     music: Music,
+    ambience: ambience::Ambience,
     /// 各种音效上次播放的时刻（秒），用于限制间隔
     last: Vec<(&'static str, f64)>,
     now: f64,
@@ -259,6 +262,7 @@ fn init_audio(world: &mut World) {
         music_filter,
         sfx: Sfx::new(),
         music: Music::new(Instruments::new()),
+        ambience: ambience::Ambience::new(),
         last: Vec::new(),
         now: 0.0,
         gem_chain: 0,
