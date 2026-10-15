@@ -14,7 +14,7 @@ docs/GAMEPLAY.md 11.6：一张水墨长卷，灯驿的夜景。画里四个人�
   人物   从左到右：老灯匠（树下的案子前糊灯，案头一盏油灯）、货郎（挑着担子，担头一盏小红灯，手摇拨浪鼓；
          灯把他的影子投在墙上，影子里有条狐狸尾巴）、灯童（坐在门槛上，牵着一盏兔子灯，望着门外的路）、
          说书人（檐下桌边，举着折扇，桌上醒木、残书、一支蜡烛）。四个人的灯在底图里一直亮着，照出各自的人。
-  地面   院子、石板，最下面一条安静的地，留给提示文字；右下角一方朱砂印“心灯”。
+  地面   院子、石板，最下面一条安静的地，留给提示文字；右下角一方朱砂印“灯驿”。
 
 输出（art/out/screens/hub/，格式见 hub.json 的 note）：
   hub.png                      底图，不透明 RGB。心灯全部没点亮（纸灯留白、墨线勾边、不发光）。
@@ -84,6 +84,7 @@ ADD_COLOR = col("#FFD98A")  # 叠加层的颜色：暖而不太饱和
 DAWN_PEACH = col("#FFD1A8")  # 晨光：与 crates/view/src/atmos.rs 天明的暖桃色同值
 DAWN_GOLD = col("#FFE3A6")  # 山脊金线
 ADD_PEAK = 0.70  # 叠加层的 alpha 峰值（游戏亮起时会放大到 1.4 倍）
+NIGHT_AMB = 0.40  # 长夜光照图的底（灰）：灯边以外的画都沉在这一档
 
 # ---------------------------------------------------------------- 构图（画面像素）
 # 游戏按“铺满窗口、居中裁掉多出来的”显示（16:10 剩 x 96–1824，21:9 剩 y 128–952，4:3 剩 x 240–1680）：
@@ -254,6 +255,64 @@ def ellipse(P: Hub, cx, cy, rx, ry, color, alpha=1.0, *, mode="over", ang=0.0, n
     return pts
 
 
+def brush(P: Hub, ctrl, w, *, color=None, alpha=0.95, smooth=True, press=1.0, nail=0.7, tail=0.3, dry=0.0, dry_start=0.55,
+          gap=None, mode="over", n=None, near=True):
+    """白描的一笔：起笔一顿（钉头），行笔略细，转折处按重，收笔出锋；dry>0 时后段飞白；gap=(t0, t1) 在这一段断开。
+    w 是行笔时的半宽（像素）。"""
+    p = np.asarray(ctrl, np.float64)
+    length = float(np.hypot(*np.diff(p, axis=0).T).sum())
+    n = n or max(10, int(length / 1.4))
+    c = T.curve_pts(p, n) if (smooth and len(p) > 2) else V.arc_resample(p, n)
+    d = np.gradient(c, axis=0)
+    ang = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
+    seg = max(length / max(n - 1, 1), 1e-6)
+    k = np.abs(np.gradient(ang)) / seg
+    k = blur(k[None, :], (2.5, 0))[0]
+    kn = np.clip(k * 16.0, 0, 1)  # 转弯半径 16 像素以内按到最重
+    t = np.linspace(0, 1, n)
+    prof = (0.62 + 0.55 * press * kn) * (1 + nail * np.exp(-(t / 0.06) ** 2))
+    if tail:
+        prof = prof * (0.18 + 0.82 * np.clip((1 - t) / tail, 0, 1) ** 0.7)
+    wob = blur(P.rng.standard_normal((1, n)), (4.0, 0))[0]
+    prof = prof * (1 + 0.12 * wob / (wob.std() + 1e-9))
+    hw = w * prof
+    c_ = JIAO if color is None else color
+    pieces = [(c, hw)]
+    if gap:
+        i0, i1 = int(gap[0] * (n - 1)), int(gap[1] * (n - 1))
+        pieces = [(c[:i0], hw[:i0]), (c[i1:], hw[i1:])]
+    for cc, hh in pieces:
+        if len(cc) >= 3:
+            P.stroke(cc, hh, c_, alpha, dry=dry, dry_start=dry_start, jitter=0.1, mode=mode, near=near)
+
+
+def wash(P: Hub, poly, color, alpha, *, soft=2.4, rough=0.6, ring=0.3, mode="glaze", tex=0.18, smooth=True):
+    """一层淡墨或淡彩：边缘软、略不齐（洇开），干后边上一圈水痕略深。poly 是闭合轮廓（画面坐标）。"""
+    pts = closed_curve(poly) if smooth else np.asarray(poly, np.float64)
+    sl, m = shape_cover(pts, soft=0, pad=int(soft * 3) + 6)
+    if m.size == 0:
+        return
+    ms = blur(m, soft)
+    n1 = noise(P.rng, m.shape, 3.0)
+    ms = ms + 0.10 * rough * n1
+    body = smoothstep(0.28, 0.62, ms)
+    rim = ring * np.exp(-((ms - 0.40) / 0.09) ** 2)
+    a = alpha * np.clip(body * (1 - tex + tex * (0.5 + 0.5 * noise(P.rng, m.shape, 7.0))) + rim, 0, 1)
+    (P.glaze if mode == "glaze" else P.over)(a, color, sl)
+    P.mark_near(body, sl)
+
+
+def knock(P: Hub, poly, smooth=True):
+    """人物所在处的背景擦回纸色（画人物时那里本来是留白的），边缘略外扩一点。"""
+    pts = closed_curve(poly) if smooth else np.asarray(poly, np.float64)
+    sl, m = shape_cover(pts, soft=1.0, pad=6)
+    if m.size == 0:
+        return
+    a = smoothstep(0.08, 0.5, m) * 0.98
+    P.over(a, P.paper0[sl], sl)
+    P.mark_near(a, sl)
+
+
 class Fig:
     """点景人物的局部坐标：原点在脚底（坐着的人是座位前的地面），y 向上为负；s 缩放，flip=-1 左右翻转。"""
 
@@ -275,6 +334,15 @@ class Fig:
     def ellipse(self, cx, cy, rx, ry, color, alpha=1.0, **kw):
         x, y = self.pt(cx, cy)
         return ellipse(self.P, x, y, rx * self.s, ry * self.s, color, alpha, **kw)
+
+    def brush(self, ctrl, w, **kw):
+        brush(self.P, self.pts(ctrl), w * self.s, **kw)
+
+    def wash(self, ctrl, color, alpha, off=(0.0, 0.0), **kw):
+        wash(self.P, self.pts([(x + off[0], y + off[1]) for x, y in ctrl]), color, alpha, **kw)
+
+    def knock(self, ctrl, **kw):
+        knock(self.P, self.pts(ctrl), **kw)
 
     def shade(self, ctrl, color, alpha, side=-1.0):
         """衣服的背光一面：在轮廓里朝 side（局部坐标，-1 = 身后）一侧罩一层墨，往另一侧淡掉。"""
@@ -365,7 +433,9 @@ def paint_far(P: Hub, rng):
     T.mountain_layer(P, rf, color, 0.48, 130.0, rng, mist_from=FAR_BASE + 20, mist_len=80.0, edge=0.6)
     T.mountain_texture(P, rf, color, rng, FAR_BASE + 20, n=80, strength=0.26, edge_k=1.3)
     P.layers["far"], P.ridges["far"] = inside_of(P, rf), rf
+    P.begin("city")
     paint_youdu_city(P, rng)
+    P.layers["city"] = np.clip(P.end("city") * 1.2, 0, 1)
     fog_band(P, rng, 430, 520, 0.34)
 
 
@@ -932,178 +1002,259 @@ def paint_flame_emit(P: Hub, x, y, h, w, gain=1.0, color=None):
 
 
 def paint_smith(P: Hub, rng, lights):
-    """老灯匠：坐在矮凳上，侧身朝右，驼着背，白胡子，系着围裙、挽着袖子，一手扶灯、一手拿糨糊刷子糊灯纸。
-    面前一张案子：竹篾扎的灯骨、一盏糊了一半的灯、糨糊碗，案头一盏油灯。"""
-    f = Fig(P, *SMITH_AT, flip=-1)  # 朝左
+    """老灯匠：坐在矮凳上，驼着背、朝左（局部坐标朝右画、整个翻过来），白胡子，系着围裙、挽着袖子，
+    一手扶着灯骨、一手拿糨糊刷子糊纸；面前一张案子：糊了一半的灯、一只灯骨、一捆竹篾、糨糊碗，案头一盏油灯。"""
+    f = Fig(P, *SMITH_AT, flip=-1)
     bx0, bx1, btop = 62.0, 202.0, -92.0
     # 凳子
-    f.line([(-24, -52), (24, -52)], 3.2, color=NONG)
-    f.line([(-18, -50), (-22, 0)], 2.0, color=NONG, smooth=False)
-    f.line([(16, -50), (20, 0)], 2.0, color=NONG, smooth=False)
-    # 腿：裤子（重墨），布鞋
-    f.fill([(-10, -66), (28, -70), (48, -62), (54, -40), (52, -8), (38, -8), (36, -44), (20, -50), (-6, -48)], mixc(ZHONG, NONG, 0.3), 0.92,
-           mode="over", rim=0.0)
-    f.line([(-6, -64), (30, -68), (48, -60)], 1.4, color=JIAO, alpha=0.8)
-    f.line([(50, -56), (54, -30), (52, -8)], 1.6, color=JIAO, alpha=0.85)
-    f.fill([(34, -10), (54, -10), (64, -4), (62, 0), (34, 0)], JIAO, 0.95, mode="over", rim=0.0)
-    # 身子：驼背的袍子
-    robe = [(-14, -50), (-24, -84), (-20, -116), (-4, -140), (16, -152), (34, -146), (42, -124), (46, -96), (50, -66), (40, -52), (14, -48)]
-    f.fill(robe, mixc(ZHONG, DAN, 0.35), 1.0, mode="over", rim=0.0)
-    f.shade(robe, NONG, 0.75, side=-1.0)
-    f.line([(-14, -52), (-24, -86), (-20, -118), (-4, -141), (16, -153)], 3.0, 1.4, color=JIAO, dry=0.35)  # 背的轮廓
-    f.line([(2, -128), (10, -96), (6, -62)], 0.9, color=NONG, alpha=0.7)  # 衣褶
-    f.line([(-8, -100), (-2, -70)], 0.8, color=NONG, alpha=0.6)
-    # 围裙：浅色，从胸前垂到膝上
-    apron = [(26, -130), (40, -124), (46, -98), (58, -66), (56, -48), (34, -46), (30, -78), (24, -110)]
-    f.fill(apron, mixc(PAPER, QING, 0.45), 0.92, mode="over", rim=0.2)
-    f.line([(26, -130), (40, -122), (47, -96), (58, -64), (56, -48)], 1.2, color=NONG, alpha=0.85)
-    f.line([(8, -100), (40, -104)], 1.0, color=NONG, alpha=0.6)  # 围裙带
-    # 头：秃顶、后脑一个小髻，朝前低着
-    f.ellipse(34, -160, 14, 15, mixc(PAPER, WHITE, 0.1), 0.98)
-    f.line([(22, -150), (21, -164), (28, -174), (40, -175), (48, -167)], 1.2, color=NONG, alpha=0.85)
-    f.dot(20, -170, 5.5, NONG)  # 发髻
-    f.line([(16, -158), (20, -150)], 3.6, color=mixc(PAPER, QING, 0.3), alpha=0.9)  # 鬓边白发
-    f.line([(40, -165), (49, -164)], 1.6, color=mixc(PAPER, WHITE, 0.2), alpha=0.95)  # 白眉
-    f.line([(41, -166), (49, -165)], 0.6, color=NONG, alpha=0.7)
-    f.line([(47, -162), (52, -154), (47, -152)], 1.0, color=NONG, alpha=0.9, smooth=False)  # 鼻
-    f.dot(29, -158, 2.0, NONG, 0.8)  # 耳
-    # 长白胡子：纸白几笔，淡墨勾
-    for k, (dx, ln) in enumerate(((0, 30), (4, 26), (-4, 22), (7, 18))):
-        f.line([(42 + dx * 0.3, -150), (46 + dx, -136), (44 + dx, -150 + ln * 0.2 - ln)], 3.2 - k * 0.5, 0.6,
-               color=mixc(PAPER, WHITE, 0.25), alpha=0.95)
-    f.line([(40, -150), (44, -134), (42, -118)], 0.6, color=DAN, alpha=0.8)
-    f.line([(48, -150), (52, -136), (48, -124)], 0.6, color=DAN, alpha=0.8)
-    # 远手：挽袖的小臂扶着灯
-    f.line([(18, -136), (34, -112), (58, -110)], 6.0, 4.0, color=mixc(ZHONG, NONG, 0.4), alpha=0.95)
-    f.line([(56, -110), (78, -116)], 3.0, 2.4, color=mixc(PAPER, QING, 0.2), alpha=0.95)
-    f.line([(56, -113), (78, -119)], 0.6, color=NONG, alpha=0.8)
+    f.brush([(-24, -42), (22, -42)], 2.2, color=NONG, smooth=False, nail=0.5, tail=0.2)
+    f.brush([(-18, -40), (-22, 0)], 1.4, color=NONG, smooth=False, nail=0.4, tail=0.1)
+    f.brush([(16, -40), (20, 0)], 1.4, color=NONG, smooth=False, nail=0.4, tail=0.1)
+    # 腿：裤子，布鞋
+    legs = [(-8, -56), (36, -62), (48, -54), (50, -8), (38, -8), (36, -44), (2, -40)]
+    f.knock(legs)
+    f.wash(legs, WASH_M, 0.5, off=(-1.5, 1.2))
+    f.brush([(-6, -58), (34, -63), (48, -55), (51, -30), (50, -8)], 1.5, color=JIAO, press=1.6, dry=0.3)
+    f.brush([(36, -44), (38, -8)], 0.9, color=NONG)
+    f.brush([(34, -4), (62, -2)], 2.6, color=JIAO, smooth=False, nail=0.9, tail=0.3)
+    # 袍子：驼背
+    robe = [(-12, -44), (-20, -74), (-18, -104), (-6, -128), (10, -142), (26, -142), (34, -124), (36, -96), (44, -66), (46, -48), (20, -42)]
+    f.knock(robe)
+    f.wash(robe, WASH_M, 0.6, off=(-2.5, 1.5))
+    f.wash([(-12, -46), (-20, -74), (-18, -104), (-6, -128), (8, -140), (4, -110), (-2, -70), (2, -46)], WASH_D, 0.38, soft=2.0)
+    # 围裙：留白，边上淡淡一笔
+    apron = [(22, -126), (34, -122), (40, -98), (52, -66), (54, -48), (34, -46), (28, -80), (20, -110)]
+    f.knock(apron)
+    f.wash(apron, WASH_L, 0.2, soft=1.6)
+    f.brush([(-12, -44), (-20, -74), (-18, -104), (-6, -128), (12, -142)], 2.4, color=JIAO, press=1.6, dry=0.35, dry_start=0.6)  # 背
+    f.brush([(46, -48), (20, -42), (-12, -44)], 1.2, color=NONG, gap=(0.35, 0.5))
+    f.brush([(24, -126), (36, -120), (42, -96), (53, -66), (54, -48)], 1.1, color=NONG, press=1.4)  # 围裙边
+    f.brush([(20, -110), (26, -80), (32, -48)], 0.8, color=NONG, alpha=0.8)
+    f.brush([(2, -98), (36, -100)], 1.0, color=NONG, alpha=0.85)  # 围裙带
+    f.brush([(0, -122), (6, -98)], 0.8, color=NONG, alpha=0.75)  # 衣褶
+    f.brush([(-6, -80), (-2, -58)], 0.7, color=NONG, alpha=0.7)
+    # 远手：挽袖的小臂扶着灯骨
+    f.wash([(10, -130), (30, -112), (40, -112), (36, -122), (18, -134)], WASH_M, 0.5, soft=1.4)
+    f.brush([(12, -128), (30, -110), (40, -112)], 1.0, color=NONG, press=1.4)
+    farm = [(40, -110), (74, -118), (76, -112), (42, -104)]
+    f.knock(farm)
+    f.brush([(40, -111), (74, -119)], 0.7, color=NONG)
+    f.brush([(42, -104), (75, -112)], 0.6, color=NONG)
+    hand(f, 77, -116, 3.0)
     # 案板、案腿
-    f.fill([(bx0, btop), (bx1, btop), (bx1, btop + 7), (bx0, btop + 7)], mixc(ZHONG, NONG, 0.4), 0.95, mode="over", rim=0.0, smooth=False)
-    f.line([(bx0 - 2, btop), (bx1 + 2, btop)], 1.6, color=JIAO)
+    f.brush([(bx0 - 2, btop), (132, btop - 1), (bx1 + 2, btop)], 3.4, color=mixc(NONG, ZHONG, 0.3), nail=0.6, tail=0.15, press=0.2, dry=0.25)
+    f.brush([(bx0 + 2, btop + 6), (bx1 - 2, btop + 6)], 0.9, color=NONG, smooth=False, nail=0.2, tail=0.2)
     for x in (bx0 + 8, bx1 - 8):
-        f.line([(x, btop + 6), (x + (2 if x > 100 else -2), 0)], 2.6, color=NONG, smooth=False, taper=False)
-    f.line([(bx0 + 8, -26), (bx1 - 8, -26)], 1.4, color=NONG, alpha=0.8, smooth=False)
-    # 糊了一半的灯：左半糊了纸，右半还是竹骨
-    lx, ly, lrx, lry = 98.0, -120.0, 16.0, 22.0
+        f.brush([(x, btop + 7), (x + (2 if x > 100 else -2), 0)], 2.0, color=NONG, smooth=False, nail=0.6, tail=0.1, dry=0.3)
+    f.brush([(bx0 + 8, -26), (bx1 - 8, -26)], 1.0, color=NONG, smooth=False, nail=0.3, tail=0.2)
+    # 糊了一半的灯：靠人的半边糊了纸，另一半还是竹骨
+    lx, ly, lrx, lry = 96.0, -120.0, 16.0, 22.0
     th = np.linspace(math.pi / 2, 3 * math.pi / 2, 24)
     half = [(lx + lrx * math.cos(a), ly + lry * math.sin(a)) for a in th] + [(lx, ly - lry)]
-    f.fill(half, PLASTER, 0.95, mode="over", rim=0.0)
-    f.fill(half, DAN, 0.2, rim=0.5)
-    th2 = np.linspace(0, 2 * math.pi, 40)
-    f.line([(lx + lrx * math.cos(a), ly + lry * math.sin(a)) for a in th2], 1.0, color=JIAO, alpha=0.85, taper=False)
+    f.knock(half)
+    f.wash(half, WASH_L, 0.3, soft=1.4)
+    th2 = np.linspace(-0.3, 2 * math.pi - 0.3, 40)
+    f.brush([(lx + lrx * math.cos(a), ly + lry * math.sin(a)) for a in th2], 0.8, color=JIAO, nail=0.4, tail=0.15, press=0.6)
     for k in (0.0, 0.5, 0.85):
-        f.line([(lx + k * lrx * math.cos(a), ly + lry * math.sin(a)) for a in np.linspace(-math.pi / 2, math.pi / 2, 16)], 0.7,
-               color=NONG, alpha=0.8, taper=False)
-    f.line([(lx - lrx * 0.6, ly - lry - 2), (lx + lrx * 0.6, ly - lry - 2)], 2.2, color=JIAO, smooth=False, taper=False)
-    f.line([(lx - lrx * 0.6, ly + lry + 2), (lx + lrx * 0.6, ly + lry + 2)], 2.2, color=JIAO, smooth=False, taper=False)
-    # 近手：挽袖的大臂（重墨）、露出的小臂，拿着糨糊刷
-    f.line([(22, -134), (44, -106)], 7.0, 5.0, color=mixc(ZHONG, NONG, 0.2), alpha=0.97)
-    f.line([(44, -106), (70, -98)], 3.4, 2.6, color=mixc(PAPER, QING, 0.15), alpha=0.97)
-    f.line([(44, -103), (70, -95)], 0.7, color=NONG, alpha=0.8)
-    f.dot(72, -98, 3.4, mixc(PAPER, QING, 0.3), 0.97)
-    f.line([(66, -104), (100, -128)], 1.1, color=NONG, alpha=0.95, smooth=False)  # 刷柄
-    f.fill([(98, -126), (106, -134), (110, -130), (102, -122)], JIAO, 0.95, mode="over", rim=0.0, smooth=False)
-    # 案上：一只灯骨、一捆竹篾、糨糊碗
-    for (gx, gy, grx, gry) in ((156.0, -110.0, 11.0, 15.0),):
-        f.line([(gx + grx * math.cos(a), gy + gry * math.sin(a)) for a in th2], 0.9, color=NONG, alpha=0.9, taper=False)
-        for k in (-0.5, 0.5):
-            f.line([(gx + k * grx * math.cos(a), gy + gry * math.sin(a)) for a in np.linspace(-math.pi / 2, math.pi / 2, 12)], 0.6,
-                   color=NONG, alpha=0.8, taper=False)
-    for k in range(4):
-        f.line([(134 + k * 1.2, -94 - k * 1.1), (176, -95 - k * 1.5)], 0.6, color=NONG, alpha=0.8, smooth=False, taper=False)
-    f.fill([(116, -94), (132, -94), (130, -100), (118, -100)], mixc(ZHONG, DAN, 0.3), 0.95, mode="over", rim=0.0)
-    f.line([(116, -100), (132, -100)], 1.2, color=JIAO, smooth=False)
+        f.brush([(lx + k * lrx * math.cos(a), ly + lry * math.sin(a)) for a in np.linspace(-math.pi / 2, math.pi / 2, 16)], 0.55,
+                color=NONG, nail=0.1, tail=0.1, press=0.0)
+    f.brush([(lx - lrx * 0.6, ly - lry - 2), (lx + lrx * 0.6, ly - lry - 2)], 1.8, color=JIAO, smooth=False, nail=0.3, tail=0.1)
+    f.brush([(lx - lrx * 0.6, ly + lry + 2), (lx + lrx * 0.6, ly + lry + 2)], 1.8, color=JIAO, smooth=False, nail=0.3, tail=0.1)
+    # 近手：挽起的袖子（一道卷边）、小臂、手里的糨糊刷
+    sleeve = [(16, -136), (42, -108), (48, -112), (40, -124), (24, -140)]
+    f.knock(sleeve)
+    f.wash(sleeve, WASH_M, 0.55, off=(-1, 1), soft=1.6)
+    f.brush([(16, -134), (30, -118), (42, -106)], 1.3, color=JIAO, press=1.5)
+    f.brush([(38, -120), (46, -110)], 1.6, color=NONG, smooth=False, nail=0.4, tail=0.3)  # 卷起的袖口
+    narm = [(44, -112), (68, -102), (70, -95), (44, -103)]
+    f.knock(narm)
+    f.brush([(45, -111), (68, -102)], 0.7, color=NONG)
+    f.brush([(45, -103), (69, -96)], 0.6, color=NONG)
+    f.brush([(64, -104), (100, -128)], 0.9, color=mixc(NONG, ZHESHI, 0.3), smooth=False, nail=0.3, tail=0.0, press=0.0)  # 刷柄
+    f.brush([(98, -126), (108, -133)], 2.2, color=JIAO, smooth=False, nail=0.2, tail=0.6)  # 刷头
+    hand(f, 70, -100, 3.2)
+    # 头：秃顶、后脑一个小髻，朝前低着
+    hx, hy, hr = 32.0, -154.0, 14.0
+    head = [(hx - hr, hy - 2), (hx - 6, hy - hr), (hx + 6, hy - hr - 1), (hx + hr, hy - 6), (hx + hr + 2, hy + 4), (hx + 6, hy + hr), (hx - 8, hy + 10)]
+    f.knock(head)
+    f.wash(head, SKIN, 0.3, soft=1.8)
+    f.brush([(hx - hr + 2, hy + 6), (hx - hr, hy - 4), (hx - 6, hy - hr + 1), (hx + 4, hy - hr - 1), (hx + hr - 2, hy - 8)], 1.1,
+            color=NONG, press=1.2, nail=0.3)
+    f.dot(hx - 12, hy - 12, 5.0, mixc(JIAO, NONG, 0.3), 0.95)  # 发髻
+    f.wash([(hx - hr - 2, hy - 2), (hx - 8, hy - 8), (hx - 6, hy + 6), (hx - 12, hy + 10)], mixc(DAN, QING, 0.5), 0.45, soft=1.2)  # 鬓边白发
+    profile_face(f, hx, hy, hr * 0.92, beard=None, old=True)
+    # 长白胡子：留白，几道淡墨的须
+    beard = [(hx + 4, hy + 8), (hx + 14, hy + 8), (hx + 16, hy + 24), (hx + 12, hy + 44), (hx + 8, hy + 50), (hx + 4, hy + 30)]
+    f.knock(beard)
+    for k, (dx, ln) in enumerate(((0.0, 42.0), (5.0, 36.0), (-3.0, 30.0), (9.0, 26.0))):
+        f.brush([(hx + 6 + dx * 0.4, hy + 8), (hx + 10 + dx, hy + 8 + ln * 0.5), (hx + 7 + dx * 0.6, hy + 8 + ln)], 0.55, color=DAN,
+                nail=0.1, tail=0.6, press=0.3)
+    f.brush([(hx + 10, hy + 6), (hx + 18, hy + 9)], 0.9, color=mixc(DAN, QING, 0.4), nail=0.3, tail=0.6)  # 髭
     # 油灯：灯台、灯盏，火苗画进发光层
     lpx = 186.0
-    f.line([(lpx - 9, -93), (lpx + 9, -93)], 2.0, color=JIAO, smooth=False, taper=False)
-    f.line([(lpx, -94), (lpx, -120)], 1.6, color=NONG, smooth=False, taper=False)
+    f.brush([(lpx - 9, -93), (lpx + 9, -93)], 1.6, color=JIAO, smooth=False, nail=0.3, tail=0.2)
+    f.brush([(lpx, -94), (lpx, -120)], 1.2, color=NONG, smooth=False, nail=0.3, tail=0.1)
     f.fill([(lpx - 9, -124), (lpx + 9, -124), (lpx + 6, -119), (lpx - 6, -119)], NONG, 0.95, mode="over", rim=0.0, smooth=False)
     fx_, fy_ = f.pt(lpx, -124)
     paint_flame_emit(P, fx_, fy_, 16.0, 7.0, gain=1.1)
     lights.append((fx_, fy_ - 10, 250.0, mixc(FLAME_LIGHT, LAMP_LIGHT, 0.5), 0.62, f.fy))
+    # 案上：一只灯骨、一捆竹篾、糨糊碗
+    for (gx, gy, grx, gry) in ((150.0, -110.0, 11.0, 15.0),):
+        f.brush([(gx + grx * math.cos(a), gy + gry * math.sin(a)) for a in th2], 0.7, color=NONG, nail=0.3, tail=0.1, press=0.6)
+        for k in (-0.5, 0.5):
+            f.brush([(gx + k * grx * math.cos(a), gy + gry * math.sin(a)) for a in np.linspace(-math.pi / 2, math.pi / 2, 12)], 0.5,
+                    color=NONG, nail=0.1, tail=0.1, press=0.0)
+    for k in range(4):
+        f.brush([(132 + k * 1.2, -94 - k * 1.1), (176, -95 - k * 1.5)], 0.5, color=NONG, alpha=0.85, smooth=False, nail=0.1, tail=0.2,
+                press=0.0)
+    bowl = [(114, -94), (132, -94), (130, -101), (116, -101)]
+    f.wash(bowl, WASH_D, 0.7, soft=1.0, smooth=False)
+    f.brush([(114, -101), (132, -101)], 1.0, color=JIAO, smooth=False, nail=0.3, tail=0.3)
     # 脚下的影
     gx, gy = f.pt(100, 2)
     T.wash_blob(P, gx, gy, 140.0, 9.0, ZHONG, 0.35, rng)
 
 
+SKIN = mixc(PAPER, ZHESHI, 0.10)  # 脸和手：纸色里一丝赭
+WASH_L, WASH_M, WASH_D = mixc(QING, DAN, 0.5), mixc(DAN, ZHONG, 0.35), mixc(ZHONG, NONG, 0.3)  # 淡、中、重三档墨
+
+
+def profile_face(f: Fig, hx, hy, r, *, brow=True, beard=None, eye=1.0, nose=1.0, old=False):
+    """朝右的侧脸：额、鼻、嘴、下巴一笔勾出，一点眼、一笔眉；beard: None / "stubble" / "long" / "goatee"。"""
+    f.brush([(hx + 0.55 * r, hy - 0.95 * r), (hx + 0.85 * r, hy - 0.45 * r), (hx + 1.12 * r * nose, hy + 0.02 * r),
+             (hx + 0.86 * r, hy + 0.2 * r), (hx + 0.92 * r, hy + 0.42 * r), (hx + 0.7 * r, hy + 0.78 * r), (hx + 0.2 * r, hy + 1.0 * r)],
+            0.75, color=NONG, nail=0.4, tail=0.25, press=1.2)
+    ex, ey = hx + 0.48 * r, hy - 0.22 * r
+    f.brush([(ex - 0.16 * r, ey - 0.02 * r), (ex + 0.2 * r, ey + 0.03 * r)], 0.75 * eye, color=JIAO, nail=0.3, tail=0.5, smooth=False)
+    f.dot(ex + 0.06 * r, ey + 0.06 * r, 0.75 * eye, JIAO, 0.95)
+    if brow:
+        f.brush([(ex - 0.3 * r, ey - 0.28 * r), (ex + 0.05 * r, ey - 0.36 * r), (ex + 0.3 * r, ey - 0.3 * r)],
+                0.85 if not old else 1.2, color=mixc(DAN, QING, 0.5) if old else JIAO, nail=0.5, tail=0.4)
+    f.brush([(hx - 0.42 * r, hy - 0.08 * r), (hx - 0.55 * r, hy + 0.12 * r), (hx - 0.4 * r, hy + 0.3 * r)], 0.6, color=NONG, nail=0.2, tail=0.3)  # 耳
+    if beard == "stubble":
+        for k in range(7):
+            t = k / 6
+            x = hx + (0.85 - 0.75 * t) * r
+            y = hy + (0.45 + 0.5 * math.sin(math.pi * 0.5 * t)) * r
+            f.brush([(x, y), (x - 0.12 * r, y + 0.16 * r)], 0.55, color=NONG, alpha=0.7, smooth=False, nail=0.0, tail=0.6)
+    elif beard == "goatee":
+        f.brush([(hx + 0.86 * r, hy + 0.36 * r), (hx + 1.05 * r, hy + 0.42 * r)], 0.6, color=NONG, smooth=False)  # 髭
+        for k, dx in enumerate((0.0, 0.12, -0.1)):
+            f.brush([(hx + (0.62 + dx) * r, hy + 0.85 * r), (hx + (0.72 + dx) * r, hy + 1.5 * r), (hx + (0.6 + dx) * r, hy + 2.2 * r - k * 0.2 * r)],
+                    0.75, color=NONG, nail=0.3, tail=0.6, dry=0.3)
+
+
+def hand(f: Fig, x, y, r=3.4, curl=1.0):
+    """一只手：纸色一小团，两笔勾出握着的指节。"""
+    f.knock([(x - r, y - r * 0.8), (x + r, y - r), (x + r * 1.1, y + r * 0.6), (x - r * 0.6, y + r)])
+    f.brush([(x - r * 0.9, y - r * 0.6), (x + r * 0.2, y - r * 1.05), (x + r * 1.05, y - r * 0.2)], 0.55, color=NONG, nail=0.2, tail=0.3)
+    f.brush([(x + r * 0.9 * curl, y + r * 0.1), (x + r * 0.3, y + r * 0.95), (x - r * 0.7, y + r * 0.7)], 0.55, color=NONG, nail=0.2, tail=0.3)
+
+
 def paint_peddler(P: Hub, rng, lights) -> dict:
-    """货郎：头戴斗笠、短褂绑腿，右肩挑着扁担往右走，后头一只筐、前头一只带抽屉的货箱，担头挂一盏小红灯；
-    一手摇着拨浪鼓。返回影子要用的东西（剪影、灯的位置）。"""
+    """货郎：头往前探、斗笠前沿掀起，露出脸；短褂、裹腿、草鞋，右肩挑着扁担往右走，后头一只筐、前头一只带抽屉的货箱，
+    担头挂一盏小红灯；一手扶担，一手摇着拨浪鼓。先擦出留白、淡墨洇两层，再白描勾线。返回影子要用的东西（剪影、灯的位置）。"""
     f = Fig(P, *PEDDLER_AT)
     P.begin("peddler")
-    dark = mixc(ZHONG, NONG, 0.25)
-    # 扁担（后段在身后）
-    pole = [(-132, -168), (-60, -183), (14, -189), (80, -187), (150, -180)]
-    # 后头的筐：绳、筐
-    for (a, b) in (((-126, -170), (-152, -92)), ((-126, -170), (-98, -92)), ((-126, -170), (-126, -94))):
-        f.line([a, b], 0.7, color=NONG, alpha=0.9, smooth=False, taper=False)
+    pole = [(-132, -160), (-60, -174), (14, -180), (80, -180), (150, -172)]  # 压在右肩上
+    # ---- 后头的筐：绳、筐身淡墨，竹篾几笔
+    for (q, r_) in (((-126, -162), (-152, -92)), ((-126, -162), (-98, -92)), ((-126, -162), (-126, -94))):
+        f.brush([q, r_], 0.6, color=NONG, smooth=False, nail=0.2, tail=0.0, press=0.0)
     basket = [(-154, -92), (-96, -92), (-100, -40), (-112, -24), (-138, -24), (-150, -40)]
-    f.fill(basket, mixc(DAN, ZHONG, 0.3), 0.92, mode="over", rim=0.0)
+    f.knock(basket)
+    f.wash(basket, mixc(DAN, ZHESHI, 0.15), 0.45, off=(-2, 1))
+    for k in range(4):
+        y = -80 + k * 14
+        f.brush([(-151 + k * 1.2, y), (-125, y + 3), (-99 - k * 1.2, y)], 0.6, color=NONG, alpha=0.75, nail=0.2, tail=0.2, press=0.0)
     for k in range(5):
-        y = -86 + k * 12
-        f.line([(-152 + k * 1.2, y), (-98 - k * 1.2, y)], 0.7, color=NONG, alpha=0.6, smooth=False, taper=False)
-    for k in range(6):
-        x = -148 + k * 9.5
-        f.line([(x, -92), (x + (k - 2.5) * 1.2, -26)], 0.6, color=NONG, alpha=0.55, smooth=False, taper=False)
-    f.line([(-156, -92), (-94, -92)], 1.8, color=JIAO, smooth=False)
-    f.line([(-154, -92), (-150, -40), (-138, -24), (-112, -24), (-100, -40), (-96, -92)], 1.2, color=JIAO, alpha=0.9, taper=False)
-    for (dx, h_) in ((-140, 18), (-128, 24), (-116, 14)):  # 筐里冒出来的货：几根杆、一卷布
-        f.line([(dx, -92), (dx + 4, -92 - h_)], 1.2, color=NONG, smooth=False)
-    f.ellipse(-110, -98, 10, 6, mixc(PAPER, QING, 0.4), 0.95)
-    # 腿：往右走，后腿往后蹬、前腿屈膝迈出；深色裤子，小腿缠浅色绑腿，草鞋
-    trous = mixc(ZHONG, NONG, 0.2)
-    legs = (((-6, -106), (-12, -60), (-30, -12)), ((12, -106), (28, -62), (24, -12)))
+        x = -146 + k * 11
+        f.brush([(x, -90), (x + (k - 2) * 1.5, -28)], 0.5, color=NONG, alpha=0.6, smooth=False, nail=0.1, tail=0.3, press=0.0)
+    f.brush([(-156, -92), (-125, -95), (-94, -92)], 1.6, color=JIAO, nail=0.8, tail=0.2)
+    f.brush([(-154, -90), (-152, -44), (-138, -24), (-112, -24), (-100, -42), (-96, -90)], 1.3, color=JIAO, dry=0.35, dry_start=0.5)
+    for (dx, h_) in ((-140, 18), (-128, 24)):  # 筐里冒出来的货：几根杆、一卷布
+        f.brush([(dx, -92), (dx + 4, -92 - h_)], 1.0, color=NONG, smooth=False, nail=0.5, tail=0.2)
+    f.wash([(-120, -104), (-100, -104), (-98, -92), (-122, -92)], WASH_L, 0.5)
+    f.brush([(-122, -94), (-118, -105), (-100, -104), (-98, -93)], 0.8, color=NONG)
+    # ---- 腿：裹腿的裤子各一笔，草鞋
+    legs = (((-6, -104), (-14, -58), (-30, -12)), ((12, -104), (28, -62), (24, -10)))
     for (hip, knee, ankle) in legs:
-        f.line([hip, knee, ankle], 8.5, 5.0, color=trous, alpha=0.97)
-        lo = (knee[0] + (ankle[0] - knee[0]) * 0.35, knee[1] + (ankle[1] - knee[1]) * 0.35)
-        f.line([lo, ankle], 4.6, 3.8, color=mixc(PAPER, QING, 0.45), alpha=0.97, smooth=False)
-        for t in (0.35, 0.7):
-            x, y = lo[0] + (ankle[0] - lo[0]) * t, lo[1] + (ankle[1] - lo[1]) * t
-            f.line([(x - 4.5, y - 2.5), (x + 4.5, y + 2.5)], 0.7, color=NONG, alpha=0.8, smooth=False, taper=False)
-    f.fill([(-44, -12), (-26, -12), (-22, 0), (-48, 0)], JIAO, 0.95, mode="over", rim=0.0, smooth=False)
-    f.fill([(16, -12), (32, -12), (40, 0), (14, 0)], JIAO, 0.95, mode="over", rim=0.0, smooth=False)
-    # 短褂：溜肩，下摆略张开，开襟露出里面浅色的衣领
-    coat = [(-12, -191), (-24, -176), (-28, -150), (-32, -116), (-27, -100), (25, -100), (35, -112), (31, -148), (24, -176), (12, -191),
-            (0, -193)]
-    f.fill(coat, mixc(ZHONG, DAN, 0.35), 1.0, mode="over", rim=0.0)
-    f.shade(coat, NONG, 0.7, side=-1.0)
-    f.fill([(4, -192), (14, -190), (10, -168), (6, -170)], mixc(PAPER, QING, 0.4), 0.95, mode="over", rim=0.0, smooth=False)  # 衣领
-    f.line([(-12, -191), (-24, -176), (-28, -150), (-32, -116), (-27, -100)], 2.6, 1.4, color=JIAO, dry=0.3)
-    f.line([(24, -176), (31, -148), (35, -112), (25, -100)], 1.6, 1.0, color=JIAO, dry=0.3)
-    f.line([(10, -190), (14, -150), (12, -102)], 0.9, color=NONG, alpha=0.85)  # 衣襟
-    f.line([(-30, -118), (34, -120)], 3.2, color=mixc(PAPER, QING, 0.45), alpha=0.95, smooth=False)  # 腰带
-    f.line([(-6, -119), (-12, -98)], 1.4, 0.6, color=mixc(PAPER, QING, 0.45), alpha=0.9, smooth=False)  # 带头
-    # 扁担
-    f.line(pole, 3.4, color=mixc(ZHESHI, NONG, 0.0) * 0 + mixc(NONG, ZHONG, 0.3), alpha=0.97, taper=False, dry=0.15)
-    # 后手扶着扁担
-    f.line([(-14, -178), (-32, -160), (-44, -180)], 6.0, 4.0, color=mixc(ZHONG, DAN, 0.2), alpha=0.97)
-    f.line([(-14, -178), (-33, -159), (-44, -180)], 0.9, color=JIAO, alpha=0.8)
-    f.dot(-46, -182, 3.6, mixc(PAPER, QING, 0.3), 0.97)
-    # 头、斗笠
-    f.ellipse(10, -196, 11, 12, mixc(PAPER, WHITE, 0.1), 0.97)
-    f.line([(19, -200), (24, -194), (19, -191)], 0.9, color=NONG, smooth=False)
-    f.line([(4, -188), (14, -184)], 1.4, color=NONG, alpha=0.7)  # 胡茬
-    hat = [(-54, -198), (-20, -208), (8, -238), (36, -210), (60, -202), (4, -200)]
-    f.fill(hat, mixc(DAN, QING, 0.35), 0.96, mode="over", rim=0.0, smooth=False)
-    f.fill(hat, DAN, 0.3, rim=0.5, smooth=False)
-    for k in range(-4, 5):
-        f.line([(8, -236), (8 + k * 13, -202 + abs(k) * 0.4)], 0.6, color=NONG, alpha=0.6, smooth=False, taper=False)
-    f.line([(-56, -198), (-20, -207), (8, -239), (36, -210), (62, -202)], 1.8, 1.4, color=JIAO, smooth=False, dry=0.2)
-    f.line([(-56, -198), (4, -199), (62, -202)], 2.4, color=JIAO, alpha=0.95, dry=0.3)
-    # 前头的货箱：两层抽屉、铜环；绳
-    for (a, b) in (((140, -182), (106, -118)), ((140, -182), (172, -118))):
-        f.line([a, b], 0.7, color=NONG, alpha=0.9, smooth=False, taper=False)
+        thigh = [(hip[0] - 9, hip[1]), (hip[0] + 9, hip[1]), (knee[0] + 7, knee[1]), (ankle[0] + 4.5, ankle[1]), (ankle[0] - 4.5, ankle[1]),
+                 (knee[0] - 7, knee[1])]
+        f.knock(thigh, smooth=False)
+        f.wash(thigh, WASH_M, 0.5, off=(-1.5, 1), smooth=False, soft=1.8)
+        f.brush([(hip[0] - 9, hip[1] + 4), (knee[0] - 7, knee[1]), (ankle[0] - 4.5, ankle[1])], 1.5, color=JIAO, dry=0.3, press=1.4)
+        f.brush([(hip[0] + 9, hip[1] + 8), (knee[0] + 7, knee[1] + 2), (ankle[0] + 4.5, ankle[1])], 1.1, color=NONG, press=1.2)
+        for t in (0.42, 0.62, 0.82):  # 裹腿
+            x = knee[0] + (ankle[0] - knee[0]) * t
+            y = knee[1] + (ankle[1] - knee[1]) * t
+            f.brush([(x - 5.5, y - 3), (x + 5.5, y + 2)], 0.7, color=NONG, smooth=False, nail=0.3, tail=0.4, press=0.0)
+    for (x0, x1, lift) in ((-46, -22, -3), (14, 40, 0)):  # 草鞋：鞋底一笔、两道绳
+        f.brush([(x0, lift - 1), (x1, 0)], 1.8, color=JIAO, smooth=False, nail=0.6, tail=0.3)
+        f.brush([(x0 + 8, lift - 7), (x0 + 12, lift - 1)], 0.6, color=NONG, smooth=False)
+        f.brush([(x1 - 10, -7), (x1 - 6, -1)], 0.6, color=NONG, smooth=False)
+    # ---- 短褂
+    coat = [(-10, -184), (-22, -170), (-28, -146), (-30, -116), (-26, -102), (24, -102), (34, -110), (32, -146), (24, -172), (16, -182)]
+    f.knock(coat)
+    f.wash(coat, WASH_M, 0.55, off=(-2.5, 1.5))
+    f.wash([(-10, -182), (-22, -168), (-28, -144), (-30, -114), (-24, -104), (-4, -104), (-8, -140)], WASH_D, 0.35, off=(-1, 0))
+    f.brush([(-8, -184), (-22, -168), (-28, -140), (-31, -114), (-26, -102)], 2.2, color=JIAO, dry=0.35, dry_start=0.6, press=1.5)
+    f.brush([(18, -180), (30, -152), (34, -112)], 1.4, color=JIAO, press=1.2)
+    f.brush([(-27, -103), (4, -100), (34, -108)], 1.3, color=NONG, gap=(0.42, 0.55))
+    f.brush([(6, -186), (12, -166), (17, -182)], 0.9, color=NONG, smooth=False)  # 衣领
+    f.brush([(12, -166), (14, -132), (12, -104)], 0.8, color=NONG)  # 衣襟
+    f.brush([(-14, -152), (-8, -134)], 0.8, color=NONG, alpha=0.8)
+    f.brush([(22, -142), (27, -124)], 0.7, color=NONG, alpha=0.8)
+    f.brush([(-30, -118), (2, -121), (34, -120)], 2.0, color=mixc(NONG, ZHONG, 0.3), press=0.5)  # 腰带
+    f.brush([(-4, -120), (-9, -100)], 1.2, color=NONG, nail=0.4, tail=0.6)
+    f.brush([(2, -120), (4, -102)], 1.0, color=NONG, nail=0.4, tail=0.6)
+    # ---- 扁担
+    f.brush(pole, 3.2, color=mixc(NONG, ZHONG, 0.3), nail=0.3, tail=0.0, press=0.2, dry=0.15, dry_start=0.8)
+    # ---- 后手：抬起扶着担
+    sleeve_b = [(-6, -176), (-26, -162), (-38, -164), (-40, -172), (-28, -174), (-12, -182)]
+    f.knock(sleeve_b)
+    f.wash(sleeve_b, WASH_M, 0.5, off=(-1, 1))
+    f.brush([(-6, -174), (-30, -155), (-38, -166)], 1.3, color=JIAO, press=1.6)
+    f.brush([(-10, -182), (-28, -172), (-38, -174)], 0.9, color=NONG)
+    hand(f, -42, -175, 3.6)
+    # ---- 头、脸：头往前探
+    hx, hy, hr = 20.0, -194.0, 10.5
+    head = [(hx - hr, hy - 2), (hx - 4, hy - hr), (hx + hr, hy - 6), (hx + hr * 1.1, hy + 4), (hx + 4, hy + hr), (hx - hr, hy + 6)]
+    f.knock(head)
+    f.wash(head, SKIN, 0.35, soft=2.0)
+    f.wash([(hx - hr - 1, hy - 4), (hx - 2, hy - hr), (hx + 2, hy - 2), (hx - 2, hy + 6), (hx - hr, hy + 8)], WASH_D, 0.8, soft=1.5)  # 头发
+    profile_face(f, hx, hy, hr, beard="stubble")
+    f.brush([(hx - 6, hy + hr - 1), (hx - 4, hy + hr + 8)], 0.9, color=NONG)  # 颈
+    # ---- 斗笠：前沿掀起，底下露出脸
+    hat = [(-46, -196), (-10, -207), (4, -246), (26, -224), (62, -218), (20, -206)]
+    f.knock(hat, smooth=False)
+    f.wash(hat, mixc(DAN, ZHESHI, 0.3), 0.5, off=(-1.5, 1), smooth=False, soft=1.6)
+    f.wash([(-44, -197), (20, -205), (62, -217), (20, -210)], WASH_D, 0.55, smooth=False, soft=1.2)  # 笠沿底下的暗
+    for k in range(-4, 6):
+        t = (k + 4) / 9
+        bx = -40 + 96 * t
+        by = -199 - 18 * t
+        f.brush([(4, -243), (bx, by)], 0.5, color=NONG, alpha=0.6, smooth=False, nail=0.0, tail=0.2, press=0.0)
+    f.brush([(-48, -195), (-10, -206), (4, -247)], 1.5, color=JIAO, smooth=False, nail=0.6, tail=0.1)
+    f.brush([(4, -247), (28, -224), (64, -218)], 1.5, color=JIAO, smooth=False, nail=0.4, tail=0.3)
+    f.brush([(-48, -195), (8, -203), (64, -218)], 1.8, color=JIAO, nail=0.7, tail=0.25, dry=0.3, dry_start=0.5)
+    # ---- 前头的货箱
+    for (q, r_) in (((140, -174), (106, -118)), ((140, -174), (172, -118))):
+        f.brush([q, r_], 0.6, color=NONG, smooth=False, nail=0.2, tail=0.0, press=0.0)
     box = [(104, -118), (174, -118), (174, -22), (104, -22)]
-    f.fill(box, mixc(ZHONG, DAN, 0.15), 0.95, mode="over", rim=0.0, smooth=False)
-    f.fill([(104, -118), (174, -118), (168, -128), (110, -128)], mixc(DAN, QING, 0.3), 0.95, mode="over", rim=0.0, smooth=False)
-    for (a, b) in (((104, -118), (174, -118)), ((104, -22), (174, -22)), ((104, -118), (104, -22)), ((174, -118), (174, -22)),
-                   ((104, -86), (174, -86)), ((104, -54), (174, -54)), ((139, -86), (139, -22))):
-        f.line([a, b], 1.2, color=JIAO, alpha=0.9, smooth=False, taper=False)
+    f.knock(box, smooth=False)
+    f.wash(box, WASH_M, 0.5, off=(-2, 1.5), smooth=False, soft=2.0)
+    f.wash([(104, -118), (174, -118), (168, -128), (110, -128)], WASH_L, 0.5, smooth=False, soft=1.2)
+    f.brush([(102, -118), (139, -119), (176, -118)], 1.6, color=JIAO, nail=0.7, tail=0.2)
+    f.brush([(104, -116), (104, -22)], 1.5, color=JIAO, smooth=False, nail=0.8, tail=0.1, dry=0.3)
+    f.brush([(174, -116), (175, -22)], 1.2, color=JIAO, smooth=False, nail=0.6, tail=0.1)
+    f.brush([(102, -22), (176, -22)], 1.4, color=JIAO, smooth=False, nail=0.6, tail=0.2)
+    for (q, r_) in (((106, -86), (172, -86)), ((106, -54), (172, -54)), ((139, -86), (139, -24))):
+        f.brush([q, r_], 0.8, color=NONG, smooth=False, nail=0.3, tail=0.2, press=0.0)
     for (x, y) in ((139, -102), (121, -70), (157, -70), (121, -38), (157, -38)):
-        f.dot(x, y, 2.2, mixc(PAPER, QING, 0.3), 0.95)
-    # 担头的小红灯
-    lx, ly = 156.0, -160.0
-    f.line([(150, -180), (lx, ly - 13)], 0.8, color=NONG, alpha=0.9, smooth=False, taper=False)
+        f.dot(x, y, 1.8, NONG, 0.9)
+    # ---- 担头的小红灯
+    lx, ly = 156.0, -150.0
+    f.brush([(150, -172), (lx, ly - 13)], 0.7, color=NONG, smooth=False, nail=0.2, tail=0.0, press=0.0)
     gx, gy = f.pt(lx, ly)
     sl = (slice(int(gy - 20), int(gy + 20)), slice(int(gx - 16), int(gx + 16)))
     rho = np.hypot((P.X[sl] - gx) / 9.5, (P.Y[sl] - gy) / 11.5)
@@ -1111,63 +1262,82 @@ def paint_peddler(P: Hub, rng, lights) -> dict:
     P.over(body * 0.95, mixc(ZHUSHA, PAPER, 0.15), sl)
     P.mark_near(body, sl)
     P.emit[sl] += (body * (0.30 + 0.45 * np.exp(-(rho / 0.6) ** 2)))[..., None] * mixc(ZHUSHA, FLAME_LIGHT, 0.55)
-    f.line([(lx - 6, ly - 12), (lx + 6, ly - 12)], 1.8, color=JIAO, smooth=False, taper=False)
-    f.line([(lx - 6, ly + 12), (lx + 6, ly + 12)], 1.8, color=JIAO, smooth=False, taper=False)
-    f.line([(lx, ly + 13), (lx, ly + 24)], 0.8, color=NONG, smooth=False)
+    f.brush([(lx - 6, ly - 12), (lx + 6, ly - 12)], 1.6, color=JIAO, smooth=False, nail=0.2, tail=0.0, press=0.0)
+    f.brush([(lx - 6, ly + 12), (lx + 6, ly + 12)], 1.6, color=JIAO, smooth=False, nail=0.2, tail=0.0, press=0.0)
+    f.brush([(lx, ly + 13), (lx, ly + 24)], 0.7, color=NONG, smooth=False, nail=0.0, tail=0.5)
     lights.append((gx, gy, 270.0, mixc(LAMP_LIGHT, mixc(ZHUSHA, FLAME_LIGHT, 0.6), 0.45), 0.6, f.fy + 2))
-    # 前手摇着拨浪鼓
-    f.line([(14, -180), (34, -150), (52, -158)], 6.0, 4.0, color=mixc(ZHONG, DAN, 0.3), alpha=0.97)
-    f.line([(16, -178), (35, -148), (52, -156)], 0.9, color=JIAO, alpha=0.8)
-    f.dot(54, -160, 3.6, mixc(PAPER, QING, 0.3), 0.97)
-    f.line([(55, -162), (59, -192)], 1.0, color=NONG, smooth=False, taper=False)
-    f.ellipse(60, -199, 7.5, 8.5, mixc(PAPER, QING, 0.5), 0.97)
-    th = np.linspace(0, 2 * math.pi, 30)
-    f.line([(60 + 7.5 * math.cos(a), -199 + 8.5 * math.sin(a)) for a in th], 1.0, color=JIAO, taper=False)
+    # ---- 前手：袖子、手里的拨浪鼓
+    sleeve_f = [(16, -178), (32, -158), (44, -150), (48, -158), (36, -170), (24, -182)]
+    f.knock(sleeve_f)
+    f.wash(sleeve_f, WASH_M, 0.5, off=(-1, 1))
+    f.brush([(16, -176), (34, -150), (46, -152)], 1.3, color=JIAO, press=1.6)
+    f.brush([(24, -182), (38, -168), (48, -160)], 0.9, color=NONG)
+    f.brush([(54, -162), (58, -192)], 0.8, color=mixc(NONG, ZHESHI, 0.3), smooth=False, nail=0.2, tail=0.0, press=0.0)  # 鼓柄
+    hand(f, 53, -160, 3.4)
+    gx_, gy_ = f.pt(58.5, -199)
+    f.knock([(51, -207), (66, -207), (66, -191), (51, -191)])
+    f.wash([(51, -207), (66, -207), (66, -191), (51, -191)], mixc(DAN, ZHESHI, 0.25), 0.4, soft=1.2)
+    th = np.linspace(0.2, 2 * math.pi + 0.1, 30)
+    f.brush([(58.5 + 7 * math.cos(a), -199 + 8 * math.sin(a)) for a in th], 0.9, color=JIAO, nail=0.4, tail=0.2)
     for sx in (-1, 1):
-        f.line([(60 + sx * 7, -199), (60 + sx * 15, -196)], 0.5, color=NONG, smooth=False, taper=False)
-        f.dot(60 + sx * 16, -196, 2.2, NONG)
+        f.brush([(58.5 + sx * 7, -199), (58.5 + sx * 14, -195)], 0.45, color=NONG, smooth=False, nail=0.0, tail=0.0, press=0.0)
+        f.dot(58.5 + sx * 15, -195, 2.0, NONG)
     sil = P.end("peddler")
     # 脚下的影：从脚往左后方拖到墙脚
     gx0, gy0 = f.pt(-48, -14)
     T.wash_blob(P, gx0, gy0, 92.0, 11.0, ZHONG, 0.45, rng, ang=0.18)
-    # 尾巴：只在影子里（剪影里加一条蓬松的狐尾，从腰后往后上方翘起）
-    tail = f.pts([(-22, -110), (-44, -100), (-72, -104), (-98, -124), (-112, -150), (-110, -178), (-98, -204), (-90, -198), (-94, -178),
-                  (-90, -156), (-76, -138), (-52, -126), (-26, -124)])
-    tsl, tm = shape_cover(closed_curve(tail), soft=1.0)
-    sil[tsl] = np.maximum(sil[tsl], tm)
+    # 尾巴：只在墙上的影子里——腿后面一道软软的、蓬松的弯
+    tail = f.pts([(-18, -100), (-38, -92), (-60, -94), (-80, -104), (-94, -122), (-98, -138), (-90, -142), (-84, -128), (-70, -114),
+                  (-52, -108), (-34, -108), (-20, -110)])
+    tsl, tm = shape_cover(closed_curve(tail), soft=2.5, pad=10)
+    sil[tsl] = np.maximum(sil[tsl], 0.9 * tm)
     return {"sil": sil, "light": (gx, gy)}
 
 
 def paint_child(P: Hub, rng, lights):
-    """灯童：坐在门槛上，侧身朝右，两个小发髻，抱着膝；一手牵着兔子灯（竹棍、白纸兔、红眼、两只轮子），望着门外的路。"""
+    """灯童：坐在门槛上，侧身朝右，抱着膝，两个小发髻；一手牵着兔子灯的竹棍（白纸兔、红眼、两只轮子），望着门外的路。"""
     f = Fig(P, *CHILD_AT)
     seat = SILL_Y - f.fy  # 门槛上沿（局部坐标）
-    dark = mixc(ZHONG, NONG, 0.3)
-    # 腿：屈膝，裤子淡一些，小布鞋踩在台阶上
-    f.line([(4, seat - 6), (28, seat - 26), (32, -4)], 6.5, 5.0, color=mixc(DAN, ZHONG, 0.4), alpha=0.95)
-    f.fill([(24, -8), (40, -8), (42, 0), (22, 0)], JIAO, 0.95, mode="over", rim=0.0, smooth=False)
-    # 身子：小褂，弓着背
-    body = [(-14, seat), (-18, seat - 22), (-14, seat - 44), (-2, seat - 54), (12, seat - 52), (20, seat - 40), (24, seat - 26),
-            (18, seat - 12), (6, seat - 2)]
-    f.fill(body, dark, 0.95, mode="over", rim=0.0)
-    f.fill(body, NONG, 0.2, rim=0.45)
-    f.line([(-14, seat), (-18, seat - 22), (-14, seat - 44), (-2, seat - 54)], 1.8, 1.2, color=JIAO, dry=0.3)
-    # 头：圆脸、后脑的头发、两个发髻和小红头绳……长夜里只用墨
-    hx, hy = 8.0, seat - 68
-    f.ellipse(hx, hy, 12, 12.5, mixc(PAPER, WHITE, 0.1), 0.97)
-    hair = [(hx - 12, hy + 3), (hx - 12, hy - 6), (hx - 4, hy - 12), (hx + 6, hy - 12.5), (hx + 2, hy - 6), (hx - 4, hy + 4), (hx - 8, hy + 9)]
-    f.fill(hair, JIAO, 0.95, mode="over", rim=0.0)
-    f.dot(hx - 6, hy - 15, 6.2, JIAO)
-    f.dot(hx + 7, hy - 16, 5.6, JIAO)
-    f.line([(hx - 11, hy - 18), (hx - 16, hy - 24)], 0.7, color=NONG, smooth=False)
-    f.line([(hx + 11, hy - 20), (hx + 15, hy - 26)], 0.7, color=NONG, smooth=False)
-    f.line([(hx + 11, hy + 1), (hx + 13.5, hy + 3), (hx + 11, hy + 4.5)], 0.8, color=NONG, smooth=False)  # 鼻
-    f.dot(hx + 6, hy - 1, 1.2, JIAO)  # 眼
-    f.line([(hx - 2, hy + 1), (hx - 1, hy + 4)], 0.8, color=NONG, alpha=0.6)  # 耳
-    # 手臂：抱膝的一只、伸出去牵灯的一只
-    f.line([(4, seat - 44), (16, seat - 30), (26, seat - 30)], 4.2, 3.0, color=dark, alpha=0.95)
-    f.dot(28, seat - 30, 2.8, mixc(PAPER, QING, 0.2), 0.97)
-    f.line([(28, seat - 31), (60, -18)], 0.9, color=NONG, smooth=False, taper=False)  # 竹棍
+    # 裤腿、小鞋
+    legs = [(-8, seat - 6), (20, seat - 26), (30, seat - 22), (34, -6), (24, -6), (20, seat - 12), (-2, seat + 2)]
+    f.knock(legs)
+    f.wash(legs, WASH_L, 0.45, off=(-1, 1), soft=1.6)
+    f.brush([(-6, seat - 8), (20, seat - 27), (29, seat - 22), (33, -6)], 1.1, color=JIAO, press=1.6)
+    f.brush([(4, seat - 2), (19, seat - 12), (24, -6)], 0.8, color=NONG)
+    f.brush([(22, -4), (38, -3)], 2.4, color=JIAO, smooth=False, nail=0.8, tail=0.3)
+    # 小褂：弓着背
+    coat = [(2, seat - 54), (-10, seat - 42), (-15, seat - 22), (-13, seat - 2), (6, seat), (18, seat - 16), (22, seat - 30), (16, seat - 46),
+            (10, seat - 54)]
+    f.knock(coat)
+    f.wash(coat, WASH_M, 0.6, off=(-1.5, 1.2), soft=1.8)
+    f.wash([(2, seat - 52), (-10, seat - 40), (-14, seat - 20), (-12, seat - 4), (-2, seat - 6), (-4, seat - 36)], WASH_D, 0.4, soft=1.4)
+    f.brush([(2, seat - 54), (-10, seat - 42), (-15, seat - 22), (-13, seat - 1)], 1.6, color=JIAO, press=1.6, dry=0.3)
+    f.brush([(-13, seat - 1), (6, seat + 1)], 1.0, color=NONG, smooth=False)
+    f.brush([(-6, seat - 30), (-2, seat - 16)], 0.7, color=NONG, alpha=0.8)  # 衣褶
+    # 抱膝的手臂：袖子绕到膝前，手攥着竹棍
+    arm = [(4, seat - 48), (14, seat - 30), (26, seat - 26), (30, seat - 32), (18, seat - 40), (10, seat - 52)]
+    f.knock(arm)
+    f.wash(arm, WASH_M, 0.55, off=(-1, 1), soft=1.6)
+    f.brush([(4, seat - 46), (12, seat - 32), (26, seat - 27)], 1.1, color=JIAO, press=1.6)
+    f.brush([(10, seat - 50), (20, seat - 40), (29, seat - 33)], 0.7, color=NONG)
+    f.brush([(31, seat - 30), (62, -20)], 0.8, color=mixc(NONG, ZHESHI, 0.3), smooth=False, nail=0.3, tail=0.0, press=0.0)  # 竹棍
+    hand(f, 31, seat - 30, 2.8)
+    # 头：圆脸、后脑的头发、两个发髻
+    hx, hy, hr = 8.0, seat - 66, 12.0
+    head = [(hx - hr, hy), (hx - 6, hy - hr), (hx + 6, hy - hr), (hx + hr, hy - 2), (hx + hr * 0.9, hy + 7), (hx + 3, hy + hr), (hx - 8, hy + 8)]
+    f.knock(head)
+    f.wash(head, SKIN, 0.35, soft=1.8)
+    f.wash([(hx - hr - 1, hy + 2), (hx - 8, hy - hr), (hx + 4, hy - hr - 1), (hx + 2, hy - 5), (hx - 3, hy + 3), (hx - 7, hy + 9)], WASH_D, 0.85,
+           soft=1.4)
+    for (bx, by, br) in ((hx - 5, hy - 15, 6.2), (hx + 7, hy - 17, 5.6)):  # 发髻：两团湿墨
+        f.dot(bx, by, br, mixc(JIAO, NONG, 0.4), 0.95)
+        f.brush([(bx - br * 0.7, by + br * 0.4), (bx + br * 0.6, by + br * 0.5)], 0.7, color=mixc(PAPER, QING, 0.3), alpha=0.6, smooth=False)
+    # 侧脸：圆圆的额头、小鼻子、一点眼
+    f.brush([(hx + 6, hy - hr + 1), (hx + hr, hy - 3), (hx + hr + 2, hy + 1), (hx + hr - 0.5, hy + 3), (hx + hr, hy + 6), (hx + 6, hy + hr)],
+            0.7, color=NONG, nail=0.3, tail=0.3, press=1.2)
+    f.dot(hx + 6.5, hy - 1, 1.1, JIAO, 0.95)
+    f.brush([(hx + 4, hy - 4.5), (hx + 8.5, hy - 5)], 0.6, color=NONG, smooth=False)
+    f.wash([(hx + 1, hy + 2), (hx + 6, hy + 2), (hx + 6, hy + 6), (hx + 1, hy + 6)], ZHUSHA, 0.12, soft=1.2)  # 脸蛋一点红（在灯光里）
     # 兔子灯：在台阶上
     rb = (82.0, -14.0)
     gx, gy = f.pt(*rb)
@@ -1195,88 +1365,100 @@ def paint_child(P: Hub, rng, lights):
 
 
 def paint_teller(P: Hub, rng, lights):
-    """说书人：檐下桌边坐在凳上，戴方巾、长衫宽袖，一手举着折扇，一手按在桌上；桌上一块醒木、一本撕残的书、一支蜡烛。"""
+    """说书人：檐下桌边坐在凳上，戴一顶软巾（脑后垂两根巾带），长衫宽袖，一手举着折扇，一手按在桌上的醒木旁；
+    桌上一本撕残的书、一支蜡烛。"""
     f = Fig(P, *TELLER_AT)
-    gown = mixc(DAN, QING, 0.35)
+    gown = mixc(mixc(QING, DAN, 0.4), HUAQING, 0.12)  # 长衫：淡墨里一丝花青
     # 凳子：长衫后面露出两条腿
-    f.line([(-30, -50), (-34, 0)], 2.2, color=NONG, smooth=False, taper=False)
-    f.line([(-8, -50), (-6, 0)], 2.2, color=NONG, smooth=False, taper=False)
-    f.line([(-36, -50), (-2, -50)], 2.6, color=JIAO, smooth=False, taper=False)
+    f.brush([(-30, -50), (-34, 0)], 1.5, color=NONG, smooth=False, nail=0.5, tail=0.1)
+    f.brush([(-8, -50), (-6, 0)], 1.5, color=NONG, smooth=False, nail=0.5, tail=0.1)
     # 小腿、鞋：从衣摆下面伸出来
-    f.line([(40, -26), (42, -6)], 4.6, 4.0, color=mixc(ZHONG, NONG, 0.3), smooth=False)
-    f.fill([(34, -8), (54, -8), (58, 0), (32, 0)], JIAO, 0.95, mode="over", rim=0.0, smooth=False)
+    f.brush([(40, -26), (42, -6)], 3.6, color=mixc(ZHONG, NONG, 0.3), smooth=False, nail=0.3, tail=0.0, press=0.0)
+    f.brush([(32, -3), (58, -2)], 2.6, color=JIAO, smooth=False, nail=0.9, tail=0.3)
     # 长衫：上身坐直，腿往前搭到膝，衣摆从膝盖垂下来
     gown_p = [(-20, -128), (-26, -104), (-28, -78), (-32, -56), (-30, -40), (-14, -40), (6, -36), (30, -26), (50, -24), (54, -44),
-              (50, -62), (26, -66), (20, -92), (20, -126), (0, -136)]
-    f.fill(gown_p, gown, 1.0, mode="over", rim=0.0)
-    f.shade(gown_p, ZHONG, 0.55, side=-1.0)
-    f.line([(-20, -128), (-26, -104), (-28, -78), (-32, -56), (-30, -40)], 2.6, 1.4, color=JIAO, dry=0.3)
-    f.line([(20, -74), (36, -64), (50, -62), (54, -44), (50, -24)], 1.6, 1.0, color=JIAO, dry=0.3)  # 膝
-    f.line([(-14, -40), (6, -36), (30, -26), (50, -24)], 1.2, color=NONG, alpha=0.85)  # 衣摆
-    f.line([(2, -132), (8, -100), (10, -72)], 0.9, color=NONG, alpha=0.7)  # 衣襟
-    f.line([(-24, -82), (20, -84)], 2.2, color=mixc(ZHONG, DAN, 0.3), alpha=0.9, smooth=False)  # 腰带
+              (50, -62), (26, -66), (20, -92), (20, -126), (2, -134)]
+    f.knock(gown_p)
+    f.wash(gown_p, gown, 0.6, off=(-2.5, 1.5))
+    f.wash([(-20, -126), (-26, -104), (-28, -78), (-32, -56), (-30, -42), (-14, -44), (-8, -80), (-4, -120)], WASH_M, 0.32, soft=2.0)
+    f.wash([(20, -70), (36, -64), (50, -60), (52, -46), (36, -50), (22, -58)], WASH_M, 0.25, soft=1.6)  # 膝上的折
+    f.brush([(-20, -128), (-26, -104), (-28, -78), (-32, -56), (-30, -40)], 2.2, color=JIAO, press=1.6, dry=0.3, dry_start=0.6)
+    f.brush([(20, -76), (36, -66), (50, -62), (54, -44), (50, -24)], 1.4, color=JIAO, press=1.6)  # 膝
+    f.brush([(-14, -40), (6, -36), (30, -26), (50, -24)], 1.1, color=NONG, gap=(0.45, 0.58))  # 衣摆
+    f.brush([(2, -132), (8, -100), (10, -72)], 0.8, color=NONG, alpha=0.85)  # 衣襟
+    f.brush([(-12, -100), (-14, -60)], 0.7, color=NONG, alpha=0.7)
+    f.brush([(-24, -84), (-2, -86), (20, -84)], 1.4, color=mixc(ZHONG, DAN, 0.2), press=0.4)  # 腰带
     # 桌子：桌面、牙板、桌腿
     tx0, tx1, ttop = 62.0, 172.0, -84.0
-    f.fill([(tx0, ttop), (tx1, ttop), (tx1, ttop + 8), (tx0, ttop + 8)], mixc(ZHONG, NONG, 0.35), 0.97, mode="over", rim=0.0, smooth=False)
-    f.fill([(tx0 + 6, ttop + 8), (tx1 - 6, ttop + 8), (tx1 - 6, ttop + 18), (tx0 + 6, ttop + 18)], mixc(DAN, ZHONG, 0.5), 0.92, mode="over",
-           rim=0.0, smooth=False)
-    f.line([(tx0 - 2, ttop), (tx1 + 2, ttop)], 1.6, color=JIAO, smooth=False)
+    f.wash([(tx0, ttop), (tx1, ttop), (tx1, ttop + 18), (tx0, ttop + 18)], WASH_M, 0.55, smooth=False, soft=1.2)
+    f.brush([(tx0 - 2, ttop), (117, ttop - 1), (tx1 + 2, ttop)], 2.6, color=mixc(NONG, ZHONG, 0.3), nail=0.6, tail=0.15, press=0.2, dry=0.2)
+    f.brush([(tx0 + 6, ttop + 18), (tx1 - 6, ttop + 18)], 0.9, color=NONG, smooth=False, nail=0.2, tail=0.2)
     for x in (tx0 + 6, tx1 - 6):
-        f.line([(x, ttop + 8), (x, 0)], 3.0, color=NONG, smooth=False, taper=False)
-    # 后手：伸到桌上按着醒木
-    f.line([(-6, -120), (12, -94), (60, -88)], 7.5, 5.0, color=gown, alpha=0.97)
-    f.line([(-6, -120), (12, -93), (58, -86)], 1.0, color=NONG, alpha=0.75)
-    f.dot(62, -88, 3.2, mixc(PAPER, QING, 0.2), 0.97)
-    # 头、方巾、山羊胡
-    hx, hy = 6.0, -148.0
-    f.ellipse(hx, hy, 12.5, 13.5, mixc(PAPER, WHITE, 0.1), 0.98)
-    cap = [(hx - 13, hy - 6), (hx - 15, hy - 31), (hx + 13, hy - 34), (hx + 15, hy - 8)]
-    f.fill(cap, mixc(NONG, ZHONG, 0.2), 0.97, mode="over", rim=0.0, smooth=False)
-    f.line([(hx - 14, hy - 32), (hx + 13, hy - 35)], 1.4, color=JIAO, smooth=False)
-    f.line([(hx - 13, hy - 8), (hx - 24, hy + 16)], 3.0, 1.4, color=NONG, alpha=0.95)  # 巾带
-    f.line([(hx + 12.5, hy - 3), (hx + 16.5, hy + 3), (hx + 12, hy + 4)], 0.9, color=NONG, smooth=False)  # 鼻
-    f.dot(hx + 7, hy - 2, 1.3, JIAO)
-    f.line([(hx + 4, hy - 6.5), (hx + 10, hy - 7)], 0.8, color=NONG, alpha=0.8)  # 眉
-    f.line([(hx + 9, hy + 10), (hx + 12, hy + 22), (hx + 9, hy + 32)], 1.6, 0.4, color=NONG, alpha=0.9)  # 山羊胡
-    f.line([(hx + 6, hy + 8), (hx + 14, hy + 8)], 0.9, color=NONG, alpha=0.8)
+        f.brush([(x, ttop + 6), (x, 0)], 2.0, color=NONG, smooth=False, nail=0.6, tail=0.1, dry=0.25)
+    # 后手：伸到桌上，按在醒木旁
+    arm_b = [(-6, -122), (12, -96), (56, -90), (56, -82), (10, -88), (-12, -112)]
+    f.knock(arm_b)
+    f.wash(arm_b, gown, 0.55, off=(-1, 1), soft=1.6)
+    f.brush([(-6, -120), (12, -94), (54, -88)], 1.2, color=JIAO, press=1.5)
+    f.brush([(-10, -112), (10, -88), (54, -82)], 0.8, color=NONG)
+    hand(f, 60, -87, 3.2)
+    # 头、软巾、山羊胡
+    hx, hy, hr = 6.0, -148.0, 12.5
+    head = [(hx - hr, hy), (hx - 6, hy - hr), (hx + 6, hy - hr), (hx + hr, hy - 3), (hx + hr + 1, hy + 5), (hx + 4, hy + hr), (hx - 8, hy + 9)]
+    f.knock(head)
+    f.wash(head, SKIN, 0.3, soft=1.8)
+    cap = [(hx - hr - 2, hy - 2), (hx - hr + 1, hy - 12), (hx - 2, hy - hr - 6), (hx + 9, hy - hr - 3), (hx + hr + 1, hy - 6), (hx + 4, hy - 7),
+           (hx - 6, hy - 4)]
+    f.wash(cap, WASH_D, 0.85, soft=1.3)
+    f.brush([(hx - hr - 2, hy - 2), (hx - hr + 1, hy - 12), (hx - 2, hy - hr - 6), (hx + 9, hy - hr - 3), (hx + hr + 1, hy - 6)], 1.2,
+            color=JIAO, press=1.4, nail=0.4)
+    f.brush([(hx - hr, hy - 4), (hx - hr - 7, hy + 10), (hx - hr - 9, hy + 24)], 1.2, color=NONG, nail=0.6, tail=0.5)  # 巾带
+    f.brush([(hx - hr + 3, hy - 3), (hx - hr - 2, hy + 12), (hx - hr - 3, hy + 22)], 1.0, color=NONG, nail=0.5, tail=0.5)
+    profile_face(f, hx, hy, hr, beard="goatee")
     # 书：摊开，右页撕掉一半，几行字
     book = [(76, ttop - 1), (100, ttop - 3), (102, ttop - 1), (128, ttop - 4), (124, ttop - 9), (120, ttop - 7), (116, ttop - 12),
             (108, ttop - 9), (102, ttop - 12), (78, ttop - 10)]
-    f.fill(book, mixc(PAPER, WHITE, 0.3), 0.97, mode="over", rim=0.0, smooth=False)
-    f.line(book + [book[0]], 0.7, color=NONG, smooth=False, taper=False)
+    f.knock(book, smooth=False)
+    f.brush(book[:2] + [(102, ttop - 1), (128, ttop - 4)], 0.6, color=NONG, smooth=False, nail=0.2, tail=0.2, press=0.0)
+    f.brush([(78, ttop - 10), (102, ttop - 12), (108, ttop - 9), (116, ttop - 12), (120, ttop - 7), (124, ttop - 9), (128, ttop - 4)], 0.6,
+            color=NONG, smooth=False, nail=0.2, tail=0.2, press=0.0)
+    f.brush([(76, ttop - 1), (78, ttop - 10)], 0.6, color=NONG, smooth=False, nail=0.2, tail=0.2, press=0.0)
     for k in range(4):
-        f.line([(82 + k * 5, ttop - 3), (84 + k * 5, ttop - 9)], 0.45, color=NONG, alpha=0.7, smooth=False, taper=False)
+        f.brush([(82 + k * 5, ttop - 3), (84 + k * 5, ttop - 9)], 0.4, color=NONG, alpha=0.75, smooth=False, nail=0.0, tail=0.3, press=0.0)
     # 醒木
     f.fill([(64, ttop - 1), (76, ttop - 1), (75, ttop - 7), (65, ttop - 7)], JIAO, 0.97, mode="over", rim=0.0, smooth=False)
     # 蜡烛：烛台、白蜡，火苗画进发光层
     cx = 154.0
-    f.line([(cx - 8, ttop - 1), (cx + 8, ttop - 1)], 1.8, color=JIAO, smooth=False, taper=False)
-    f.line([(cx, ttop - 2), (cx, ttop - 14)], 1.6, color=NONG, smooth=False, taper=False)
-    f.line([(cx - 6, ttop - 14), (cx + 6, ttop - 14)], 1.4, color=JIAO, smooth=False, taper=False)
-    f.line([(cx, ttop - 15), (cx, ttop - 38)], 3.6, color=mixc(PAPER, WHITE, 0.4), alpha=0.97, smooth=False, taper=False)
-    f.line([(cx - 3.6, ttop - 15), (cx - 3.6, ttop - 38)], 0.6, color=DAN, alpha=0.8, smooth=False, taper=False)
+    f.brush([(cx - 8, ttop - 1), (cx + 8, ttop - 1)], 1.5, color=JIAO, smooth=False, nail=0.3, tail=0.2)
+    f.brush([(cx, ttop - 2), (cx, ttop - 14)], 1.2, color=NONG, smooth=False, nail=0.2, tail=0.0)
+    f.brush([(cx - 6, ttop - 14), (cx + 6, ttop - 14)], 1.1, color=JIAO, smooth=False, nail=0.2, tail=0.2)
+    f.knock([(cx - 3.5, ttop - 15), (cx + 3.5, ttop - 15), (cx + 3.5, ttop - 38), (cx - 3.5, ttop - 38)], smooth=False)
+    f.brush([(cx - 3.6, ttop - 15), (cx - 3.6, ttop - 38)], 0.5, color=DAN, smooth=False, nail=0.0, tail=0.0, press=0.0)
     fx_, fy_ = f.pt(cx, ttop - 39)
     paint_flame_emit(P, fx_, fy_, 15.0, 6.0, gain=1.05, color=mixc(FLAME_LIGHT, LAMP_LIGHT, 0.5))
     lights.append((fx_, fy_ - 8, 255.0, mixc(LAMP_LIGHT, FLAME_LIGHT, 0.25), 0.6, PORCH_Y + 2))
-    # 前手：宽袖，举起折扇
-    sleeve = [(12, -126), (34, -104), (46, -110), (46, -124), (30, -132)]
-    f.fill(sleeve, gown, 1.0, mode="over", rim=0.0)
-    f.shade(sleeve, ZHONG, 0.35, side=1.0)
-    f.line([(12, -126), (34, -103), (46, -110)], 1.4, color=NONG, alpha=0.9)
-    f.line([(44, -118), (46, -132)], 3.0, 2.6, color=mixc(PAPER, QING, 0.2), alpha=0.97, smooth=False)
-    f.dot(46, -134, 3.2, mixc(PAPER, QING, 0.2), 0.97)
-    pv = (48.0, -136.0)
-    a0, a1, R, r0 = math.radians(-150), math.radians(-40), 34.0, 8.0
+    # 前手：宽袖垂着，手举起折扇
+    sleeve = [(12, -126), (34, -102), (52, -108), (52, -122), (30, -132)]
+    f.knock(sleeve)
+    f.wash(sleeve, gown, 0.6, off=(-1, 1.5), soft=1.8)
+    f.brush([(12, -126), (24, -110), (34, -101), (52, -108)], 1.3, color=JIAO, press=1.6)
+    f.brush([(30, -132), (48, -124)], 0.8, color=NONG)
+    f.knock([(46, -122), (54, -122), (57, -142), (50, -142)], smooth=False)
+    f.brush([(47, -120), (52, -142)], 0.6, color=NONG, smooth=False)
+    pv = (58.0, -146.0)
+    a0, a1, R, r0 = math.radians(-128), math.radians(-26), 34.0, 8.0
     th = np.linspace(a0, a1, 24)
     fan = [(pv[0] + R * math.cos(a), pv[1] + R * math.sin(a)) for a in th] + \
           [(pv[0] + r0 * math.cos(a), pv[1] + r0 * math.sin(a)) for a in th[::-1]]
-    f.fill(fan, mixc(PAPER, WHITE, 0.3), 0.98, mode="over", rim=0.0, smooth=False)
+    f.knock(fan, smooth=False)
+    f.wash(fan, WASH_L, 0.18, smooth=False, soft=1.2)
     for a in np.linspace(a0, a1, 9):
-        f.line([(pv[0] + 3 * math.cos(a), pv[1] + 3 * math.sin(a)), (pv[0] + R * math.cos(a), pv[1] + R * math.sin(a))], 0.5, color=NONG,
-               alpha=0.7, smooth=False, taper=False)
-    f.line([(pv[0] + R * math.cos(a), pv[1] + R * math.sin(a)) for a in th], 1.2, color=JIAO, alpha=0.95, taper=False)
+        f.brush([(pv[0] + 3 * math.cos(a), pv[1] + 3 * math.sin(a)), (pv[0] + R * math.cos(a), pv[1] + R * math.sin(a))], 0.45, color=NONG,
+                alpha=0.75, smooth=False, nail=0.0, tail=0.2, press=0.0)
+    f.brush([(pv[0] + R * math.cos(a), pv[1] + R * math.sin(a)) for a in th], 1.0, color=JIAO, nail=0.5, tail=0.15, press=0.4)
     for a in (a0, a1):
-        f.line([pv, (pv[0] + R * math.cos(a), pv[1] + R * math.sin(a))], 1.0, color=JIAO, alpha=0.9, smooth=False, taper=False)
+        f.brush([pv, (pv[0] + R * math.cos(a), pv[1] + R * math.sin(a))], 0.8, color=JIAO, smooth=False, nail=0.3, tail=0.1, press=0.0)
+    hand(f, 56, -144, 3.0)
     T.wash_blob(P, f.fx + 40, PORCH_Y + 2, 110.0, 6.0, ZHONG, 0.3, rng)
 
 
@@ -1292,11 +1474,11 @@ def light_terms(P: Hub, lights, seed: int) -> np.ndarray:
 
 def night_ambient(P: Hub, rng) -> np.ndarray:
     """长夜的底：灰（纸色兑一点灰，不偏蓝），月亮附近亮一点，雾在月光里微微发亮。"""
-    amb = 0.54 * (1 + 0.10 * noise(rng, (H, W), (300.0, 120.0)))
+    amb = NIGHT_AMB * (1 + 0.10 * noise(rng, (H, W), (300.0, 120.0)))
     mx, my, mr = MOON
     d = np.hypot(P.X - mx, (P.Y - my) * 1.1)
-    moon = 0.02 + 0.14 * np.exp(-(d / 650.0) ** 2) + 0.12 * np.exp(-(d / 200.0) ** 2)
-    mist = P.mist * (1 - P.near) * (0.08 + 0.16 * np.exp(-(d / 900.0) ** 2))
+    moon = 0.015 + 0.11 * np.exp(-(d / 650.0) ** 2) + 0.12 * np.exp(-(d / 200.0) ** 2)
+    mist = P.mist * (1 - P.near) * (0.06 + 0.12 * np.exp(-(d / 900.0) ** 2))
     g = (amb + moon + mist)[..., None]
     return g * mixc(WHITE, PAPER / PAPER.max(), 0.22)[None, None]
 
@@ -1341,8 +1523,8 @@ def finish(P: Hub, lm: np.ndarray, paper0: np.ndarray) -> tuple[np.ndarray, dict
 
 
 def put_seal(img: Image.Image) -> Image.Image:
-    """右下角一方朱砂印“心灯”（白文，title_screen.make_seal）。"""
-    seal = T.make_seal("心灯", SEAL_PX, np.random.default_rng(SEED + 99))
+    """右下角一方朱砂印“灯驿”（白文，title_screen.make_seal）。"""
+    seal = T.make_seal("灯驿", SEAL_PX, np.random.default_rng(SEED + 99))
     im = img.convert("RGBA")
     im.alpha_composite(seal, SEAL_AT)
     return im.convert("RGB")
@@ -1359,6 +1541,7 @@ def paint() -> dict:
     slots = lamp_slots(ids)
     P = Hub(rng)
     paper0 = P.rgb.copy()
+    P.paper0 = paper0
     paint_sky(P, rng)
     paint_far(P, rng)
     P.begin("front")  # 远山以后画的都算挡在远山前面（晨光只落在露出来的山和天上）
@@ -1386,7 +1569,7 @@ def paint() -> dict:
     t_paint = time.perf_counter() - t0
     # ---- 光照
     wall_mask = np.zeros((H, W))
-    wall_mask[int(WALL_TOP + 4):int(WALL_BASE - 22), 0:int(WALL_X1)] = 1.0
+    wall_mask[int(WALL_TOP + 4):int(WALL_BASE), 0:int(WALL_X1)] = 1.0
     wall_vis = blur(wall_mask, 1.0) * (1 - np.clip(after_wall * 1.5, 0, 1))
     shadow = wall_shadow(P, ped["sil"], ped["light"], wall_vis)
     lm = night_ambient(P, np.random.default_rng(SEED + 5))
@@ -1401,7 +1584,7 @@ def paint() -> dict:
     gx, gy = ped["light"]
     wash = (gx - 210.0, gy - 20.0, 320.0, mixc(LAMP_LIGHT, mixc(ZHUSHA, FLAME_LIGHT, 0.6), 0.4), 0.5, None)
     lt += (T.light_map(P, [wash], np.random.default_rng(lseed)) - lm0) * wall_vis[..., None]
-    lm = lm * (1 - 0.3 * shadow)[..., None] + lt * (1 - 0.92 * shadow)[..., None]
+    lm = lm * (1 - 0.2 * shadow)[..., None] + lt * (1 - 0.85 * shadow)[..., None]
     out, fin = finish(P, lm, paper0)
     img = put_seal(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGB"))
     return {"P": P, "img": img, "lm": lm, "fin": fin, "front": front, "slots": slots, "ids": ids, "lights": lights,
@@ -1518,29 +1701,34 @@ def dawn_layers(R: dict, rid: str) -> dict:
     lay, cx, hgt, wl, wr, sharp, half = REGIONS[rid]
     rng = np.random.default_rng(SEED + 400 + hash_id(rid) % 97)
     front = np.clip(R["front"] * 1.2, 0, 1)
-    back, far = P.layers["back"], P.layers["far"]
+    back, far, city = P.layers["back"], P.layers["far"], P.layers["city"]
     if lay == "back":
-        body = back * (1 - far) * (1 - front)
+        body = back * (1 - far) * (1 - city) * (1 - front)
         ridge = P.ridges["back"]
     else:
-        body = far * (1 - front)
+        body = np.maximum(far, city) * (1 - front)
         ridge = P.ridges["far"]
-    sky = (1 - back) * (1 - far) * (1 - front)
+    sky = (1 - back) * (1 - far) * (1 - city) * (1 - front)
     xs = np.arange(W) + 0.5
-    win = V.bump_window(np.clip(np.abs(xs - cx) / half, 0, 1))[None, :]
+    inner = 0.7 if rid == "youdu" else 0.35  # 幽都是一个山口：窗口平一些，两道山肩都照到
+    win = smoothstep(half, inner * half, np.abs(xs - cx))[None, :]
     rr = ridge[None, :]
     depth = P.Y - rr  # 山脊以下为正
-    # 主峰附近亮得多：按山脊高低加权（越高越早见光、越亮）
-    top = float(ridge[int(max(0, cx - half)):int(min(W, cx + half))].min())
-    lift = np.clip((FAR_BASE + 20 - rr) / max(FAR_BASE + 20 - top, 1.0), 0, 1) ** 1.3
+    seg = ridge[int(max(0, cx - half)):int(min(W, cx + half))]
+    top = float(seg.min())
+    lift = np.clip((FAR_BASE + 20 - rr) / max(FAR_BASE + 20 - top, 1.0), 0, 1) ** 1.3  # 越高越早见光、越亮
+    if rid == "youdu":
+        lift = np.maximum(lift, 0.55)
     fib = V.rank01(blur(rng.standard_normal((H, W)), (9.0, 0.7), angle=0.35)) * 0.6 + V.rank01(noise(rng, (H, W), 2.5)) * 0.4
     rim = np.exp(-np.maximum(depth, 0) / 9.0) * smoothstep(-1.5, 1.0, depth)
-    slope = np.exp(-np.maximum(depth, 0) / 80.0) * smoothstep(-1.0, 4.0, depth)
-    skyglow = np.exp(-np.maximum(-depth, 0) / 55.0) * smoothstep(1.0, -2.0, depth)
-    a = (0.42 * rim + 0.16 * slope) * body * (0.35 + 0.65 * lift) + 0.24 * skyglow * sky * (0.4 + 0.6 * lift)
+    slope = np.exp(-np.maximum(depth, 0) / 60.0) * smoothstep(-1.0, 4.0, depth) * V.bump_window(np.clip(depth / 150.0, 0, 1))
+    skyglow = np.exp(-np.maximum(-depth, 0) / 40.0) * smoothstep(1.0, -2.0, depth) * V.bump_window(np.clip(-depth / 100.0, 0, 1))
+    city_rim = city * np.clip(1 - np.roll(city, 3, axis=0), 0, 1) * (1 - front)  # 黑城的屋脊、垛口上一线光
+    a = (0.42 * rim + 0.16 * slope) * body * (0.35 + 0.65 * lift) + 0.24 * skyglow * sky * (0.4 + 0.6 * lift) + 0.35 * city_rim
     a = a * win * (0.82 + 0.18 * fib)
     a = np.clip(a, 0, 0.6)
-    ys, xs_ = np.nonzero(a > 0.004)
+    a[a < 0.004] = 0.0
+    ys, xs_ = np.nonzero(a)
     x0, x1, y0, y1 = xs_.min(), xs_.max() + 1, ys.min(), ys.max() + 1
     sl = (slice(y0, y1), slice(x0, x1))
     rel, vig = R["fin"]["rel"][sl], R["fin"]["vig"][sl]
@@ -1552,13 +1740,15 @@ def dawn_layers(R: dict, rid: str) -> dict:
     along = np.clip((ridge[None, x0:x1] - top) / 140.0, 0, 1)  # 山脊上离峰顶多远（越低越晚）
     t = 0.55 * along + 0.45 * np.clip(dist_ridge / 120.0, 0, 1) ** 0.8
     t = t + 0.16 * (fib[sl] - 0.5) + 0.06 * noise(rng, t.shape, 6.0)
-    t = (t - t[a[sl] > 0.004].min()) / max(np.ptp(t[a[sl] > 0.004]), 1e-6)
-    mask = np.where(a[sl] > 0.004, np.clip(t, 0, 1), 1.0)
+    on = a[sl] > 0
+    t = (t - t[on].min()) / max(np.ptp(t[on]), 1e-6)
+    mask = np.where(on, np.clip(t, 0, 1), 1.0)
     out = {"main": (img, (x0, y0, x1 - x0, y1 - y0), {}), "mask": (mask, (x0, y0, x1 - x0, y1 - y0), {})}
     # 山脊金线（叠加）：贴着山脊一线，主峰处最亮
-    gl = np.exp(-((depth - 1.0) / 2.2) ** 2) * body * win * lift ** 1.5 * (0.7 + 0.3 * fib)
+    gl = (np.exp(-((depth - 1.0) / 2.2) ** 2) * body + 0.6 * city_rim) * win * lift ** 1.5 * (0.7 + 0.3 * fib)
     gl = ADD_PEAK * 0.75 * gl / max(gl.max(), 1e-6)
-    ys, xs_ = np.nonzero(gl > 0.004)
+    gl[gl < 0.004] = 0.0
+    ys, xs_ = np.nonzero(gl)
     gx0, gx1, gy0, gy1 = xs_.min(), xs_.max() + 1, ys.min(), ys.max() + 1
     gsl = (slice(gy0, gy1), slice(gx0, gx1))
     out["glow"] = (np.dstack([np.broadcast_to(DAWN_GOLD, (gy1 - gy0, gx1 - gx0, 3)), gl[gsl]]), (gx0, gy0, gx1 - gx0, gy1 - gy0),
@@ -1614,44 +1804,83 @@ def composite(base_img: Image.Image, lamps: dict, dawns: dict, lit: list[str], d
 # ============================================================== 审图
 
 
+ROUND1 = ART / "out" / "_hub_round1" / "hub_sample.png"  # 上一轮的样张（审图对比用，没有就跳过）
+
+
 def review_figures(R: dict, path: Path) -> None:
-    """四个人物各裁一块放大 2 倍：上一行是宣纸上的原画（没打光），下一行是夜景（hub.png）。"""
+    """四个人物各裁一块放大 2 倍，一人一行：上一轮的夜景 | 这一轮的夜景（hub.png）| 这一轮宣纸上的原画（没打光）。"""
     P = R["P"]
     day = Image.fromarray((np.clip(P.rgb, 0, 1) * 255 + 0.5).astype(np.uint8), "RGB")
-    night = R["img"]
+    old = Image.open(ROUND1).convert("RGB") if ROUND1.exists() else None
+    srcs = [(old, "上一轮"), (R["img"], "这一轮 · 夜景"), (day, "这一轮 · 宣纸原画（未打光）")]
+    srcs = [(im, lab) for im, lab in srcs if im is not None]
     f = font("serif", 22)
-    crops = []
+    rows = []
     for c in CHARACTERS:
         x, y, w, h = c["rect"]
-        pad = 16
+        pad = 18
         box = (max(0, x - pad), max(0, y - pad), min(W, x + w + pad), min(H, y + h + pad))
-        crops.append((c, box))
-    cw = sum((b[2] - b[0]) * 2 for _, b in crops) + 20 * (len(crops) + 1)
-    ch = max((b[3] - b[1]) * 2 for _, b in crops)
-    out = Image.new("RGB", (cw, (ch + 50) * 2 + 20), (26, 26, 28))
+        rows.append((c, box))
+    cw = max((b[2] - b[0]) * 2 for _, b in rows)
+    out = Image.new("RGB", (len(srcs) * (cw + 16) + 16, sum((b[3] - b[1]) * 2 + 44 for _, b in rows) + 16), (26, 26, 28))
     d = ImageDraw.Draw(out)
-    for r, (src, lab) in enumerate(((day, "宣纸原画（未打光）"), (night, "夜景（hub.png）"))):
-        x = 20
-        y = 10 + r * (ch + 60)
-        for c, b in crops:
+    y = 8
+    for c, b in rows:
+        for i, (src, lab) in enumerate(srcs):
             im = src.crop(b).resize(((b[2] - b[0]) * 2, (b[3] - b[1]) * 2), Image.LANCZOS)
-            out.paste(im, (x, y + 36))
-            d.text((x, y + 4), f"{c['name']} · {lab}", font=f, fill=(225, 225, 225))
-            x += im.width + 20
+            x = 16 + i * (cw + 16)
+            d.text((x, y), f"{c['name']} · {lab}", font=f, fill=(225, 225, 225))
+            out.paste(im, (x, y + 34))
+        y += (b[3] - b[1]) * 2 + 44
     out.save(path, optimize=True)
 
 
+def reveal(dawn: dict, p: float) -> dict:
+    """按灰度图铺开晨光（游戏的做法）：灰度 ≤ 进度的地方显出来，边上软 0.06。"""
+    img, rect, extra = dawn["main"]
+    m = dawn["mask"][0]
+    k = smoothstep(m, m + 0.06, p * 1.06)
+    out = dict(dawn)
+    out["main"] = (np.dstack([img[..., :3], img[..., 3] * k]), rect, extra)
+    g, grect, gextra = dawn["glow"]
+    gx, gy = grect[0] - rect[0], grect[1] - rect[1]
+    kg = np.ones(g.shape[:2])
+    hh, ww = g.shape[:2]
+    sub = k[max(0, gy):gy + hh, max(0, gx):gx + ww]
+    kg[max(0, -gy):max(0, -gy) + sub.shape[0], max(0, -gx):max(0, -gx) + sub.shape[1]] = sub
+    out["glow"] = (np.dstack([g[..., :3], g[..., 3] * kg]), grect, gextra)
+    return out
+
+
 def review_states(base: Image.Image, lamps, dawns, ids, path: Path) -> list[Image.Image]:
-    """三种状态并排：0 盏；前 6 盏；12 盏 + 青丘天明。"""
+    """上一行三种状态并排：0 盏；前 6 盏；全部 + 青丘天明。下一行：青丘的晨光按灰度图铺开（25%、50%、75%、100%），
+    再加六处晨光全亮。"""
     states = [([], [], "心灯 0 盏"), (ids[:6], [], "心灯前 6 盏"), (ids, ["qingqiu"], f"心灯 {len(ids)} 盏 + 青丘天明")]
     ims = [composite(base, lamps, dawns, lit, dw) for lit, dw, _ in states]
     sw, sh = 960, 540
     f = font("serif", 22)
-    out = Image.new("RGB", (sw * 3 + 40, sh + 50), (26, 26, 28))
+    rid = "qingqiu"
+    x, y, w, h = dawns[rid]["main"][1]
+    box = (max(0, x - 40), max(0, y - 20), min(W, x + w + 40), min(H, y + h + 20))
+    steps = [0.25, 0.5, 0.75, 1.0]
+    tiles = [composite(base, lamps, {rid: reveal(dawns[rid], p_)}, [], [rid]).crop(box) for p_ in steps]
+    all6 = composite(base, lamps, dawns, ids, list(REGIONS)).crop((0, 100, W, 520))
+    th = 360
+    tiles = [t.resize((round(t.width * th / t.height), th), Image.LANCZOS) for t in tiles]
+    all6 = all6.resize((round(all6.width * th / all6.height), th), Image.LANCZOS)
+    width = max(sw * 3 + 40, sum(t.width + 10 for t in tiles) + all6.width + 20)
+    out = Image.new("RGB", (width, sh + 50 + th + 50), (26, 26, 28))
     d = ImageDraw.Draw(out)
     for i, (im, (_, _, lab)) in enumerate(zip(ims, states)):
         out.paste(im.resize((sw, sh), Image.LANCZOS), (10 + i * (sw + 10), 40))
         d.text((10 + i * (sw + 10), 8), lab, font=f, fill=(225, 225, 225))
+    xx = 10
+    for p_, t in zip(steps, tiles):
+        out.paste(t, (xx, sh + 90))
+        d.text((xx, sh + 58), f"青丘晨光 {int(p_ * 100)}%（按 mask 铺开）", font=f, fill=(225, 225, 225))
+        xx += t.width + 10
+    out.paste(all6, (xx, sh + 90))
+    d.text((xx, sh + 58), "六处晨光全亮（远山）", font=f, fill=(225, 225, 225))
     out.save(path, optimize=True)
     return ims
 
@@ -1761,6 +1990,21 @@ def write_outputs(R: dict, lamps: dict, dawns: dict) -> dict:
     return man
 
 
+def load_layers(man: dict) -> tuple[dict, dict]:
+    """按 hub.json 从磁盘读回各层（和游戏读到的一样），给审图合成用。"""
+    def rd(fn, mode="RGBA"):
+        return np.asarray(Image.open(OUT / fn).convert(mode), np.float64) / 255.0
+
+    lamps = {}
+    for lid, e in man["lamps"].items():
+        lamps[lid] = {part: (rd(v["file"]), tuple(v["rect"]), {k: v[k] for k in ("blend", "base") if k in v}) for part, v in e.items()}
+    dawns = {}
+    for rid, e in man["dawn"].items():
+        dawns[rid] = {"main": (rd(e["file"]), tuple(e["rect"]), {}), "mask": (rd(e["mask"], "L"), tuple(e["rect"]), {}),
+                      "glow": (rd(e["glow"]["file"]), tuple(e["glow"]["rect"]), {"blend": "add"})}
+    return lamps, dawns
+
+
 def main(argv: list[str]) -> int:
     t0 = time.perf_counter()
     REVIEW.mkdir(parents=True, exist_ok=True)
@@ -1769,12 +2013,17 @@ def main(argv: list[str]) -> int:
     lamps = {lid: quantize(lamp_layers(R, lid)) for lid in R["ids"]}
     dawns = {rid: quantize(dawn_layers(R, rid)) for rid in REGIONS}
     print(f"[hub] 叠层 {time.perf_counter() - t0:.1f}s")
+    base = R["img"]
     if "--sample" not in argv:
-        write_outputs(R, lamps, dawns)
-        print(f"[hub] → {OUT}")
-    R["img"].save(REVIEW / "hub_sample.png", optimize=True)
+        man = write_outputs(R, lamps, dawns)
+        lamps, dawns = load_layers(man)  # 审图用写出去的文件合成
+        base = Image.open(OUT / "hub.png").convert("RGB")
+        n = sum(1 for _ in OUT.glob("*.png"))
+        mb = sum(p_.stat().st_size for p_ in OUT.iterdir()) / 1024 / 1024
+        print(f"[hub] → {OUT}（{n} 张 PNG + hub.json，共 {mb:.1f} MB）")
+    base.save(REVIEW / "hub_sample.png", optimize=True)
     review_figures(R, REVIEW / "hub_sample_figures.png")
-    ims = review_states(R["img"], lamps, dawns, R["ids"], REVIEW / "hub_sample_states.png")
+    ims = review_states(base, lamps, dawns, R["ids"], REVIEW / "hub_sample_states.png")
     review_ui(ims[2], REVIEW / "hub_sample_ui_720.png")
     print(f"[review] → {REVIEW}/hub_sample*.png，共 {time.perf_counter() - t0:.1f}s")
     return 0
