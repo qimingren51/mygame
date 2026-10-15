@@ -44,7 +44,7 @@ cargo run --release -p lantern-tools -- kite --runs 200 --meta half --school all
 cargo run --release -p lantern-tools -- kite --runs 1 --god --record bot.ron  # 机器人打一局存成回放并打印关键时刻（看后期画面用）
 cargo run -- --replay <文件> [--from <秒>]     # 在游戏里观看回放（--from 跳到第几秒）
 UPDATE_GOLDEN=1 cargo test -p lantern_sim      # 有意修改玩法后，更新确定性黄金哈希
-python3 crates/ui/fonts.py                     # 新增界面文字后，重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）
+python3 crates/ui/fonts.py                     # 界面用到常用字以外的字时重新裁剪字体（需要 fonttools；CI 用 --check 检查缺字）
 ```
 
 Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev`。
@@ -66,7 +66,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
   - `Cargo.lock` 要提交。
 - **提交前**：`cargo fmt --all --check`、`clippy -D warnings`、`cargo test --workspace` 都要通过。
 - **代码风格**：注释和面向玩家的文字用中文，简洁直白。
-- **界面文字**：固定文字写在 `crates/ui` 的代码里，名字和说明写在 `assets/data/`；加第二种语言时再统一移到 `assets/i18n/`。改了文字要重新运行 `fonts.py`。
+- **界面文字**：固定文字写在 `crates/ui` 的代码里，名字和说明写在 `assets/data/`；加第二种语言时再统一移到 `assets/i18n/`。改了文字先跑 `fonts.py --check`，缺字（用到常用字以外的字）时再重新运行 `fonts.py`。
 - **美术**：
   - Blender 管线在 `art/`，在仓库根目录运行，产物输出到 `assets/atlas/`。
   - 只提交脚本和打包好的图集，中间文件（`art/out/`、`art/.venv/`）不提交。
