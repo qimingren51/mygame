@@ -2,6 +2,7 @@
 
 所有美术脚本（Blender 渲染、后期处理、特效贴图、自检）都从这里取颜色、尺寸、相机和线条参数。
 子代理只能引用，不能修改；要改风格请改这一个文件，然后全部素材重渲。
+运行时色板（RUNTIME_COLORS / RUNTIME_LEVELS）和 crates/view/src/palette.rs 对齐，改它不用重渲图集。
 
 本文件不依赖 bpy，普通 Python（Pillow/numpy 脚本）也能直接 import。
 Blender 相关的辅助函数放在 bstyle.py。
@@ -41,6 +42,8 @@ NIGHT_AMBIENT = "#161B2C"  # 光照图的底色（游戏里同值）
 LANTERN_LIGHT = "#FFC27A"  # 灯笼暖光
 FLAME_LIGHT = "#FF9A4D"  # 火焰
 SOUL_LIGHT = "#BFEFFF"  # 魂火冷光
+DAWN_PEACH = "#FFD1A8"  # 天明中段：暖桃
+DAWN_WHITE = "#FFFAF0"  # 天明终点：鱼肚白
 
 # 妖眼颜色（与 src/data/enemies.ts 的 eye 字段一致）
 EYE = {
@@ -73,6 +76,40 @@ def mix(a: str, b: str, t: float) -> str:
     """按比例 t 把颜色 a 混向 b（sRGB 空间直接插值，和国画调色的直觉一致）。"""
     ca, cb = hex_to_rgb(a), hex_to_rgb(b)
     return rgb_to_hex(tuple(round(x + (y - x) * t) for x, y in zip(ca, cb)))  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------- 运行时色板
+# 与 crates/view/src/palette.rs 同名同值；make_style_frames.py 逐项核对，漂移就报错。
+# 这里的混色在 sRGB 中完成并取整；运行时光照叠加、天明插值在线性空间进行。
+# 不加入 BASE_COLORS，不改变现有图集及美术自检的允许色域。
+RUNTIME_COLORS = {
+    "INK": INK["jiao"],                         # #17140F，墨滴、灰、化墨与轮廓同色
+    "GOLD": ACCENT["tenghuang"],               # #E2B23A，金火星
+    "DUST": mix(INK["zhong"], INK["dan"], 0.5), # #6A645A，受光尘土；运行时 alpha=0.4
+    "NIGHT_AMBIENT": NIGHT_AMBIENT,             # #161B2C，保持夜色
+    "LANTERN_LIGHT": LANTERN_LIGHT,             # #FFC27A
+    "FLAME_LIGHT": FLAME_LIGHT,                 # #FF9A4D，FIRE 同值
+    "SOUL_LIGHT": SOUL_LIGHT,                   # #BFEFFF
+    "WOOD_GLOW": mix(ACCENT["shilv"], PAPER, 0.25),   # #82A489，石绿兑宣纸
+    "WATER_GLOW": mix(ACCENT["huaqing"], SOUL_LIGHT, 0.35), # #6B8EAB，花青借冷光
+    "EARTH_GLOW": mix(ACCENT["zheshi"], LANTERN_LIGHT, 0.25), # #BE884E，赭石借灯光
+    "WARNING": mix(ACCENT["zhusha"], FLAME_LIGHT, 0.65), # #EA7841，朱砂危险色
+    "DAWN_PEACH": DAWN_PEACH,                   # #FFD1A8
+    "DAWN_WHITE": DAWN_WHITE,                   # #FFFAF0
+}
+
+# 与 Rust 同步的演出参数；增益是线性光强或 alpha 倍数，不是 sRGB 色值。
+RUNTIME_LEVELS = {
+    "IGNITE_LEN": 1.4,
+    "DAWN_LEN": 3.0,
+    "DAWN_DELAY": 0.8,
+    "TIDE_AMBIENT_GAIN": 0.9,
+    "TIDE_PARTICLE_GAIN": 0.35,
+    "TIDE_DECOR_GAIN": 0.45,
+    "WARNING_ALPHA_MIN": 0.85,
+    "DAWN_LANTERN_GAIN": 0.35,
+    "DAWN_PARTICLE_GAIN": 0.2,
+}
 
 
 # 深墨不能再混向重墨（会越混越浅），直接用墨色的相邻档
