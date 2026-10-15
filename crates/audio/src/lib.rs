@@ -487,7 +487,11 @@ fn play_sim_events(
                 let s = a.sfx.resonance.clone();
                 a.play(&s);
             }
-            SimEvent::BossPhase { .. } | SimEvent::BossEnraged => {
+            SimEvent::BossPhase { .. } => {
+                let s = a.sfx.boss_phase.clone();
+                a.play(&s);
+            }
+            SimEvent::BossEnraged => {
                 let s = a.sfx.big_bell.clone();
                 a.play(&s);
             }

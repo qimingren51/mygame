@@ -1,6 +1,6 @@
 //! 高光时刻的演出（docs/FEEL.md 第 5 节，对应 docs/GAMEPLAY.md 第 14 节）：
 //! 共鸣跨阶盖朱砂印、反应初见盖章、连斩题字、夜主登场（上下黑边 + 题字 + 台词）、
-//! 夜主伏诛（黑边 + 台词）、天明题字。台词照 docs/LORE.md 第 7 节，写在 enemies.ron 里。
+//! 夜主换阶段（台词）、夜主伏诛（黑边 + 台词）、天明题字。台词照 docs/LORE.md 第 7 节，写在 enemies.ron 里。
 //!
 //! 只读模拟事件和画面层的天明进度，不改模拟。动画用现实时间，顿帧和慢镜时照常播放。
 
@@ -104,6 +104,19 @@ fn spawn_bars(commands: &mut Commands, life: f32) {
 
 /// 台词写在下边的黑边里，像字幕：start 秒起一个字一个字地出来，逗号句号处顿一下，end 秒淡完。
 fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, end: f32) {
+    spawn_line_at(commands, fonts, line, start, end, px(0), None);
+}
+
+/// 同上，写在离底边 bottom 的地方；没有黑边时 wash 给一笔淡墨垫着，火光里也看得清。
+fn spawn_line_at(
+    commands: &mut Commands,
+    fonts: &Fonts,
+    line: &str,
+    start: f32,
+    end: f32,
+    bottom: Val,
+    wash: Option<&AtlasDb>,
+) {
     let mut delays = Vec::new();
     let mut d = start;
     for ch in line.chars() {
@@ -123,7 +136,7 @@ fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, en
             Node {
                 left: px(0),
                 right: px(0),
-                bottom: px(0),
+                bottom,
                 height: percent(10),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -131,12 +144,34 @@ fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, en
             },
         ))
         .with_children(|p| {
-            for (ch, d) in delays {
+            if let Some(db) = wash
+                && let Some(f) = db.find("ui/ink_wash")
+            {
+                let mut img = db.ui_image(f);
+                img.color = WASH_INK.with_alpha(0.0);
                 p.spawn((
+                    Moment { t: 0.0, life: end, anim: Anim::Fade },
+                    Node {
+                        left: percent(28),
+                        right: percent(28),
+                        top: px(-14),
+                        bottom: px(-14),
+                        ..absolute()
+                    },
+                    Wash(0.75),
+                    img,
+                ));
+            }
+            for (ch, d) in delays {
+                let mut c = p.spawn((
                     Moment { t: -d, life: end - d, anim: Anim::Ink },
                     text(&fonts.title, 30.0, PAPER.with_alpha(0.0), &ch.to_string()),
                     UiTransform::default(),
                 ));
+                // 没有黑边垫着：字压一层影子
+                if wash.is_some() {
+                    c.insert(TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::BLACK.with_alpha(0.0) });
+                }
             }
         });
 }
@@ -358,6 +393,17 @@ fn read_events(
                         p.spawn((text(&fonts.title, 112.0, PAPER, &name), shadow));
                         p.spawn((text(&fonts.body, 22.0, PAPER, sub), shadow));
                     });
+            }
+            // 夜主换阶段：不放黑边（打着仗，别挡住预警），台词垫一笔淡墨写在画面下方
+            SimEvent::BossPhase { phase } => {
+                let Some(lines) = boss_lines(c, last.0) else { continue };
+                let line = match phase {
+                    2 => &lines.phase2,
+                    3 => &lines.phase3,
+                    _ => continue,
+                };
+                // 信息栏的血条在最下面，写在它上面一点
+                spawn_line_at(&mut commands, &fonts, line, 0.25, 3.4, percent(22), Some(&db));
             }
             // 夜主伏诛：慢镜里黑边再合上，它说最后一句；天明在黑边之间亮起来，结算浮现前收走
             SimEvent::BossDefeated { dawn: true, .. } => {

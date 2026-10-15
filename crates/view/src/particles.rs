@@ -17,7 +17,7 @@ use lantern_content::{BlastKind, Element, Rank};
 use lantern_core::Pcg32;
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{Arsenal, GameContent, HitKind, Player, SimEvent, SimOutbox};
+use lantern_sim::{Arsenal, Director, Enemies, GameContent, HitKind, Player, SimEvent, SimOutbox};
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
@@ -640,6 +640,8 @@ pub(crate) fn particle_events(
     arsenal: Option<Res<Arsenal>>,
     lanterns: Option<Res<lantern_sim::lanterns::Lanterns>>,
     bamboo: Option<Res<Bamboo>>,
+    director: Option<Res<Director>>,
+    enemies: Option<Res<Enemies>>,
     fixed: Res<Time<Fixed>>,
     mut clock: ResMut<ParticleClock>,
     mut parts: ResMut<Particles>,
@@ -801,6 +803,27 @@ pub(crate) fn particle_events(
                 parts.dust(at, 4, 0.8, DUST);
             }
             // 夜主登场，狐火把结界里的竹丛烧平：每丛起一股狐火和焦烟，结界边上烧起一圈
+            // 夜主换阶段：身上炸开一团墨，妖眼色的火线四射，一圈妖光荡开；三阶更猛
+            SimEvent::BossPhase { phase } => {
+                let Some((i, en)) = director
+                    .as_ref()
+                    .and_then(|d| d.boss)
+                    .zip(enemies.as_ref())
+                    .and_then(|(h, en)| Some((en.resolve(h)?, en)))
+                else {
+                    continue;
+                };
+                let def = &content.0.enemies[en.kind[i] as usize];
+                let at = to_screen(Vec2::new(en.x[i], en.y[i]));
+                let body = at + Vec2::new(0.0, def.radius.max(8.0));
+                let eye = hex(&def.eye);
+                let k = if phase >= 3 { 1.5 } else { 1.0 };
+                parts.ink(body, (28.0 * k) as u32, 2.0 * k);
+                parts.smoke(body, 1.8 * k, INK.with_alpha(0.5), (6.0 * k) as u32);
+                parts.sparks(body, eye, (22.0 * k) as u32, 360.0, Vec2::ZERO);
+                parts.embers(body, def.radius * k, eye, (18.0 * k) as u32);
+                parts.halo(frames.ring, at, 0.2, 4.0 * k, 0.9, eye.with_alpha(0.85));
+            }
             SimEvent::BambooBurned { pos, radius } => {
                 if let Some(b) = &bamboo {
                     let mut n = 0;

@@ -43,6 +43,8 @@ pub struct Sfx {
     pub stamp: StaticSoundData,
     /// 濒死的心跳（“咚、咚”）
     pub heart: StaticSoundData,
+    /// 夜主换阶段：太鼓一击、低锣，一声狐啸（往上挑再拖着落下来）
+    pub boss_phase: StaticSoundData,
     /// 夜主倒下：低锣、太鼓、长长的余响
     pub boss_down: StaticSoundData,
     /// 天明：编钟和晨鸟
@@ -383,6 +385,32 @@ impl Sfx {
                     NoiseOpts { kind: FilterKind::Low, freq: 400.0, slide: Some(80.0), ..Default::default() },
                 );
             }),
+            boss_phase: render(3.5, |b| {
+                b.drum(0.0, 0.5, 50.0);
+                b.gong(55.0, 0.05, 0.2);
+                // 狐啸：先往上挑，再拖着落下来；底下垫低八度的正弦撑住
+                b.osc(Wave::Triangle, 520.0, 0.08, 0.34, 0.05, Some((1100.0, 0.3)), 0.06);
+                b.osc(Wave::Triangle, 1100.0, 0.4, 0.9, 0.045, Some((380.0, 0.85)), 0.02);
+                b.osc(Wave::Sine, 550.0, 0.4, 0.9, 0.04, Some((190.0, 0.85)), 0.02);
+                b.noise(
+                    0.08,
+                    1.1,
+                    0.05,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1800.0,
+                        slide: Some(700.0),
+                        q: 3.0,
+                        attack: 0.05,
+                    },
+                );
+                b.noise(
+                    0.0,
+                    1.4,
+                    0.12,
+                    NoiseOpts { kind: FilterKind::Low, freq: 500.0, slide: Some(60.0), ..Default::default() },
+                );
+            }),
             boss_down: render(6.0, |b| {
                 b.gong(41.2, 0.0, 0.3);
                 b.drum(0.0, 0.5, 52.0);
@@ -461,7 +489,8 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 22] = [
+        let all: [(&str, &StaticSoundData); 23] = [
+            ("boss_phase", &s.boss_phase),
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),
             ("bamboo", &s.bamboo),

@@ -70,8 +70,10 @@ pub(crate) struct Atmos {
     hurt: f32,
     /// 辉光炸亮（燃灯、夜主倒下……），1 → 0
     flare: f32,
-    /// 夜主登场的压暗（1 → 0）
+    /// 夜色猛地一压（夜主登场、换阶段、夜深）：1 → 0，共 gloom_len 秒，最深压掉 gloom_amt
     gloom: f32,
+    gloom_len: f32,
+    gloom_amt: f32,
     /// 无尽夜：夜主每退去一次，夜就深一层（目标层数和当前过渡到的深度）
     deeper: u32,
     depth: f32,
@@ -106,6 +108,8 @@ impl Default for Atmos {
             hurt: 0.0,
             flare: 0.0,
             gloom: 0.0,
+            gloom_len: 3.0,
+            gloom_amt: 0.45,
             deeper: 0,
             depth: 0.0,
             heart: 0.0,
@@ -122,6 +126,18 @@ pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.deeper = 0;
     atmos.depth = 0.0;
     dawn.t = None;
+}
+
+impl Atmos {
+    /// 夜色压一下：len 秒，最深压掉 amt。正压着的时候不往浅里改。
+    fn press(&mut self, len: f32, amt: f32) {
+        if self.gloom > 0.0 && self.gloom_amt > amt {
+            return;
+        }
+        self.gloom = 1.0;
+        self.gloom_len = len;
+        self.gloom_amt = amt;
+    }
 }
 
 /// 平时一层很淡的暗角。
@@ -158,7 +174,9 @@ pub(crate) fn atmos_events(
                 atmos.hurt = 1.0;
                 atmos.hurt_dir = Vec2::ZERO;
             }
-            SimEvent::BossArrived { .. } => atmos.gloom = 1.0,
+            SimEvent::BossArrived { .. } => atmos.press(3.0, 0.45),
+            // 夜主换阶段：短一些、浅一些，打着仗不能黑太久
+            SimEvent::BossPhase { .. } => atmos.press(1.8, 0.3),
             SimEvent::BossDefeated { dawn: true, .. } => {
                 dawn.t = Some(0.0);
                 atmos.flare = 1.0;
@@ -168,7 +186,7 @@ pub(crate) fn atmos_events(
             // 夜深一层（无尽夜 10 分钟以后每 5 分钟）：夜色先猛地压一下，再停在更暗的一层（docs/LORE.md 第 8 节）
             SimEvent::NightDeeper { layer } => {
                 atmos.deeper = (*layer).min(MAX_DEPTH);
-                atmos.gloom = 1.0;
+                atmos.press(3.0, 0.45);
             }
             // 大事件时辉光猛地一亮再回落
             SimEvent::Strike { fx: StrikeFx::Ult, .. } => atmos.flare = atmos.flare.max(0.8),
@@ -204,7 +222,7 @@ pub(crate) fn update_atmos(
     let atmos = &mut *atmos;
     atmos.hurt = (atmos.hurt - rdt * 2.5).max(0.0);
     atmos.flare = (atmos.flare - rdt * 1.6).max(0.0);
-    atmos.gloom = (atmos.gloom - rdt / 3.0).max(0.0);
+    atmos.gloom = (atmos.gloom - rdt / atmos.gloom_len).max(0.0);
     // 夜沉下去要慢，3 秒左右过渡完
     atmos.depth += (atmos.deeper as f32 - atmos.depth) * (1.0 - (-rdt * 1.2).exp());
     if let Some(dt_dawn) = &mut dawn.t {
@@ -244,10 +262,11 @@ pub(crate) fn update_atmos(
 
     // ---- 光照图底色：夜色 → 夜主登场时更暗 → 天明时变成晨光
     let night = NIGHT_AMBIENT.to_linear();
-    // 夜主登场：0.4 秒压暗，停一会儿，最后 1.5 秒慢慢回来
+    // 夜主登场：0.4 秒压暗，停一会儿，最后 1.5 秒慢慢回来（短的按比例缩）
     let gloom = if atmos.gloom > 0.0 {
-        let (elapsed, left) = ((1.0 - atmos.gloom) * 3.0, atmos.gloom * 3.0);
-        1.0 - 0.45 * smooth(elapsed / 0.4) * smooth(left / 1.5)
+        let len = atmos.gloom_len;
+        let (elapsed, left) = ((1.0 - atmos.gloom) * len, atmos.gloom * len);
+        1.0 - atmos.gloom_amt * smooth(elapsed / (0.4 * len / 3.0)) * smooth(left / (1.5 * len / 3.0))
     } else {
         1.0
     };
