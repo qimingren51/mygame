@@ -51,6 +51,10 @@ pub struct Sfx {
     pub elite_down: StaticSoundData,
     /// 无尽夜夜深一层：低处一声锣，一个音慢慢往下沉
     pub deeper: StaticSoundData,
+    /// 竹丛打碎：一声脆的“咔嚓”，后面跟几下竹片的噼啪
+    pub bamboo: StaticSoundData,
+    /// 狐火烧平竹丛：呼地一下着起来，噼里啪啦
+    pub burn: StaticSoundData,
 }
 
 /// 一声鸟叫：两三个快速上滑的短音。
@@ -280,6 +284,34 @@ impl Sfx {
                 b.osc(Wave::Sine, 60.0, 0.2, 0.11, 0.38, Some((40.0, 0.1)), 0.004);
                 b.noise(0.0, 0.05, 0.06, noise(FilterKind::Low, 180.0));
             }),
+            bamboo: render(0.5, |b| {
+                b.noise(0.0, 0.035, 0.22, noise(FilterKind::High, 2600.0));
+                b.wood(0.0, 0.14, 1250.0);
+                b.wood(0.018, 0.1, 1650.0);
+                b.wood(0.045, 0.08, 900.0);
+                b.wood(0.0, 0.07, 320.0);
+                for (k, t) in [0.08, 0.12, 0.17, 0.23].into_iter().enumerate() {
+                    b.noise(t, 0.012, 0.09 - k as f32 * 0.018, noise(FilterKind::High, 3800.0));
+                }
+            }),
+            burn: render(2.2, |b| {
+                b.noise(
+                    0.0,
+                    1.1,
+                    0.2,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 300.0,
+                        slide: Some(2400.0),
+                        attack: 0.25,
+                        ..Default::default()
+                    },
+                );
+                for k in 0..14 {
+                    let t = 0.15 + k as f32 * 0.11 + (k * 37 % 7) as f32 * 0.013;
+                    b.noise(t, 0.01, 0.06, noise(FilterKind::High, 3000.0 + (k * 131 % 5) as f32 * 400.0));
+                }
+            }),
             deeper: render(5.0, |b| {
                 b.gong(36.7, 0.0, 0.2);
                 b.bell(pent(0), 0.0, 0.05, 3.5);
@@ -370,9 +402,11 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 16] = [
+        let all: [(&str, &StaticSoundData); 18] = [
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),
+            ("bamboo", &s.bamboo),
+            ("burn", &s.burn),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),
