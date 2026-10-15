@@ -33,14 +33,16 @@ use crate::title::{TitleMode, TitleUi};
 use crate::{DIM, Fonts, PAPER, hub, text};
 
 const DIR: &str = "atlas/screens/hub";
+/// 人物聚光的默认强度（hub.json 的 light 没写第四个数时）
+const LIGHT_POWER: f32 = 0.55;
 
 #[derive(Deserialize, Clone, Debug)]
 struct Character {
     rect: [f32; 4],
     /// 名牌那块文字的上沿中点
     label: [f32; 2],
-    /// 选中时的聚光：x、y、半径
-    light: [f32; 3],
+    /// 选中时的聚光：x、y、半径，可选第四个数是强度（没写时 0.55）
+    light: Vec<f32>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -116,7 +118,6 @@ pub(crate) struct HubLamp {
 
 /// 火苗的底在这一层里的位置（hub.json 的像素，层的左上角为原点，y 向下）。
 #[derive(Component, Clone, Copy, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的摇曳动画读，那边接上以前没人读")]
 pub(crate) struct HubFlameBase(pub Vec2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +128,6 @@ pub(crate) enum DawnPart {
 
 /// 一个地区的晨光。Image 那层默认是普通的 `ImageNode`，要铺开时由 `hub_fx` 换成 `DawnReveal` 材质。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的晨光动画读，那边接上以前没人读")]
 pub(crate) struct HubDawn {
     pub region: String,
     pub part: DawnPart,
@@ -135,12 +135,10 @@ pub(crate) struct HubDawn {
 
 /// 晨光铺开用的灰度图（assets 路径）。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的晨光动画读，那边接上以前没人读")]
 pub(crate) struct HubDawnMask(pub String);
 
 /// 这一层贴图的 assets 路径（`hub_fx` 换材质、重设贴图时用）。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 读，那边接上以前没人读")]
 pub(crate) struct HubImage(pub String);
 
 /// 人物的聚光（第几个人物）。
@@ -360,10 +358,11 @@ pub(crate) fn sync_scene(
             }
             // 人物：聚光（选中时亮）和点击区
             for (i, ch) in j.characters.iter().enumerate() {
-                let [x, y, r] = ch.light;
+                let at = |k: usize, or: f32| ch.light.get(k).copied().unwrap_or(or);
+                let (x, y, r, power) = (at(0, 0.0), at(1, 0.0), at(2, 0.0), at(3, LIGHT_POWER));
                 root.spawn((
                     place(&scene, [x - r, y - r, r * 2.0, r * 2.0]),
-                    add(scene.light.clone(), Vec4::new(1.0, 0.78, 0.5, 0.55)),
+                    add(scene.light.clone(), Vec4::new(1.0, 0.78, 0.5, power)),
                     HubLight(i),
                     Visibility::Hidden,
                 ));
@@ -383,7 +382,7 @@ pub(crate) fn sync_scene(
 }
 
 /// 光晕亮度：按“等级 ÷ 最大等级”，最暗也有六成。
-fn glow_alpha(level: u32, max: u32) -> f32 {
+pub(crate) fn glow_alpha(level: u32, max: u32) -> f32 {
     if level == 0 { 0.0 } else { 0.6 + 0.4 * level as f32 / max.max(1) as f32 }
 }
 
@@ -543,6 +542,10 @@ mod tests {
         let Ok(text) = std::fs::read_to_string(&path) else { return };
         let j: HubJson = serde_json::from_str(&text).unwrap();
         assert_eq!(j.characters.len(), hub::HUB.len());
+        assert!(
+            j.characters.iter().all(|ch| (3..=4).contains(&ch.light.len())),
+            "light 是 [x, y, 半径] 或再加强度"
+        );
         let c = Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"))
             .unwrap();
         for n in &c.meta.nodes {

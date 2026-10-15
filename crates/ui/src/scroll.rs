@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::ui::widget::NodeImageMode;
 
 use lantern_content::RegionDef;
+use lantern_platform::UiCue;
 
 use crate::{DIM, Fonts, INK, PAPER, text};
 
@@ -30,6 +31,8 @@ pub(crate) struct Unroll {
 pub(crate) struct Line {
     k: usize,
     color: Color,
+    /// 浮出时的那一声已经发过
+    cued: bool,
 }
 
 /// 把卷轴画进 `root`（标题界面的面板，重画时一起清掉）。
@@ -93,7 +96,7 @@ pub(crate) fn spawn(
                     .with_children(|sky| {
                         for (k, line) in words.lines().filter(|l| !l.trim().is_empty()).enumerate() {
                             sky.spawn((
-                                Line { k, color },
+                                Line { k, color, cued: false },
                                 text(&fonts.body, size, color.with_alpha(0.0), line.trim()),
                             ));
                         }
@@ -107,11 +110,16 @@ pub(crate) fn spawn(
 pub(crate) fn animate(
     time: Res<Time<Real>>,
     mut clips: Query<(&mut Unroll, &mut Node)>,
-    mut lines: Query<(&Line, &mut TextColor)>,
+    mut lines: Query<(&mut Line, &mut TextColor)>,
+    mut cues: MessageWriter<UiCue>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let mut t = None;
     for (mut u, mut node) in &mut clips {
+        // 展开的第一帧：纸响
+        if u.t == 0.0 {
+            cues.write(UiCue::ScrollUnroll);
+        }
         u.t += dt;
         // 先快后慢，像手推开的卷轴
         let k = (u.t / UNROLL).clamp(0.0, 1.0);
@@ -119,8 +127,13 @@ pub(crate) fn animate(
         t = Some(u.t);
     }
     let Some(t) = t else { return };
-    for (line, mut color) in &mut lines {
+    for (mut line, mut color) in &mut lines {
         let a = ((t - WORDS_AT - line.k as f32 * LINE_GAP) / 0.8).clamp(0.0, 1.0);
         color.0 = line.color.with_alpha(a);
+        // 一行开始浮出：一声很轻的高音，一行比一行高
+        if a > 0.0 && !line.cued {
+            line.cued = true;
+            cues.write(UiCue::ScrollLine(line.k.min(255) as u8));
+        }
     }
 }

@@ -239,7 +239,8 @@ art/.venv/bin/python art/post/test_scroll_qingqiu.py                          # 
 ```bash
 art/.venv/bin/python art/post/hub_scroll.py            # → out/screens/hub/，审图 review@2x/hub_review_{states,figures,ui_720}.png（约 1.5 分钟）
 art/.venv/bin/python art/post/hub_scroll.py --sample   # 只出样张 review@2x/hub_sample*.png，不写 out/screens/hub/
-art/.venv/bin/python art/post/test_hub_scroll.py       # 自检，含确定性（另画两遍逐字节比对，约 70 秒；--quick 跳过）
+art/.venv/bin/python art/post/test_hub_scroll.py       # 自检 16 项，含确定性（另画两遍逐字节比对，约 70 秒；--quick 跳过）
+art/.venv/bin/python art/post/hub_scroll.py --dawn-compare <旧目录>   # 另出 review@2x/hub_review_dawn_fix.png（晨光新旧对比）
 mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/screens/hub/
 ```
 
@@ -252,7 +253,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
   - 院子偏左一棵灯树，挂 12 盏纸灯；
   - 四个写意人物，从左到右是老灯匠、货郎、灯童、说书人。货郎的墙影里有条狐狸尾巴。
 - **人物画法**：先在宣纸上留白，洇两层淡墨淡彩，再用提按有变化的墨线勾轮廓和衣纹。整张画再乘长夜光照，长夜里只有墨色，只有灯边是暖的。
-- **输出格式**（四层心灯、晨光和 mask、`hub.json`）见 `docs/DESIGN.md` 第 15 节“灯驿长卷”。心灯 id 按顺序从 `assets/data/meta.ron` 读；节点数和画里的挂灯位置（`LAMP_SLOTS`，12 个）对不上时脚本报错。悟·金木水火土几盏点亮时，纸上带一丝那一系的颜色。
+- **输出格式**（四层心灯、晨光和 mask、`hub.json`）见 `docs/DESIGN.md` 第 15 节“灯驿长卷”。晨光只照峰顶和上面四五成的山脊，东坡（右）为主；各层的裁切框固定在 `DAWN_RECTS`（游戏已在用），内容超出就报错。心灯 id 按顺序从 `assets/data/meta.ron` 读；节点数和画里的挂灯位置（`LAMP_SLOTS`，12 个）对不上时脚本报错。悟·金木水火土几盏点亮时，纸上带一丝那一系的颜色。
 - **审图**：从盘上读回 PNG，按游戏的顺序合成，包括 0、6、12 盏灯和青丘天明，青丘晨光按 mask 铺开 25%、50%、75%、100%，以及 1280×720 叠名牌、压暗面板、4:3 裁切。
 - **自检**：
   - 清单与文件、尺寸一致，节点和人物与 meta.ron、hub.ron 对得上；
