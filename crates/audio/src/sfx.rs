@@ -55,18 +55,14 @@ pub struct Sfx {
     pub bamboo: StaticSoundData,
     /// 狐火烧平竹丛：呼地一下着起来，噼里啪啦
     pub burn: StaticSoundData,
-    // 下面四个是界面上的事（卷轴、灯驿），等界面到音频的通道（UiCue）接上以后播
+    // 下面四个是界面上的事（卷轴、灯驿），界面发 UiCue 来播
     /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
-    #[cfg_attr(not(test), expect(dead_code))]
     pub scroll_unroll: StaticSoundData,
     /// 卷轴旁白浮出一行：很轻的一声高音（按行升调播放）
-    #[cfg_attr(not(test), expect(dead_code))]
     pub scroll_line: StaticSoundData,
     /// 灯驿里点亮一盏心灯：呼地着起来，一个暖的和音
-    #[cfg_attr(not(test), expect(dead_code))]
     pub lamp_lit: StaticSoundData,
     /// 灯驿远山晨光铺开：一串往上走的拨弦，末尾几声鸟叫
-    #[cfg_attr(not(test), expect(dead_code))]
     pub dawn_spread: StaticSoundData,
 }
 

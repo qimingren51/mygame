@@ -18,7 +18,7 @@ use kira::track::{SendTrackBuilder, SendTrackHandle, TrackBuilder, TrackHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Mix, Panning, StartTime, Tween};
 
 use lantern_core::step::TICK_HZ;
-use lantern_platform::Settings;
+use lantern_platform::{Settings, UiCue};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::pickups::PickupKind;
 use lantern_sim::{
@@ -48,6 +48,7 @@ impl Plugin for AudioPlugin {
                 Update,
                 (
                     apply_settings,
+                    play_ui_cues,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
                     run_music_mode.run_if(in_state(AppState::Run)),
@@ -55,6 +56,34 @@ impl Plugin for AudioPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+/// 界面上的演出（开场卷轴、灯驿）出声。
+fn play_ui_cues(mut cues: MessageReader<UiCue>, mut audio: NonSendMut<Audio>) {
+    let a = &mut *audio;
+    for cue in cues.read() {
+        match *cue {
+            UiCue::ScrollUnroll => {
+                let s = a.sfx.scroll_unroll.clone();
+                a.play(&s);
+            }
+            // 旁白一行一个音，按五声音阶往上走（D、E、F#、A、B）
+            UiCue::ScrollLine(k) => {
+                const STEPS: [f64; 6] = [0.0, 2.0, 4.0, 7.0, 9.0, 12.0];
+                let step = STEPS[usize::from(k).min(STEPS.len() - 1)];
+                let s = a.sfx.scroll_line.clone();
+                a.play_with(&s, 2f64.powf(step / 12.0), -2.0);
+            }
+            UiCue::LampLit => {
+                let s = a.sfx.lamp_lit.clone();
+                a.play(&s);
+            }
+            UiCue::DawnSpread => {
+                let s = a.sfx.dawn_spread.clone();
+                a.play(&s);
+            }
+        }
     }
 }
 

@@ -135,10 +135,10 @@ ELEMENT_TINT = {  # 悟·五行：点亮时纸上淡淡一层那一系的颜色
 # 人物（hub.ron 的顺序）。坐标见各 paint_* 的原点。
 SMITH_AT, PEDDLER_AT, CHILD_AT, TELLER_AT = (482.0, 806.0), (836.0, 818.0), (1112.0, 792.0), (1480.0, PORCH_Y)
 CHARACTERS = [
-    {"id": "smith", "name": "老灯匠", "role": "心灯", "rect": [262, 618, 262, 196], "label": [392, 822], "light": [400, 716, 175]},
-    {"id": "peddler", "name": "货郎", "role": "属性 · 灯面", "rect": [668, 566, 352, 258], "label": [846, 830], "light": [850, 700, 190]},
-    {"id": "child", "name": "灯童", "role": "成就 · 试炼", "rect": [1084, 668, 154, 132], "label": [1160, 806], "light": [1160, 742, 125]},
-    {"id": "teller", "name": "说书人", "role": "图鉴 · 手记", "rect": [1436, 580, 230, 196], "label": [1548, 808], "light": [1546, 700, 165]},
+    {"id": "smith", "name": "老灯匠", "role": "心灯", "rect": [262, 618, 262, 196], "label": [392, 822], "light": [400, 716, 175, 0.55]},
+    {"id": "peddler", "name": "货郎", "role": "属性 · 灯面", "rect": [668, 566, 352, 258], "label": [846, 830], "light": [850, 700, 190, 0.55]},
+    {"id": "child", "name": "灯童", "role": "成就 · 试炼", "rect": [1084, 668, 154, 132], "label": [1160, 806], "light": [1160, 742, 145, 0.75]},
+    {"id": "teller", "name": "说书人", "role": "图鉴 · 手记", "rect": [1436, 580, 230, 196], "label": [1548, 808], "light": [1546, 700, 165, 0.55]},
 ]
 
 
@@ -434,9 +434,7 @@ def paint_far(P: Hub, rng):
     T.mountain_layer(P, rf, color, 0.48, 130.0, rng, mist_from=FAR_BASE + 20, mist_len=80.0, edge=0.6)
     T.mountain_texture(P, rf, color, rng, FAR_BASE + 20, n=80, strength=0.26, edge_k=1.3)
     P.layers["far"], P.ridges["far"] = inside_of(P, rf), rf
-    P.begin("city")
     paint_youdu_city(P, rng)
-    P.layers["city"] = np.clip(P.end("city") * 1.2, 0, 1)
     fog_band(P, rng, 430, 520, 0.34)
 
 
@@ -447,6 +445,7 @@ def paint_youdu_city(P: Hub, rng):
     yb = YOUDU_FLOOR + 6
     sl, m = shape_cover([(cx - 52, YOUDU_FLOOR - 10), (cx + 52, YOUDU_FLOOR - 10), (cx + 66, 480), (cx - 66, 480)], soft=6.0)
     P.glaze(0.35 * m * smoothstep(520, YOUDU_FLOOR, P.Y[sl]), ZHONG, sl)
+    P.begin("city")  # 只记城的剪影（城墙、城楼），不含上面那层山口的暗
     city = mixc(ZHONG, DAN, 0.35)
     wall = [(x0, yb), (x0, yb - 16)]
     x = x0
@@ -465,6 +464,7 @@ def paint_youdu_city(P: Hub, rng):
         P.over(0.95 * m, mixc(ZHONG, NONG, 0.4), sl)
     sl, m = shape_cover([(cx - 4, yb), (cx + 4, yb), (cx + 4, yb - 9), (cx, yb - 12), (cx - 4, yb - 9)], soft=0.3)  # 城门洞
     P.over(0.9 * m, NONG, sl)
+    P.layers["city"] = np.clip(P.end("city") * 1.2, 0, 1)
 
 
 def paint_beyond(P: Hub, rng):
@@ -1695,66 +1695,99 @@ def flame_layer(base, h, w, R, seed: int):
 # ============================================================== 叠层：晨光
 
 
+DAWN_RECTS = {  # 晨光各层的裁切框 (晨光图和灰度图, 金线)：第二阶段定下、游戏已在用，内容按画面坐标画进这些固定的框
+    "changyang": ((103, 209, 178, 243), (101, 284, 182, 116)),
+    "zhangwei": ((588, 97, 265, 336), (593, 171, 262, 219)),
+    "beiming": ((858, 226, 207, 241), (861, 301, 207, 123)),
+    "youdu": ((1064, 221, 232, 339), (1061, 294, 239, 176)),
+    "danxue": ((1323, 155, 221, 340), (1329, 230, 202, 201)),
+    "qingqiu": ((1574, 207, 239, 191), (1598, 282, 215, 111)),
+}
+DAWN_GLOW_PEAK = 0.32  # 山脊金线的 alpha 峰值
+
+
+def crop_fixed(a: np.ndarray, rect, what: str) -> np.ndarray:
+    """按固定的框裁一张整幅的层；框外还有看得见的内容就报错（说明框要改）。"""
+    x, y, w, h = rect
+    outside = a.copy()
+    outside[y:y + h, x:x + w] = 0
+    if outside.max() > 0.004:
+        ys, xs = np.nonzero(outside > 0.004)
+        raise SystemExit(f"{what} 的内容超出了固定的裁切框 {rect}（框外 alpha 最大 {outside.max():.3f}，"
+                         f"在 x {xs.min()}–{xs.max()}、y {ys.min()}–{ys.max()}，{xs.size} 个像素）")
+    return a[y:y + h, x:x + w]
+
+
 def dawn_layers(R: dict, rid: str) -> dict:
-    """一个地区的晨光：山脊上一道暖桃色、往下坡淡开，山后的天上一片淡淡的亮（普通混合）；
-    同尺寸的“先亮哪里”灰度图；山脊一线金光（叠加）。只落在露出来的山和天上（前面的屋、树、雾挡住的地方不画）。"""
+    """一个地区的晨光（光从东边来）：只照到峰顶和上面几成的山脊，东坡（右）亮、西坡淡，往下很快淡掉；
+    山顶后面的天上一团淡淡的亮（普通混合）。同尺寸的“先亮哪里”灰度图：峰顶的山脊最先。
+    山脊上一道软的金光（叠加），只在上面四五成、东坡为主。只落在露出来的山和天上（前面的屋、树、雾挡住的地方不画）。"""
     P = R["P"]
     lay, cx, hgt, wl, wr, sharp, half = REGIONS[rid]
     rng = np.random.default_rng(SEED + 400 + hash_id(rid) % 97)
     front = np.clip(R["front"] * 1.2, 0, 1)
     back, far, city = P.layers["back"], P.layers["far"], P.layers["city"]
     if lay == "back":
-        body = back * (1 - far) * (1 - city) * (1 - front)
-        ridge = P.ridges["back"]
+        vis = (1 - far) * (1 - city) * (1 - front)
+        body = back * vis
+        ridge, base_y = P.ridges["back"], BACK_BASE
     else:
-        body = np.maximum(far, city) * (1 - front)
-        ridge = P.ridges["far"]
+        vis = 1 - front
+        body = np.maximum(far, city) * vis
+        ridge, base_y = P.ridges["far"], FAR_BASE
     sky = (1 - back) * (1 - far) * (1 - city) * (1 - front)
     xs = np.arange(W) + 0.5
-    inner = 0.7 if rid == "youdu" else 0.35  # 幽都是一个山口：窗口平一些，两道山肩都照到
-    win = smoothstep(half, inner * half, np.abs(xs - cx))[None, :]
-    rr = ridge[None, :]
-    depth = P.Y - rr  # 山脊以下为正
-    seg = ridge[int(max(0, cx - half)):int(min(W, cx + half))]
-    top = float(seg.min())
-    lift = np.clip((FAR_BASE + 20 - rr) / max(FAR_BASE + 20 - top, 1.0), 0, 1) ** 1.3  # 越高越早见光、越亮
-    if rid == "youdu":
-        lift = np.maximum(lift, 0.55)
+    youdu = rid == "youdu"
+    win = smoothstep(half, (0.7 if youdu else 0.35) * half, np.abs(xs - cx))[None, :]
+    lo, hi = int(max(0, cx - half)), int(min(W, cx + half))
+    i_s = int(np.argmin(ridge[lo:hi]))
+    x_s, top = lo + i_s + 0.5, float(ridge[lo + i_s])  # 峰顶
+    ht = np.clip((base_y - ridge) / max(base_y - top, 1.0), 0, 1)  # 山脊的相对高度：峰顶 1、山脚 0
+    w_h = smoothstep(0.50, 0.92, ht)[None, :]  # 只要上面四五成
+    slope = np.gradient(blur(ridge[None, :], (6.0, 0))[0])  # >0：往右（东）下坡，朝东的一面
+    w_e = (0.42 + 0.58 * smoothstep(-0.15, 0.35, slope))[None, :]  # 东坡亮、西坡淡
+    depth = P.Y - ridge[None, :]  # 山脊以下为正
     fib = V.rank01(blur(rng.standard_normal((H, W)), (9.0, 0.7), angle=0.35)) * 0.6 + V.rank01(noise(rng, (H, W), 2.5)) * 0.4
-    rim = np.exp(-np.maximum(depth, 0) / 9.0) * smoothstep(-1.5, 1.0, depth)
-    slope = np.exp(-np.maximum(depth, 0) / 60.0) * smoothstep(-1.0, 4.0, depth) * V.bump_window(np.clip(depth / 150.0, 0, 1))
-    skyglow = np.exp(-np.maximum(-depth, 0) / 40.0) * smoothstep(1.0, -2.0, depth) * V.bump_window(np.clip(-depth / 100.0, 0, 1))
-    city_rim = city * np.clip(1 - np.roll(city, 3, axis=0), 0, 1) * (1 - front)  # 黑城的屋脊、垛口上一线光
-    a = (0.42 * rim + 0.16 * slope) * body * (0.35 + 0.65 * lift) + 0.24 * skyglow * sky * (0.4 + 0.6 * lift) + 0.35 * city_rim
-    a = a * win * (0.82 + 0.18 * fib)
-    a = np.clip(a, 0, 0.6)
+    ch = smoothstep(0.45, 0.8, city)
+    city_rim = ch * np.clip(1 - np.roll(ch, 3, axis=0), 0, 1) * (1 - front)  # 幽都黑城的屋脊、垛口上沿一线
+    # ---- 晨光（普通）：峰顶一点暖，沿上半截山脊往东坡淡开，往下很快没了；峰顶后面的天上一团亮
+    rim = np.exp(-np.maximum(depth, 0) / 12.0) * smoothstep(-1.5, 1.5, depth)
+    wash_ = np.exp(-np.maximum(depth, 0) / 40.0) * smoothstep(-1.0, 4.0, depth) * V.bump_window(np.clip(depth / 110.0, 0, 1))
+    behind = np.ones((1, W)) if youdu else np.exp(-((xs - x_s) / (0.6 * half)) ** 2)[None, :]
+    skyglow = np.exp(-np.maximum(-depth, 0) / 32.0) * smoothstep(1.0, -2.0, depth) * V.bump_window(np.clip(-depth / 90.0, 0, 1))
+    a = (0.42 * rim + 0.15 * wash_) * body * w_h * w_e + 0.20 * skyglow * sky * behind * (0.3 + 0.7 * w_h) + (0.25 * city_rim if youdu else 0)
+    a = np.clip(a * win * (0.82 + 0.18 * fib), 0, 0.55)
     a[a < 0.004] = 0.0
-    ys, xs_ = np.nonzero(a)
-    x0, x1, y0, y1 = xs_.min(), xs_.max() + 1, ys.min(), ys.max() + 1
-    sl = (slice(y0, y1), slice(x0, x1))
+    mrect, grect = DAWN_RECTS[rid]
+    a_c = crop_fixed(a, mrect, f"dawn_{rid}")
+    x0, y0, w0, h0 = mrect
+    sl = (slice(y0, y0 + h0), slice(x0, x0 + w0))
     rel, vig = R["fin"]["rel"][sl], R["fin"]["vig"][sl]
     color = DAWN_PEACH[None, None] * (1 + 0.8 * (rel[..., None] - 1)) * vig[..., None]
-    color = mixc(color, color * mixc(WHITE, DAWN_GOLD / DAWN_GOLD.max(), 0.6), rim[sl])
-    img = np.dstack([np.clip(color, 0, 1), a[sl]])
-    # 先亮哪里：主峰的山脊最先，顺着山脊往两边、往下坡、往天上铺开；纸纤维的毛
-    dist_ridge = np.abs(depth[sl])
-    along = np.clip((ridge[None, x0:x1] - top) / 140.0, 0, 1)  # 山脊上离峰顶多远（越低越晚）
-    t = 0.55 * along + 0.45 * np.clip(dist_ridge / 120.0, 0, 1) ** 0.8
+    color = mixc(color, color * mixc(WHITE, DAWN_GOLD / DAWN_GOLD.max(), 0.6), rim[sl] * w_h[:, x0:x0 + w0])
+    img = np.dstack([np.clip(color, 0, 1), a_c])
+    # ---- 先亮哪里：峰顶的山脊最先，顺着山脊往下、往天上铺开，东坡略早；纸纤维的毛
+    dist = np.abs(depth[sl])
+    down = np.clip((1 - ht[None, x0:x0 + w0]) / 0.55, 0, 1)
+    t = 0.55 * down + 0.45 * np.clip(dist / 110.0, 0, 1) ** 0.8 + 0.08 * (1 - (w_e[:, x0:x0 + w0] - 0.42) / 0.58)
     t = t + 0.16 * (fib[sl] - 0.5) + 0.06 * noise(rng, t.shape, 6.0)
-    on = a[sl] > 0
+    on = a_c > 0
     t = (t - t[on].min()) / max(np.ptp(t[on]), 1e-6)
     mask = np.where(on, np.clip(t, 0, 1), 1.0)
-    out = {"main": (img, (x0, y0, x1 - x0, y1 - y0), {}), "mask": (mask, (x0, y0, x1 - x0, y1 - y0), {})}
-    # 山脊金线（叠加）：贴着山脊一线，主峰处最亮
-    gl = (np.exp(-((depth - 1.0) / 2.2) ** 2) * body + 0.6 * city_rim) * win * lift ** 1.5 * (0.7 + 0.3 * fib)
-    gl = ADD_PEAK * 0.75 * gl / max(gl.max(), 1e-6)
-    gl[gl < 0.004] = 0.0
-    ys, xs_ = np.nonzero(gl)
-    pad = 4  # 四边留几像素全透明：叠加层裁边处为 0
-    gx0, gx1, gy0, gy1 = max(0, xs_.min() - pad), min(W, xs_.max() + 1 + pad), max(0, ys.min() - pad), min(H, ys.max() + 1 + pad)
-    gsl = (slice(gy0, gy1), slice(gx0, gx1))
-    out["glow"] = (np.dstack([np.broadcast_to(DAWN_GOLD, (gy1 - gy0, gx1 - gx0, 3)), gl[gsl]]), (gx0, gy0, gx1 - gx0, gy1 - gy0),
-                   {"blend": "add"})
+    out = {"main": (img, tuple(mrect), {}), "mask": (mask, tuple(mrect), {})}
+    # ---- 山脊金线（叠加）：贴着山脊里侧的一道软光（半亮处约 6 像素宽），上面四五成、东坡为主，往两边山腰淡到 0
+    g = np.exp(-((depth - 2.5) / 3.4) ** 2) * vis * w_h * w_e * win * (0.75 + 0.25 * fib)
+    if youdu:
+        g = g + 0.6 * blur(city_rim, 1.0) * win
+    g = blur(g, 1.2)
+    g = DAWN_GLOW_PEAK * g / max(g.max(), 1e-6)
+    g[g < 0.004] = 0.0
+    g_c = crop_fixed(g, grect, f"dawn_{rid}_glow")
+    gh, gw = g_c.shape
+    ey = np.minimum(np.arange(gh), np.arange(gh)[::-1])[:, None]
+    ex = np.minimum(np.arange(gw), np.arange(gw)[::-1])[None, :]
+    g_c = g_c * smoothstep(0.0, 3.0, np.minimum(ey, ex))  # 叠加层：四边 3 像素里淡到 0
+    out["glow"] = (np.dstack([np.broadcast_to(DAWN_GOLD, g_c.shape + (3,)), g_c]), tuple(grect), {"blend": "add"})
     return out
 
 
@@ -1887,6 +1920,35 @@ def review_states(base: Image.Image, lamps, dawns, ids, path: Path) -> list[Imag
     return ims
 
 
+def review_dawn_fix(base: Image.Image, old_dir: Path, dawns: dict, path: Path) -> None:
+    """晨光改前改后：上一行青丘放大 2 倍（底图 | 旧的晨光 | 新的晨光），下面两行是六处晨光全亮的远山（旧 / 新）。
+    合成都是游戏的做法：底图 + 晨光（普通）+ 金线（叠加）。"""
+    old_man = json.loads((old_dir / "hub.json").read_text(encoding="utf-8"))
+    _, old = load_layers(old_man, old_dir)
+    ids = list(REGIONS)
+    x, y, w, h = DAWN_RECTS["qingqiu"][0]
+    box = (x - 30, y - 30, x + w + 30, min(H, y + h + 70))
+    tiles = [base.crop(box), composite(base, {}, old, [], ["qingqiu"]).crop(box), composite(base, {}, dawns, [], ["qingqiu"]).crop(box)]
+    tiles = [t.resize((t.width * 2, t.height * 2), Image.LANCZOS) for t in tiles]
+    strip = (0, 90, W, 560)
+    rows = [composite(base, {}, old, [], ids).crop(strip), composite(base, {}, dawns, [], ids).crop(strip)]
+    f = font("serif", 22)
+    width = max(sum(t.width + 12 for t in tiles) + 12, W + 24)
+    out = Image.new("RGB", (width, 40 + tiles[0].height + 2 * (rows[0].height + 44) + 12), (26, 26, 28))
+    d = ImageDraw.Draw(out)
+    xx = 12
+    for t, lab in zip(tiles, ("底图", "旧：晨光 + 金线（第二阶段）", "新：只照峰顶和上半截山脊，东坡为主")):
+        d.text((xx, 8), f"青丘 2× · {lab}", font=f, fill=(225, 225, 225))
+        out.paste(t, (xx, 40))
+        xx += t.width + 12
+    yy = 40 + tiles[0].height + 8
+    for im, lab in zip(rows, ("旧：六处晨光全亮", "新：六处晨光全亮")):
+        d.text((12, yy), lab, font=f, fill=(225, 225, 225))
+        out.paste(im, (12, yy + 34))
+        yy += im.height + 44
+    out.save(path, optimize=True)
+
+
 def review_ui(full: Image.Image, path: Path) -> None:
     """缩到 1280×720 的样子：名字 + 行当写在 label 处，人物 0 加一团模拟聚光，红框是文字安全区；
     下面一张是居中纸色面板 + 60% 压暗。"""
@@ -1895,10 +1957,10 @@ def review_ui(full: Image.Image, path: Path) -> None:
     arr = np.asarray(im, np.float64) / 255.0
     # 模拟聚光（叠加）
     c0 = CHARACTERS[0]
-    lx, ly, lr = (v * k for v in c0["light"])
+    lx, ly, lr = (v * k for v in c0["light"][:3])
     yy, xx = np.mgrid[0:720, 0:1280] + 0.5
     dd = np.hypot(xx - lx, yy - ly) / lr
-    arr = arr + (0.35 * V.bump_window(np.clip(dd, 0, 1)))[..., None] * ADD_COLOR[None, None]
+    arr = arr + (c0["light"][3] * V.bump_window(np.clip(dd, 0, 1)))[..., None] * col("#FFC780")[None, None]
     im = Image.fromarray((np.clip(arr, 0, 1) * 255 + 0.5).astype(np.uint8), "RGB").convert("RGBA")
     txt = Image.new("RGBA", im.size, (0, 0, 0, 0))
     dr = ImageDraw.Draw(txt)
@@ -1985,7 +2047,8 @@ def write_outputs(R: dict, lamps: dict, dawns: dict, out: Path = OUT) -> dict:
     man["note"] = ("坐标都是 1920×1080 底图上的像素，rect = [x, y, w, h]（左上角 + 宽高）。合成顺序：hub.png → 各灯 body → flame（普通混合）"
                    "→ core + glow（叠加：画面 += RGB × alpha）→ dawn（普通混合）→ dawn 的 glow（叠加）。PNG 都是直通（非预乘）alpha。"
                    "flame.base 是火苗底部中点（缩放、抖动绕这一点）。dawn mask 与 dawn 图同尺寸：黑 = 最先亮，白 = 最后，按阈值铺开。"
-                   "characters：rect 是点击区；label 是名字和行当那块文字的上沿中点；light = [x, y, 半径]，选中时加的聚光。"
+                   "characters：rect 是点击区；label 是名字和行当那块文字的上沿中点；light = [x, y, 半径, 强度]，选中时在这里加一团暖色的叠加聚光，"
+                   "强度是这团光中心的亮度（灯童在门洞的暗处，给得大一些）。"
                    "text_safe：画面里安静、够暗的区域，放标题行（灯驿 + 灯油、铜钱）和底部提示。"
                    "safe：游戏按铺满窗口、居中裁切显示，16:10 与 21:9 都留得住的区域；人物、心灯、匾额、text_safe 都在里面。")
     (out / "hub.json").write_text(json.dumps(man, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -2013,7 +2076,8 @@ def arg(argv: list[str], name: str, default=None):
 
 def main(argv: list[str]) -> int:
     """--sample：只出样张 review@2x/hub_sample*.png（和上一轮对比），不写 screens/hub/；
-    --out DIR / --review DIR：换输出目录（自检的确定性测试用）；--no-review：不出审图。"""
+    --out DIR / --review DIR：换输出目录（自检的确定性测试用）；--no-review：不出审图；
+    --dawn-compare DIR：另出 hub_review_dawn_fix.png，和 DIR 里旧的晨光对比。"""
     t0 = time.perf_counter()
     sample = "--sample" in argv
     out = Path(arg(argv, "--out", OUT))
@@ -2040,6 +2104,8 @@ def main(argv: list[str]) -> int:
     review_figures(R, review / f"{pre}_figures.png", compare=sample)
     ims = review_states(base, lamps, dawns, R["ids"], review / f"{pre}_states.png")
     review_ui(ims[2], review / f"{pre}_ui_720.png")
+    if "--dawn-compare" in argv:  # 晨光改前改后的对比（旧的输出目录）
+        review_dawn_fix(base, Path(arg(argv, "--dawn-compare")), dawns, review / "hub_review_dawn_fix.png")
     print(f"[review] → {review}/{pre}_*.png，共 {time.perf_counter() - t0:.1f}s")
     return 0
 

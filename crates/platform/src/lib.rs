@@ -9,12 +9,14 @@ use bevy::window::{CursorMoved, MonitorSelection, PrimaryWindow, WindowMode};
 
 use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands, SimPhase};
 
+mod cue;
 pub mod paths;
 pub mod profile;
 pub mod replays;
 mod rumble;
 pub mod settings;
 
+pub use cue::UiCue;
 pub use profile::{HubNews, Profile};
 pub use settings::Settings;
 
@@ -62,6 +64,7 @@ impl Plugin for PlatformPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.settings.clone())
             .init_resource::<Actions>()
+            .add_message::<UiCue>()
             .add_systems(PreUpdate, (gather_actions, feed_sim).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
         replays::register(app);
