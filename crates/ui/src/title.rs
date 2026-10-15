@@ -62,7 +62,15 @@ pub(crate) fn register(app: &mut App) {
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
         .add_systems(
             Update,
-            (input, redraw, highlight, crate::scroll::animate, crate::cover::fit_covers)
+            (
+                input,
+                redraw,
+                highlight,
+                crate::scroll::animate,
+                crate::hub_scene::sync_scene,
+                crate::hub_scene::refresh_scene,
+                crate::cover::fit_covers,
+            )
                 .chain()
                 .run_if(in_state(AppState::Title)),
         );
@@ -418,6 +426,7 @@ fn redraw(
     mode: Res<TitleMode>,
     assets: Res<AssetServer>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    scene: Option<Res<crate::hub_scene::HubScene>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
 ) {
@@ -434,7 +443,19 @@ fn redraw(
         TitleMode::Omen { seed, picks } => omen_panel(&mut commands, c, &fonts, &skin, &db, *seed, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
-        TitleMode::Hub => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        TitleMode::Hub => match &scene {
+            Some(scene) => crate::hub_scene::labels(
+                &mut commands,
+                scene,
+                c,
+                &fonts,
+                &profile,
+                &news,
+                ui.selected,
+                Vec2::new(window.width(), window.height()),
+            ),
+            None => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+        },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
