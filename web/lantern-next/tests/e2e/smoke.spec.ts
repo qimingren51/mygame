@@ -50,10 +50,11 @@ test('标题、游戏、返回', async ({ page }, info) => {
   await page.mouse.move(200, 250);
   await page.mouse.down();
   await page.mouse.move(260, 250, { steps: 4 });
-  await page.waitForTimeout(1200);
+  // CI 用软件渲染，帧率低；按住摇杆直到走够距离，而不是固定等待
+  await expect
+    .poll(async () => (await dbg(page)).world.player.x - start, { timeout: 10_000 })
+    .toBeGreaterThan(40);
   await page.mouse.up();
-  const moved = (await dbg(page)).world.player.x - start;
-  expect(moved).toBeGreaterThan(40);
   await page.screenshot({ path: info.outputPath('play.png') });
 
   // 升级三选一：直接给经验，等卡片出现，点第一张
@@ -97,4 +98,43 @@ test('竖屏时提示横过来', async ({ browser }) => {
   await page.goto('./');
   await expect(page.locator('.rotate-hint')).toBeVisible();
   await ctx.close();
+});
+
+test('连续宝箱可以逐个确认，连续进化会重新计时', async ({ page }) => {
+  await page.goto('./');
+  await page.waitForFunction(() => 'world' in ((window as unknown as { __lantern?: object }).__lantern ?? {}));
+  await page.locator('#start-btn').click();
+  await page.evaluate(() => {
+    const w = (window as unknown as { __lantern: { world: import('../../src/sim/state').World } }).__lantern.world;
+    w.god = true;
+    w.chestQueue = 2;
+  });
+  const ok = page.locator('#chest-screen [data-act="ok"]');
+  await expect(ok).toBeEnabled();
+  await page.evaluate(() => { document.querySelector('#chest-screen button')?.setAttribute('data-first', 'true'); });
+  await ok.click();
+  await expect(page.locator('#chest-screen [data-first]')).toHaveCount(0);
+  await expect(ok).toBeEnabled();
+  await ok.click();
+  await expect(page.locator('#chest-screen')).toBeHidden();
+  await page.waitForFunction(() =>
+    (window as unknown as { __lantern: { world: import('../../src/sim/state').World } }).__lantern.world.phase === 'play');
+
+  await page.evaluate(() => {
+    const w = (window as unknown as { __lantern: { world: import('../../src/sim/state').World } }).__lantern.world;
+    // 相同法器也算两个演出实例，不能依赖法器名变化来刷新。
+    w.pendingEvos.push(w.weapons[0]!.id, w.weapons[0]!.id);
+    w.pendingLevels = 1;
+  });
+  await page.locator('#levelup-screen [data-act="skip"]').click();
+  await expect(page.locator('#evo-screen')).toBeVisible();
+  const firstId = await page.evaluate(() =>
+    (window as unknown as { __lantern: { world: import('../../src/sim/state').World } }).__lantern.world.choiceId);
+  await page.waitForFunction((id) => {
+    const w = (window as unknown as { __lantern: { world: import('../../src/sim/state').World } }).__lantern.world;
+    return w.choiceId > id && w.phase === 'evo';
+  }, firstId);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#evo-screen')).toBeVisible();
+  await expect(page.locator('#evo-screen')).toBeHidden({ timeout: 20_000 }); // 两段演出约 4.2 秒游戏时间，CI 低帧率会拉长
 });

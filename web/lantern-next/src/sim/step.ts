@@ -117,7 +117,7 @@ function ultimate(w: World): void {
     if (enemyDef(w, i).boss) hitEnemy(w, i, (en.maxHp[i] as number) * 0.05, 0, p.x, p.y, HIT_NOCRIT);
     else hitEnemy(w, i, dmg, 160, p.x, p.y);
   }
-  for (const f of w.foes) f.life = 0;
+  w.foes.length = 0;
 }
 
 function updateTimers(w: World, dt: number): void {

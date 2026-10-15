@@ -3,6 +3,10 @@
 name: Pages
 
 on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
   push:
     branches: [master]
     paths:
@@ -12,11 +16,9 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -29,19 +31,32 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: 'web/*/package-lock.json'
-      - name: 构建整站
+      - name: 安装浏览器
+        # 使用项目锁定的 Playwright 版本。
+        run: |
+          npm ci --prefix web/lantern-next
+          cd web/lantern-next
+          npx playwright install --with-deps chromium
+      - name: 类型、单元和构建检查
         run: node web/scripts/build-site.mjs --ci
-      - uses: actions/configure-pages@v5
+      - name: 浏览器流程检查
+        run: npm --prefix web/lantern-next run e2e
       - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           path: web/_site
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4

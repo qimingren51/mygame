@@ -9,6 +9,7 @@
 //! [`SimSet::Input`]: crate::SimSet::Input
 
 use bevy_ecs::prelude::*;
+use lantern_core::step::HASH_INTERVAL;
 use serde::{Deserialize, Serialize};
 
 use crate::{HashLog, InputFrame, RunSetup, SimCommand, SimCommands, SimPhase, Tick};
@@ -83,7 +84,30 @@ impl Replay {
                 head.format
             ));
         }
-        ron::from_str(text).map_err(|e| format!("回放文件格式错误：{e}"))
+        let replay: Replay = ron::from_str(text).map_err(|e| format!("回放文件格式错误：{e}"))?;
+        replay.validate()?;
+        Ok(replay)
+    }
+
+    /// 也允许尚未结束的一局，但已声明的输入、命令和逐秒检查点必须完整。
+    fn validate(&self) -> Result<(), String> {
+        let steps = self.inputs.iter().try_fold(0u64, |sum, run| {
+            (run.steps > 0).then(|| sum.checked_add(u64::from(run.steps))).flatten()
+        });
+        if steps != Some(self.steps) || self.ticks > self.steps {
+            return Err("回放不完整：输入游程与声明的步数不符".into());
+        }
+        if self.commands.iter().any(|&(step, _)| step >= self.steps)
+            || self.commands.windows(2).any(|w| w[0].0 > w[1].0)
+        {
+            return Err("回放命令未按步序排列或超出范围".into());
+        }
+        if self.hashes.len() as u64 != self.ticks / HASH_INTERVAL
+            || self.hashes.iter().enumerate().any(|(i, &(tick, _))| tick != (i as u64 + 1) * HASH_INTERVAL)
+        {
+            return Err("回放不完整：逐秒检查点缺失、重复或顺序错误".into());
+        }
+        Ok(())
     }
 }
 
@@ -130,16 +154,46 @@ pub struct ReplayPlayback {
     /// 第一次与录制时状态哈希不一致的步数
     pub diverged_at: Option<u64>,
     pub finished: bool,
+    /// 实际逐个对照过的检查点数量。
+    pub checked_hashes: usize,
 }
 
 impl ReplayPlayback {
     pub fn new(replay: Replay) -> Self {
-        ReplayPlayback { replay, cursor: ReplayCursor::default(), diverged_at: None, finished: false }
+        ReplayPlayback {
+            replay,
+            cursor: ReplayCursor::default(),
+            diverged_at: None,
+            finished: false,
+            checked_hashes: 0,
+        }
     }
 
     /// 回放对应的开局设置。
     pub fn setup(&self) -> RunSetup {
         self.replay.setup.clone()
+    }
+
+    /// 只有完整消费并核对后才可报告一致；终局提前到来也属于不完整。
+    pub fn verification_result(&self, tick: u64) -> Result<usize, String> {
+        self.replay.validate()?;
+        if let Some(t) = self.diverged_at {
+            return Err(format!("从第 {t} 步起与录制时不一致"));
+        }
+        if !self.finished
+            || self.cursor.step != self.replay.steps
+            || self.cursor.run != self.replay.inputs.len()
+            || self.cursor.cmd != self.replay.commands.len()
+            || tick != self.replay.ticks
+            || self.checked_hashes != self.replay.hashes.len()
+        {
+            return Err(format!(
+                "回放不完整：已核对 {} / {} 个检查点",
+                self.checked_hashes,
+                self.replay.hashes.len()
+            ));
+        }
+        Ok(self.checked_hashes)
     }
 }
 
@@ -148,6 +202,7 @@ pub(crate) fn feed_playback(
     playback: Option<ResMut<ReplayPlayback>>,
     mut input: ResMut<InputFrame>,
     mut commands: ResMut<SimCommands>,
+    mut gate: ResMut<crate::flow::StepGate>,
 ) {
     let Some(mut p) = playback else { return };
     let p = &mut *p;
@@ -156,16 +211,16 @@ pub(crate) fn feed_playback(
         Some(frame) => *input = frame,
         None => {
             p.finished = true;
+            gate.play = false;
             *input = InputFrame::default();
         }
     }
 }
 
-/// 终局后不会再读取输入，直接结束回放。
+/// 终局或最后一步之后直接结束，不额外推进一个没有输入的模拟步。
 pub(crate) fn finish_playback(phase: Option<Res<SimPhase>>, playback: Option<ResMut<ReplayPlayback>>) {
-    if phase.is_some_and(|p| *p == SimPhase::Over)
-        && let Some(mut p) = playback
-    {
+    let Some(mut p) = playback else { return };
+    if phase.is_some_and(|p| *p == SimPhase::Over) || p.cursor.step >= p.replay.steps {
         p.finished = true;
     }
 }
@@ -198,10 +253,12 @@ pub(crate) fn sync_hashes(
         log.0.hashes.push((last.tick, last.hash));
     }
     if let Some(mut p) = playback
-        && p.diverged_at.is_none()
-        && let Some(&(_, want)) = p.replay.hashes.iter().find(|&&(t, _)| t == last.tick)
-        && want != last.hash
+        && let Some(&(tick, want)) = p.replay.hashes.get(p.checked_hashes)
+        && tick == last.tick
     {
-        p.diverged_at = Some(last.tick);
+        p.checked_hashes += 1;
+        if want != last.hash && p.diverged_at.is_none() {
+            p.diverged_at = Some(last.tick);
+        }
     }
 }

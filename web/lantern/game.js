@@ -1487,7 +1487,7 @@
       if (e.d.boss) hitEnemy(e, e.maxHp * 0.05, { noCrit: true });
       else hitEnemy(e, dmg, { kb: 160, from: p });
     }
-    for (const f of G.foes) f.life = 0;
+    G.foes.length = 0;
   }
 
   // =====================================================================

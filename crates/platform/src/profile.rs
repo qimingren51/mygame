@@ -1,6 +1,6 @@
 //! 存档 `save.ron`（docs/DESIGN.md 第 12 节）：灯油与铜钱、心灯、局外属性、解锁、成就、最好成绩、累计统计。
 //!
-//! 和设置文件一样带版本号、原子写入、保留备份；文件损坏时改名保留，改用空存档。
+//! 和设置文件一样带版本号、原子写入、保留备份；优先恢复备份，恢复失败时禁止覆盖。
 //! 读到 M2 的存档（版本 1）时按 docs/BALANCE.md 第 10.6 节迁移一次：要等内容数据加载好，
 //! 由 [`Profile::upgrade`] 完成。
 
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use lantern_content::{AchievementWhen, Content, Element, HubWhen, Reward};
 use lantern_sim::{RunMode, RunResult, RunSetup};
 
-use crate::settings::write_atomic;
+use crate::settings::{load_with_backup, write_atomic};
 
 pub const SAVE_VERSION: u32 = 2;
 
@@ -105,6 +105,8 @@ pub struct Profile {
     pub wins: u32,
     #[serde(skip)]
     path: Option<PathBuf>,
+    #[serde(skip)]
+    save_error: Option<String>,
 }
 
 impl Default for Profile {
@@ -135,6 +137,7 @@ impl Default for Profile {
             runs: 0,
             wins: 0,
             path: None,
+            save_error: None,
         }
     }
 }
@@ -222,22 +225,16 @@ const M2_REFUND: [&str; 3] = ["dmg", "hp", "agi"];
 impl Profile {
     pub fn load(dir: &Path) -> Profile {
         let path = dir.join("save.ron");
-        let mut p = match std::fs::read_to_string(&path) {
-            Ok(text) => match ron::from_str::<Profile>(&text) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("存档损坏，改用空存档（原文件改名为 save.ron.broken）：{e}");
-                    let _ = std::fs::rename(&path, path.with_extension("ron.broken"));
-                    Profile::default()
-                }
-            },
-            Err(_) => Profile::default(),
-        };
+        let (mut p, error) = load_with_backup::<Profile>(&path);
+        p.save_error = error;
         p.path = Some(path);
         p
     }
 
     pub fn save(&self) -> io::Result<()> {
+        if let Some(error) = &self.save_error {
+            return Err(io::Error::other(error.clone()));
+        }
         let Some(path) = &self.path else { return Ok(()) };
         let text =
             ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()).map_err(io::Error::other)?;
@@ -659,6 +656,25 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_save_recovers_backup_without_overwriting_it() {
+        let dir = temp("backup");
+        let mut p = Profile::load(&dir);
+        p.oil = 123;
+        p.save().unwrap();
+        p.oil = 456;
+        p.save().unwrap();
+        std::fs::write(dir.join("save.ron"), "broken").unwrap();
+        let mut recovered = Profile::load(&dir);
+        assert_eq!(recovered.oil, 123);
+        recovered.oil += 1;
+        recovered.save().unwrap();
+        assert_eq!(Profile::load(&dir).oil, 124);
+        assert!(std::fs::read_to_string(dir.join("save.bak")).unwrap().contains("oil: 123"));
+        assert_eq!(std::fs::read_to_string(dir.join("save.ron.broken")).unwrap(), "broken");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn records_buys_and_roundtrips() {
         let c = content();
         let dir = temp("roundtrip");
@@ -734,7 +750,8 @@ mod tests {
 
         std::fs::write(dir.join("save.ron"), "(oil: lots").unwrap();
         assert_eq!(Profile::load(&dir).oil, 0);
-        assert!(dir.join("save.ron.broken").exists());
+        assert!(Profile::load(&dir).save().is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("save.ron")).unwrap(), "(oil: lots");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

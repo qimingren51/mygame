@@ -6,6 +6,7 @@ import { endRun } from './combat';
 import type { Command, World } from './state';
 
 export function openLevelUp(w: World): void {
+  w.choiceId++;
   w.phase = 'levelup';
   w.pendingLevels--;
   const r = rollChoices(w);
@@ -14,6 +15,7 @@ export function openLevelUp(w: World): void {
 }
 
 function openChest(w: World): void {
+  w.choiceId++;
   w.chestQueue--;
   const items = rollChest(w);
   w.phase = 'chest';
@@ -27,6 +29,7 @@ export function afterChoice(w: World): void {
   w.evo = null;
   const evo = w.pendingEvos.shift();
   if (evo) {
+    w.choiceId++;
     w.phase = 'evo';
     w.evo = evo;
     w.bus.emit({ k: 'evolve', id: evo });

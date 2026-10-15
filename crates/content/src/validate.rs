@@ -329,14 +329,36 @@ impl Content {
         }
 
         // ---- stats.ron ----
+        // 缺省的无限边界表示不设上限/下限；NaN 和反向无限边界不能用于 clamp。
         for (s, d) in crate::Stat::ALL.iter().zip(&self.stats) {
-            if !d.base.is_finite() || d.min > d.max {
+            if !d.base.is_finite()
+                || d.min.is_nan()
+                || d.max.is_nan()
+                || d.min == f32::INFINITY
+                || d.max == f32::NEG_INFINITY
+                || d.min > d.max
+            {
                 return c.fail("stats.ron", format!("{s:?} 的基础值或上下限不对"));
             }
         }
 
         // ---- run.ron ----
         let r = &self.run;
+        // 等级使用 u32：二次曲线只需检查端点及区间内的极值，避免逐级遍历。
+        let q = r.xp_need;
+        let max_level = u32::MAX as f32;
+        let vertex = if q.2 == 0.0 {
+            1.0
+        } else {
+            (-f64::from(q.1) / (2.0 * f64::from(q.2))).clamp(1.0, f64::from(max_level)) as f32
+        };
+        if [q.0, q.1, q.2].iter().any(|v| !v.is_finite())
+            || [1.0, max_level, vertex.floor(), vertex.ceil()]
+                .iter()
+                .any(|&level| !q.at(level).is_finite() || q.at(level) <= 0.0)
+        {
+            return c.fail("run.ron", "xp_need 在有效等级内必须有限且严格为正".into());
+        }
         c.positive("run.ron", &[("duration", r.duration), ("view_height", r.view_height)])?;
         if r.max_aspect < 1.0 {
             return c.fail("run.ron", "max_aspect 不能小于 1".into());

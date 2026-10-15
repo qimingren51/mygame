@@ -163,7 +163,14 @@ pub(crate) fn level_up(
     }
     loop {
         let need = content.0.run.xp_need.at(progress.level as f32);
-        if progress.xp < need {
+        if !need.is_finite()
+            || need <= 0.0
+            || !progress.xp.is_finite()
+            || progress.xp < need
+            || progress.xp - need >= progress.xp
+            || progress.level == u32::MAX
+            || progress.pending_levels == u32::MAX
+        {
             break;
         }
         progress.xp -= need;

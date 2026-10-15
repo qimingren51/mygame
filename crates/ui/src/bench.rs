@@ -37,6 +37,7 @@ pub(crate) struct BenchRun {
     sim_start: (f64, u64),
     results: Vec<StageResult>,
     done: bool,
+    reached: bool,
 }
 
 /// 从标题界面开始跑分。
@@ -52,13 +53,14 @@ pub(crate) fn start(commands: &mut Commands, next: &mut NextState<AppState>) {
         sim_start: (0.0, 0),
         results: Vec::new(),
         done: false,
+        reached: false,
     });
     next.set(AppState::Run);
 }
 
 pub(crate) fn drive(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     timing: Res<SimTiming>,
     en: Option<Res<Enemies>>,
     fonts: Res<Fonts>,
@@ -72,12 +74,25 @@ pub(crate) fn drive(
     }
     let dt = time.delta_secs();
     bench.t += dt;
-    if bench.t < WARMUP_SECS {
+    let count = en.map_or(0, |e| e.count);
+    bench.reached |= count >= STAGES[bench.stage] as usize;
+    if !bench.reached && bench.t >= STAGE_SECS {
+        let message = format!("跑分失败：目标 {}，实际 {count}", STAGES[bench.stage]);
+        warn!("{message}");
+        bench.done = true;
+        commands.remove_resource::<AutoPilot>();
+        commands.spawn((
+            DespawnOnExit(AppState::Run),
+            text(&fonts.body, 24.0, PAPER, &format!("{message}　Enter / 手柄 A　回到标题")),
+        ));
+        return;
+    }
+    if bench.t < WARMUP_SECS || !bench.reached {
         bench.sim_start = (timing.total_ms, timing.steps);
         return;
     }
     bench.frame_ms.push(dt * 1e3);
-    bench.enemy_sum += en.map_or(0, |e| e.count) as f64;
+    bench.enemy_sum += count as f64;
     if bench.t < STAGE_SECS {
         return;
     }
@@ -98,6 +113,7 @@ pub(crate) fn drive(
     bench.results.push(result);
     bench.stage += 1;
     bench.t = 0.0;
+    bench.reached = false;
     bench.frame_ms.clear();
     bench.enemy_sum = 0.0;
     if let Some(&next) = STAGES.get(bench.stage) {
@@ -178,4 +194,43 @@ pub(crate) fn finish_input(
 pub(crate) fn cleanup(mut commands: Commands) {
     commands.remove_resource::<BenchRun>();
     commands.remove_resource::<AutoPilot>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn frame_samples_use_real_time_even_when_virtual_time_is_clamped() {
+        let mut app = App::new();
+        let mut real = Time::<Real>::default();
+        real.advance_by(Duration::from_millis(250));
+        let mut virtual_time = Time::<()>::default();
+        virtual_time.advance_by(Duration::from_secs_f32(4.0 / 60.0));
+        let mut enemies = Enemies::default();
+        enemies.count = STAGES[0] as usize;
+        app.insert_resource(real)
+            .insert_resource(virtual_time)
+            .insert_resource(enemies)
+            .insert_resource(Fonts { title: default(), body: default() })
+            .init_resource::<SimTiming>()
+            .init_resource::<SimCommands>()
+            .insert_resource(BenchRun {
+                stage: 0,
+                t: WARMUP_SECS,
+                frame_ms: Vec::new(),
+                enemy_sum: 0.0,
+                sim_start: (0.0, 0),
+                results: Vec::new(),
+                done: false,
+                reached: false,
+            })
+            .add_systems(Update, drive);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.update();
+        let bench = app.world().resource::<BenchRun>();
+        assert_eq!(bench.frame_ms, [250.0]);
+        assert_eq!(bench.t, WARMUP_SECS + 0.25);
+    }
 }

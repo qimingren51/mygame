@@ -106,6 +106,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut replay = Replay::new("test", 0, RunSetup::new(7, RunMode::Normal));
         replay.ticks = 1;
+        replay.steps = 1;
+        replay.inputs.push(lantern_sim::replay::InputRun { steps: 1, mx: 0, my: 0 });
         let current = replay.to_ron();
         std::fs::write(dir.join("current.ron"), &current).unwrap();
         std::fs::write(dir.join("current.bak"), "上一次自动保存").unwrap();

@@ -60,3 +60,16 @@ describe('整局模拟', () => {
     expect(w.player.hp).toBe(0);
   });
 });
+
+it('燃灯清掉贴身弹幕后不再造成伤害', () => {
+  const w = createRun({ seed: 7 });
+  w.plan = [];
+  w.mods.spawn = 0;
+  w.ult = 1;
+  w.foes.push({ x: w.player.x, y: w.player.y, px: w.player.x, py: w.player.y, vx: 0, vy: 0, r: 5, life: 2, dmg: 14 });
+  w.commands.push({ k: 'ult' });
+  step(w, SIM_DT, NO_INPUT);
+  expect(w.foes).toHaveLength(0);
+  expect(w.player.hp).toBe(w.stats.maxHp);
+  expect(w.ult).toBe(0);
+});

@@ -180,3 +180,42 @@ fn bot_full_run_defeats_the_boss() {
     let result = sim.flow().result.clone().expect("有结算");
     assert!(result.won, "无敌时击败夜主就会天明：{result:?}");
 }
+
+#[test]
+fn bench_can_fill_5000_slots_without_raising_the_normal_cap() {
+    let c = content();
+    let cap = c.run.spawn.hard_cap as usize;
+    let mut sim = SimHarness::with_mode(c.clone(), 7, RunMode::Bench { enemies: 5000 });
+    sim.set_build(&[], &[]);
+    for _ in 0..120 {
+        sim.step(InputFrame::default(), &[]);
+    }
+    assert_eq!(sim.enemies().count, 5000);
+    let mut en = lantern_sim::Enemies::default();
+    let mut rng = lantern_core::Pcg32::new(7, 1);
+    let stats = lantern_sim::Stats::base(&c);
+    for _ in 0..cap {
+        assert!(lantern_sim::spawn::spawn_enemy(&c, &stats, &mut en, &mut rng, 0, 0.0, 0.0, 0.0).is_some());
+    }
+    assert!(lantern_sim::spawn::spawn_enemy(&c, &stats, &mut en, &mut rng, 0, 0.0, 0.0, 0.0).is_none());
+    assert_eq!(en.count, cap);
+}
+
+#[test]
+fn invalid_xp_cannot_loop_or_overflow_levels() {
+    for need in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        let mut c = content();
+        c.run.xp_need = lantern_content::Quad(need, 0.0, 0.0);
+        let mut sim = SimHarness::new(c, 7);
+        sim.quiet();
+        sim.progress_mut().xp = 100.0;
+        sim.step(InputFrame::default(), &[]);
+        assert_eq!(sim.progress().level, 1);
+        assert_eq!(sim.progress().pending_levels, 0);
+    }
+    let mut sim = SimHarness::new(content(), 7);
+    sim.quiet();
+    sim.progress_mut().xp = f32::INFINITY;
+    sim.step(InputFrame::default(), &[]);
+    assert_eq!(sim.progress().level, 1);
+}
