@@ -184,8 +184,32 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
     }
 }
 
-/// 卡片底部的提示：共鸣进度、相生、进化线索。
-pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -> Option<OfferNote> {
+/// 共鸣、进化优先；普通升级把首项收益提到卡面中心，完整描述仍由卡片保留。
+pub(crate) fn offer_note(
+    c: &Content,
+    arsenal: &Arsenal,
+    build: &Build,
+    offer: Offer,
+    desc: &str,
+) -> OfferNote {
+    emphasize_note(offer, desc, resonance_note(c, arsenal, build, offer))
+}
+
+fn emphasize_note(offer: Offer, desc: &str, note: Option<OfferNote>) -> OfferNote {
+    let note = match note {
+        Some(n) if n.color.is_some() || matches!(offer, Offer::NewWeapon(_)) => return n,
+        note => note,
+    };
+    // 保留首项里的等级条件（如折纸），不把条件收益误写成每级必得。
+    let title = desc.split(['，', '。', '；', '\n']).next().unwrap_or(desc).to_string();
+    let body = note.map_or_else(String::new, |n| {
+        if n.body.is_empty() { n.title } else { format!("{}\n{}", n.title, n.body) }
+    });
+    OfferNote { color: None, title, body }
+}
+
+/// 共鸣进度、相生与进化线索，只读取当前构筑。
+fn resonance_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -> Option<OfferNote> {
     let gold = hex("#FFD98A");
     let el = offer.element(c, arsenal, build)?;
     if let Offer::Evolve(k) = offer {
@@ -285,6 +309,53 @@ pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 });
             }
             Some(OfferNote { color: None, title: progress, body: String::new() })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resonance_and_evolution_take_priority_over_numeric_gain() {
+        for title in ["金 2 → 3 · 共鸣激活", "满级 · 下次升级可进化"] {
+            let note = emphasize_note(
+                Offer::WeaponUp(0),
+                "伤害 +4，冷却 -0.10 秒。",
+                Some(OfferNote {
+                    color: Some(Color::WHITE), title: title.into(), body: "进化线索".into()
+                }),
+            );
+            assert_eq!(note.title, title);
+            assert_eq!(note.body, "进化线索");
+        }
+    }
+
+    #[test]
+    fn ordinary_upgrade_emphasizes_gain_and_keeps_resonance_hint() {
+        let note = emphasize_note(
+            Offer::WeaponUp(0),
+            "伤害 +4，冷却 -0.10 秒。",
+            Some(OfferNote {
+                color: None, title: "金 1".into(), body: "进化需心法「剑意」".into()
+            }),
+        );
+        assert_eq!(note.title, "伤害 +4");
+        assert_eq!(note.body, "金 1\n进化需心法「剑意」");
+        assert!(note.color.is_none());
+    }
+
+    #[test]
+    fn conditional_and_neutral_gains_keep_their_meaning() {
+        for (offer, desc, expected) in [
+            (Offer::PassiveUp(0), "1 / 3 / 5 级时数量 +1。", "1 / 3 / 5 级时数量 +1"),
+            (Offer::NewPassive(0), "魂火价值 +6%，升级时 5% 概率多一个选项。", "魂火价值 +6%"),
+            (Offer::Heal, "回复 30% 生命。", "回复 30% 生命"),
+            (Offer::Oil, "本局结算灯油 +15。", "本局结算灯油 +15"),
+        ] {
+            let note = emphasize_note(offer, desc, None);
+            assert_eq!(note.title, expected);
         }
     }
 }

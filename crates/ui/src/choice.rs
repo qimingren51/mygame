@@ -70,10 +70,24 @@ pub(crate) struct RerollLabel;
 #[derive(Component)]
 struct BanishLabel;
 
+/// 卡面字号：收益与卡名拉开层级，说明退到纸面墨色里。
+const CARD_NAME_SIZE: f32 = 30.0;
+const CARD_GAIN_SIZE: f32 = 26.0;
+const CARD_DESC_SIZE: f32 = 14.0;
+const CARD_LABEL_SIZE: f32 = 12.0;
+const CARD_META_SIZE: f32 = 11.0;
+
+/// 直接跟随焦点框，鼠标和键盘共用同一份展开状态。
+#[derive(Component)]
+struct CardDetail {
+    focus: Entity,
+    expanded: bool,
+}
+
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<ChoiceUi>().add_systems(OnExit(lantern_sim::AppState::Run), reset).add_systems(
         Update,
-        (sync, input, highlight, animate_evolve, animate_rise, animate_chest)
+        (sync, input, highlight, show_details, animate_evolve, animate_rise, animate_chest)
             .chain()
             .run_if(in_state(RunState::Playing))
             .run_if(resource_exists::<SimPhase>),
@@ -351,6 +365,31 @@ fn highlight(
 #[derive(Component)]
 pub(crate) struct CardFocus(usize);
 
+fn show_details(
+    focus: Query<&Visibility, With<CardFocus>>,
+    mut details: Query<(&CardDetail, &mut Visibility), Without<CardFocus>>,
+) {
+    for (detail, mut visibility) in &mut details {
+        let expanded = focus.get(detail.focus).is_ok_and(|v| *v != Visibility::Hidden);
+        visibility.set_if_neq(if expanded == detail.expanded {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+}
+
+/// 按字截取，保留中文边界；完整内容留在焦点卡里。
+fn card_summary(s: &str) -> String {
+    let line = s.lines().next().unwrap_or_default();
+    let mut chars = line.chars();
+    let mut short: String = chars.by_ref().take(16).collect();
+    if chars.next().is_some() || s.contains('\n') {
+        short.push('…');
+    }
+    short
+}
+
 fn overlay(skin: &Skin) -> impl Bundle {
     (
         ChoiceRoot,
@@ -423,76 +462,143 @@ fn card(
     offer: Offer,
 ) {
     let info: OfferInfo = offer_info(c, arsenal, build, offer);
-    let note = offer_note(c, arsenal, build, offer);
+    let note = offer_note(c, arsenal, build, offer, &info.desc);
     let el = info.element.map(|e| format!("{} 属性", c.element(e).name)).unwrap_or_default();
     let mut card = commands.spawn((
         Card,
         Rise::after(0.04 + i as f32 * 0.07),
         Node {
-            width: px(240),
-            min_height: px(340),
+            width: px(256),
+            min_height: px(380),
+            flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            padding: UiRect::axes(px(22), px(20)),
-            row_gap: px(8),
+            padding: UiRect::axes(px(20), px(22)),
             ..default()
         },
         skin.image(card_skin(info.rarity)),
     ));
     card.with_children(|card| {
         // 焦点框：和卡片一样大，叠在上面
-        card.spawn((
-            CardFocus(i),
-            Visibility::Hidden,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(-6),
-                right: px(-6),
-                top: px(-6),
-                bottom: px(-6),
-                ..default()
-            },
-            skin.image("card_focus"),
-        ));
+        let focus = card
+            .spawn((
+                CardFocus(i),
+                Visibility::Hidden,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(-6),
+                    right: px(-6),
+                    top: px(-6),
+                    bottom: px(-6),
+                    ..default()
+                },
+                skin.image("card_focus"),
+            ))
+            .id();
         card.spawn(Node { width: percent(100), justify_content: JustifyContent::SpaceBetween, ..default() })
             .with_children(|row| {
-                row.spawn(text(&fonts.body, 14.0, on_paper(info.rarity.color()), info.rarity.name()));
-                row.spawn(text(&fonts.body, 14.0, INK_DIM, &info.kind));
+                row.spawn(text(
+                    &fonts.body,
+                    CARD_LABEL_SIZE,
+                    on_paper(info.rarity.color()),
+                    info.rarity.name(),
+                ));
+                row.spawn(text(&fonts.body, CARD_LABEL_SIZE, INK_DIM, &info.kind));
             });
-        spawn_icon(card, db, fonts, info.icon.as_deref(), &info.glyph, on_paper(info.color), 88.0);
-        card.spawn(text(&fonts.title, 36.0, on_paper(info.color), &info.name));
-        card.spawn((text(&fonts.body, 16.0, INK, &info.desc), Node { max_width: px(196), ..default() }));
-        if !info.flavor.is_empty() {
-            card.spawn((
-                text(&fonts.body, 13.0, INK_DIM, &info.flavor),
-                Node { max_width: px(196), ..default() },
+        card.spawn(Node {
+            width: percent(100),
+            align_items: AlignItems::Center,
+            column_gap: px(10),
+            margin: UiRect::vertical(px(14)),
+            ..default()
+        })
+        .with_children(|head| {
+            spawn_icon(head, db, fonts, info.icon.as_deref(), &info.glyph, on_paper(info.color), 56.0);
+            head.spawn((
+                text(&fonts.title, CARD_NAME_SIZE, INK, &info.name),
+                Node { max_width: px(150), ..default() },
             ));
-        }
-        card.spawn(text(&fonts.body, 13.0, INK_DIM, &el));
-        card.spawn(Node { flex_grow: 1.0, ..default() });
-        if let Some(n) = note {
-            let box_skin = if n.color.is_some() { "note_box_hi" } else { "note_box" };
-            card.spawn((
+        });
+        // 共鸣与数值占据中腰；明确分行，避免大字挤成一段说明。
+        card.spawn((
+            Node {
+                width: percent(100),
+                min_height: px(92),
+                padding: UiRect::all(px(12)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            skin.image(if note.color.is_some() { "note_box_hi" } else { "note_box" }),
+        ))
+        .with_child((
+            Text::new(note.title.replace(" · ", "\n")),
+            // 毛笔字体缺少箭头等字形，用正文补齐，保留数值变化的方向。
+            TextFont {
+                font: bevy::text::FontSource::list([fonts.title.clone(), fonts.body.clone()]),
+                ..TextFont::from_font_size(CARD_GAIN_SIZE)
+            },
+            TextColor(on_paper(note.color.unwrap_or(info.color)).mix(&INK, 0.25)),
+            TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
+            Node { width: percent(100), ..default() },
+        ));
+        // 隐藏的全文仍占位，摘要叠在同一位置：切换焦点不推挤整排卡片。
+        card.spawn(Node {
+            width: percent(100),
+            min_height: px(104),
+            flex_grow: 1.0,
+            margin: UiRect::top(px(16)),
+            ..default()
+        })
+        .with_children(|slot| {
+            slot.spawn((
+                CardDetail { focus, expanded: true },
+                Visibility::Hidden,
                 Node {
                     width: percent(100),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::axes(px(10), px(8)),
-                    row_gap: px(2),
+                    row_gap: px(10),
                     ..default()
                 },
-                skin.image(box_skin),
             ))
-            .with_children(|b| {
-                b.spawn(text(&fonts.body, 14.0, n.color.map_or(INK_DIM, on_paper), &n.title));
-                if !n.body.is_empty() {
-                    b.spawn((
-                        text(&fonts.body, 13.0, INK_DIM, &n.body),
-                        Node { max_width: px(176), ..default() },
+            .with_children(|detail| {
+                detail.spawn((
+                    text(&fonts.body, CARD_DESC_SIZE, INK_DIM, &info.desc),
+                    Node { width: percent(100), ..default() },
+                ));
+                if !info.flavor.is_empty() {
+                    detail.spawn((
+                        text(&fonts.body, CARD_LABEL_SIZE, INK_DIM, &info.flavor),
+                        Node { width: percent(100), ..default() },
+                    ));
+                }
+                if !note.body.is_empty() {
+                    detail.spawn((
+                        text(&fonts.body, CARD_LABEL_SIZE, INK_DIM, &note.body),
+                        Node { width: percent(100), ..default() },
                     ));
                 }
             });
-        }
-        card.spawn(crate::prompts::hint(&fonts.title, 22.0, INK_DIM, &format!("{{pick{}}}", i + 1)));
+            let summary =
+                if note.body.is_empty() { "聚焦查看详情".into() } else { card_summary(&note.body) };
+            slot.spawn((
+                CardDetail { focus, expanded: false },
+                text(&fonts.body, CARD_LABEL_SIZE, INK_DIM, &summary),
+                TextLayout::no_wrap(),
+                Node { position_type: PositionType::Absolute, top: px(0), left: px(0), ..default() },
+            ));
+        });
+        card.spawn(Node {
+            width: percent(100),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+            margin: UiRect::top(px(12)),
+            ..default()
+        })
+        .with_children(|foot| {
+            foot.spawn(text(&fonts.body, CARD_META_SIZE, INK_DIM, &el));
+            foot.spawn(crate::prompts::hint(&fonts.title, 18.0, INK_DIM, &format!("{{pick{}}}", i + 1)));
+        });
     });
     card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
@@ -541,7 +647,15 @@ fn spawn_level_up(
             PAPER,
             "{nav} 选择　上下切换卡片与操作　{confirm} 确定",
         ));
-        root.spawn(Node { column_gap: px(16), ..default() }).with_children(|foot| {
+        root.spawn(Node {
+            max_width: percent(94),
+            flex_wrap: FlexWrap::Wrap,
+            justify_content: JustifyContent::Center,
+            column_gap: px(16),
+            row_gap: px(8),
+            ..default()
+        })
+        .with_children(|foot| {
             let labels = [
                 format!("{{reroll}} 重抽（剩 {rerolls} 次）"),
                 format!("{{banish}} 封印第 1 项（剩 {banishes} 次）"),
@@ -1323,5 +1437,97 @@ mod input_tests {
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
         app.update();
         assert_eq!(app.world().resource::<SimCommands>().0, vec![SimCommand::Skip]);
+    }
+}
+
+#[cfg(test)]
+mod card_tests {
+    use super::*;
+
+    fn choice_app() -> App {
+        let offers = vec![Offer::Heal, Offer::Oil, Offer::Heal, Offer::Oil];
+        let mut app = App::new();
+        app.insert_resource(ChoiceUi {
+            shown: Shown::LevelUp(offers.clone(), true, 0),
+            age: 1.0,
+            ..default()
+        })
+        .insert_resource(Flow {
+            choice: Some(lantern_sim::flow::Choice { offers, inspired: true, level: 2, ember: false }),
+            ..default()
+        })
+        .insert_resource(SimPhase::LevelUp)
+        .init_resource::<Build>()
+        .init_resource::<lantern_sim::Progress>()
+        .init_resource::<Actions>()
+        .init_resource::<SimCommands>()
+        .add_systems(Update, (input, highlight, show_details).chain());
+        for i in 0..4 {
+            let focus = app.world_mut().spawn((CardFocus(i), Visibility::Hidden)).id();
+            for expanded in [true, false] {
+                app.world_mut().spawn((CardDetail { focus, expanded }, Visibility::Hidden));
+            }
+        }
+        app
+    }
+
+    fn assert_expanded(app: &mut App, selected: usize) {
+        assert_eq!(app.world().resource::<ChoiceUi>().selected, selected);
+        let world = app.world_mut();
+        for (detail, visibility) in world.query::<(&CardDetail, &Visibility)>().iter(world) {
+            let index = world.get::<CardFocus>(detail.focus).unwrap().0;
+            assert_eq!(*visibility != Visibility::Hidden, (index == selected) == detail.expanded);
+        }
+    }
+
+    #[test]
+    fn details_follow_keyboard_and_pointer_focus_without_choosing() {
+        let mut app = choice_app();
+        app.update();
+        assert_expanded(&mut app, 0);
+
+        // 左移循环到第四张；静止光标不能抢回焦点。
+        app.world_mut().resource_mut::<ChoiceUi>().hovered = Some(1);
+        app.insert_resource(Actions { nav: IVec2::NEG_X, ..default() });
+        app.update();
+        assert_expanded(&mut app, 3);
+
+        app.world_mut().resource_mut::<ChoiceUi>().hovered = Some(1);
+        app.insert_resource(Actions { pointer_moved: true, ..default() });
+        app.update();
+        assert_expanded(&mut app, 1);
+
+        app.insert_resource(Actions { nav: IVec2::X, ..default() });
+        app.update();
+        assert_expanded(&mut app, 2);
+        assert!(app.world().resource::<SimCommands>().0.is_empty());
+
+        app.insert_resource(Actions { confirm: true, ..default() });
+        app.update();
+        assert!(matches!(app.world().resource::<SimCommands>().0.as_slice(), [SimCommand::Choose(2)]));
+    }
+
+    #[test]
+    fn number_keys_still_choose_each_of_four_cards_once() {
+        for pick in 0..4 {
+            let mut app = choice_app();
+            app.insert_resource(Actions { pick: Some(pick), ..default() });
+            app.update();
+            app.update();
+            assert!(
+                matches!(app.world().resource::<SimCommands>().0.as_slice(), [SimCommand::Choose(i)] if *i == pick)
+            );
+        }
+    }
+
+    #[test]
+    fn summary_preserves_short_lines_and_marks_hidden_text() {
+        assert_eq!(card_summary("金 2 → 3"), "金 2 → 3");
+        assert_eq!(card_summary("金 2 → 3\n进化需心法「剑意」"), "金 2 → 3…");
+        let long = "每次暴击都追加飞剑，追加的也能暴击、继续追加";
+        let short = card_summary(long);
+        assert_eq!(short.chars().count(), 17);
+        assert!(short.ends_with('…'));
+        assert!(long.starts_with(short.trim_end_matches('…')));
     }
 }
