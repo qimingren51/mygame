@@ -96,7 +96,6 @@ export function updateSpawns(w: World, dt: number): void {
   // 按本局随机计划出场
   for (const s of w.plan) {
     if (s.done || w.t < s.at) continue;
-    s.done = true;
     if (s.kind === 'elite') {
       spawnElite(w, s.pool);
     } else if (s.kind === 'surge') {
@@ -107,11 +106,14 @@ export function updateSpawns(w: World, dt: number): void {
     } else if (s.kind === 'boss') {
       const pos = ringPos(w, 40);
       const i = spawnEnemy(w, 'boss', pos.x, pos.y);
-      w.boss = i >= 0 ? en.handle(i) : -1;
+      // 满池时保留夜主事件，腾出槽位后重试。
+      if (i < 0) continue;
+      w.boss = en.handle(i);
       w.bus.emit({ k: 'boss' });
       w.bus.emit({ k: 'shake', amount: 10 });
       w.bus.emit({ k: 'flash', color: 0xff6b5a, a: 0.2 });
     }
+    s.done = true;
   }
 
   // 夜签「天降宝箱」

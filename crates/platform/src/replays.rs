@@ -4,7 +4,7 @@
 //! （万一崩溃，最近的一局也还在），一局结束时存成 `replays/<时间>-<种子>.ron`，只保留最近 20 局。
 //! 重放（`--replay`）时不录。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
@@ -53,21 +53,29 @@ fn autosave(time: Res<Time>, log: Option<Res<ReplayLog>>, mut t: Local<f32>) {
 
 fn finish_recording(mut commands: Commands, log: Option<Res<ReplayLog>>) {
     let Some(log) = log else { return };
-    commands.remove_resource::<ReplayLog>();
     if log.0.ticks == 0 {
+        commands.remove_resource::<ReplayLog>();
         return;
     }
     let dir = replay_dir();
     let stamp =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let path = dir.join(format!("{stamp}-{}.ron", log.0.setup.seed));
-    match write_atomic(&path, log.0.to_ron().as_bytes()) {
-        Ok(()) => info!("回放已保存：{}", path.display()),
+    match save_finished_replay(&dir, &log.0, stamp) {
+        Ok(path) => {
+            commands.remove_resource::<ReplayLog>();
+            info!("回放已保存：{}", path.display());
+        }
         Err(e) => warn!("保存回放失败：{e}"),
     }
+}
+
+fn save_finished_replay(dir: &Path, replay: &Replay, stamp: u64) -> std::io::Result<PathBuf> {
+    let path = dir.join(format!("{stamp}-{}.ron", replay.setup.seed));
+    write_atomic(&path, replay.to_ron().as_bytes())?;
     let _ = std::fs::remove_file(dir.join("current.ron"));
     let _ = std::fs::remove_file(dir.join("current.bak"));
-    prune(&dir);
+    prune(dir);
+    Ok(path)
 }
 
 /// 只保留最近的 KEEP 局（文件名以时间开头，按名字排序即按时间排序）。
@@ -83,5 +91,43 @@ fn prune(dir: &std::path::Path) {
     let extra = files.len().saturating_sub(KEEP);
     for old in &files[..extra] {
         let _ = std::fs::remove_file(old);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lantern_sim::RunMode;
+
+    #[test]
+    fn failed_final_save_keeps_recovery_files_until_a_successful_retry() {
+        let dir = std::env::temp_dir().join(format!("lantern-replays-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut replay = Replay::new("test", 0, RunSetup::new(7, RunMode::Normal));
+        replay.ticks = 1;
+        let current = replay.to_ron();
+        std::fs::write(dir.join("current.ron"), &current).unwrap();
+        std::fs::write(dir.join("current.bak"), "上一次自动保存").unwrap();
+        // 用同名目录让最终替换失败，不依赖权限或磁盘容量。
+        let final_path = dir.join("100-7.ron");
+        std::fs::create_dir(&final_path).unwrap();
+        for i in 0..KEEP + 1 {
+            std::fs::write(dir.join(format!("{i:03}-old.ron")), "旧回放").unwrap();
+        }
+
+        assert!(save_finished_replay(&dir, &replay, 100).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("current.ron")).unwrap(), current);
+        assert_eq!(std::fs::read_to_string(dir.join("current.bak")).unwrap(), "上一次自动保存");
+        assert!(dir.join("000-old.ron").exists(), "保存失败也不能裁剪旧回放");
+
+        std::fs::remove_dir(&final_path).unwrap();
+        assert_eq!(save_finished_replay(&dir, &replay, 100).unwrap(), final_path);
+        assert_eq!(Replay::parse(&std::fs::read_to_string(&final_path).unwrap()).unwrap(), replay);
+        assert!(!dir.join("current.ron").exists());
+        assert!(!dir.join("current.bak").exists());
+        assert!(!dir.join("000-old.ron").exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), KEEP);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

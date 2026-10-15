@@ -244,6 +244,40 @@ fn boss_phases_bring_illusions_and_sweeps() {
 }
 
 #[test]
+fn boss_retries_after_the_enemy_cap_has_room() {
+    let c = content();
+    let mut sim = only_event(6, 1, |e| matches!(e, lantern_content::PlanEvent::Boss { .. }));
+    sim.set_build(&[], &[]);
+    let cap = c.run.spawn.hard_cap as usize;
+    for k in 0..cap {
+        sim.spawn("shade", Vec2::new(2000.0 + k as f32 * 30.0, 0.0)).unwrap();
+    }
+    assert!(sim.spawn("shade", Vec2::ZERO).is_none());
+
+    for _ in 0..2 {
+        sim.step(InputFrame::default(), &[]);
+        assert!(sim.world().resource::<Director>().boss.is_none());
+        assert!(!sim.world().resource::<lantern_sim::run::RunPlan>().schedule[0].done);
+        assert!(!sim.take_events().iter().any(|e| matches!(e, SimEvent::BossArrived { .. })));
+    }
+
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().kill(0);
+    sim.step(InputFrame::default(), &[]);
+    let boss = sim.world().resource::<Director>().boss.expect("腾出槽位后夜主出场");
+    let i = sim.enemies().resolve(boss).unwrap();
+    assert_eq!(c.enemies[sim.enemies().kind[i] as usize].rank, lantern_content::Rank::Boss);
+    assert_eq!(sim.enemies().count, cap);
+    assert!(sim.world().resource::<lantern_sim::run::RunPlan>().schedule[0].done);
+    assert_eq!(sim.take_events().iter().filter(|e| matches!(e, SimEvent::BossArrived { .. })).count(), 1);
+
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().kill(1);
+    sim.step(InputFrame::default(), &[]);
+    assert_eq!(sim.world().resource::<Director>().boss, Some(boss));
+    assert_eq!(sim.enemies().count, cap - 1);
+    assert!(!sim.take_events().iter().any(|e| matches!(e, SimEvent::BossArrived { .. })));
+}
+
+#[test]
 fn illusions_inside_the_reveal_circle_dispel() {
     let mut sim = quiet(6);
     let i = sim.spawn("jiuwei", Vec2::new(300.0, 0.0)).unwrap();
@@ -542,6 +576,40 @@ fn endless_oil_counts_late_time_and_bosses_separately() {
     assert!(r.endless && !r.won && r.bosses == 3);
     // 存活 600 + 600 × 0.5；击杀 10000 × 0.05 + 20000 × 0.01；夜主 300 + 2 × 150
     assert_eq!(&r.oil_parts[..3], &[900, 700, 600]);
+}
+
+/// 无尽夜里夜主再来时池子满了，也等腾出槽位再来，不丢、不重复。
+#[test]
+fn endless_boss_waits_for_room_too() {
+    let c = content();
+    let mut s = setup(5);
+    s.mode = RunMode::Endless;
+    let mut sim = SimHarness::with_setup(content(), s);
+    sim.quiet();
+    sim.set_build(&[], &[]);
+    let hz = u64::from(lantern_core::step::TICK_HZ);
+    sim.world_mut().resource_mut::<lantern_sim::Tick>().0 = 20 * 60 * hz;
+    {
+        // 20:00 的妖潮已经来过，夜主该来了
+        let mut d = sim.world_mut().resource_mut::<Director>();
+        let e = d.endless.as_mut().unwrap();
+        (e.wave, e.boss_due) = (2, Some(0.0));
+    }
+    let cap = c.run.spawn.hard_cap as usize;
+    for k in 0..cap {
+        sim.spawn("shade", Vec2::new(2000.0 + k as f32 * 30.0, 0.0)).unwrap();
+    }
+    for _ in 0..2 {
+        sim.step(InputFrame::default(), &[]);
+        assert!(sim.world().resource::<Director>().boss.is_none());
+        assert!(sim.world().resource::<Director>().endless.unwrap().boss_due.is_some(), "还记着要来");
+    }
+    sim.world_mut().resource_mut::<lantern_sim::Enemies>().kill(0);
+    sim.step(InputFrame::default(), &[]);
+    assert!(sim.world().resource::<Director>().boss.is_some(), "腾出槽位后夜主再来");
+    let e = sim.world().resource::<Director>().endless.unwrap();
+    assert!(e.boss_due.is_none() && e.arrivals == 1);
+    assert_eq!(sim.take_events().iter().filter(|e| matches!(e, SimEvent::BossArrived { .. })).count(), 1);
 }
 
 /// 夜深（docs/BALANCE.md 第 4.7 节）：无尽夜 10 分钟以后，生命按每分钟 × 1.2 复利涨，

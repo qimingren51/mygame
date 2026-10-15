@@ -68,3 +68,33 @@ fn tampered_replay_is_detected() {
     let (_, diverged) = play(replay);
     assert!(diverged.is_some(), "改过的回放应该报告分歧");
 }
+
+#[test]
+fn replay_finishes_at_death_or_victory_with_inputs_remaining() {
+    use bevy_ecs::prelude::*;
+    use lantern_sim::replay::InputRun;
+    use lantern_sim::{Health, Player};
+
+    for won in [false, true] {
+        let mut replay = Replay::new("test", content().hash, RunSetup::new(7, RunMode::Normal));
+        replay.inputs.push(InputRun { steps: 600, mx: 0, my: 0 });
+        replay.steps = 600;
+        replay.ticks = 600;
+        let mut sim = SimHarness::from_replay(content(), replay);
+        sim.quiet();
+        if won {
+            sim.flow_mut().won_at = Some(0.0);
+        } else {
+            let world = sim.world_mut();
+            world.query_filtered::<&mut Health, With<Player>>().single_mut(world).unwrap().hp = 0.0;
+        }
+
+        sim.step(InputFrame::default(), &[]);
+        assert!(sim.is_over());
+        assert_eq!(sim.flow().result.as_ref().unwrap().won, won);
+        assert!(sim.playback().unwrap().finished, "终局无需再读一步输入才能结束回放");
+        let tick = sim.tick();
+        sim.step(InputFrame::default(), &[]);
+        assert_eq!(sim.tick(), tick);
+    }
+}

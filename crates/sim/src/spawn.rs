@@ -247,11 +247,12 @@ pub(crate) fn update_spawns(
     let elites = stats.get(Stat::EliteCount).round().max(0.0) as u32;
     let affixes = stats.get(Stat::Affixes).round().max(0.0) as u32;
     let schedule = &content.run.schedule;
-    let mut due: Vec<usize> = Vec::new();
-    for step in &mut plan.schedule {
+    // 这一步要发生的事件：时间表里的下标，以及它来自本局时间表的第几项（无尽夜补上的是 None）
+    let mut due: Vec<(usize, Option<usize>)> = Vec::new();
+    for (pos, step) in plan.schedule.iter_mut().enumerate() {
         if !step.done && t >= step.at {
             step.done = true;
-            due.push(step.index);
+            due.push((step.index, Some(pos)));
         }
     }
     if let Some(mut e) = director.endless {
@@ -262,7 +263,7 @@ pub(crate) fn update_spawns(
             && let Some(k) = find(|ev| matches!(ev, PlanEvent::Surge { .. }))
         {
             e.wave += 1;
-            due.push(k);
+            due.push((k, None));
             outbox.0.push(SimEvent::NightDeeper { layer: e.wave });
             if let PlanEvent::Surge { duration, .. } = schedule[k].event {
                 e.boss_due = Some(t + duration);
@@ -274,11 +275,11 @@ pub(crate) fn update_spawns(
             && let Some(k) = find(|ev| matches!(ev, PlanEvent::Boss { .. }))
         {
             e.boss_due = None;
-            due.push(k);
+            due.push((k, None));
         }
         director.endless = Some(e);
     }
-    for index in due {
+    for (index, from) in due {
         let spawn_elite = |pool: &[String],
                            rng: &mut Pcg32,
                            en: &mut Enemies,
@@ -337,6 +338,16 @@ pub(crate) fn update_spawns(
                         director.barrier = Some((Vec2::new(p.x, p.y), *barrier));
                     }
                     outbox.0.push(SimEvent::BossArrived { kind });
+                } else {
+                    // 满员时保留夜主事件，腾出槽位后重试
+                    match from {
+                        Some(pos) => plan.schedule[pos].done = false,
+                        None => {
+                            if let Some(e) = &mut director.endless {
+                                e.boss_due = Some(t);
+                            }
+                        }
+                    }
                 }
             }
         }
