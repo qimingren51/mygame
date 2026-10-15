@@ -28,7 +28,7 @@ use lantern_sim::{
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
-use crate::feedback::{Feedback, Priority, eviction};
+use crate::feedback::{Category, Feedback, Priority, eviction};
 use crate::{MainCamera, layer, to_screen};
 
 /// 透视：地面上的圆画成扁圆
@@ -74,8 +74,6 @@ pub(crate) struct FxFrames {
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
     coin: Option<(FrameId, Option<FrameId>)>,
-    /// 九尾扫的扇形预警：轮廓、蓄力填充
-    sector: Option<(FrameId, FrameId)>,
     /// 冲锋预警：车道、箭头
     charge: Option<(FrameId, FrameId)>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
@@ -92,7 +90,6 @@ pub(crate) struct FxFrames {
 const ZONE_LAVA_R: f32 = 43.0;
 const ZONE_MUD_R: f32 = 45.5;
 const ZONE_HERB_R: f32 = 39.5;
-const SECTOR_R: f32 = 32.0;
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
     let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
@@ -133,7 +130,6 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         merchant: prop("merchant"),
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
-        sector: db.find("weapons/sector").zip(db.find("weapons/sector_fill")),
         charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
         ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
@@ -153,6 +149,7 @@ enum OneShot {
     Quake,
     Ult,
     Reaction { color: Color },
+    HostileBlast { color: Color },
     Taiji,
     Residue(WeaponIdentity),
 }
@@ -175,6 +172,21 @@ struct Live {
     t: f32,
     life: f32,
     rot: f32,
+}
+
+impl Live {
+    fn category(&self) -> Category {
+        self.kind.category()
+    }
+}
+
+impl OneShot {
+    fn category(self) -> Category {
+        match self {
+            Self::HostileBlast { .. } => Category::Hostile,
+            _ => Category::Decorative,
+        }
+    }
 }
 
 /// 一次性效果、闪屏。震屏在 `camera.rs`。
@@ -217,10 +229,25 @@ const LIVE_RESERVE: usize = 8;
 impl FxState {
     fn push(&mut self, kind: OneShot, pos: Vec2, r: f32, life: f32) {
         // 死亡残留是最低的一级：挤不掉普通招式，普通招式可以挤掉它；高潮（暴击以上）能用预留的格子。
+        let category = kind.category();
         let priority = if matches!(kind, OneShot::Residue(_)) { Priority::Ambient } else { self.priority };
-        let limit = if priority < Priority::Critical { MAX_LIVE - LIVE_RESERVE } else { MAX_LIVE };
+        let limit = if category == Category::Decorative && priority < Priority::Critical {
+            MAX_LIVE - LIVE_RESERVE
+        } else {
+            MAX_LIVE
+        };
         if self.live.len() >= limit {
-            let Some(index) = eviction(&self.live, priority, |l| l.priority) else { return };
+            // 敌方出手可回收任意装饰槽，后来的玩家高光不能反向挤掉落点。
+            // 64 槽因此始终能容纳一轮五雨点加一扫击；全是敌方效果时才轮换最旧的。
+            let Some(index) = eviction(&self.live, (category, priority), |l| (l.category(), l.priority))
+                .or_else(|| {
+                    (category == Category::Hostile)
+                        .then(|| self.live.iter().position(|l| l.category() == Category::Hostile))
+                        .flatten()
+                })
+            else {
+                return;
+            };
             self.live.remove(index);
         }
         let rot = self.rng.range_f32(0.0, TAU);
@@ -346,7 +373,7 @@ pub(crate) fn read_fx_events(
             }
             SimEvent::SweepStrike { pos, dir } => {
                 let tip = pos + Vec2::new(dir.cos(), dir.sin()) * 110.0;
-                fx.push(OneShot::Blast { color: rgb(0xff4a3a), ice: false }, to_screen(tip), 120.0, 0.35);
+                fx.push(OneShot::HostileBlast { color: rgb(0xff4a3a) }, to_screen(tip), 120.0, 0.35);
             }
             // 回光、九转金丹：金色的大环，震屏
             SimEvent::LastStand { pos } | SimEvent::Revived { pos } => {
@@ -360,7 +387,7 @@ pub(crate) fn read_fx_events(
                 fx.flash(rgb(0xfff1c2), 0.45);
             }
             SimEvent::RainStrike { pos } => {
-                fx.push(OneShot::Blast { color: rgb(0xff6b5a), ice: false }, to_screen(pos), 44.0, 0.3);
+                fx.push(OneShot::HostileBlast { color: rgb(0xff6b5a) }, to_screen(pos), 44.0, 0.3);
             }
             SimEvent::IllusionDispelled { pos } => fx.push(
                 OneShot::Ring { color: rgb(0xd8c8ff), ink: false, light: true, strong: false },
@@ -488,6 +515,7 @@ pub(crate) fn collect_fx(
         }
     }
 
+    let personal_start = (pools.fx.len(), glow.0.len());
     // ---- 照见圈：地上一圈淡淡的墨线；灯芯的灯焰带在圈边跳动
     if let Some(reveal) = &res.reveal
         && reveal.radius > 0.0
@@ -500,7 +528,7 @@ pub(crate) fn collect_fx(
         });
         if reveal.band_dps > 0.0 {
             let kr = px(f.wave, reveal.radius * 2.0 / 0.84);
-            let flicker = (0.22 + 0.05 * (now * 9.0).sin()) * feedback.visibility(Priority::Normal);
+            let flicker = 0.22 + 0.05 * (now * 9.0).sin();
             glow.add(
                 f.wave,
                 hero.extend(layer::EMISSIVE - 2.5),
@@ -518,7 +546,7 @@ pub(crate) fn collect_fx(
             if let WeaponBehavior::Orbit { inner: Some(fire), .. } = slot.behavior(c) {
                 let r = fire.radius * stats.get(Stat::Area);
                 let kr = px(f.wave, r * 2.0 / 0.84);
-                let flicker = (0.28 + 0.06 * (now * 11.0).sin()) * feedback.visibility(Priority::Normal);
+                let flicker = 0.28 + 0.06 * (now * 11.0).sin();
                 glow.add(
                     f.wave,
                     hero.extend(layer::EMISSIVE - 1.5),
@@ -526,15 +554,13 @@ pub(crate) fn collect_fx(
                     0.0,
                     rgb(0xff7a2a).with_alpha(flicker),
                 );
-                glow.light(
-                    &frames,
-                    &db,
-                    hero,
-                    (rgb(0xff8a3d).with_alpha(0.12 * feedback.visibility(Priority::Normal)), r * 1.6),
-                );
+                glow.light(&frames, &db, hero, (rgb(0xff8a3d).with_alpha(0.12), r * 1.6));
             }
         }
     }
+
+    let visibility = Category::Decorative.visibility(&feedback, Priority::Normal, res.readability.gain);
+    dim_personal(&mut pools, &mut glow, personal_start, visibility);
 
     // ---- 反应留下的区域：赤地（橙红的裂纹）、淤泥（暗褐的泥圈）
     if let Some(zones) = &res.zones {
@@ -742,7 +768,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 夜主：结界、幻身、九尾扫与狐火雨的预警
+    // ---- 夜主：结界、幻身；危险区统一交给 telegraphs.rs 描摹模拟几何
     if let Some(dir) = &res.director
         && let Some((c, r)) = dir.barrier
     {
@@ -771,7 +797,11 @@ pub(crate) fn collect_fx(
             if !ef.is_empty() {
                 for (k, m) in bs.illusions.iter().enumerate() {
                     let p = lerp(m.prev, m.pos);
-                    let frame = ef[((now * 8.0) as usize + k * 3) % ef.len()];
+                    let frame = m
+                        .volley
+                        .as_ref()
+                        .and_then(|v| frames.charge_frame(kind, v.t / v.warn))
+                        .unwrap_or(ef[((now * 8.0) as usize + k * 3) % ef.len()]);
                     let flicker = 0.45 + 0.15 * (now * 6.0 + k as f32).sin();
                     pools.fx.push(Draw {
                         flip: m.pos.x > ppos.0.x,
@@ -780,67 +810,6 @@ pub(crate) fn collect_fx(
                     });
                 }
             }
-        }
-        let red = rgb(0xff4a3a);
-        for sw in bs.sweeps.iter().filter(|_| f.sector.is_some()) {
-            // 扇形预警：轮廓按扇形朝向旋转、地面压扁；填充层从顶点往外放大，填满时落下
-            let Some((outline, fill)) = f.sector else { break };
-            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
-            let o = to_screen(sw.origin);
-            let d = Vec2::new(sw.dir.cos(), sw.dir.sin());
-            let radial = to_screen(sw.origin + d * sw.radius) - o;
-            let radial = Vec2::new(radial.x, radial.y * FLAT);
-            let side = to_screen(sw.origin + d.perp() * sw.radius) - o;
-            let side = Vec2::new(side.x, side.y * FLAT);
-            let rot = radial.y.atan2(radial.x);
-            let across = (radial.normalize_or_zero().perp_dot(side)).abs();
-            // 贴图的扇形张角是 120°；九尾扫的张角写在数据里，横向按比例缩放
-            let open = (sw.angle * 0.5).tan() / (std::f32::consts::FRAC_PI_3).tan();
-            let scale =
-                Vec2::new(radial.length(), across * open) / db.frame(outline).radius.unwrap_or(SECTOR_R);
-            pools.fx.push(Draw {
-                scale,
-                rot,
-                color: red.with_alpha(0.35 + 0.3 * u),
-                ..Draw::new(outline, o.extend(layer::GROUND + 0.95))
-            });
-            pools.fx.push(Draw {
-                scale: scale * u,
-                rot,
-                color: red.with_alpha(0.25 + 0.25 * u),
-                ..Draw::new(fill, o.extend(layer::GROUND + 0.96))
-            });
-            glow.add(outline, o.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(0.15 + 0.35 * u));
-        }
-        for sw in bs.sweeps.iter().filter(|_| f.sector.is_none()) {
-            // 没有扇形贴图时：沿扇形铺几排光点，越接近落下越亮
-            let u = (sw.t / sw.warn).clamp(0.0, 1.0);
-            for ring in 1..=4 {
-                let rr = sw.radius * ring as f32 / 4.0;
-                let steps = 3 + ring * 2;
-                for j in 0..=steps {
-                    let a = sw.dir - sw.angle * 0.5 + sw.angle * j as f32 / steps as f32;
-                    let w = sw.origin + Vec2::new(a.cos(), a.sin()) * rr;
-                    glow.add(
-                        f.glow,
-                        to_screen(w).extend(layer::EMISSIVE - 2.0),
-                        Vec2::splat(0.35),
-                        0.0,
-                        red.with_alpha(0.25 + 0.5 * u),
-                    );
-                }
-            }
-        }
-        for d in &bs.drops {
-            let u = (d.t / d.warn).clamp(0.0, 1.0);
-            let k = px(f.ring, d.radius * 2.0);
-            glow.add(
-                f.ring,
-                to_screen(d.pos).extend(layer::EMISSIVE - 2.0),
-                Vec2::new(k, k * FLAT) * (1.2 - 0.2 * u),
-                0.0,
-                red.with_alpha(0.3 + 0.6 * u),
-            );
         }
     }
 
@@ -955,9 +924,8 @@ pub(crate) fn collect_fx(
         l.t < l.life
     });
     for l in &fx.live {
+        let personal_start = (pools.fx.len(), glow.0.len());
         let u = l.t / l.life;
-        let sprites_before = pools.fx.len();
-        let glows_before = glow.0.len();
         match l.kind {
             OneShot::Residue(identity) => draw_residue(l, identity, &f, &parts.f, &db, &mut pools, &mut glow),
             OneShot::Ring { color, ink, light, strong } => {
@@ -1089,8 +1057,8 @@ pub(crate) fn collect_fx(
                     );
                 }
             }
-            OneShot::Blast { color, ice } => {
-                if ice {
+            OneShot::Blast { color, .. } | OneShot::HostileBlast { color } => {
+                if matches!(l.kind, OneShot::Blast { ice: true, .. }) {
                     // 冰爆是向外迸射的尖棱，火爆是向上卷的焰舌。
                     for i in 0..7 {
                         let angle = l.rot + i as f32 * TAU / 7.0;
@@ -1141,15 +1109,11 @@ pub(crate) fn collect_fx(
                 }
             }
         }
-        let visibility = feedback.visibility(l.priority);
-        for draw in &mut pools.fx[sprites_before..] {
-            draw.color.set_alpha(draw.color.alpha() * visibility);
-        }
-        for draw in &mut glow.0[glows_before..] {
-            draw.color.set_alpha(draw.color.alpha() * visibility);
-        }
+        let visibility = l.category().visibility(feedback.as_ref(), l.priority, res.readability.gain);
+        dim_personal(&mut pools, &mut glow, personal_start, visibility);
     }
 
+    let personal_start = (pools.fx.len(), glow.0.len());
     // ---- 石印：预警和下落
     if let Some(seals) = &res.seals {
         for s in &seals.0 {
@@ -1163,7 +1127,7 @@ pub(crate) fn collect_fx(
                 p.extend(layer::EMISSIVE - 2.0),
                 Vec2::new(kr, kr * FLAT),
                 0.0,
-                earth.with_alpha(pulse * show * 0.55 * feedback.visibility(Priority::Normal)),
+                earth.with_alpha(pulse * show * 0.55),
             );
             glow.add(
                 f.warn,
@@ -1265,6 +1229,9 @@ pub(crate) fn collect_fx(
             rgb(0xc9925a).with_alpha(alpha),
         );
     }
+
+    let visibility = Category::Decorative.visibility(&feedback, Priority::Normal, res.readability.gain);
+    dim_personal(&mut pools, &mut glow, personal_start, visibility);
 
     // ---- 拾取物
     if let Some(pickups) = &res.pickups {
@@ -1422,6 +1389,7 @@ pub(crate) fn collect_fx(
 /// 用到的模拟资源（开局前都不存在）。
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct FxSources<'w> {
+    readability: Res<'w, crate::telegraphs::Readability>,
     shots: Option<Res<'w, Shots>>,
     seals: Option<Res<'w, Seals>>,
     fissures: Option<Res<'w, Fissures>>,
@@ -1476,6 +1444,16 @@ pub(crate) fn apply_flash(
         sprite.color = fx.flash.with_alpha(fx.flash.alpha() * feedback.visibility(fx.flash_priority));
         tf.translation.x = cam.translation.x;
         tf.translation.y = cam.translation.y;
+    }
+}
+
+/// 压低当前一段玩家特效请求；只动本帧颜色，不改模拟状态或永久材质。
+fn dim_personal(pools: &mut Pools, glow: &mut GlowRequests, start: (usize, usize), gain: f32) {
+    for draw in &mut pools.fx[start.0..] {
+        draw.color = draw.color.with_alpha(draw.color.alpha() * gain);
+    }
+    for draw in &mut glow.0[start.1..] {
+        draw.color = draw.color.with_alpha(draw.color.alpha() * gain);
     }
 }
 
@@ -1596,6 +1574,60 @@ mod identity_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crowded_frame_keeps_all_five_rain_impacts_and_sweep_in_both_modes() {
+        let content = lantern_content::Content::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"),
+        )
+        .unwrap();
+        for lite in [false, true] {
+            let mut app = App::new();
+            app.insert_resource(GameContent(content.clone().into()))
+                .insert_resource(crate::Feel { lite, ..default() })
+                .init_resource::<Time>()
+                .init_resource::<Time<Real>>()
+                .init_resource::<Feedback>()
+                .init_resource::<SimOutbox>()
+                .init_resource::<FxState>()
+                .add_systems(Update, (crate::feedback::prepare_feedback, read_fx_events).chain());
+            {
+                let mut fx = app.world_mut().resource_mut::<FxState>();
+                fx.priority = Priority::Finale;
+                for _ in 0..MAX_LIVE {
+                    fx.push(OneShot::Ult, Vec2::ZERO, 400.0, 1.0);
+                }
+            }
+            {
+                let mut events = app.world_mut().resource_mut::<SimOutbox>();
+                events.0.push(SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult });
+                for x in 0..5 {
+                    events.0.push(SimEvent::RainStrike { pos: Vec2::new(x as f32, 0.0) });
+                }
+                events.0.push(SimEvent::SweepStrike { pos: Vec2::ZERO, dir: 0.0 });
+            }
+            app.update();
+            let feedback = app.world().resource::<Feedback>();
+            let fx = app.world().resource::<FxState>();
+            let hostile: Vec<_> = fx.live.iter().filter(|l| l.category() == Category::Hostile).collect();
+            assert_eq!(fx.live.len(), MAX_LIVE);
+            assert_eq!(hostile.len(), 6);
+            for x in 0..5 {
+                assert!(hostile.iter().any(|l| l.pos == Vec2::new(x as f32, 0.0) && l.r == 44.0));
+            }
+            assert!(hostile.iter().any(|l| l.pos == Vec2::new(110.0, 0.0) && l.r == 120.0));
+            for l in hostile {
+                assert!(matches!(l.kind, OneShot::HostileBlast { .. }));
+                assert_eq!(l.category().visibility(feedback, l.priority, 0.32), 1.0);
+            }
+            let mut fx = app.world_mut().resource_mut::<FxState>();
+            fx.priority = Priority::Finale;
+            for _ in 0..MAX_LIVE {
+                fx.push(OneShot::Ult, Vec2::ZERO, 400.0, 1.0);
+            }
+            assert_eq!(fx.live.iter().filter(|l| l.category() == Category::Hostile).count(), 6);
+        }
+    }
 
     #[test]
     fn full_transient_pool_reserves_and_then_evicts_for_ultimate() {

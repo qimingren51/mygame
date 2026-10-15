@@ -23,6 +23,7 @@ pub mod lighting;
 mod mist;
 mod particles;
 mod stats;
+mod telegraphs;
 
 use atlas::AtlasDb;
 pub use atmos::{DAWN_LEN, Dawn};
@@ -44,6 +45,8 @@ pub mod layer {
     pub const WEAPONS: f32 = 210.0;
     /// 自发光（叠加）：灯笼窗、妖眼、魂火
     pub const EMISSIVE: f32 = 220.0;
+    /// 危险轮廓在自发光、战斗粒子之上，伤害数字之下。
+    pub const TELEGRAPH: f32 = 260.0;
     pub const NUMBERS: f32 = 300.0;
 }
 
@@ -74,6 +77,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<actors::GlowPool>()
             .init_resource::<actors::GlowRequests>()
             .init_resource::<fx::FxState>()
+            .init_resource::<telegraphs::Readability>()
             .init_resource::<camera::Rig>()
             .init_resource::<feedback::Feedback>()
             .init_resource::<actors::LanternFlare>()
@@ -107,6 +111,7 @@ impl Plugin for ViewPlugin {
                     fx::spawn_flash,
                     fx::reset_fx,
                     impact::reset,
+                    telegraphs::spawn,
                     feedback::reset_feedback,
                     camera::reset_rig,
                     particles::reset_particles,
@@ -147,6 +152,7 @@ impl Plugin for ViewPlugin {
                         .chain(),
                     (
                         impact::read_events,
+                        telegraphs::update_readability,
                         actors::collect_draws,
                         impact::draw_deaths,
                         fx::read_fx_events,
@@ -155,11 +161,15 @@ impl Plugin for ViewPlugin {
                         actors::hero_glow,
                         effects::read_events,
                         effects::update_effects,
+                    )
+                        .chain(),
+                    (
                         particles::particle_events,
                         atmos::atmos_events,
                         atmos::update_atmos,
                         mist::update_mist,
                         particles::update_particles,
+                        telegraphs::draw,
                         actors::apply_pools,
                         actors::apply_glow,
                         ground::scroll_paper,

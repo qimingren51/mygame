@@ -32,6 +32,10 @@ pub struct Sfx {
     pub blast: StaticSoundData,
     pub quake: StaticSoundData,
     pub warn: StaticSoundData,
+    /// 夜主起手：聚火、扫尾、落雨各有固定音色，短起音穿过战斗声。
+    pub volley_warn: StaticSoundData,
+    pub sweep_warn: StaticSoundData,
+    pub rain_warn: StaticSoundData,
     pub warn_big: StaticSoundData,
     pub soul_bell: StaticSoundData,
     pub heal: StaticSoundData,
@@ -379,6 +383,31 @@ impl Sfx {
                     b.drum(i as f32 * 0.24, 0.55, 95.0);
                 }
             }),
+            volley_warn: render(0.7, |b| {
+                b.wood(0.0, 0.22, 620.0);
+                b.bell(880.0, 0.02, 0.12, 0.6);
+                b.osc(Wave::Sine, 180.0, 0.0, 0.65, 0.14, Some((350.0, 0.6)), 0.025);
+            }),
+            sweep_warn: render(0.7, |b| {
+                b.drum(0.0, 0.45, 85.0);
+                b.wood(0.16, 0.2, 440.0);
+                b.noise(
+                    0.0,
+                    0.65,
+                    0.1,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 400.0,
+                        slide: Some(1600.0),
+                        ..Default::default()
+                    },
+                );
+            }),
+            rain_warn: render(0.7, |b| {
+                for (i, f) in [1320.0, 1100.0, 880.0].into_iter().enumerate() {
+                    b.bell(f, i as f32 * 0.12, 0.12, 0.4);
+                }
+            }),
             warn_big: render(4.2, |b| {
                 for i in 0..3 {
                     b.drum(i as f32 * 0.24, 0.55, 75.0);
@@ -592,7 +621,10 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 22] = [
+        let all = [
+            ("volley_warn", &s.volley_warn),
+            ("sweep_warn", &s.sweep_warn),
+            ("rain_warn", &s.rain_warn),
             ("boss_phase", &s.boss_phase),
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),

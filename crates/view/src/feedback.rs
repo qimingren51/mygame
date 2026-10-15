@@ -7,6 +7,34 @@ use lantern_sim::{HitKind, SimEvent, SimOutbox};
 
 use crate::Feel;
 
+/// 敌方出手单独归类，不改变镜头的冲击级别，也不参与玩家高光压暗。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Category {
+    #[default]
+    Decorative,
+    Hostile,
+}
+
+impl Category {
+    pub fn of(event: &SimEvent) -> Self {
+        match event {
+            SimEvent::SweepStrike { .. } | SimEvent::RainStrike { .. } | SimEvent::BossVolley { .. } => {
+                Self::Hostile
+            }
+            _ => Self::Decorative,
+        }
+    }
+
+    /// 两套压暗只取较小值，避免玩家效果重复变暗；敌方出手始终完整显示。
+    pub fn visibility(self, feedback: &Feedback, priority: Priority, personal_gain: f32) -> f32 {
+        if self == Self::Hostile || priority.protected() {
+            1.0
+        } else {
+            feedback.visibility(priority).min(personal_gain)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Priority {
     #[default]
@@ -63,6 +91,9 @@ impl Priority {
 
 /// 只对装饰事件限流。危险预警及灯阵等持久状态仍消费完整队列。
 fn family(event: &SimEvent) -> Option<(u16, Vec2, usize)> {
+    if Category::of(event) == Category::Hostile {
+        return None;
+    }
     match *event {
         SimEvent::Hit { pos, kind: HitKind::Dot, .. } => Some((13, pos, 4)),
         SimEvent::Hit { pos, crit, .. } => Some((u16::from(crit), pos, if crit { 6 } else { 14 })),
@@ -87,8 +118,6 @@ fn family(event: &SimEvent) -> Option<(u16, Vec2, usize)> {
         }
         SimEvent::Reaction { kind, pos, first: false, .. } => Some((32 + u16::from(kind), pos, 2)),
         SimEvent::IllusionDispelled { pos } => Some((12, pos, 3)),
-        SimEvent::RainStrike { pos } => Some((14, pos, 6)),
-        SimEvent::SweepStrike { pos, .. } => Some((15, pos, 2)),
         _ => None,
     }
 }
@@ -198,7 +227,7 @@ pub(crate) fn reset_feedback(mut feedback: ResMut<Feedback>) {
 }
 
 /// 满池时只替换较低级效果，优先清走最弱的；同级旧效果不被小事件驱逐。
-pub(crate) fn eviction<T>(list: &[T], priority: Priority, get: impl Fn(&T) -> Priority) -> Option<usize> {
+pub(crate) fn eviction<T, K: Ord>(list: &[T], priority: K, get: impl Fn(&T) -> K) -> Option<usize> {
     list.iter()
         .enumerate()
         .filter(|(_, item)| get(item) < priority)
@@ -263,6 +292,32 @@ mod tests {
         assert!(f.selected.contains(&500));
         f.prepare(&events, 0.016, true);
         assert_eq!(f.selected.len(), 8);
+    }
+
+    #[test]
+    fn hostile_attacks_bypass_proximity_and_frame_caps_even_in_lite_mode() {
+        let mut events = vec![SimEvent::Strike { pos: Vec2::ZERO, radius: 400.0, fx: StrikeFx::Ult }];
+        events.extend([SimEvent::RainStrike { pos: Vec2::ZERO }; 20]);
+        events.extend([SimEvent::SweepStrike { pos: Vec2::ZERO, dir: 0.0 }; 5]);
+        events.extend([SimEvent::BossVolley { pos: Vec2::ZERO, illusion: true }; 3]);
+        for lite in [false, true] {
+            let mut f = Feedback::default();
+            f.prepare(&events, 0.016, lite);
+            assert_eq!(f.selected.len(), events.len());
+            for index in 0..events.len() {
+                assert!(f.selected.contains(&index));
+            }
+            assert_eq!(f.focus, Priority::Ultimate);
+            for event in &events[1..] {
+                assert_eq!(Category::of(event), Category::Hostile);
+                assert_eq!(Category::of(event).visibility(&f, Priority::of(event), 0.32), 1.0);
+            }
+            assert_eq!(Category::Decorative.visibility(&f, Priority::Impact, 0.32), 0.32);
+            assert_eq!(Category::Decorative.visibility(&f, Priority::Normal, 0.32), 0.22);
+            // 敌方出手不会延长玩家高光的压暗时间。
+            f.prepare(&events[1..], 1.0, lite);
+            assert_eq!(f.visibility(Priority::Normal), 1.0);
+        }
     }
 
     #[test]

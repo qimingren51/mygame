@@ -201,6 +201,27 @@ mod tests {
     }
 
     #[test]
+    fn boss_warning_durations_and_angles_must_be_valid() {
+        for value in [0.0, -0.1, f32::NAN, f32::INFINITY] {
+            for field in ["volley_warn", "sweep.warn", "rain.warn", "sweep.angle"] {
+                let mut c = Content::load(&repo_data_dir()).unwrap();
+                let b = c.enemies.iter_mut().find_map(|e| e.boss.as_mut()).unwrap();
+                match field {
+                    "volley_warn" => b.volley_warn = value,
+                    "sweep.warn" => b.sweep.as_mut().unwrap().warn = value,
+                    "rain.warn" => b.rain.as_mut().unwrap().warn = value,
+                    _ => b.sweep.as_mut().unwrap().angle = value,
+                }
+                let error = c.validate(Path::new("data")).unwrap_err().to_string();
+                assert!(error.contains(field), "{error}");
+            }
+        }
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        c.enemies.iter_mut().find_map(|e| e.boss.as_mut()).unwrap().sweep.as_mut().unwrap().angle = 7.0;
+        assert!(c.validate(Path::new("data")).is_err());
+    }
+
+    #[test]
     fn dangling_references_are_reported() {
         let mut c = Content::load(&repo_data_dir()).unwrap();
         c.run.spawn.mix[0].enemy = "no_such_enemy".into();

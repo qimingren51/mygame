@@ -21,7 +21,7 @@ use lantern_sim::{Arsenal, Director, Enemies, GameContent, HitKind, Player, SimE
 
 use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
 use crate::atlas::{AtlasDb, FrameId};
-use crate::feedback::{Feedback, Priority, eviction};
+use crate::feedback::{Category, Feedback, Priority, eviction};
 use crate::fx::hex;
 use crate::{Feel, layer, to_screen};
 
@@ -214,6 +214,7 @@ pub(crate) fn setup_particles(
         rng: Pcg32::new(0x0b1a_5e20, 5),
         lite: false,
         priority: Priority::Ambient,
+        category: Category::Decorative,
         spawned: [0; Priority::ALL.len()],
         f: PFrames {
             streak: f("fx/streak"),
@@ -238,6 +239,7 @@ pub(crate) fn setup_particles(
 pub(crate) struct P {
     pub frame: FrameId,
     priority: Priority,
+    category: Category,
     pub pos: Vec2,
     pub vel: Vec2,
     /// 离地高度和竖直速度：墨滴抛起再落地
@@ -274,6 +276,7 @@ impl P {
         P {
             frame,
             priority: Priority::Ambient,
+            category: Category::Decorative,
             pos,
             vel: Vec2::ZERO,
             h: 0.0,
@@ -307,6 +310,7 @@ pub(crate) struct Particles {
     /// 精简特效：成团的粒子减半，上限减半
     pub lite: bool,
     priority: Priority,
+    category: Category,
     spawned: [u32; Priority::ALL.len()],
 }
 
@@ -315,9 +319,10 @@ impl Particles {
         self.lite = lite;
         self.spawned = [0; Priority::ALL.len()];
         self.priority = Priority::Ambient;
+        self.category = Category::Decorative;
         let cap = if lite { CAP / 2 } else { CAP };
         if self.list.len() > cap {
-            self.list.sort_by_key(|p| std::cmp::Reverse(p.priority));
+            self.list.sort_by_key(|p| std::cmp::Reverse((p.category, p.priority)));
             self.list.truncate(cap);
         }
     }
@@ -326,15 +331,24 @@ impl Particles {
         let divisor = if self.lite { 2 } else { 1 };
         let priority = self.priority;
         let used = &mut self.spawned[priority as usize];
-        if *used >= FRAME_BUDGET[priority as usize].div_ceil(divisor as u32) {
+        if self.category == Category::Decorative
+            && *used >= FRAME_BUDGET[priority as usize].div_ceil(divisor as u32)
+        {
             return;
         }
         let cap = CAP / divisor;
-        let limit = if priority < Priority::Critical { cap - RESERVE / divisor } else { cap };
+        let limit = if self.category == Category::Decorative && priority < Priority::Critical {
+            cap - RESERVE / divisor
+        } else {
+            cap
+        };
         p.priority = priority;
+        p.category = self.category;
         if self.list.len() < limit {
             self.list.push(p);
-        } else if let Some(index) = eviction(&self.list, priority, |p| p.priority) {
+        } else if let Some(index) =
+            eviction(&self.list, (self.category, priority), |p| (p.category, p.priority))
+        {
             self.list.swap_remove(index);
             self.list.push(p);
         } else if p.core
@@ -346,7 +360,9 @@ impl Particles {
         } else {
             return;
         }
-        *used += 1;
+        if self.category == Category::Decorative {
+            *used += 1;
+        }
     }
 
     /// 一团粒子的个数：精简特效时减半（至少留一个）。
@@ -358,6 +374,7 @@ impl Particles {
         self.list.clear();
         self.spawned = [0; Priority::ALL.len()];
         self.priority = Priority::Ambient;
+        self.category = Category::Decorative;
     }
 
     pub fn len(&self) -> usize {
@@ -725,7 +742,11 @@ pub(crate) fn update_particles(
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
         let fade_out = if u > 0.5 { 1.0 - (u - 0.5) / 0.5 } else { 1.0 };
-        let alpha = p.color.alpha() * fade_in * fade_out * fade_out.sqrt() * feedback.visibility(p.priority);
+        let alpha = p.color.alpha()
+            * fade_in
+            * fade_out
+            * fade_out.sqrt()
+            * p.category.visibility(&feedback, p.priority, 1.0);
         if alpha <= 0.01 {
             continue;
         }
@@ -805,6 +826,7 @@ pub(crate) fn particle_events(
     for &index in &feedback.selected {
         let ev = &outbox.0[index];
         parts.priority = Priority::of(ev);
+        parts.category = Category::of(ev);
         match *ev {
             SimEvent::Hit { impact_pos, incoming_dir, crit, kind, element, weapon, source, .. } => {
                 let at = to_screen(impact_pos);
@@ -983,6 +1005,7 @@ pub(crate) fn particle_events(
         }
     }
     parts.priority = Priority::Ambient;
+    parts.category = Category::Decorative;
     // 走路扬尘：每走一段，脚边起一小团尘
     let moved = clock.last_hero.map_or(0.0, |p| p.distance(hero_at));
     clock.last_hero = Some(hero_at);
@@ -1083,6 +1106,7 @@ mod tests {
             rng: Pcg32::new(1, 2),
             lite: false,
             priority: Priority::Ambient,
+            category: Category::Decorative,
             spawned: [0; Priority::ALL.len()],
             f: PFrames {
                 streak: frame,
@@ -1095,6 +1119,32 @@ mod tests {
                 leaves: [frame; 4],
                 real_leaves: false,
             },
+        }
+    }
+
+    #[test]
+    fn hostile_particles_bypass_frame_budget_and_survive_attack_highlights() {
+        for lite in [false, true] {
+            let mut parts = pool();
+            parts.begin_frame(lite);
+            let cap = if lite { CAP / 2 } else { CAP };
+            let p = P { priority: Priority::Finale, ..P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0) };
+            parts.list.resize(cap, p);
+            parts.category = Category::Hostile;
+            parts.priority = Priority::Impact;
+            let count = FRAME_BUDGET[Priority::Impact as usize] as usize + 1;
+            for _ in 0..count {
+                parts.spawn(P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0));
+            }
+            assert_eq!(parts.len(), cap);
+            assert_eq!(parts.list.iter().filter(|p| p.category == Category::Hostile).count(), count);
+            assert_eq!(parts.spawned[Priority::Impact as usize], 0);
+            parts.begin_frame(lite);
+            parts.priority = Priority::Finale;
+            for _ in 0..cap {
+                parts.spawn(P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0));
+            }
+            assert_eq!(parts.list.iter().filter(|p| p.category == Category::Hostile).count(), count);
         }
     }
 

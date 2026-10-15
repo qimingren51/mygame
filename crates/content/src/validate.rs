@@ -592,6 +592,7 @@ impl Content {
                     "enemies.ron",
                     &[
                         ("boss.volley_every", b.volley_every),
+                        ("boss.volley_warn", b.volley_warn),
                         ("boss.summon_every", b.summon_every),
                         ("boss.shot_speed", b.shot_speed),
                         ("boss.shot_life", b.shot_life),
@@ -599,6 +600,20 @@ impl Content {
                     ],
                 )?;
                 enemy_ref("enemies.ron", "boss.summon", &b.summon)?;
+                // 狐火环蓄力不随狂暴缩短，要比狂暴后最短的出手间隔短，不然一环没放完下一环又来
+                let mut every = b.volley_every;
+                if let Some(i) = &b.illusions {
+                    every = every.min(i.volley_every);
+                }
+                if let Some(sw) = &b.sweep {
+                    every = every.min(sw.volley_every);
+                }
+                if b.volley_warn >= every * b.enrage_mult.min(1.0) {
+                    return c.fail(
+                        "enemies.ron",
+                        format!("{} 的 volley_warn 要比狂暴后最短的狐火环间隔短", e.id),
+                    );
+                }
                 if let Some(i) = &b.illusions {
                     c.fraction("enemies.ron", "illusions.at", i.at)?;
                     c.positive(
@@ -613,9 +628,14 @@ impl Content {
                         &[
                             ("sweep.every", sw.every),
                             ("sweep.radius", sw.radius),
+                            ("sweep.warn", sw.warn),
+                            ("sweep.angle", sw.angle),
                             ("sweep.volley_every", sw.volley_every),
                         ],
                     )?;
+                    if sw.angle > std::f32::consts::TAU {
+                        return c.fail("enemies.ron", "sweep.angle 不能超过一周".into());
+                    }
                 }
                 if let Some(l) = &b.lines
                     && [&l.arrive, &l.phase2, &l.phase3, &l.defeat, &l.retreat, &l.again]
@@ -625,7 +645,10 @@ impl Content {
                     return c.fail("enemies.ron", format!("{} 的台词不能留空", e.id));
                 }
                 if let Some(rn) = &b.rain {
-                    c.positive("enemies.ron", &[("rain.every", rn.every), ("rain.radius", rn.radius)])?;
+                    c.positive(
+                        "enemies.ron",
+                        &[("rain.every", rn.every), ("rain.radius", rn.radius), ("rain.warn", rn.warn)],
+                    )?;
                 }
             }
             if let Some(l) = &e.loot {

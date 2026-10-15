@@ -517,6 +517,8 @@ pub struct ChargeDef {
 pub struct BossDef {
     pub volley_every: f32,
     pub volley_first: f32,
+    /// 狐火环起手时锁定发射位置、方向；本体与幻身共用，狂暴不缩短。
+    pub volley_warn: f32,
     pub volley_count: u32,
     pub shot_speed: f32,
     pub shot_radius: f32,
