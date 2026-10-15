@@ -175,6 +175,21 @@ mod tests {
         assert_eq!(c.passives.len(), 17);
     }
 
+    /// 法器、进化、心法都要有卡片上的一句话（docs/LORE-TEXT.md 3.5、3.6 节）。
+    #[test]
+    fn weapons_and_passives_have_flavor() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        for w in &c.weapons {
+            assert!(!w.flavor.is_empty(), "法器 {} 没写 flavor", w.id);
+            if let Some(evo) = &w.evolution {
+                assert!(!evo.flavor.is_empty(), "进化 {} 没写 flavor", evo.name);
+            }
+        }
+        for p in &c.passives {
+            assert!(!p.flavor.is_empty(), "心法 {} 没写 flavor", p.id);
+        }
+    }
+
     #[test]
     fn invalid_values_are_reported_with_file_name() {
         let mut c = Content::load(&repo_data_dir()).unwrap();

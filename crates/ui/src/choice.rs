@@ -423,6 +423,12 @@ fn card(
         spawn_icon(card, db, fonts, info.icon.as_deref(), &info.glyph, on_paper(info.color), 88.0);
         card.spawn(text(&fonts.title, 36.0, on_paper(info.color), &info.name));
         card.spawn((text(&fonts.body, 16.0, INK, &info.desc), Node { max_width: px(196), ..default() }));
+        if !info.flavor.is_empty() {
+            card.spawn((
+                text(&fonts.body, 13.0, INK_DIM, &info.flavor),
+                Node { max_width: px(196), ..default() },
+            ));
+        }
         card.spawn(text(&fonts.body, 13.0, INK_DIM, &el));
         card.spawn(Node { flex_grow: 1.0, ..default() });
         if let Some(n) = note {
@@ -1023,6 +1029,9 @@ fn spawn_evolve(
                 text(&fonts.body, 20.0, PAPER.with_alpha(0.0), &format!("{} → {}", def.name, evo.name)),
             ));
             root.spawn((EvoPart::Text, text(&fonts.body, 18.0, DIM.with_alpha(0.0), &evo.desc)));
+            if !evo.flavor.is_empty() {
+                root.spawn((EvoPart::Text, text(&fonts.body, 16.0, DIM.with_alpha(0.0), &evo.flavor)));
+            }
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
 }
