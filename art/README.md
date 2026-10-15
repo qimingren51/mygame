@@ -234,6 +234,38 @@ art/.venv/bin/python art/post/test_scroll_qingqiu.py                          # 
 - `weapons/bamboo_spike`：竹刺，锚点居中、朝 +X，`length_units: 28`；`bamboo_spike_trail`：拖尾，叠加、可染色（建议 #A8E6B8），锚点在右端。
 - 卷轴：2400×800 不透明，同一幅画两种天光（长夜只有墨色，天明上色）；左上留给旁白，文字由游戏画。
 
+## 灯驿长卷（post/hub_scroll.py）
+
+```bash
+art/.venv/bin/python art/post/hub_scroll.py            # → out/screens/hub/，审图 review@2x/hub_review_{states,figures,ui_720}.png（约 1.5 分钟）
+art/.venv/bin/python art/post/hub_scroll.py --sample   # 只出样张 review@2x/hub_sample*.png，不写 out/screens/hub/
+art/.venv/bin/python art/post/test_hub_scroll.py       # 自检，含确定性（另画两遍逐字节比对，约 70 秒；--quick 跳过）
+mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/screens/hub/
+```
+
+只出桌面版，Pillow + numpy，不用 Blender。画法复用 `title_screen.py` 和 `scroll_qingqiu.py`（只 import）。固定种子，重复运行逐字节相同。
+
+- **画面**（1920×1080）：
+  - 夜空，月亮留白；
+  - 六座远山，从左到右是常羊、章尾山（最远最淡最高）、北冥、幽都（山口里一座黑城）、丹穴、青丘；
+  - 白墙、挂“灯驿”匾额的门楼、门边刻“正”字的墙、檐下的厅、更鼓、漏刻；
+  - 院子偏左一棵灯树，挂 12 盏纸灯；
+  - 四个写意人物，从左到右是老灯匠、货郎、灯童、说书人。货郎的墙影里有条狐狸尾巴。
+- **人物画法**：先在宣纸上留白，洇两层淡墨淡彩，再用提按有变化的墨线勾轮廓和衣纹。整张画再乘长夜光照，长夜里只有墨色，只有灯边是暖的。
+- **输出格式**（四层心灯、晨光和 mask、`hub.json`）见 `docs/DESIGN.md` 第 15 节“灯驿长卷”。心灯 id 按顺序从 `assets/data/meta.ron` 读；节点数和画里的挂灯位置（`LAMP_SLOTS`，12 个）对不上时脚本报错。悟·金木水火土几盏点亮时，纸上带一丝那一系的颜色。
+- **审图**：从盘上读回 PNG，按游戏的顺序合成，包括 0、6、12 盏灯和青丘天明，青丘晨光按 mask 铺开 25%、50%、75%、100%，以及 1280×720 叠名牌、压暗面板、4:3 裁切。
+- **自检**：
+  - 清单与文件、尺寸一致，节点和人物与 meta.ron、hub.ron 对得上；
+  - 各层在画面里，该在 `safe` 里的都在；
+  - 每盏灯只改自己那一块，点亮后够暖，叠加放大 1.4 倍时不冲白；叠加层峰值 ≤ 0.75、四边为 0；
+  - 火苗 `base` 在火苗矩形里；mask 用满灰阶；晨光只落在自己那座山上；
+  - 文字安全区够暗；离灯远处只有墨色；
+  - 体积（hub.png < 3 MB，整个目录 < 5 MB）；确定性。
+- **已知的不足**：
+  - 人物近看仍有些规整，衣纹不多；
+  - 墙上的影子只投在白墙上，地上那段是一团淡墨；
+  - 章尾山晨光的上沿在 y 97，21:9 会裁掉最淡的一点天光。
+
 ## 正式管线
 
 ```bash

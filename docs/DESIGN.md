@@ -449,7 +449,7 @@ assets/data/
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
-  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底）；地区开场卷轴 `scroll_qingqiu.png`（长夜，只有墨色）和 `scroll_qingqiu_dawn.png`（天明，同一幅画上了颜色），见下面“开场卷轴” |
+  | `screens/` | 不进 index.json：`title.png`（标题画，1920×1080 不透明）、`logo.png`（“提灯夜行”毛笔字 + 朱砂印，透明底）；地区开场卷轴 `scroll_qingqiu.png`（长夜，只有墨色）和 `scroll_qingqiu_dawn.png`（天明，同一幅画上了颜色），见下面“开场卷轴”；灯驿长卷 `hub/`（底图、心灯和晨光叠层、清单 `hub.json`），见下面“灯驿长卷” |
   | `skin/` | 不进 index.json：界面九宫格皮肤，一张图一个文件，清单 `skin.json`（见下面“界面皮肤”） |
   | `index.json` | 清单：`{"atlases": [...], "pages": {"actors": ["actors_0.json", ...]}, "paper": true}` |
 
@@ -499,6 +499,15 @@ assets/data/
 - **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
 - **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15）。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
 - **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。
+- **灯驿长卷**（`screens/hub/`，GAMEPLAY 11.6）：灯驿的全屏背景。点亮的心灯在画里一盏盏亮起，通关的地区远山露出晨光。
+  - **显示**：按“铺满再居中裁边”缩放，s = max(窗口宽 / 1920, 窗口高 / 1080)，不拉伸、不加黑边；所有叠层和坐标走同一个变换。`safe` [96, 128, 1728, 824] 是 16:10 和 21:9 都留得住的区域，人物、心灯、匾额、`text_safe` 都在里面；四个人物还在 x 240–1680 里，4:3 也看得全。
+  - **`hub.png`**：1920×1080 不透明 RGB，长夜，只有墨色。12 盏心灯都不亮；四个人物各自的灯（老灯匠的工作灯、货郎担上的小红灯、灯童的兔子灯、说书人的蜡烛）一直亮着。
+  - **`hub.json`**（坐标都是底图像素，`rect` = [x, y, w, h]，每层都裁到自己的外框）：
+    - `characters`：顺序同 `hub.ron`（smith、peddler、child、teller，←/→ 也按这个顺序）。`rect` 是点击区；`label` 是名字和行当那块文字的上沿中点；`light` = [x, y, 半径]，选中时在这里叠一团暖光。
+    - `lamps.<节点 id>`（id 同 `meta.ron`）四层：`body` 灯身点亮（普通混合）、`flame` 火苗（普通混合，`base` 是火苗底部中点，缩放、摇曳绕它）、`core` 内圈光和 `glow` 外圈光晕（叠加：画面 += RGB × alpha；RGB 是 #FFD98A，alpha 峰值约 0.7，点亮时推到 1.4 倍也不冲白）。节点等级 > 0 就叠这盏灯，光晕亮度可以按 等级 ÷ 最大等级 调。
+    - `dawn.<地区>`：`file` 晨光（普通混合）、`mask` 同尺寸的灰度图（黑 = 最先亮，白 = 最后，边缘带纸纤维，按进度做阈值铺开）、`glow` 山脊上一线金光（叠加）。地区 id：`changyang`、`zhangwei`、`beiming`、`youdu`、`danxue`、`qingqiu`（从左到右；章尾山最远最淡）。现在通关过一更就显示 `qingqiu`。
+    - `text_safe`：画面里安静、够暗的两条，左上放“灯驿 + 灯油、铜钱”，底部放操作提示。`note` 写了合成顺序。
+  - **合成顺序**：底图 → 各灯 `body` → `flame` → `core` + `glow`（叠加）→ 晨光（普通）→ 晨光 `glow`（叠加）。PNG 都是直通 alpha。打开子面板时再压暗。亮灯和晨光铺开的动画见 docs/FEEL.md。
 - **冲锋预警**：`weapons/charge_line` 是车道，锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − `head_len_px`”再旋转；沿 X 透明度一致，拉多长都不走样，宽 `width_px`（2 倍下 28 像素）。`weapons/charge_line_head` 是箭头，锚点在箭头底边正中，放在车道末端、同样旋转、不拉伸，箭尖离锚点 `head_len_px`（2 倍下 51 像素）。两张都是白色、叠加、可染色，建议染 `#FF4A3A`。
 - **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。
