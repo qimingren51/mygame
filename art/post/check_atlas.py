@@ -164,7 +164,7 @@ def check_hub(path: Path, errors: list[str], info: list[str]) -> int:
                 errors.append(f"hub: {file} 实际 {im.size[0]}×{im.size[1]}，rect 写的是 {w}×{h}")
         inside(f"{what}（{file}）", x, y, w, h)
         if blend and spec.get("blend") != blend:
-            errors.append(f"hub: {what} 的 blend 应为 {blend}，实际 {spec.get('blend')}")
+            errors.append(f"hub: {what}：blend 应为 {blend}，实际 {spec.get('blend')}")
 
     layer("底图", {"file": "hub.png", "rect": [0, 0, W, H]}, "RGB")
     safe = tuple(hub.get("safe", (0, 0, W, H)))
@@ -181,20 +181,29 @@ def check_hub(path: Path, errors: list[str], info: list[str]) -> int:
     nodes = ron_ids(ROOT / "assets" / "data" / "meta.ron")
     if sorted(lamps) != sorted(nodes):
         errors.append(f"hub: lamps 的节点 {sorted(lamps)} 应与 meta.ron {sorted(nodes)} 一致")
-    for lid, lp in lamps.items():
+    def lamp(what: str, lp: dict):
+        """一盏四层的灯（心灯、路灯）：body、flame（带 base）普通混合，core、glow 叠加；灯身在安全区里。"""
         missing = [k for k in ("body", "flame", "core", "glow") if k not in lp]
         if missing:
-            errors.append(f"hub: 心灯 {lid} 缺少 {missing}")
-            continue
-        layer(f"心灯 {lid} 的灯身", lp["body"], "RGBA", "normal")
-        layer(f"心灯 {lid} 的火苗", lp["flame"], "RGBA", "normal")
-        layer(f"心灯 {lid} 的内圈光", lp["core"], "RGBA", "add")
-        layer(f"心灯 {lid} 的光晕", lp["glow"], "RGBA", "add")
-        inside(f"心灯 {lid} 的灯身", *lp["body"]["rect"], area=safe)
+            errors.append(f"hub: {what} 缺少 {missing}")
+            return
+        layer(f"{what}的灯身", lp["body"], "RGBA", "normal")
+        layer(f"{what}的火苗", lp["flame"], "RGBA", "normal")
+        layer(f"{what}的内圈光", lp["core"], "RGBA", "add")
+        layer(f"{what}的光晕", lp["glow"], "RGBA", "add")
+        inside(f"{what}的灯身", *lp["body"]["rect"], area=safe)
         bx, by = lp["flame"].get("base", (-1, -1))
         fx, fy, fw, fh = lp["flame"]["rect"]
         if not (fx <= bx <= fx + fw and fy <= by <= fy + fh):
-            errors.append(f"hub: 心灯 {lid} 的火苗 base {bx, by} 不在火苗 rect 里")
+            errors.append(f"hub: {what}的火苗 base {bx, by} 不在火苗 rect 里")
+
+    for lid, lp in lamps.items():
+        lamp(f"心灯 {lid} ", lp)
+    road = hub.get("road_lamps", [])
+    if len(road) > 10:
+        errors.append(f"hub: road_lamps 有 {len(road)} 盏，最多 10 盏")
+    for i, lp in enumerate(road):
+        lamp(f"路灯 {i} ", lp)
     for rid, dp in hub.get("dawn", {}).items():
         layer(f"晨光 {rid}", dp, "RGBA", "normal")
         if "mask" not in dp:
@@ -205,7 +214,7 @@ def check_hub(path: Path, errors: list[str], info: list[str]) -> int:
             layer(f"晨光 {rid} 的辉光", dp["glow"], "RGBA", "add")
     for r in hub.get("text_safe", []):
         inside("text_safe", *r, area=safe)
-    info.append(f"screens/hub: {len(chars)} 个人物、{len(lamps)} 盏心灯、{len(hub.get('dawn', {}))} 处晨光，"
+    info.append(f"screens/hub: {len(chars)} 个人物、{len(lamps)} 盏心灯、{len(road)} 盏路灯、{len(hub.get('dawn', {}))} 处晨光，"
                 f"{total / 1024 / 1024:.1f} MB")
     return total
 
