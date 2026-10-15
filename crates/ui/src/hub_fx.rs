@@ -11,7 +11,7 @@ use bevy::render::render_resource::{AsBindGroup, Extent3d, TextureDimension, Tex
 use bevy::shader::ShaderRef;
 use bevy::ui::Val2;
 
-use lantern_platform::HubNews;
+use lantern_platform::{HubNews, UiCue};
 use lantern_sim::GameContent;
 
 use crate::hub_scene::{
@@ -58,6 +58,9 @@ pub(crate) struct HubAnim {
     dawn: Option<(String, f32)>,
     /// 已经放过余烬、光圈的（灯的 id，哪一层）
     sparked: Vec<(String, LampPart)>,
+    /// 已经出过声的灯、晨光
+    cued: Vec<String>,
+    dawn_cued: bool,
 }
 
 impl HubAnim {
@@ -130,12 +133,29 @@ fn start(
     lamps: Query<(), With<HubLamp>>,
     dawns: Query<(Entity, &HubDawn, &HubImage, &HubDawnMask)>,
     mut reveals: ResMut<Assets<DawnReveal>>,
+    mut cues: MessageWriter<UiCue>,
 ) {
     anim.clock += time.delta_secs().min(0.1);
     let clock = anim.clock;
     anim.lighting.retain(|(_, at)| clock - at < LIGHT_LEN + 1.0);
-    let HubAnim { lighting, sparked, .. } = &mut *anim;
+    let HubAnim { lighting, sparked, cued, dawn, dawn_cued, .. } = &mut *anim;
     sparked.retain(|(id, _)| lighting.iter().any(|(l, _)| l == id));
+    cued.retain(|id| lighting.iter().any(|(l, _)| l == id));
+    // 每盏灯开始点亮、晨光开始铺开的那一刻出声
+    for (id, at) in lighting.iter() {
+        if clock >= *at && !cued.contains(id) {
+            cued.push(id.clone());
+            cues.write(UiCue::LampLit);
+        }
+    }
+    match dawn {
+        Some((_, at)) if clock >= *at && !*dawn_cued => {
+            *dawn_cued = true;
+            cues.write(UiCue::DawnSpread);
+        }
+        None => *dawn_cued = false,
+        _ => {}
+    }
     if anim.dawn.as_ref().is_some_and(|(_, at)| clock - at > DAWN_LEN + 1.0) {
         anim.dawn = None;
     }
