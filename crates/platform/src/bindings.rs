@@ -13,6 +13,8 @@ pub enum Action {
     Right,
     Dash,
     Ult,
+    /// 局内交互（狐村护火、留灯）
+    Interact,
     Pause,
     Confirm,
     Back,
@@ -23,13 +25,14 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Up,
         Self::Down,
         Self::Left,
         Self::Right,
         Self::Dash,
         Self::Ult,
+        Self::Interact,
         Self::Pause,
         Self::Confirm,
         Self::Back,
@@ -38,9 +41,10 @@ impl Action {
         Self::Banish,
         Self::Hub,
     ];
-    pub const BUTTONS: [Self; 9] = [
+    pub const BUTTONS: [Self; 10] = [
         Self::Dash,
         Self::Ult,
+        Self::Interact,
         Self::Pause,
         Self::Confirm,
         Self::Back,
@@ -53,7 +57,7 @@ impl Action {
     fn contexts(self) -> u8 {
         match self {
             Self::Up | Self::Down | Self::Left | Self::Right => 15,
-            Self::Dash | Self::Ult => 1,
+            Self::Dash | Self::Ult | Self::Interact => 1,
             Self::Pause => 9,
             Self::Confirm | Self::Back => 14,
             Self::Reroll | Self::Skip | Self::Banish => 2,
@@ -75,6 +79,7 @@ impl Action {
             Self::Right => KeyCode::KeyD,
             Self::Dash => KeyCode::Space,
             Self::Ult => KeyCode::KeyE,
+            Self::Interact => KeyCode::KeyG,
             Self::Pause | Self::Back => KeyCode::Escape,
             Self::Confirm => KeyCode::Enter,
             Self::Reroll => KeyCode::KeyR,
@@ -94,7 +99,8 @@ impl Action {
             Self::Ult | Self::Reroll => GamepadButton::North,
             Self::Pause => GamepadButton::Start,
             Self::Back => GamepadButton::East,
-            Self::Skip | Self::Hub => GamepadButton::West,
+            // 交互只在游戏进行中生效，跳过、灯驿只在菜单里，同一个键不冲突。
+            Self::Interact | Self::Skip | Self::Hub => GamepadButton::West,
             Self::Banish => GamepadButton::LeftTrigger,
         }
     }
@@ -333,6 +339,14 @@ mod tests {
         assert_eq!(b.key(Action::Dash), KeyCode::Space);
         assert!(b.bind_button(Action::Dash, GamepadButton::South).is_ok());
         assert!(b.bind_button(Action::Hub, GamepadButton::West).is_ok());
+        // 交互与跳过、灯驿共用 X，场景不同；与同在游戏进行中的闪避、燃灯冲突。
+        assert!(b.bind_button(Action::Interact, GamepadButton::West).is_ok());
+        assert_eq!(
+            b.bind_button(Action::Interact, GamepadButton::North),
+            Err(BindError::Conflict(Action::Ult))
+        );
+        assert_eq!(b.bind_key(Action::Interact, KeyCode::Space), Err(BindError::Conflict(Action::Dash)));
+        assert!(b.bind_key(Action::Interact, KeyCode::KeyX).is_ok());
         assert_eq!(
             b.bind_button(Action::Confirm, GamepadButton::East),
             Err(BindError::Conflict(Action::Back))

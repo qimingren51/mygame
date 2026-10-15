@@ -11,6 +11,7 @@
         (when: MetaLit, text: "这一盏，是东街几户人家凑的油。"),
         (when: Lamp("mirror"), text: "你回来了两次，我就知道你还会回来。给你打了面镜子。"),
         (when: Cleared(1), text: "霜瓷灯给你。丹穴的火凶，带盏凉的去。"),
+        (when: Story("qingqiu_left_lantern"), text: "灯芯短了一截？嗯，够它们亮一夜了。"),
         (when: MetaFull, text: "树都亮了。灯驿从来没这么亮过。"),
     ]),
     (id: "peddler", name: "货郎", lines: [
@@ -26,6 +27,10 @@
         (when: Achievement, text: "这个我记下了！（墙上又多了一道）"),
         (when: Charm("longevity"), text: "长命锁借你的，回来要还我。"),
         (when: Cleared(1), text: "狐狸也怕黑吗？那它们现在有灯了吗？"),
+        (when: All([Story("qingqiu_entered"), WithoutStory("qingqiu_guarded_fire"), WithoutStory("qingqiu_left_lantern")]), seen_event: Some("qingqiu_asked_dark"), text: "回来了就好。青丘那边也这么黑吗？下回路过，替我看看那边有没有灯，好不好？"),
+        (when: All([HasCleared(1), WithoutStory("qingqiu_guarded_fire"), WithoutStory("qingqiu_left_lantern")]), seen_event: Some("qingqiu_asked_dark"), text: "狐狸也怕黑吗？那它们现在有灯了吗？……你走的时候，回头看了吗？"),
+        (when: All([Story("qingqiu_guarded_fire"), WithoutStory("qingqiu_left_lantern")]), seen_event: Some("qingqiu_asked_guarded"), text: "狐狸也怕黑吗？那它们现在有灯了吗？你护了一会儿……那你走了以后呢？"),
+        (when: All([Story("qingqiu_guarded_fire"), Story("qingqiu_left_lantern")]), seen_event: Some("qingqiu_asked_lit"), text: "狐狸也怕黑吗？那它们现在有灯了吗？……你留了一盏呀。这一道，我替它们记。"),
     ]),
     (id: "teller", name: "说书人", lines: [
         (when: Idle, text: "白泽说，天下的妖物有一万一千五百二十种。我这儿才记了几页。"),
@@ -33,6 +38,9 @@
         (when: First, text: "坐。白泽图缺了好些页，你路上见着什么妖，回来讲给我听。"),
         (when: Reaction, text: "两系一撞，就有新花样。见得多了，自然就懂。"),
         (when: Cleared(1), text: "梦有深有浅。你要往深处走，就别等天明。"),
+        (when: JournalCount(1), text: "这字迹……是南边灯驿的。他也走过这条路。"),
+        (when: Story("qingqiu_left_lantern"), text: "旧纸上写着没下手。你倒多留了一盏。"),
+        (when: JournalCount(30), text: "一千年……原来是借的。"),
         (when: EndlessBack, text: "走了多深？深处的魂，比上面多吧。"),
     ]),
 ]

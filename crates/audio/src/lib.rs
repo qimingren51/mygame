@@ -536,6 +536,11 @@ fn play_sim_events(
                 let s = a.sfx.coins.clone();
                 a.play_with(&s, 1.0, -8.0);
             }
+            SimEvent::StoryBeat { .. } => {
+                // 檐下一声轻响，不盖住正在靠近的妖物。
+                let s = a.sfx.event.clone();
+                a.play_with(&s, 0.85, -10.0);
+            }
             SimEvent::LanternLit { .. } => {
                 let s = a.sfx.event.clone();
                 a.play(&s);

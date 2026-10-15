@@ -147,6 +147,8 @@ pub struct ChestReveal {
 /// 一局的结算。
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunResult {
+    pub events: std::collections::BTreeSet<String>,
+    pub journals: std::collections::BTreeSet<u8>,
     pub won: bool,
     pub seconds: f32,
     pub kills: u32,
@@ -238,6 +240,7 @@ pub(crate) struct FlowParams<'w, 's> {
     survival: Res<'w, Survival>,
     director: Res<'w, crate::run::Director>,
     discoveries: Res<'w, crate::reactions::Discoveries>,
+    story: ResMut<'w, crate::story::Story>,
     player: Query<'w, 's, &'static mut Health, With<Player>>,
 }
 
@@ -534,6 +537,8 @@ impl FlowParams<'_, '_> {
         }
         let gold = self.progress.gold.floor() as u32;
         self.flow.result = Some(RunResult {
+            events: self.story.events.clone(),
+            journals: self.story.journals.clone(),
             won,
             seconds: secs,
             kills: self.progress.kills,
@@ -596,6 +601,11 @@ pub(crate) fn handle_commands(
             (_, SimCommand::BenchTarget(n)) => {
                 if let RunMode::Bench { enemies } = &mut fp.plan.mode {
                     *enemies = n;
+                }
+            }
+            (SimPhase::Play, SimCommand::Interact) => {
+                for (pos, _) in &player {
+                    fp.story.interact(pos.0);
                 }
             }
             (SimPhase::Play, SimCommand::Dash) => {

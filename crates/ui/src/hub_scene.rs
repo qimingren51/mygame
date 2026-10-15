@@ -427,9 +427,26 @@ pub(crate) fn refresh_scene(
 }
 
 /// 灯驿首页的字：左上角“灯驿”和钱袋，每个人物的名牌（选中的那位多一句台词），底部操作提示。
-/// 位置按长卷当前的缩放换算成屏幕像素。
+/// 位置按长卷当前的缩放换算成屏幕像素。选中那位的台词画出来时记为已听过（只记这一位）；
+/// 返回存档有没有变，变了由调用方写盘。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn labels(
+    commands: &mut Commands,
+    scene: &HubScene,
+    c: &Content,
+    fonts: &Fonts,
+    profile: &mut Profile,
+    news: &HubNews,
+    selected: usize,
+    window: Vec2,
+) -> bool {
+    let spoken = spawn_labels(commands, scene, c, fonts, profile, news, selected, window);
+    spoken && profile.saw_hub(c, selected, news)
+}
+
+/// 画 [`labels`] 的字；返回选中那位的台词有没有画出来。
+#[allow(clippy::too_many_arguments)]
+fn spawn_labels(
     commands: &mut Commands,
     scene: &HubScene,
     c: &Content,
@@ -438,7 +455,8 @@ pub(crate) fn labels(
     news: &HubNews,
     selected: usize,
     window: Vec2,
-) {
+) -> bool {
+    let mut spoken = false;
     let (s, at) = Cover(scene.size()).fit(window);
     let to = |x: f32, y: f32| at + Vec2::new(x, y) * s;
     // 窗口比长卷窄很多时（接近 4:3），两边裁掉的比安全区还多：放字的矩形夹回窗口里
@@ -518,12 +536,14 @@ pub(crate) fn labels(
                     p.spawn(band(JustifyContent::Center)).with_children(|t| {
                         t.spawn(text(&fonts.body, size(26.0, 14.0), PAPER, &format!("{who}：“{line}”")));
                     });
+                    spoken = true;
                 }
                 p.spawn(band(JustifyContent::End)).with_children(|t| {
                     t.spawn(text(&fonts.body, size(20.0, 12.0), DIM, "← →　Enter 进去　Esc 返回"));
                 });
             }
         });
+    spoken
 }
 
 fn hex_gold() -> Color {

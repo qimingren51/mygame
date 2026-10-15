@@ -30,6 +30,7 @@ pub(crate) fn render(template: &str, active: &ActiveInput, settings: &Settings) 
     for (token, action) in [
         ("{dash}", Action::Dash),
         ("{ult}", Action::Ult),
+        ("{interact}", Action::Interact),
         ("{pause}", Action::Pause),
         ("{confirm}", Action::Confirm),
         ("{back}", Action::Back),
@@ -76,5 +77,8 @@ mod tests {
         assert_eq!(render("{dash} 闪避", &active, &settings), "A 闪避");
         settings.bindings.bind_button(Action::Dash, GamepadButton::RightTrigger2).unwrap();
         assert_eq!(render("{dash} 闪避", &active, &settings), "RT 闪避");
+        assert_eq!(render("{interact} 留灯", &active, &settings), "X 留灯");
+        active.device = InputDevice::Keyboard;
+        assert_eq!(render("{interact} 留灯", &active, &settings), "G 留灯");
     }
 }

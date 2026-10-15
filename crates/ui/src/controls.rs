@@ -58,6 +58,7 @@ fn label(action: Action) -> &'static str {
         Action::Right => "向右移动",
         Action::Dash => "闪避",
         Action::Ult => "燃灯",
+        Action::Interact => "交互",
         Action::Pause => "暂停",
         Action::Confirm => "确定",
         Action::Back => "返回",

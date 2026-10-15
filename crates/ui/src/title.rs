@@ -125,8 +125,9 @@ pub(crate) fn input(
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
+    mut reader: ResMut<crate::journals::Reader>,
 ) {
-    if controls.is_open() || transition.active() {
+    if controls.is_open() || transition.active() || reader.open {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -279,6 +280,10 @@ pub(crate) fn input(
             }
         }
         TitleMode::Achievements | TitleMode::Codex => {
+            if *mode == TitleMode::Codex && actions.meta {
+                reader.open = true;
+                return;
+            }
             if actions.back || actions.confirm || clicked.is_some() {
                 let i = if *mode == TitleMode::Codex { 3 } else { 2 };
                 back_to_hub(&mut mode, &mut ui, i);
@@ -458,7 +463,7 @@ fn redraw(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     db: Res<AtlasDb>,
-    profile: Res<Profile>,
+    mut profile: ResMut<Profile>,
     news: Res<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
@@ -481,18 +486,28 @@ fn redraw(
         TitleMode::Omen { picks, .. } => omen_panel(&mut commands, c, &fonts, &skin, &db, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
+        // 台词只确认选中的那位真正说出口的一句；存档有变才写盘，重画不重复写。
         TitleMode::Hub => match &scene {
-            Some(scene) => crate::hub_scene::labels(
-                &mut commands,
-                scene,
-                c,
-                &fonts,
-                &profile,
-                &news,
-                ui.selected,
-                Vec2::new(window.width(), window.height()),
-            ),
-            None => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+            Some(scene) => {
+                if crate::hub_scene::labels(
+                    &mut commands,
+                    scene,
+                    c,
+                    &fonts,
+                    &mut profile,
+                    &news,
+                    ui.selected,
+                    Vec2::new(window.width(), window.height()),
+                ) {
+                    save(&profile);
+                }
+            }
+            None => {
+                hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news);
+                if profile.saw_hub(c, ui.selected, &news) {
+                    save(&profile);
+                }
+            }
         },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
@@ -849,6 +864,7 @@ mod input_tests {
             .init_resource::<TitleUi>()
             .init_resource::<crate::controls::Controls>()
             .init_resource::<crate::transition::InkTransition>()
+            .init_resource::<crate::journals::Reader>()
             .init_resource::<NextState<AppState>>()
             .add_message::<AppExit>()
             .add_systems(Update, input);
