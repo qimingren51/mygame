@@ -1,8 +1,8 @@
-//! 音频层（docs/DESIGN.md 第 10 节）。只消费模拟事件，不影响模拟。
+//! 音频层（docs/DESIGN.md 第 10 节）。只读模拟状态和事件，不影响模拟。
 //!
-//! - 启动时用代码合成全部乐器和音效（[`synth`]、[`sfx`]），不用音频文件。
+//! - 用代码合成全部乐器和音效（[`synth`]、[`sfx`]），音乐采样库后台生成，不用音频文件。
 //! - 音效和音乐各走一条轨道，音量来自设置；音乐轨道带低通滤波，升级选择、暂停时变闷。
-//! - 背景音乐（[`music`]）：低音持续音 + 按种子生成的五声旋律 + 随局势加强的鼓点；夜主出场后换成更紧的节奏。
+//! - 背景音乐（[`music`]）：青丘角调主题与三分钟长曲式，战斗压力驱动分轨，按乐句换配器，天明完整再现。
 //! - 同类声音有最短间隔，几百次命中也不会炸耳朵；音效轨再挂一个压缩器兜底。
 //! - 空间感（docs/FEEL.md 第 6 节）：音效和音乐都送一点到混响轨；有位置的音效按相对主角的
 //!   左右做声像、按远近衰减。濒死时有心跳；夜主倒下时全场静半拍，接着是天明的编钟和晨鸟。
@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
+use kira::clock::ClockSpeed;
 use kira::effect::compressor::CompressorBuilder;
 use kira::effect::filter::{FilterBuilder, FilterHandle};
 use kira::effect::reverb::ReverbBuilder;
@@ -21,17 +22,18 @@ use lantern_content::WeaponIdentity;
 use lantern_core::step::TICK_HZ;
 use lantern_platform::{Settings, UiCue};
 use lantern_sim::combat::StrikeFx;
+use lantern_sim::enemies::Enemies;
 use lantern_sim::pickups::PickupKind;
 use lantern_sim::{
-    AppState, Director, Health, Player, Pos, RunSetup, RunState, SimEvent, SimOutbox, SimPhase, Tick,
+    AppState, Director, GameContent, Health, Player, Pos, RunState, SimEvent, SimOutbox, SimPhase, Tick,
 };
 
 mod music;
 mod sfx;
 mod synth;
 
-use music::{Music, MusicMode};
-use sfx::{Instruments, Sfx};
+use music::{Music, MusicMode, PressureInput};
+use sfx::Sfx;
 use synth::pent;
 
 pub struct AudioPlugin;
@@ -39,18 +41,18 @@ pub struct AudioPlugin;
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_audio)
-            .add_systems(OnEnter(AppState::Title), |mut a: NonSendMut<Audio>| {
+            .add_systems(OnEnter(AppState::Title), |time: Res<Time<Real>>, mut a: NonSendMut<Audio>| {
                 a.muffle(false);
                 a.last_phase = None;
-                a.set_mode(MusicMode::Title, None);
+                a.music.title(time.elapsed_secs_f64());
             })
             .add_systems(OnEnter(AppState::Run), start_run)
             .add_systems(
                 Update,
                 (
+                    update_audio_time,
                     apply_settings,
                     play_ui_cues,
-                    update_clock,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
                     run_music_mode.run_if(in_state(AppState::Run)),
@@ -199,9 +201,14 @@ impl Audio {
         }
     }
 
-    fn set_mode(&mut self, mode: MusicMode, seed: Option<u64>) {
-        let Self { music, music_track, .. } = self;
-        music.set_mode(mode, seed, music_track.as_mut());
+    fn dawn(&mut self) {
+        if self.music.dawn(self.now) {
+            self.duck(0.55);
+            let s = self.sfx.boss_down.clone();
+            self.play_later(&s, 0.6);
+            let s = self.sfx.dawn.clone();
+            self.play_later(&s, 1.6);
+        }
     }
 
     fn muffle(&mut self, on: bool) {
@@ -250,6 +257,10 @@ fn init_audio(world: &mut World) {
         sfx_track = m.add_sub_track(sfx).ok();
         music_track = m.add_sub_track(music).ok();
     }
+    let clock = manager.as_mut().and_then(|m| m.add_clock(ClockSpeed::TicksPerSecond(1.0)).ok());
+    // 音乐在后台合成；时钟先走，采样就绪时再确定第一拍的起点。
+    let mut music = Music::new(clock, music_track.as_mut());
+    music.start_clock();
     world.insert_non_send(Audio {
         _manager: manager,
         sfx_track,
@@ -261,7 +272,7 @@ fn init_audio(world: &mut World) {
         next_heart: 0.0,
         music_filter,
         sfx: Sfx::new(),
-        music: Music::new(Instruments::new()),
+        music,
         last: Vec::new(),
         now: 0.0,
         impact_variant: [[0; 2]; 5],
@@ -292,38 +303,60 @@ fn apply_settings(settings: Option<Res<Settings>>, mut audio: NonSendMut<Audio>)
     }
 }
 
-fn start_run(setup: Res<RunSetup>, mut audio: NonSendMut<Audio>) {
+fn start_run(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
     audio.gem_chain = 0;
-    audio.set_mode(MusicMode::Play, Some(setup.seed));
+    audio.duck_until = None;
+    audio.restore_volume();
+    audio.muffle(false);
+    audio.music.start_run(time.elapsed_secs_f64());
 }
 
-/// 局势：开局、3 分钟、6.5 分钟三档；夜主在场时换成夜主的音乐。选择、暂停、结束时音乐变闷。
+/// 每 0.2 秒只读一次妖物池，不分配临时列表；压力记忆属于音频，不写回模拟。
 fn run_music_mode(
     tick: Option<Res<Tick>>,
+    content: Option<Res<GameContent>>,
+    enemies: Option<Res<Enemies>>,
+    hero: Option<Single<(&Pos, &Health), With<Player>>>,
     director: Option<Res<Director>>,
     phase: Option<Res<SimPhase>>,
     run: Option<Res<State<RunState>>>,
+    mut last_sample: Local<f64>,
     mut audio: NonSendMut<Audio>,
 ) {
-    let secs = tick.map_or(0, |t| t.0 / u64::from(TICK_HZ));
     let boss = director.is_some_and(|d| d.boss.is_some());
     let over = phase.as_deref() == Some(&SimPhase::Over);
-    if !over {
-        audio.music.intensity = if secs < 180 {
-            0
-        } else if secs < 390 {
-            1
-        } else {
-            2
-        };
-        let mode = if boss { MusicMode::Boss } else { MusicMode::Play };
-        if audio.music.mode != mode {
-            audio.set_mode(mode, None);
-        }
-    }
     let menu = phase.as_deref().is_some_and(|p| *p != SimPhase::Play)
         || run.is_some_and(|r| *r.get() != RunState::Playing);
-    audio.muffle(menu);
+    let dt = audio.now - *last_sample;
+    if menu {
+        *last_sample = audio.now;
+    } else if !over && dt >= 0.2 {
+        *last_sample = audio.now;
+        if let (Some(en), Some(hero)) = (enemies, hero) {
+            let (pos, health) = *hero;
+            let nearby = en
+                .iter_alive()
+                .filter(|&i| {
+                    let dx = en.x[i] - pos.0.x;
+                    let dy = en.y[i] - pos.0.y;
+                    en.hp[i] > 0.0 && en.damage[i] > 0.0 && dx * dx + dy * dy <= 180.0 * 180.0
+                })
+                .count();
+            let seconds = tick.map_or(0.0, |t| t.0 as f32 / TICK_HZ as f32);
+            let duration = content.map_or(600.0, |c| c.0.run.duration);
+            let input = PressureInput {
+                enemies: en.count,
+                nearby,
+                hp_ratio: health.hp / health.max.max(1.0),
+                progress: seconds / duration.max(1.0),
+            };
+            let mode = audio.music.pressure.update(input, dt.min(0.5) as f32);
+            audio.music.request(if boss { MusicMode::Boss } else { mode });
+        }
+    }
+    // 天明即使已进入结算，也保留完整频带。
+    let muffle = menu && !audio.music.is_dawn();
+    audio.muffle(muffle);
     let now = phase.as_deref().copied();
     if audio.last_phase == Some(SimPhase::LevelUp) && now != Some(SimPhase::LevelUp) {
         let s = audio.sfx.select.clone();
@@ -332,7 +365,7 @@ fn run_music_mode(
     audio.last_phase = now;
 }
 
-fn update_clock(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
+fn update_audio_time(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
     audio.now = time.elapsed_secs_f64();
 }
 
@@ -342,8 +375,7 @@ fn tick_music(mut audio: NonSendMut<Audio>) {
         audio.duck_until = None;
         audio.restore_volume();
     }
-    let Audio { music, music_track, .. } = &mut *audio;
-    music.tick(now, music_track.as_mut());
+    audio.music.tick(now);
 }
 
 /// 濒死的心跳：生命低于三成时越来越急（和画面的暗角同一个节奏公式）。
@@ -433,12 +465,13 @@ fn play_sim_events(
             }
             // 夜主倒下：全场静半拍，一声低锣；天明时编钟和晨鸟（无尽夜不天明）
             SimEvent::BossDefeated { dawn, .. } => {
-                a.duck(0.55);
-                let s = a.sfx.boss_down.clone();
-                a.play_later(&s, 0.6);
                 if dawn {
-                    let s = a.sfx.dawn.clone();
-                    a.play_later(&s, 1.6);
+                    a.dawn();
+                } else {
+                    a.duck(0.55);
+                    let s = a.sfx.boss_down.clone();
+                    a.play_later(&s, 0.6);
+                    a.music.request(MusicMode::Explore);
                 }
             }
             SimEvent::GemPicked { .. } if a.can("gem", 0.05) => {
@@ -453,9 +486,12 @@ fn play_sim_events(
                 let s = a.sfx.dash.clone();
                 a.play(&s);
             }
-            SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } if a.can("hurt", 0.2) => {
-                let s = a.sfx.hurt.clone();
-                a.play(&s);
+            SimEvent::PlayerHurt { .. } | SimEvent::Sacrifice { .. } => {
+                a.music.pressure.hurt();
+                if a.can("hurt", 0.2) {
+                    let s = a.sfx.hurt.clone();
+                    a.play(&s);
+                }
             }
             SimEvent::LevelUp { .. } if a.can("level", 0.3) => {
                 let s = a.sfx.level_up.clone();
@@ -572,6 +608,9 @@ fn play_sim_events(
                 a.play(&s);
             }
             SimEvent::BossArrived { .. } | SimEvent::Surge => {
+                if matches!(ev, SimEvent::BossArrived { .. }) {
+                    a.music.request(MusicMode::Boss);
+                }
                 let s = a.sfx.warn_big.clone();
                 a.play(&s);
             }
@@ -616,9 +655,13 @@ fn play_sim_events(
                 a.play(&s);
             }
             SimEvent::RunOver { won } => {
-                a.set_mode(MusicMode::None, None);
-                let s = if won { a.sfx.victory.clone() } else { a.sfx.defeat.clone() };
-                a.play(&s);
+                if won {
+                    a.dawn();
+                } else {
+                    a.music.stop();
+                    let s = a.sfx.defeat.clone();
+                    a.play(&s);
+                }
             }
             _ => {}
         }

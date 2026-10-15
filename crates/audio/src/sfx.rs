@@ -4,7 +4,7 @@
 use kira::sound::static_sound::StaticSoundData;
 use lantern_content::WeaponIdentity;
 
-use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, pent, render, render_seeded};
+use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, jiao, pent, render, render_seeded};
 
 /// 渲染好的全部音效。
 pub struct Sfx {
@@ -39,7 +39,6 @@ pub struct Sfx {
     pub event: StaticSoundData,
     pub coins: StaticSoundData,
     pub shield: StaticSoundData,
-    pub victory: StaticSoundData,
     pub defeat: StaticSoundData,
     /// 盖章：朱砂印落下的闷响（共鸣跨阶、反应初见）
     pub stamp: StaticSoundData,
@@ -203,6 +202,57 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
 }
 
 impl Sfx {
+    #[cfg(test)]
+    pub(crate) fn pcm_bytes(&self) -> usize {
+        [
+            &self.hit,
+            &self.crit,
+            &self.kill,
+            &self.gem,
+            &self.level_up,
+            &self.select,
+            &self.evolution,
+            &self.resonance,
+            &self.ult,
+            &self.ult_ready,
+            &self.dash,
+            &self.hurt,
+            &self.sword,
+            &self.bell_pulse,
+            &self.big_bell,
+            &self.seal,
+            &self.blast,
+            &self.quake,
+            &self.warn,
+            &self.warn_big,
+            &self.soul_bell,
+            &self.heal,
+            &self.combo,
+            &self.event,
+            &self.coins,
+            &self.shield,
+            &self.defeat,
+            &self.stamp,
+            &self.heart,
+            &self.boss_phase,
+            &self.boss_down,
+            &self.dawn,
+            &self.elite_down,
+            &self.deeper,
+            &self.bamboo,
+            &self.burn,
+            &self.scroll_unroll,
+            &self.scroll_line,
+            &self.lamp_lit,
+            &self.dawn_spread,
+        ]
+        .into_iter()
+        .chain(self.chest.iter())
+        .chain(self.impacts.iter().flatten().flatten())
+        .map(|s| s.frames.len() * size_of::<kira::Frame>())
+        .sum()
+    }
+
     pub fn new() -> Self {
         Sfx {
             impacts: std::array::from_fn(|i| {
@@ -365,23 +415,6 @@ impl Sfx {
                 b.bell(pent(8), 0.0, 0.06, 0.6);
                 b.noise(0.0, 0.2, 0.05, noise(FilterKind::Band, 1500.0));
             }),
-            victory: render(4.8, |b| {
-                let notes = [
-                    (10, 0.0),
-                    (12, 0.25),
-                    (14, 0.5),
-                    (17, 0.75),
-                    (15, 1.1),
-                    (14, 1.35),
-                    (12, 1.6),
-                    (15, 1.85),
-                    (20, 2.3),
-                ];
-                for (d, at) in notes {
-                    b.pluck(pent(d), 0.1 + at, 0.18, 1.4);
-                }
-                b.gong(73.4, 2.4, 0.2);
-            }),
             stamp: render(0.9, |b| {
                 b.drum(0.0, 0.5, 62.0);
                 b.wood(0.0, 0.14, 330.0);
@@ -520,8 +553,8 @@ impl Sfx {
                 );
             }),
             dawn: render(6.0, |b| {
-                for (i, d) in [15, 19, 22].into_iter().enumerate() {
-                    b.bell(pent(d), i as f32 * 0.45, 0.17 - i as f32 * 0.025, 3.2);
+                for (i, d) in [10, 12, 15].into_iter().enumerate() {
+                    b.bell(jiao(d), i as f32 * 0.45, 0.17 - i as f32 * 0.025, 3.2);
                 }
                 let birds = [
                     (1.1, 3400.0),
@@ -551,33 +584,6 @@ impl Sfx {
     }
 }
 
-/// 音乐用的乐器样本：按基准音高渲染，播放时变速换调。
-pub struct Instruments {
-    /// 拨弦（基准 pent(0) = D3），三种余音长短
-    pub pluck: [StaticSoundData; 3],
-    pub pluck_decays: [f32; 3],
-    /// 木鱼（基准 900 Hz）
-    pub wood: StaticSoundData,
-    /// 太鼓（基准 100 Hz）
-    pub drum: StaticSoundData,
-    /// 锣（基准 49 Hz）
-    pub gong: StaticSoundData,
-}
-
-impl Instruments {
-    pub fn new() -> Self {
-        let decays = [1.1, 1.6, 1.8];
-        let pluck = decays.map(|d| render(d + 0.1, |b: &mut Buf| b.pluck(pent(0), 0.0, 1.0, d)));
-        Instruments {
-            pluck,
-            pluck_decays: decays,
-            wood: render(0.15, |b| b.wood(0.0, 1.0, 900.0)),
-            drum: render(0.6, |b| b.drum(0.0, 1.0, 100.0)),
-            gong: render(3.6, |b| b.gong(49.0, 0.0, 1.0)),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,7 +592,7 @@ mod tests {
     #[test]
     fn sounds_are_audible_and_not_clipped() {
         let s = Sfx::new();
-        let all: [(&str, &StaticSoundData); 23] = [
+        let all: [(&str, &StaticSoundData); 22] = [
             ("boss_phase", &s.boss_phase),
             ("chest5", &s.chest[2]),
             ("deeper", &s.deeper),
@@ -607,7 +613,6 @@ mod tests {
             ("kill", &s.kill),
             ("ult", &s.ult),
             ("evolution", &s.evolution),
-            ("victory", &s.victory),
             ("warn_big", &s.warn_big),
             ("hurt", &s.hurt),
         ];
