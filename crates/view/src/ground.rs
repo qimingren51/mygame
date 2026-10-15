@@ -123,7 +123,7 @@ pub(crate) fn build_decor(mut commands: Commands, db: Res<AtlasDb>) {
         upright(&["ground/qq_shoots_0", "ground/qq_shoots_1"], 1.0),
         upright(&["stone_fox/idle_S_00"], 0.2),
     ];
-    kinds.extend(glowing_prop(&db, "fox_shrine", 0.1));
+    // 狐祠由庭院构图单独生成，散点里不再出现第二座。
     kinds.extend(glowing_prop(&db, "fox_lanterns", 0.12));
     kinds.extend([
         upright(&["rock_a/idle_S_00", "rock_b/idle_S_00", "rock_c/idle_S_00"], 0.8),
@@ -189,6 +189,9 @@ pub(crate) fn update_decor(
                     // 模拟坐标（y 向下）
                     let x = (cx as f32 + rng.next_f32()) * CHUNK;
                     let y = (cy as f32 + rng.next_f32()) * CHUNK;
+                    if rng.next_f32() >= decor_density(Vec2::new(x, y), setup.seed) {
+                        continue;
+                    }
                     // 主角出生点附近不放山石，免得开局挡住
                     if kind.upright && x * x + y * y < 120.0 * 120.0 {
                         continue;
@@ -202,6 +205,9 @@ pub(crate) fn update_decor(
                     let z =
                         if kind.upright { sort_z(layer::ACTORS, y) } else { layer::GROUND + rng.next_f32() };
                     let mut e = commands.spawn((sprite, anchor, Transform::from_xyz(x, -y, z)));
+                    if kind.upright {
+                        e.insert(GroundFoot(foot_radius(&db, frame)));
+                    }
                     if let Some(light) = kind.light {
                         e.insert(light);
                     }
@@ -219,5 +225,153 @@ pub(crate) fn clear_decor(mut commands: Commands, mut decor: ResMut<Decor>) {
         for e in entities {
             commands.entity(e).despawn();
         }
+    }
+}
+
+/// 青丘只有一处狐祠庭院。位置独立派生，不随载入块的顺序或窗口尺寸改变。
+fn shrine_center(seed: u64) -> Vec2 {
+    let mut rng = Pcg32::new(seed ^ 0x7169_6e67_7169_7500, 12);
+    let side = if rng.chance(0.5) { -1.0 } else { 1.0 };
+    Vec2::new(side * rng.range_f32(210.0, 235.0), rng.range_f32(-105.0, -75.0))
+}
+
+#[derive(Debug, PartialEq)]
+struct ShrinePiece {
+    asset: &'static str,
+    pos: Vec2,
+    scale: f32,
+    flip: bool,
+    upright: bool,
+}
+
+/// 成对石狐守住入口，弯曲的落石/爪印带把视线引向祠顶；中轴只留纸面。
+fn shrine_layout(seed: u64) -> Vec<ShrinePiece> {
+    let center = shrine_center(seed);
+    let mut pieces = Vec::new();
+    let mut put = |asset, x, y, scale, flip, upright| {
+        pieces.push(ShrinePiece { asset, pos: center + Vec2::new(x, y), scale, flip, upright })
+    };
+    put("fox_shrine/idle_S_00", 0.0, 0.0, 2.5, false, true);
+    put("stone_fox/idle_S_00", -65.0, 40.0, 1.25, false, true);
+    put("stone_fox/idle_S_00", 65.0, 40.0, 1.25, true, true);
+    put("fox_lanterns/idle_S_00", -103.0, 5.0, 1.25, false, true);
+    put("stone_lantern_dark/idle_S_00", 98.0, 48.0, 1.2, false, true);
+    put("rock_b/idle_S_00", 112.0, -20.0, 1.5, true, true);
+    put("ground/bamboo_0", -123.0, -32.0, 1.6, false, true);
+    put("ground/bamboo_1", 133.0, -42.0, 1.8, true, true);
+    let mut rng = Pcg32::new(seed ^ 0x666f_7873_6872_696e, 12);
+    for k in 0..7 {
+        let y = 65.0 + k as f32 * 23.0;
+        let bend = (k as f32 * 0.43).sin() * 25.0;
+        for side in [-1.0, 1.0] {
+            let x = bend + side * (42.0 + k as f32 * 5.0);
+            put("ground/pebbles_0", x, y, rng.range_f32(0.8, 1.15), side < 0.0, false);
+            put("ground/qq_bamboo_leaves_1", x + side * 23.0, y - 8.0, 1.1, side > 0.0, false);
+        }
+        if k % 2 == 0 {
+            put("ground/qq_fox_tracks", bend - 8.0, y, 0.8, false, false);
+        }
+    }
+    pieces
+}
+
+/// 清出整个庭院及引导小径，边缘再慢慢恢复散点，避免块边界留下密度接缝。
+fn decor_density(at: Vec2, seed: u64) -> f32 {
+    let p = at - (shrine_center(seed) + Vec2::new(0.0, 60.0));
+    let d = (p / Vec2::new(195.0, 250.0)).length();
+    ((d - 1.0) / 0.35).clamp(0.0, 1.0)
+}
+
+#[derive(Component)]
+pub(crate) struct GroundFoot(f32);
+
+fn foot_radius(db: &AtlasDb, frame: FrameId) -> f32 {
+    (db.frame(frame).size.x * 0.3).clamp(5.0, 24.0)
+}
+
+pub(crate) fn spawn_shrine(mut commands: Commands, setup: Res<RunSetup>, db: Res<AtlasDb>) {
+    for p in shrine_layout(setup.seed) {
+        let Some(frame) = db.find(p.asset) else { continue };
+        let (mut sprite, anchor) = db.sprite(frame);
+        sprite.flip_x = p.flip;
+        if !p.upright {
+            sprite.color = Color::WHITE.with_alpha(0.65);
+        }
+        let z = if p.upright { sort_z(layer::ACTORS, p.pos.y) } else { layer::GROUND + 0.1 };
+        let mut e = commands.spawn((
+            sprite,
+            anchor,
+            Transform::from_xyz(p.pos.x, -p.pos.y, z).with_scale(Vec3::new(p.scale, p.scale, 1.0)),
+            DespawnOnExit(AppState::Run),
+        ));
+        if p.upright {
+            e.insert(GroundFoot(foot_radius(&db, frame) * p.scale));
+        }
+        if let Some(asset) = p.asset.split('/').next()
+            && let Some(kind) = glowing_prop(&db, asset, 0.0)
+            && let Some(light) = kind.light
+        {
+            e.insert(light);
+        }
+    }
+}
+
+/// 地标与散景共用角色的影子纹理和精灵池；离屏时不提交绘制请求。
+pub(crate) fn ground_shadows(
+    db: Res<AtlasDb>,
+    frames: Res<crate::actors::ActorFrames>,
+    lights: Res<crate::lighting::SceneLights>,
+    camera: Single<(&Transform, &Projection), With<MainCamera>>,
+    q: Query<(&GroundFoot, &Transform)>,
+    mut pools: ResMut<crate::actors::Pools>,
+) {
+    let (cam, proj) = *camera;
+    let half = match proj {
+        Projection::Orthographic(o) => o.area.half_size(),
+        _ => Vec2::splat(500.0),
+    } + Vec2::splat(100.0);
+    for (foot, tf) in &q {
+        let at = tf.translation.truncate();
+        if (at - cam.translation.truncate()).abs().cmpgt(half).any() {
+            continue;
+        }
+        let (offset, stretch) = crate::lighting::contact_shadow(at, lights.dominant(at), foot.0);
+        pools.fx.push(crate::actors::Draw {
+            scale: stretch * (foot.0 * 2.0 / db.frame(frames.shadow).size.x),
+            color: Color::WHITE.with_alpha(0.55),
+            ..crate::actors::Draw::new(frames.shadow, (at + offset).extend(layer::SHADOW))
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shrine_is_unique_reproducible_and_clear_of_spawn() {
+        for seed in [0, 1, 3, u64::MAX] {
+            let a = shrine_layout(seed);
+            assert_eq!(a, shrine_layout(seed));
+            assert_eq!(a.iter().filter(|p| p.asset.starts_with("fox_shrine/")).count(), 1);
+            assert!(a.iter().filter(|p| p.upright).all(|p| p.pos.length() > 100.0));
+            let center = shrine_center(seed);
+            assert_eq!(decor_density(center, seed), 0.0);
+            assert_eq!(decor_density(center + Vec2::new(0.0, 190.0), seed), 0.0);
+            assert_eq!(decor_density(center + Vec2::splat(600.0), seed), 1.0);
+        }
+        assert_ne!(shrine_layout(1), shrine_layout(2));
+    }
+
+    #[test]
+    fn chunk_random_is_independent_of_visit_order() {
+        let sample = |c| {
+            let mut rng = chunk_rng(3, c);
+            [rng.next_f32(), rng.next_f32()]
+        };
+        let a = IVec2::new(-1, 2);
+        let first = sample(a);
+        let _ = sample(IVec2::new(7, -5));
+        assert_eq!(first, sample(a));
     }
 }

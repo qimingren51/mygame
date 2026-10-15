@@ -16,6 +16,7 @@ mod atmos;
 mod camera;
 mod effects;
 mod feedback;
+mod foreground;
 mod fx;
 mod ground;
 mod hero_feedback;
@@ -36,7 +37,8 @@ pub mod layer {
     pub const PAPER: f32 = 0.0;
     /// 地面装饰占 GROUND .. GROUND + 1
     pub const GROUND: f32 = 10.0;
-    pub const SHADOW: f32 = 50.0;
+    /// 接触阴影在地面笔触与危险填充之下，不能压暗预警。
+    pub const SHADOW: f32 = 9.0;
     pub const GEMS: f32 = 60.0;
     /// 角色按脚底 y 排序，占 ACTORS ± 1
     pub const ACTORS: f32 = 100.0;
@@ -48,6 +50,9 @@ pub mod layer {
     pub const EMISSIVE: f32 = 220.0;
     /// 危险轮廓在自发光、战斗粒子之上，伤害数字之下。
     pub const TELEGRAPH: f32 = 260.0;
+    /// 近景墨竹盖过场景与薄雾，但在法术和危险描边之下。
+    pub const FOREGROUND: f32 = 205.0;
+    pub const DANGER: f32 = 240.0;
     pub const NUMBERS: f32 = 300.0;
 }
 
@@ -87,6 +92,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<particles::ParticleClock>()
             .init_resource::<Feel>()
             .init_resource::<ViewStats>()
+            .init_resource::<foreground::Safety>()
             .init_resource::<mist::MistReady>()
             .add_systems(
                 Startup,
@@ -108,6 +114,8 @@ impl Plugin for ViewPlugin {
                 OnEnter(AppState::Run),
                 (
                     ground::spawn_paper,
+                    ground::spawn_shrine,
+                    foreground::spawn_foreground,
                     effects::spawn_number_pool,
                     fx::spawn_flash,
                     fx::reset_fx,
@@ -128,6 +136,7 @@ impl Plugin for ViewPlugin {
                     lighting::hide_darkness,
                     camera::reset_rig,
                     mist::hide_mist,
+                    lighting::reset_scene_lights,
                 ),
             )
             .add_systems(
@@ -148,6 +157,8 @@ impl Plugin for ViewPlugin {
                         interpolate,
                         actors::animate_hero,
                         camera::advance_rig_time,
+                        lighting::update_scene_lights,
+                        actors::update_hero_shadow,
                         camera::camera_events,
                         camera::update_rig,
                         camera::follow_main_camera,
@@ -173,11 +184,17 @@ impl Plugin for ViewPlugin {
                         mist::update_mist,
                         particles::update_particles,
                         telegraphs::draw,
-                        actors::apply_pools,
-                        actors::apply_glow,
-                        ground::scroll_paper,
-                        ground::update_decor,
-                        stats::end,
+                        (
+                            ground::scroll_paper,
+                            ground::update_decor,
+                            ground::ground_shadows,
+                            foreground::update_foreground,
+                            actors::apply_pools,
+                            actors::apply_glow,
+                            lighting::apply_surface_lights,
+                            stats::end,
+                        )
+                            .chain(),
                     )
                         .chain(),
                 )

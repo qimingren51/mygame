@@ -466,10 +466,9 @@ pub(crate) fn read_fx_events(
 
 /// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
 pub(crate) fn collect_fx(
-    time: Res<Time>,
-    real: Res<Time<Real>>,
+    // 三种时间：虚拟（随顿帧）、现实（燃灯节拍）、定步长（插值）
+    (time, real, fixed): (Res<Time>, Res<Time<Real>>, Res<Time<Fixed>>),
     run: Option<Res<State<RunState>>>,
-    fixed: Res<Time<Fixed>>,
     content: Res<GameContent>,
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
@@ -482,7 +481,9 @@ pub(crate) fn collect_fx(
     mut fx: ResMut<FxState>,
     mut pools: ResMut<Pools>,
     mut glow: ResMut<GlowRequests>,
+    mut foreground: ResMut<crate::foreground::Safety>,
 ) {
+    foreground.clear();
     let dt = time.delta_secs();
     fx.time += dt;
     let now = fx.time;
@@ -845,6 +846,13 @@ pub(crate) fn collect_fx(
                 }
             }
         }
+        // 近景竹子避开扫击、狐火雨的落点（描边在 telegraphs.rs 画）
+        for sw in &bs.sweeps {
+            foreground.protect(to_screen(sw.origin), sw.radius);
+        }
+        for d in &bs.drops {
+            foreground.protect(to_screen(d.pos), d.radius + 12.0);
+        }
     }
 
     // ---- 冲锋的预警：蓄力时身上发亮、地上画出冲锋线（越接近出手越亮，锁定后最亮）
@@ -862,6 +870,7 @@ pub(crate) fn collect_fx(
             let len = ch.speed * ch.duration + en.r[i];
             let start = to_screen(at);
             let screen_dir = to_screen(at + dir * len) - start;
+            foreground.protect(start + screen_dir * 0.5, len * 0.5 + en.r[i]);
             let rot = screen_dir.y.atan2(screen_dir.x);
             // 锁定以后线停下、变亮，给玩家躲的信号
             let locked = en.charge_t[i] <= ch.lock;
@@ -880,9 +889,9 @@ pub(crate) fn collect_fx(
                         scale,
                         rot,
                         color: red.with_alpha(line_a),
-                        ..Draw::new(id, pos.extend(layer::GROUND + 0.97))
+                        ..Draw::new(id, pos.extend(layer::DANGER))
                     });
-                    glow.add(id, pos.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                    glow.add(id, pos.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
                 }
             } else {
                 // 没有专用贴图时借剑光拖尾：锚点在右端，放在终点、朝冲锋方向
@@ -893,9 +902,9 @@ pub(crate) fn collect_fx(
                     scale,
                     rot,
                     color: red.with_alpha(line_a),
-                    ..Draw::new(f.trail, end.extend(layer::GROUND + 0.97))
+                    ..Draw::new(f.trail, end.extend(layer::DANGER))
                 });
-                glow.add(f.trail, end.extend(layer::EMISSIVE - 2.0), scale, rot, red.with_alpha(glow_a));
+                glow.add(f.trail, end.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
             }
             let pulse = 0.6 + 0.4 * (now * 18.0).sin();
             glow.add(

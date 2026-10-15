@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{RenderTarget, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -19,10 +19,12 @@ use bevy::material::specialize::SpecializedMeshPipelineError;
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, TextureFormat,
+    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, ShaderType, TextureFormat,
 };
+use bevy::shader::ShaderRef;
 use bevy::sprite_render::{
-    AlphaMode2d, ExtendedMaterial2d, Material2dKey, Material2dPipeline, Material2dPlugin, MaterialExtension2d,
+    AlphaMode2d, ExtendedMaterial2d, Material2d, Material2dKey, Material2dPipeline, Material2dPlugin,
+    MaterialExtension2d,
 };
 use bevy::window::{PrimaryWindow, WindowResized};
 
@@ -197,11 +199,15 @@ pub struct LightingPlugin;
 
 impl Plugin for LightingPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "surface_light.wesl");
         app.add_plugins((
             Material2dPlugin::<AddMaterial>::default(),
             Material2dPlugin::<MulMaterial>::default(),
+            Material2dPlugin::<SurfaceMaterial>::default(),
         ))
-        .init_resource::<FrameMeshes>();
+        .init_resource::<FrameMeshes>()
+        .init_resource::<SceneLights>()
+        .init_resource::<SurfaceDraws>();
     }
 }
 
@@ -272,4 +278,249 @@ pub(crate) fn resize_lightmap(
 
 pub(crate) fn hide_darkness(mut darkness: Single<&mut Visibility, With<Darkness>>) {
     **darkness = Visibility::Hidden;
+}
+
+// ---------------------------------------------------------------------------
+// 近场受光与接触阴影：只读画面坐标，不向模拟写数据
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct LocalLight {
+    pub pos: Vec2,
+    pub radius: f32,
+    pub strength: f32,
+    pub color: Vec3,
+}
+
+impl LocalLight {
+    fn weight(self, at: Vec2) -> f32 {
+        let falloff = (1.0 - at.distance_squared(self.pos) / self.radius.max(1.0).powi(2)).max(0.0);
+        falloff * falloff * self.strength
+    }
+}
+
+/// 固定三个主光：手灯、燃灯爆光、最近一团夜主狐火。杂兵只取手灯，避免逐妖遍历光源。
+#[derive(Resource, Default)]
+pub(crate) struct SceneLights {
+    pub sources: [LocalLight; 3],
+    burst: f32,
+    burst_pos: Vec2,
+    burst_radius: f32,
+}
+
+impl SceneLights {
+    /// 主角、地标和夜主取当前位置最强的主光；普通妖物仍只算手灯。
+    pub(crate) fn dominant(&self, at: Vec2) -> LocalLight {
+        self.sources.into_iter().max_by(|a, b| a.weight(at).total_cmp(&b.weight(at))).unwrap_or_default()
+    }
+}
+
+pub(crate) fn update_scene_lights(
+    time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
+    db: Res<AtlasDb>,
+    hero: Single<(&Transform, &crate::actors::HeroView), With<lantern_sim::Player>>,
+    foes: Option<Res<lantern_sim::boss::Foes>>,
+    stats: Option<Res<lantern_sim::Stats>>,
+    outbox: Res<lantern_sim::SimOutbox>,
+    mut lights: ResMut<SceneLights>,
+    mut draws: ResMut<SurfaceDraws>,
+) {
+    draws.0.clear();
+    lights.burst = (lights.burst - time.delta_secs() / 0.55).max(0.0);
+    for ev in &outbox.0 {
+        if let lantern_sim::SimEvent::Strike { pos, radius, fx: lantern_sim::combat::StrikeFx::Ult } = ev {
+            lights.burst = 1.0;
+            lights.burst_pos = crate::to_screen(*pos);
+            lights.burst_radius = *radius;
+        }
+    }
+    let (tf, view) = *hero;
+    let pos = tf.translation.truncate();
+    let (socket, color) = view.lamp(&db);
+    let col = color.to_linear();
+    lights.sources[0] = LocalLight {
+        pos: pos + socket,
+        radius: stats.map_or(200.0, |s| {
+            200.0 * s.get(lantern_content::Stat::Area).sqrt() * s.get(lantern_content::Stat::Light)
+        }),
+        strength: 0.85,
+        color: Vec3::new(col.red, col.green, col.blue),
+    };
+    lights.sources[1] = LocalLight {
+        pos: lights.burst_pos,
+        radius: lights.burst_radius.max(240.0),
+        strength: lights.burst * 1.4,
+        color: Vec3::new(1.0, 0.69, 0.32),
+    };
+    // 位置和弹幕精灵一样插值；没有狐火时完全熄灭，不凭空补一团光。
+    lights.sources[2] = foes
+        .as_ref()
+        .and_then(|f| {
+            f.0.iter().min_by(|a, b| {
+                a.pos
+                    .distance_squared(crate::to_screen(pos))
+                    .total_cmp(&b.pos.distance_squared(crate::to_screen(pos)))
+            })
+        })
+        .map_or(LocalLight::default(), |f| LocalLight {
+            pos: crate::to_screen(f.prev.lerp(f.pos, fixed.overstep_fraction())),
+            radius: 155.0,
+            strength: 0.8,
+            color: Vec3::new(1.0, 0.25, 0.16),
+        });
+}
+
+/// 椭圆仍紧贴脚底：离光越远稍长，偏移封顶为脚底半径的 22%，不能变成悬浮的投影。
+pub(crate) fn contact_shadow(at: Vec2, light: LocalLight, radius: f32) -> (Vec2, Vec2) {
+    let delta = at - light.pos;
+    let weight = light.weight(at).min(1.0);
+    if weight <= 0.001 {
+        return (Vec2::ZERO, Vec2::ONE);
+    }
+    let direction = delta / (delta.length_squared() + 24.0 * 24.0).sqrt();
+    let offset = direction * radius * 0.22 * weight;
+    let stretch = Vec2::ONE + direction.abs() * (0.28 * weight);
+    (offset, stretch)
+}
+
+/// 主角/夜主少量叠画；材质和实体按槽复用，不为杂兵增加一次绘制。
+#[derive(Resource, Default)]
+pub(crate) struct SurfaceDraws(pub Vec<crate::actors::Draw>);
+
+#[derive(Clone, Copy, ShaderType, Debug)]
+pub(crate) struct SurfaceUniform {
+    uv_rect: Vec4,
+    tint: Vec4,
+    // xyz：位置与半径；w：强度
+    lights: [Vec4; 3],
+    colors: [Vec4; 3],
+    // x：水平镜像符号；其余保留
+    shape: Vec4,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub(crate) struct SurfaceMaterial {
+    #[uniform(0)]
+    params: SurfaceUniform,
+    #[texture(1)]
+    #[sampler(2)]
+    image: Handle<Image>,
+}
+
+impl Material2d for SurfaceMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://lantern_view/surface_light.wesl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Blend
+    }
+
+    fn specialize(
+        _pipeline: &Material2dPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: Material2dKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        set_blend(
+            descriptor,
+            BlendState {
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::Zero,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+            },
+        );
+        Ok(())
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct SurfaceSlot;
+
+pub(crate) fn apply_surface_lights(
+    mut commands: Commands,
+    db: Res<AtlasDb>,
+    lights: Res<SceneLights>,
+    requests: Res<SurfaceDraws>,
+    mut cache: ResMut<FrameMeshes>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<SurfaceMaterial>>,
+    mut q: Query<
+        (&mut Mesh2d, &MeshMaterial2d<SurfaceMaterial>, &mut Transform, &mut Visibility),
+        With<SurfaceSlot>,
+    >,
+) {
+    let mut iter = requests.0.iter();
+    for (mut mesh, mat, mut tf, mut vis) in &mut q {
+        let Some(d) = iter.next() else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        mesh.0 = cache.mesh(&db, &mut meshes, d.frame, d.flip);
+        if let Some(mut material) = materials.get_mut(&mat.0) {
+            *material = surface_material(&db, &lights, d);
+        }
+        *tf = surface_transform(d);
+        *vis = Visibility::Inherited;
+    }
+    for d in iter {
+        commands.spawn((
+            SurfaceSlot,
+            Mesh2d(cache.mesh(&db, &mut meshes, d.frame, d.flip)),
+            MeshMaterial2d(materials.add(surface_material(&db, &lights, d))),
+            surface_transform(d),
+            DespawnOnExit(lantern_sim::AppState::Run),
+        ));
+    }
+}
+
+fn surface_transform(d: &crate::actors::Draw) -> Transform {
+    Transform::from_translation(d.pos + Vec3::Z * 0.00002).with_scale(d.scale.extend(1.0))
+}
+
+fn surface_material(db: &AtlasDb, lights: &SceneLights, d: &crate::actors::Draw) -> SurfaceMaterial {
+    let f = db.frame(d.frame);
+    let c = d.color.to_linear();
+    SurfaceMaterial {
+        params: SurfaceUniform {
+            uv_rect: Vec4::new(f.uv.min.x, f.uv.min.y, f.uv.max.x, f.uv.max.y),
+            tint: Vec4::new(c.red, c.green, c.blue, c.alpha),
+            lights: lights.sources.map(|l| Vec4::new(l.pos.x, l.pos.y, l.radius, l.strength)),
+            colors: lights.sources.map(|l| l.color.extend(1.0)),
+            shape: Vec4::new(if d.flip { -1.0 } else { 1.0 }, 0.0, 0.0, 0.0),
+        },
+        image: db.image(d.frame),
+    }
+}
+
+pub(crate) fn reset_scene_lights(mut lights: ResMut<SceneLights>, mut draws: ResMut<SurfaceDraws>) {
+    *lights = SceneLights::default();
+    draws.0.clear();
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    #[test]
+    fn contact_shadow_follows_light_and_stays_at_feet() {
+        for dir in [Vec2::X, Vec2::NEG_X, Vec2::Y, Vec2::NEG_Y] {
+            let light = LocalLight { pos: dir * 40.0, radius: 200.0, strength: 1.0, ..default() };
+            let (offset, stretch) = contact_shadow(Vec2::ZERO, light, 12.0);
+            assert!(offset.dot(dir) < 0.0);
+            assert!(offset.length() <= 12.0 * 0.22);
+            assert!(stretch.min_element() >= 1.0 && stretch.max_element() <= 1.28);
+        }
+        let light = LocalLight { radius: 200.0, strength: 1.0, ..default() };
+        assert_eq!(contact_shadow(Vec2::ZERO, light, 12.0), (Vec2::ZERO, Vec2::ONE));
+        assert_eq!(contact_shadow(Vec2::splat(500.0), light, 12.0), (Vec2::ZERO, Vec2::ONE));
+    }
 }

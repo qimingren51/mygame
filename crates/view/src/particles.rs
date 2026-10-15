@@ -1215,7 +1215,8 @@ mod tests {
         let parts = app.world().resource::<Particles>();
         assert_eq!(parts.len(), 1);
         assert_eq!(parts.list[0].t, 0.0);
-        assert!(parts.list[0].z < layer::SHADOW);
+        // 落在地面那一层（#17 起影子在地面之下）
+        assert!((layer::GROUND..layer::GROUND + 1.0).contains(&parts.list[0].z));
         app.update();
         assert!((app.world().resource::<Particles>().list[0].t - 0.02).abs() < 1e-6);
     }
