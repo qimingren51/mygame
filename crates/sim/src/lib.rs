@@ -143,12 +143,12 @@ pub enum SimSet {
     Player,
     /// 刷怪、时间表、奇遇
     Director,
-    /// 重建空间网格（本步之后的查询都用它）
-    Spatial,
     /// 夜主出招
     Ai,
     /// 妖物移动、互推、接触伤害
     Move,
+    /// 妖物移动以后重建空间网格，法器、反应按妖物这一步的位置查；下一步主角阶段的查询也用它
+    Spatial,
     /// 排队的动作、法器、石印与地裂，最后把范围打击变成命中
     Weapons,
     /// 飞剑、弹幕
@@ -190,9 +190,9 @@ impl Plugin for SimPlugin {
                     SimSet::Input,
                     SimSet::Player,
                     SimSet::Director,
-                    SimSet::Spatial,
                     SimSet::Ai,
                     SimSet::Move,
+                    SimSet::Spatial,
                     SimSet::Weapons,
                     SimSet::Projectiles,
                     SimSet::Collide,
@@ -214,9 +214,9 @@ impl Plugin for SimPlugin {
                 (
                     SimSet::Player,
                     SimSet::Director,
-                    SimSet::Spatial,
                     SimSet::Ai,
                     SimSet::Move,
+                    SimSet::Spatial,
                     SimSet::Weapons,
                     SimSet::Projectiles,
                     SimSet::Collide,

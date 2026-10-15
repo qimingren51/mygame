@@ -25,6 +25,13 @@ pub const TAG_FRENZY: u8 = 4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnemyHandle(u32);
 
+impl EnemyHandle {
+    /// 槽位和代数打成的一个数（状态哈希用）。
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 /// 冲锋的阶段：冷却（照常追击）、蓄力（原地转向）、冲出（方向锁定）、收势（原地停）。
 pub const CHARGE_IDLE: u8 = 0;
 pub const CHARGE_WINDUP: u8 = 1;
@@ -267,20 +274,61 @@ impl Enemies {
         (0..self.hi).filter(|&i| self.alive[i])
     }
 
+    /// 每只活着的妖物会影响以后结果的状态都写进去：位置、生命、各种计时和控制、印记、词缀、冲锋。
+    /// 只给画面用的（闪白、上一步位置、灼烧数字的累计）和每步重算的（淤泥、隐身）不写。
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_u32(self.count as u32);
         for i in self.iter_alive() {
             h.write_u32(i as u32);
-            h.write_u32(u32::from(self.kind[i]));
-            h.write_u32(u32::from(self.mark[i]));
-            for v in
-                [self.x[i], self.y[i], self.hp[i], self.kx[i], self.ky[i], self.burn_t[i], self.frozen[i]]
-            {
-                h.write_f32(v);
+            for v in [
+                u32::from(self.kind[i]),
+                u32::from(self.mark[i]),
+                u32::from(self.hit_n[i]),
+                u32::from(self.affix[i]),
+                u32::from(self.tags[i]),
+                u32::from(self.charge[i]),
+                u32::from(self.hard_n[i]),
+                u32::from(self.soft_n[i]),
+                u32::from(self.blast_frozen[i]),
+            ] {
+                h.write_u32(v);
             }
-            if self.charge[i] != CHARGE_IDLE || self.charge_t[i] != 0.0 {
-                h.write_u32(u32::from(self.charge[i]));
-                h.write_f32(self.charge_t[i]);
+            for v in [
+                self.x[i],
+                self.y[i],
+                self.r[i],
+                self.hp[i],
+                self.max_hp[i],
+                self.speed[i],
+                self.damage[i],
+                self.kx[i],
+                self.ky[i],
+                self.wob[i],
+                self.lamp_ready[i],
+                self.slow_t[i],
+                self.slow_amount[i],
+                self.frozen[i],
+                self.stun[i],
+                self.burn_t[i],
+                self.burn_stacks[i],
+                self.burn_dps[i],
+                self.atk_t[i],
+                self.summon_t[i],
+                self.mark_t[i],
+                self.react_cd[i],
+                self.melt[i],
+                self.melt_t[i],
+                self.root[i],
+                self.confuse[i],
+                self.confuse_dir[i],
+                self.rush[i],
+                self.charge_t[i],
+                self.charge_dx[i],
+                self.charge_dy[i],
+                self.hard_t[i],
+                self.soft_t[i],
+            ] {
+                h.write_f32(v);
             }
         }
     }

@@ -218,8 +218,27 @@ pub(crate) struct HashParams<'w, 's> {
     trail: Res<'w, Trail>,
     survival: Res<'w, Survival>,
     director: Res<'w, Director>,
+    plan: Res<'w, RunPlan>,
+    flow: Res<'w, crate::flow::Flow>,
     bamboo: Res<'w, crate::bamboo::Bamboo>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
+}
+
+/// 流程里排队的东西和次数（选项本身由随机流和构筑决定，选完体现在构筑里）。
+fn hash_flow(f: &crate::flow::Flow, h: &mut StateHasher) {
+    for v in [
+        f.rerolls,
+        f.banishes,
+        f.lamp_queue,
+        f.ember,
+        f.charm_queue,
+        f.oil_bonus,
+        f.chest_queue.len() as u32,
+        f.pending_evos.len() as u32,
+    ] {
+        h.write_u32(v);
+    }
+    h.write_f32(f.won_at.unwrap_or(-1.0));
 }
 
 pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
@@ -262,13 +281,9 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.trail.hash_into(&mut h);
     p.survival.hash_into(&mut h);
     p.bamboo.hash_into(&mut h);
-    if let Some(e) = &p.director.endless {
-        e.hash_into(&mut h);
-    }
-    h.write_f32(p.progress.gold);
-    h.write_f32(p.progress.xp);
-    h.write_u32(p.progress.level);
-    h.write_u32(p.progress.kills);
-    h.write_f32(p.progress.ult);
+    p.director.hash_into(&mut h);
+    p.plan.hash_into(&mut h);
+    p.progress.hash_into(&mut h);
+    hash_flow(&p.flow, &mut h);
     log.0.push(HashCheckpoint { tick: p.tick.0, hash: h.finish() });
 }
