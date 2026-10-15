@@ -8,7 +8,7 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 
-use lantern_content::{BlastKind, Element, EventKind, Stat, WeaponBehavior, ZoneKind};
+use lantern_content::{BlastKind, Element, EventKind, Stat, WeaponBehavior, WeaponIdentity, ZoneKind};
 use lantern_core::Pcg32;
 use lantern_sim::boss::{BossState, Foes};
 use lantern_sim::charms::Trail;
@@ -144,6 +144,27 @@ enum OneShot {
     Mark { evolved: bool },
     Blast { color: Color },
     Taiji,
+    Residue(WeaponIdentity),
+}
+
+impl OneShot {
+    fn priority(self) -> u8 {
+        match self {
+            Self::Residue(_) => 0,
+            Self::Taiji | Self::Ring { strong: true, .. } | Self::Mark { evolved: true } => 2,
+            _ => 1,
+        }
+    }
+}
+
+fn residue_life(identity: WeaponIdentity) -> f32 {
+    match identity {
+        WeaponIdentity::Lamp => 1.1,
+        WeaponIdentity::Sword => 0.45,
+        WeaponIdentity::Bell => 0.7,
+        WeaponIdentity::Crane => 0.9,
+        WeaponIdentity::Seal => 1.0,
+    }
 }
 
 struct Live {
@@ -161,6 +182,7 @@ pub(crate) struct FxState {
     rng: Pcg32,
     live: Vec<Live>,
     time: f32,
+    residue_quiet: f32,
     /// 石灯笼点亮的时刻（按下标），光区从小慢慢铺开
     lamp_lit: Vec<(u8, f32)>,
     pub flash: Color,
@@ -174,6 +196,7 @@ impl Default for FxState {
             rng: Pcg32::new(0xf00d_2026, 3),
             live: Vec::new(),
             time: 0.0,
+            residue_quiet: 0.0,
             lamp_lit: Vec::new(),
             flash: Color::NONE,
             mist: None,
@@ -185,8 +208,15 @@ const MAX_LIVE: usize = 160;
 
 impl FxState {
     fn push(&mut self, kind: OneShot, pos: Vec2, r: f32, life: f32) {
-        if self.live.len() >= MAX_LIVE {
-            self.live.remove(0);
+        let limit = if kind.priority() == 2 { MAX_LIVE } else { MAX_LIVE - 8 };
+        if self.live.len() >= limit {
+            let Some((i, old)) = self.live.iter().enumerate().min_by_key(|(_, l)| l.kind.priority()) else {
+                return;
+            };
+            if old.kind.priority() > kind.priority() {
+                return;
+            }
+            self.live.remove(i);
         }
         let rot = self.rng.range_f32(0.0, TAU);
         self.live.push(Live { kind, pos, r, t: 0.0, life, rot });
@@ -216,9 +246,47 @@ fn element_rgb(e: Element) -> Color {
 }
 
 /// 把模拟事件变成一次性效果和闪屏。
-pub(crate) fn read_fx_events(content: Res<GameContent>, outbox: Res<SimOutbox>, mut fx: ResMut<FxState>) {
+pub(crate) fn read_fx_events(
+    content: Res<GameContent>,
+    outbox: Res<SimOutbox>,
+    time: Res<Time>,
+    feel: Res<crate::Feel>,
+    mut fx: ResMut<FxState>,
+) {
+    fx.residue_quiet = (fx.residue_quiet - time.delta_secs()).max(0.0);
+    let climax = outbox.0.iter().any(|e| {
+        matches!(
+            e,
+            SimEvent::BossDefeated { .. }
+                | SimEvent::Strike { fx: StrikeFx::Ult | StrikeFx::Taiji | StrikeFx::Toll, .. }
+        )
+    });
+    if climax {
+        fx.residue_quiet = 0.5;
+        fx.live.retain(|l| !matches!(l.kind, OneShot::Residue(_)));
+    }
+    let mut residues = 0;
+    let cap = if feel.lite { 12 } else { 24 };
+    let per_frame = if feel.lite { 4 } else { 8 };
     for ev in &outbox.0 {
         match *ev {
+            SimEvent::Kill { pos, kind, weapon, incoming_dir, .. }
+                if fx.residue_quiet == 0.0 && residues < per_frame =>
+            {
+                let Some(identity) = WeaponIdentity::resolve(&content.0, weapon) else { continue };
+                let count = fx.live.iter().filter(|l| matches!(l.kind, OneShot::Residue(_))).count();
+                if count >= cap || fx.live.len() >= MAX_LIVE - 8 {
+                    continue;
+                }
+                residues += 1;
+                let radius = content.0.enemies[kind as usize].radius.clamp(8.0, 22.0);
+                let before = fx.live.len();
+                fx.push(OneShot::Residue(identity), to_screen(pos), radius, residue_life(identity));
+                if fx.live.len() > before {
+                    let dir = to_screen(incoming_dir);
+                    fx.live.last_mut().unwrap().rot = dir.y.atan2(dir.x);
+                }
+            }
             SimEvent::Reaction { kind, pos, first, .. } => {
                 let r = &content.0.elements.reactions[kind as usize];
                 let color = element_rgb(r.b);
@@ -353,6 +421,7 @@ pub(crate) fn collect_fx(
     db: Res<AtlasDb>,
     frames: Res<ActorFrames>,
     f: Res<FxFrames>,
+    parts: Res<crate::particles::Particles>,
     res: FxSources,
     player: Single<(&Pos, &PrevPos, &Player)>,
     cam: Single<(&Transform, &Projection), With<MainCamera>>,
@@ -890,6 +959,7 @@ pub(crate) fn collect_fx(
     for l in &fx.live {
         let u = l.t / l.life;
         match l.kind {
+            OneShot::Residue(identity) => draw_residue(l, identity, &f, &parts.f, &db, &mut pools, &mut glow),
             OneShot::Ring { color, ink, light, strong } => {
                 let rr = 12.0 + (l.r - 12.0) * (1.0 - (1.0 - u) * (1.0 - u));
                 let k = px(f.ring, rr * 2.0);
@@ -1027,12 +1097,23 @@ pub(crate) fn collect_fx(
             }
             for (k, c) in slot.cranes.iter().enumerate() {
                 let p = lerp(c.prev, c.pos) + Vec2::new(0.0, 6.0);
-                let frame = seq[((now * 12.0 + k as f32 * 1.3) as usize) % seq.len()];
-                let ang = -c.angle;
+                let rest = match slot.behavior(&content.0) {
+                    WeaponBehavior::Seeker { rest, .. } => *rest,
+                    _ => 0.0,
+                };
+                let contact_age = rest - c.rest;
+                let contacting = !c.striking && c.target.is_some() && (0.0..0.15).contains(&contact_age);
+                let frame = if contacting && contact_age < 0.05 {
+                    seq[0]
+                } else {
+                    seq[((now * 12.0 + k as f32 * 1.3) as usize) % seq.len()]
+                };
+                let contact = if contacting { (1.0 - contact_age / 0.15).max(0.0) } else { 0.0 };
+                let ang = -c.angle + contact * 0.18;
                 // 向左飞时上下翻转，保持鹤背朝上
                 let flip_y = if c.angle.cos() < 0.0 { -1.0 } else { 1.0 };
                 pools.fx.push(Draw {
-                    scale: Vec2::new(1.0, flip_y),
+                    scale: Vec2::new(1.0 - contact * 0.18, flip_y * (1.0 + contact * 0.12)),
                     rot: ang,
                     ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, c.pos.y)))
                 });
@@ -1268,5 +1349,117 @@ pub(crate) fn apply_flash(
         sprite.color = fx.flash;
         tf.translation.x = cam.translation.x;
         tf.translation.y = cam.translation.y;
+    }
+}
+
+/// 残留只用已有图集，每组最多六次绘制；在普通特效与地面层之间保持克制。
+fn draw_residue(
+    l: &Live,
+    identity: WeaponIdentity,
+    f: &FxFrames,
+    p: &crate::particles::PFrames,
+    db: &AtlasDb,
+    pools: &mut Pools,
+    glow: &mut GlowRequests,
+) {
+    use WeaponIdentity::*;
+    let u = l.t / l.life;
+    let fade = (1.0 - u).powi(2);
+    let axis = Vec2::from_angle(l.rot);
+    let ground = layer::GROUND + 0.96;
+    let color = match identity {
+        Lamp => rgb(0xff6528),
+        Sword => rgb(0xf5e6b4),
+        Bell => rgb(0xc6eeff),
+        Crane => rgb(0x92dcb4),
+        Seal => rgb(0xb79a6b),
+    };
+    if identity == Sword {
+        let size = Vec2::new(l.r * 3.0 / db.frame(p.slash).size.x, 0.06);
+        pools.fx.push(Draw {
+            rot: l.rot,
+            scale: size * 1.15,
+            color: crate::particles::INK.with_alpha(fade * 0.65),
+            ..Draw::new(p.slash, l.pos.extend(ground))
+        });
+        glow.add(
+            p.streak,
+            l.pos.extend(layer::EMISSIVE - 1.0),
+            Vec2::new(l.r * 2.4 / db.frame(p.streak).size.x, 0.07),
+            l.rot,
+            color.with_alpha(fade * 0.5),
+        );
+        return;
+    }
+    if matches!(identity, Bell | Seal) {
+        let ring = if identity == Seal { f.ring_ink } else { f.ring };
+        let k = l.r * (1.4 + 0.5 * u) / db.frame(ring).size.x;
+        pools.fx.push(Draw {
+            scale: Vec2::new(k, k * FLAT),
+            color: color.with_alpha(fade * 0.45),
+            ..Draw::new(ring, l.pos.extend(ground))
+        });
+        if identity == Seal {
+            pools.fx.push(Draw {
+                scale: Vec2::new(k * 0.8, k * 0.3),
+                color: crate::particles::INK.with_alpha(fade * 0.35),
+                ..Draw::new(p.drop, l.pos.extend(ground - 0.01))
+            });
+        }
+    }
+    for i in 0..4 {
+        let n = i as f32;
+        let dir = Vec2::from_angle(l.rot + n * 2.4);
+        let off = dir * l.r * (0.18 + n * 0.13) + axis * (u * 2.0);
+        let drift = match identity {
+            Lamp => Vec2::Y * u * (5.0 + n),
+            Crane => dir.perp() * (u * 8.0) + Vec2::Y * ((u * 7.0 + n).sin() * 2.0),
+            _ => Vec2::ZERO,
+        };
+        let pos = l.pos + Vec2::new(off.x, off.y * FLAT) + drift;
+        let frame = if identity == Lamp && i % 2 == 0 { p.ember } else { p.ash };
+        let scale = match identity {
+            Bell => Vec2::new(0.12, 0.35),
+            Crane => Vec2::new(0.40, 0.21) * (0.8 + 0.2 * (u * 14.0 + n).cos().abs()),
+            _ => Vec2::splat(0.22 + n * 0.035),
+        };
+        let rot = l.rot + n + if identity == Crane { u * 2.0 } else { 0.0 };
+        if identity == Lamp && i % 2 == 0 {
+            glow.add(frame, pos.extend(layer::EMISSIVE - 1.0), scale, rot, color.with_alpha(fade * 0.6));
+        } else {
+            pools.fx.push(Draw {
+                scale,
+                rot,
+                color: if identity == Lamp {
+                    crate::particles::INK.with_alpha(fade * 0.6)
+                } else {
+                    color.with_alpha(fade * 0.7)
+                },
+                ..Draw::new(frame, pos.extend(ground + 0.01))
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn residues_yield_to_highlights_and_cannot_evict_them() {
+        let mut fx = FxState::default();
+        for _ in 0..MAX_LIVE - 8 {
+            fx.push(OneShot::Residue(WeaponIdentity::Lamp), Vec2::ZERO, 10.0, 1.0);
+        }
+        for _ in 0..MAX_LIVE {
+            fx.push(OneShot::Taiji, Vec2::ZERO, 10.0, 1.0);
+        }
+        assert_eq!(fx.live.len(), MAX_LIVE);
+        assert!(fx.live.iter().all(|l| l.kind.priority() == 2));
+        fx.push(OneShot::Residue(WeaponIdentity::Seal), Vec2::ZERO, 10.0, 1.0);
+        assert!(fx.live.iter().all(|l| l.kind.priority() == 2));
+        for identity in WeaponIdentity::ALL {
+            assert!((0.4..=1.2).contains(&residue_life(identity)));
+        }
     }
 }

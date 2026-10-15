@@ -227,7 +227,11 @@ pub(crate) fn update_shots(
                 s.target = None;
             }
             hits.0.push(
-                Hit::new(h, s.damage, s.source).knock(s.knockback, s.pos).flags(s.flags).element(s.element),
+                Hit::new(h, s.damage, s.source)
+                    .knock(s.knockback, s.pos)
+                    .incoming(s.vel)
+                    .flags(s.flags)
+                    .element(s.element),
             );
             s.pierce = s.pierce.saturating_sub(1);
             if s.pierce == 0 {

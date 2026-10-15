@@ -273,6 +273,14 @@ pub fn render(secs: f32, f: impl FnOnce(&mut Buf)) -> StaticSoundData {
     b.finish().to_sound()
 }
 
+/// 独立噪声种子的材质变体，不改变其他音效的合成结果。
+pub fn render_seeded(secs: f32, seed: u32, f: impl FnOnce(&mut Buf)) -> StaticSoundData {
+    let mut b = Buf::new(secs);
+    b.noise = Noise(seed.max(1));
+    f(&mut b);
+    b.finish().to_sound()
+}
+
 /// 可以无缝循环的低音持续音：两个三角波（频率取 0.25 Hz 的整数倍，4 秒正好整周期）经过低通。
 pub fn drone(a: f32, b: f32) -> StaticSoundData {
     let q = |f: f32| (f * 4.0).round() / 4.0;

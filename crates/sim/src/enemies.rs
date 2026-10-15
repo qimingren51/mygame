@@ -22,7 +22,7 @@ pub const TAG_CHILD: u8 = 2;
 pub const TAG_FRENZY: u8 = 4;
 
 /// 指向某只妖物的句柄。妖物死后（或槽位被复用后）解析为 `None`。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnemyHandle(u32);
 
 impl EnemyHandle {

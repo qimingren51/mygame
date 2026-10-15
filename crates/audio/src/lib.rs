@@ -17,6 +17,7 @@ use kira::sound::static_sound::StaticSoundData;
 use kira::track::{SendTrackBuilder, SendTrackHandle, TrackBuilder, TrackHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Mix, Panning, StartTime, Tween};
 
+use lantern_content::WeaponIdentity;
 use lantern_core::step::TICK_HZ;
 use lantern_platform::{Settings, UiCue};
 use lantern_sim::combat::StrikeFx;
@@ -49,6 +50,7 @@ impl Plugin for AudioPlugin {
                 (
                     apply_settings,
                     play_ui_cues,
+                    update_clock,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
                     run_music_mode.run_if(in_state(AppState::Run)),
@@ -119,6 +121,7 @@ pub struct Audio {
     /// 各种音效上次播放的时刻（秒），用于限制间隔
     last: Vec<(&'static str, f64)>,
     now: f64,
+    impact_variant: [[usize; 2]; 5],
     /// 拾取魂火的连拾次数；停顿一会儿回到起点
     gem_chain: i32,
     gem_last: f64,
@@ -261,6 +264,7 @@ fn init_audio(world: &mut World) {
         music: Music::new(Instruments::new()),
         last: Vec::new(),
         now: 0.0,
+        impact_variant: [[0; 2]; 5],
         gem_chain: 0,
         gem_last: 0.0,
         muffled: false,
@@ -328,8 +332,11 @@ fn run_music_mode(
     audio.last_phase = now;
 }
 
-fn tick_music(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
+fn update_clock(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
     audio.now = time.elapsed_secs_f64();
+}
+
+fn tick_music(mut audio: NonSendMut<Audio>) {
     let now = audio.now;
     if audio.duck_until.is_some_and(|t| now >= t) {
         audio.duck_until = None;
@@ -364,6 +371,7 @@ fn heartbeat(
 }
 
 fn play_sim_events(
+    content: Res<lantern_sim::GameContent>,
     outbox: Res<SimOutbox>,
     hero: Option<Single<&Pos, With<Player>>>,
     mut audio: NonSendMut<Audio>,
@@ -378,10 +386,28 @@ fn play_sim_events(
     if a.now - a.gem_last > 0.6 {
         a.gem_chain = 0;
     }
-    for ev in &outbox.0 {
+    let mut impact_voices = 0;
+    let critical = |e: &&SimEvent| matches!(e, SimEvent::Hit { crit: true, .. });
+    for ev in outbox.0.iter().filter(critical).chain(outbox.0.iter().filter(|e| !critical(e))) {
         match *ev {
-            SimEvent::Hit { crit, kind, pos, .. } => {
-                if kind == lantern_sim::HitKind::Dot {
+            SimEvent::Hit { crit, kind, pos, impact_pos, weapon, .. } => {
+                if matches!(kind, lantern_sim::HitKind::Dot | lantern_sim::HitKind::Reaction) {
+                    continue;
+                }
+                if let Some(identity) = WeaponIdentity::resolve(&content.0, weapon) {
+                    if impact_voices >= 8 {
+                        continue;
+                    }
+                    let (i, key, gap) = sfx::impact_group(identity, crit);
+                    if a.can(key, gap) {
+                        impact_voices += 1;
+                        let c = usize::from(crit);
+                        let v = a.impact_variant[i][c];
+                        a.impact_variant[i][c] = (v + 1) % 3;
+                        let sound = a.sfx.impacts[i][c][v].clone();
+                        let rate = 0.96 + (a.now * 3571.0 + i as f64 * 0.17).fract() * 0.08;
+                        a.play_at(&sound, rate, 0.0, place(impact_pos));
+                    }
                     continue;
                 }
                 if crit {
@@ -522,10 +548,6 @@ fn play_sim_events(
             SimEvent::SwordFired { .. } if a.can("sword", 0.1) => {
                 let s = a.sfx.sword.clone();
                 a.play(&s);
-            }
-            SimEvent::CraneStrike { pos } if a.can("crane", 0.08) => {
-                let s = a.sfx.crane.clone();
-                a.play_at(&s, 1.0, 0.0, place(pos));
             }
             SimEvent::Strike { fx, pos, .. } => {
                 let (name, gap, sound) = match fx {

@@ -82,6 +82,8 @@ pub struct Hit {
     pub knockback: f32,
     /// 击退方向的来源点
     pub from: Vec2,
+    /// 仅供表现的速度方向，不参与击退或状态哈希
+    pub incoming: Vec2,
     pub flags: u8,
     /// 大于 0 时，对夜主的单次伤害不超过它
     pub boss_cap: f32,
@@ -104,6 +106,7 @@ impl Hit {
             damage,
             knockback: 0.0,
             from: Vec2::ZERO,
+            incoming: Vec2::ZERO,
             flags: 0,
             boss_cap: 0.0,
             stun: 0.0,
@@ -127,10 +130,42 @@ impl Hit {
         self
     }
 
+    pub fn incoming(mut self, velocity: Vec2) -> Self {
+        self.incoming = velocity;
+        self
+    }
+
     pub fn flags(mut self, flags: u8) -> Self {
         self.flags = flags;
         self
     }
+}
+
+/// 接触几何只附带给表现；不改变原来的击退计算。
+pub fn hit_contact(center: Vec2, radius: f32, from: Vec2, player: Vec2, velocity: Vec2) -> (Vec2, Vec2) {
+    let dir = velocity
+        .try_normalize()
+        .or_else(|| (center - from).try_normalize())
+        .or_else(|| (center - player).try_normalize())
+        .unwrap_or(Vec2::ZERO);
+    (center - dir * radius, dir)
+}
+
+impl Source {
+    pub fn weapon(self, content: &Content) -> Option<u16> {
+        match self {
+            Self::Weapon(i) => Some(i),
+            Self::BonusSword => content.weapon_index("sword").map(|i| i as u16),
+            _ => None,
+        }
+    }
+}
+
+/// 最后一击的表现信息，不进入状态哈希。
+#[derive(Clone, Copy, Debug)]
+pub struct KillingHit {
+    pub source: Source,
+    pub incoming_dir: Vec2,
 }
 
 /// 本步待结算的命中，按产生顺序。
@@ -224,6 +259,7 @@ pub struct ActionQueue(pub Vec<Deferred>);
 /// 一只妖物的死亡，Death 阶段处理。
 #[derive(Clone, Copy, Debug)]
 pub struct Death {
+    pub hit: KillingHit,
     pub handle: EnemyHandle,
     pub pos: Vec2,
     pub kind: u16,
@@ -394,7 +430,7 @@ pub(crate) fn resolve_hits(
     mut log: ResMut<DamageLog>,
     mut outbox: ResMut<SimOutbox>,
     mut react: ReactRes,
-    player: Single<&Player>,
+    player: Single<(&Player, &Pos)>,
 ) {
     let content = &content.0;
     let rng = rng.0.get(Stream::Combat);
@@ -402,7 +438,7 @@ pub(crate) fn resolve_hits(
     let crit_chance = stats.get(Stat::CritChance);
     let crit_mult = stats.get(Stat::CritMult);
     // 加成区：定海神针的站定、移动加成也算在这里
-    let dmg_mult = stats.get(Stat::Damage) + stance(&stats, &content.player.charms, &player);
+    let dmg_mult = stats.get(Stat::Damage) + stance(&stats, &content.player.charms, player.0);
     let stun_crit = stats.get(Stat::StunCrit) > 0.0;
     let freeze_time = stats.get(Stat::FreezeTime);
     let zones = &content.elements.zones;
@@ -482,7 +518,13 @@ pub(crate) fn resolve_hits(
         } else {
             HitKind::Normal
         };
+        let (impact_pos, incoming_dir) = hit_contact(pos, en.r[i], hit.from, player.1.0, hit.incoming);
         outbox.0.push(SimEvent::Hit {
+            impact_pos,
+            incoming_dir,
+            weapon: hit.source.weapon(content),
+            source: hit.source,
+            target: hit.target,
             pos: pos - Vec2::new(0.0, en.r[i] + 4.0),
             damage: dmg,
             crit,
@@ -537,7 +579,15 @@ pub(crate) fn resolve_hits(
                 apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
             }
         } else {
-            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
+            kill(
+                en,
+                i,
+                rank,
+                KillingHit { source: hit.source, incoming_dir },
+                &mut spread,
+                &mut deaths,
+                &mut outbox,
+            );
         }
     }
     list.clear();
@@ -580,6 +630,7 @@ pub(crate) fn kill(
     en: &mut Enemies,
     i: usize,
     rank: Rank,
+    hit: KillingHit,
     spread: &mut Spread,
     deaths: &mut Deaths,
     outbox: &mut SimOutbox,
@@ -588,6 +639,7 @@ pub(crate) fn kill(
     let pos = Vec2::new(en.x[i], en.y[i]);
     let kind = en.kind[i];
     deaths.0.push(Death {
+        hit,
         handle: en.handle(i),
         pos,
         kind,
@@ -598,8 +650,10 @@ pub(crate) fn kill(
         affix: en.affix[i],
         tags: en.tags[i],
     });
+    let target = en.handle(i);
+    let weapon = hit.source.weapon(spread.content);
     en.kill(i);
-    outbox.0.push(SimEvent::Kill { pos, kind, rank });
+    outbox.0.push(SimEvent::Kill { pos, kind, rank, target, weapon, incoming_dir: hit.incoming_dir });
 }
 
 /// 追加飞剑的额度：每秒补充 `bonus_sword_rate` 把，最多攒这么多（金·极境的上限）。
@@ -776,6 +830,7 @@ pub(crate) fn process_strikes(
                 damage: s.damage,
                 knockback: s.knockback,
                 from: s.pos,
+                incoming: Vec2::ZERO,
                 flags: s.flags,
                 boss_cap: s.boss_cap,
                 stun: s.stun,
@@ -829,6 +884,11 @@ pub(crate) fn burn(
         if en.burn_show[i] <= 0.0 && en.burn_acc[i] >= 1.0 {
             outbox.0.push(SimEvent::Hit {
                 pos: Vec2::new(en.x[i], en.y[i] - en.r[i]),
+                impact_pos: Vec2::new(en.x[i], en.y[i]),
+                incoming_dir: Vec2::ZERO,
+                weapon: None,
+                source: Source::Burn,
+                target: en.handle(i),
                 damage: en.burn_acc[i],
                 crit: false,
                 kind: HitKind::Dot,
@@ -839,7 +899,15 @@ pub(crate) fn burn(
         }
         if en.hp[i] <= 0.0 {
             let rank = content.0.enemies[en.kind[i] as usize].rank;
-            kill(en, i, rank, &mut spread, &mut deaths, &mut outbox);
+            kill(
+                en,
+                i,
+                rank,
+                KillingHit { source: Source::Burn, incoming_dir: Vec2::ZERO },
+                &mut spread,
+                &mut deaths,
+                &mut outbox,
+            );
         }
     }
 }

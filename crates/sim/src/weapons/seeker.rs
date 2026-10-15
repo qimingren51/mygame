@@ -72,9 +72,12 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             };
             let target = Vec2::new(en.x[t], en.y[t]);
             if target.distance(c.pos) < en.r[t] + reach {
-                ctx.hits
-                    .0
-                    .push(Hit::new(en.handle(t), lv.damage, source).knock(knockback, c.pos).element(element));
+                ctx.hits.0.push(
+                    Hit::new(en.handle(t), lv.damage, source)
+                        .knock(knockback, c.pos)
+                        .incoming(c.vel)
+                        .element(element),
+                );
                 ctx.outbox.0.push(SimEvent::CraneStrike { pos: c.pos });
                 ctx.bamboo.circle(c.pos, reach, lv.damage);
                 c.striking = false;

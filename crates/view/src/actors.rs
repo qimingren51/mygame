@@ -628,6 +628,7 @@ pub(crate) enum Pooled {
 
 /// 每类精灵本帧要显示的内容，攒好后一次写进池子。
 pub(crate) struct Draw {
+    pub deform: Mat2,
     pub frame: FrameId,
     pub pos: Vec3,
     pub flip: bool,
@@ -639,7 +640,15 @@ pub(crate) struct Draw {
 
 impl Draw {
     pub fn new(frame: FrameId, pos: Vec3) -> Self {
-        Draw { frame, pos, flip: false, scale: Vec2::ONE, rot: 0.0, color: Color::WHITE }
+        Draw {
+            deform: Mat2::IDENTITY,
+            frame,
+            pos,
+            flip: false,
+            scale: Vec2::ONE,
+            rot: 0.0,
+            color: Color::WHITE,
+        }
     }
 }
 
@@ -755,6 +764,7 @@ pub(crate) fn collect_draws(
     arsenal: Option<Res<Arsenal>>,
     sight: Sight,
     mut moves: Moves,
+    mut impacts: ResMut<crate::impact::Impacts>,
     bamboo: Option<Res<Bamboo>>,
     player: Single<(&Pos, &PrevPos), With<Player>>,
     camera: Single<(&Transform, &Projection), With<MainCamera>>,
@@ -799,11 +809,22 @@ pub(crate) fn collect_draws(
             let phase = en.wob[i] / TAU * n as f32;
             (&f.base, ((t * f.base.fps + phase) as usize) % n, None)
         });
-        let flashing = en.flash[i] > 0.0 && !anim.flash.is_empty();
+        let response = impacts.hits.get(&en.handle(i)).copied();
+        let flashing = response.is_some_and(|h| h.flashing()) && !anim.flash.is_empty();
         let frame = if flashing { anim.flash[k] } else { anim.normal[k] };
         let bob = if f.floating { (t * 2.0 + en.wob[i]).sin() * 1.5 + 4.0 } else { 0.0 };
         let flip = face.unwrap_or(player_now.x < p.x);
-        let body = Vec2::new(s.x, s.y + bob);
+        let (deform, offset) = response.map_or((Mat2::IDENTITY, Vec2::ZERO), |h| h.sample());
+        let body = Vec2::new(s.x, s.y + bob) + offset;
+        impacts.poses.insert(
+            en.handle(i),
+            crate::impact::Pose {
+                frame: anim.normal[k],
+                flash: anim.flash.get(k).copied().unwrap_or(anim.normal[k]),
+                pos: Vec2::new(s.x, s.y + bob),
+                flip,
+            },
+        );
         // 冰冻发蓝，灼烧发红
         let color = if flashing {
             Color::WHITE
@@ -825,17 +846,10 @@ pub(crate) fn collect_draws(
             continue;
         }
         let color = color.with_alpha(fade);
-        // 受击时横向一挤再弹回（闪白的 0.08 秒里）
-        let squash = if en.flash[i] > 0.0 {
-            let k = (en.flash[i] / 0.08).clamp(0.0, 1.0);
-            Vec2::new(1.0 + 0.14 * k, 1.0 - 0.1 * k)
-        } else {
-            Vec2::ONE
-        };
         pools.enemy.push(Draw {
             flip,
             color,
-            scale: squash,
+            deform,
             ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
         });
         pools.enemy_shadow.push(Draw {
@@ -843,7 +857,7 @@ pub(crate) fn collect_draws(
             color: Color::srgba(1.0, 1.0, 1.0, 0.7 * fade),
             ..Draw::new(frames.shadow, Vec3::new(s.x, s.y, layer::SHADOW))
         });
-        if let Some(&emit) = anim.emit.get(k) {
+        if !flashing && let Some(&emit) = anim.emit.get(k) {
             glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade));
         }
     }
@@ -920,17 +934,23 @@ pub(crate) fn collect_draws(
     }
 }
 
-/// 把攒好的绘制内容写进精灵池；不够就补生成（下一帧可见），多余的隐藏。
+/// 把攒好的绘制内容写进精灵池；不够就按本帧姿态补生成，多余的隐藏。
 pub(crate) fn apply_pools(
     mut commands: Commands,
     db: Res<AtlasDb>,
-    frames: Res<ActorFrames>,
     mut pools: ResMut<Pools>,
-    mut q: Query<(&Pooled, &mut Sprite, &mut Anchor, &mut Transform, &mut Visibility)>,
+    mut q: Query<(
+        &Pooled,
+        &mut Sprite,
+        &mut Anchor,
+        &mut Transform,
+        &mut Visibility,
+        &mut crate::impact::SpriteDeform,
+    )>,
 ) {
     let pools = &mut *pools;
     let mut used = [0usize; 3];
-    for (kind, mut sprite, mut anchor, mut tf, mut vis) in &mut q {
+    for (kind, mut sprite, mut anchor, mut tf, mut vis, mut deform) in &mut q {
         let (list, k) = match kind {
             Pooled::Enemy => (&pools.enemy, 0),
             Pooled::EnemyShadow => (&pools.enemy_shadow, 1),
@@ -945,6 +965,7 @@ pub(crate) fn apply_pools(
         if d.scale != Vec2::ONE {
             sprite.custom_size = Some(db.frame(d.frame).size * d.scale);
         }
+        deform.0 = d.deform;
         sprite.flip_x = d.flip;
         sprite.color = d.color;
         tf.translation = d.pos;
@@ -957,14 +978,23 @@ pub(crate) fn apply_pools(
     for k in 0..kinds.len() {
         if lens[k] > pools.spawned[k] {
             let batch: Vec<_> = (pools.spawned[k]..lens[k])
-                .map(|_| {
-                    let (sprite, anchor) = db.sprite(frames.shadow);
+                .map(|i| {
+                    let d = match kinds[k] {
+                        Pooled::Enemy => &pools.enemy[i],
+                        Pooled::EnemyShadow => &pools.enemy_shadow[i],
+                        Pooled::Fx => &pools.fx[i],
+                    };
+                    let (mut sprite, anchor) = db.sprite(d.frame);
+                    sprite.custom_size = Some(db.frame(d.frame).size * d.scale);
+                    sprite.color = d.color;
+                    sprite.flip_x = d.flip;
                     (
                         kinds[k],
+                        crate::impact::SpriteDeform(d.deform),
                         sprite,
                         anchor,
-                        Transform::default(),
-                        Visibility::Hidden,
+                        Transform::from_translation(d.pos).with_rotation(Quat::from_rotation_z(d.rot)),
+                        Visibility::Inherited,
                         DespawnOnExit(AppState::Run),
                     )
                 })
@@ -1026,16 +1056,18 @@ pub(crate) fn apply_glow(
     for (k, list) in [lights, emits].iter().enumerate() {
         let light = k == 0;
         while pool.spawned[k] < list.len() {
+            let g = list[pool.spawned[k]];
             pool.spawned[k] += 1;
-            let g = list[0];
-            let mesh = cache.mesh(&db, &mut meshes, g.frame, false);
+            let mesh = cache.mesh(&db, &mut meshes, g.frame, g.flip);
             let mat = cache.additive(&db, &mut materials, g.frame, g.color, !light);
             let mut e = commands.spawn((
                 GlowSlot { light },
                 Mesh2d(mesh),
                 MeshMaterial2d(mat),
-                Transform::default(),
-                Visibility::Hidden,
+                Transform::from_translation(g.pos)
+                    .with_scale(g.scale.extend(1.0))
+                    .with_rotation(Quat::from_rotation_z(g.rot)),
+                Visibility::Inherited,
                 DespawnOnExit(AppState::Run),
             ));
             if light {

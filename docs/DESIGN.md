@@ -218,6 +218,14 @@ Points(2), Favor,                                                 // 夜签“�
 
 在 `Play` 阶段处理燃灯命令时，充能不足会发出 `SimEvent::UltNotReady`。界面据此抖动整条燃灯计量槽并短暂显示“灯火未满”，音频复用提示鼓点；计时、淡出和音效限频留在表现层。事件由命令和模拟充能值确定，不改变玩法状态或随机流，也不进入状态哈希。
 
+打击身份事件契约（仅表现用，见 `FEEL.md` 第 10 节）：
+
+- `SimEvent::Hit` 保留 `pos` 的飘字语义，新增 `impact_pos: Vec2`、`incoming_dir: Vec2`、`weapon: Option<u16>`、`source: combat::Source`、`target: EnemyHandle`。接触点为敌人中心减入射单位方向乘敌人半径。飞剑、纸鹤可把当前速度附在瞬时 `combat::Hit.incoming`；否则取 `from→目标`，重合时取 `主角→目标`，再重合为零方向、接触点为中心。
+- `Source::Weapon(i)` 的 `weapon` 为内容下标；`BonusSword` 按 ID 查找 `sword`，缺失为 `None`；灼烧、反应、燃灯等非法器来源为 `None`。`Source` 保留来源类别，用于给无元素字段的灼烧 / 反应脉冲上色。
+- `SimEvent::Kill` 增加 `target`、`weapon`、`incoming_dir`；`Death.hit: KillingHit` 保存最后一击的来源和方向。范围打击、反应走统一结算，灼烧死亡显式传 `Burn + ZERO`。句柄包含代号，槽位复用不会把旧受击表现套到新妖物上。
+- 这些数据只写到临时伤害 / 死亡记录与事件里，不参与伤害、击退、控制、随机流或状态哈希。事件仍为 `Copy`，不含堆分配。`Enemies.flash` 的原模拟值保持原样；画面改由事件驱动自己的计时。
+- `content::WeaponIdentity` 按字符串 ID 给 view / audio 提供相同归属，未知 ID 使用通用表现。`view::impact` 保存句柄对应的受击曲线与最后可见姿态；精灵池在变换传播之后、可见性检查之前应用纯渲染仿射矩阵。每帧从原始 `Transform` 重建，暂停时不叠乘形变。死亡残留使用 `fx` 一次性池的低优先级槽位，不修改模拟资源。
+
 ### 6.8 导演（单局节奏）
 
 `assets/data/run.ron` 描述一局的全部节奏：总时长、刷怪速率曲线（再乘过渡系数，P0 是 0.7）、杂兵和精英各自的血量曲线、升级所需经验曲线、妖物配比、成群涌来的妖物、时间表、掉落、铜钱、点灯、升级选项权重、连斩、灯油。曲线用二次多项式系数表示。奇遇在 `events.ron`（间隔 40–65 秒）。夜签和“更”通过和属性一样的修正机制改这些参数（`SpawnRate`、`EnemyHp`、`EnemyDamage`、`BossHp`、`Affixes`……）。音乐强度由画面层按时间（3 分钟、6.5 分钟）和夜主是否在场决定。
