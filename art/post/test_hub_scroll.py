@@ -286,7 +286,7 @@ def test_dawn_masks():
         ga = img(g["file"], "RGBA")[..., 3]
         gx, gy = g["rect"][0] - e["rect"][0], g["rect"][1] - e["rect"][1]
         full = np.zeros(v.shape)
-        ys, xs = np.nonzero(ga > 0.5 * ga.max())
+        ys, xs = np.nonzero(ga > 0.7 * ga.max())  # 金线最亮的三成：峰顶的山脊
         ys, xs = ys + gy, xs + gx
         ok = (ys >= 0) & (xs >= 0) & (ys < v.shape[0]) & (xs < v.shape[1])
         full[ys[ok], xs[ok]] = 1
@@ -318,6 +318,45 @@ def test_dawn_stays_on_its_mountain():
     assert (seen > 1).sum() == 0, f"几处晨光互相重叠（{(seen > 1).sum()} 个像素）"
 
 
+def test_focus_lights():
+    """人物的聚光 light = [x, y, 半径, 强度]：半径为正、强度在 (0, 1]；灯童在门洞的暗处，给得比别人大。"""
+    lights = {c["id"]: c["light"] for c in man()["characters"]}
+    for cid, L in lights.items():
+        assert len(L) == 4 and all(isinstance(v, (int, float)) for v in L), f"{cid} 的 light 应是 [x, y, 半径, 强度]：{L}"
+        assert L[2] > 0 and 0 < L[3] <= 1, f"{cid} 的聚光半径 / 强度不对：{L}"
+    assert lights["child"][3] > max(L[3] for k, L in lights.items() if k != "child"), "灯童的聚光应比别人强"
+    assert "强度" in man()["note"], "note 里要说明 light 的第 4 个值"
+
+
+def test_dawn_only_on_the_top():
+    """晨光只照峰顶和上面几成的山脊：金线的 alpha 峰值 ≤ 0.35、只在峰高的上面一半，东坡（右）比西坡亮；
+    晨光的暖色九成以上在峰的上半截和山后的天上。幽都放宽到上面 65%（山口里黑城的屋脊、山口的天比两道山肩低）。"""
+    m = man()
+    for rid, e in m["dawn"].items():
+        lay, cx, hgt, wl, wr, sharp, half = H.REGIONS[rid]
+        base_y = H.BACK_BASE if lay == "back" else H.FAR_BASE
+        g = img(e["glow"]["file"], "RGBA")[..., 3]
+        gx, gy = e["glow"]["rect"][:2]
+        assert g.max() <= 0.35 + 1e-9, f"{rid} 的山脊金线太亮（峰值 {g.max():.3f}）"
+        ys, xs = np.nonzero(g > 0.02)
+        ytop = ys.min() + gy
+        h = base_y - ytop
+        reach = (ys.max() + gy - ytop) / h
+        limit = 0.65 if rid == "youdu" else 0.5  # 幽都：山口里黑城的屋脊、山口的天比两道山肩低
+        assert reach <= limit, f"{rid} 的金线往下铺得太远（到峰高的 {reach:.0%}）"
+        a = img(e["file"], "RGBA")[..., 3]
+        ax, ay = e["rect"][:2]
+        yy = np.mgrid[0:a.shape[0], 0:a.shape[1]][0] + ay
+        upper = a[yy <= ytop + limit * h].sum() / a.sum()
+        assert upper >= 0.9, f"{rid} 的晨光没有集中在上半截（{upper:.0%}）"
+        if rid == "youdu":
+            continue
+        x_s = xs[ys == ys.min()].mean() + gx
+        xx = np.mgrid[0:g.shape[0], 0:g.shape[1]][1] + gx
+        right, left = g[xx > x_s].sum(), g[xx < x_s].sum()
+        assert right > 1.3 * left, f"{rid}：东坡（右）应比西坡亮（右 {right:.0f}，左 {left:.0f}）"
+
+
 # ============================================================== 底图
 
 
@@ -344,7 +383,7 @@ def test_ink_only_except_lights():
     yy, xx = np.mgrid[0:H.H, 0:H.W]
     far = np.ones((H.H, H.W), bool)
     for c in man()["characters"]:
-        x, y, r = c["light"]
+        x, y, r = c["light"][:3]
         far &= np.hypot(xx - x, yy - y) > 2.0 * r + 60
     sx, sy = H.SEAL_AT
     seal = (xx >= sx - 4) & (xx < sx + H.SEAL_PX + 4) & (yy >= sy - 4) & (yy < sy + H.SEAL_PX + 4)
@@ -356,7 +395,7 @@ def test_ink_only_except_lights():
     cool = ((b[..., 2] > b[..., 0] + 0.02) | (b[..., 1] > b[..., 0] + 0.02)) & ~seal
     assert cool.mean() < 0.0005, f"有偏青 / 偏绿的像素（{cool.mean():.4f}）"
     for c in man()["characters"]:
-        x, y, r = c["light"]
+        x, y, r = c["light"][:3]
         near = (np.hypot(xx - x, yy - y) < r) & ~seal
         warm = (b[..., 0] - b[..., 2])[near].mean()
         assert warm > 0.08, f"{c['id']} 的灯边不够暖（R−B {warm:.3f}）"
