@@ -164,15 +164,22 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
 格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
 
-## 标题画面与主角头像（render/portrait.py、render/title_hero.py、post/title_screen.py）
+## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
 ```bash
-art/.venv/bin/python art/render/portrait.py --all   # 主角胸像 → out/assets*/portrait/（1 倍 128²、2 倍 256²），约 17 秒
-art/.venv/bin/python art/post/title_screen.py       # 标题画 + logo → out/screens/，审图 → out/review@2x/title_review*.png，约 1 分钟
+art/.venv/bin/python art/render/portrait.py --all        # 主角胸像 → out/assets*/portrait/（1 倍 128²、2 倍 256²），约 17 秒
+art/.venv/bin/python art/post/title_screen.py            # 标题画 + logo → out/screens/，审图 → out/review@2x/title_review*.png，约 1.5 分钟
+art/.venv/bin/python art/post/title_screen.py --sample   # 只出候选 out/screens/title_candidate.png 和新旧对比 review@2x/title_fix_sample.png，不动 title.png
 ```
 
 - 胸像用真实的主角模型、同样的墨线和后期，装进界面图标的圆框；`meta.json` 的 `name` 写 `ui`，所以打包后帧名是 `ui/portrait_hero`。
-- 标题画是夜色水墨长卷：远山、雾、月、松、坡上提灯的主角背影（`title_hero.py` 单独渲染大尺寸背影和石灯笼），左侧留给菜单。
+- 标题画是夜色水墨长卷，只用 Pillow + numpy，不用 Blender（`render/title_hero.py` 已不再使用）：
+  - 远山三层，层间隔着雾，有阴阳，近山用披麻皴；
+  - 月、松；
+  - 坡上提灯往山路走的主角背影和两座石灯笼用写意画法；
+  - 左侧留给菜单；
+  - 纸用短而软的纤维，暗处不像裂纹。
+- 人物笔法在 `post/ink_figure.py`，`hub_scroll.py` 和 `title_screen.py` 共用：留白、洇墨、提按的墨线、局部坐标 `Fig` 和姿态 `pose`、飘带、手。
 - logo 用完整版马善政字体写“提灯夜行”，加飞白、墨晕和“夜行”朱砂印。
 - 界面美术用的完整字体由 `post/ui_fonts.py` 下载并缓存到 `out/fonts/`（OFL）；`assets/fonts/` 里只是游戏用的子集。
 
@@ -257,7 +264,7 @@ art/.venv/bin/python art/post/hub_scroll.py --dawn-compare <旧目录>   # 另�
 mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/screens/hub/
 ```
 
-只出桌面版，Pillow + numpy，不用 Blender。画法复用 `title_screen.py` 和 `scroll_qingqiu.py`（只 import）。固定种子，重复运行逐字节相同。
+只出桌面版，Pillow + numpy，不用 Blender。画法复用 `title_screen.py`、`scroll_qingqiu.py` 和 `ink_figure.py`（只 import）。固定种子，重复运行逐字节相同。
 
 - **画面**（1920×1080）：
   - 夜空，月亮留白；

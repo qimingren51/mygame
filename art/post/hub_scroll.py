@@ -32,6 +32,7 @@ docs/GAMEPLAY.md 11.6：一张水墨长卷，灯驿的夜景。画里四个人�
 
 画法尽量复用 title_screen.py 和 scroll_qingqiu.py（只 import）：Painting 的笔墨工具、ridge_line、mountain_layer、
 mountain_texture、wash_blob、curve_pts、stroke_cover、light_map（光池）、bloom、make_seal、roof_poly。
+人物的笔法（留白、洇墨、提按的墨线、局部坐标 Fig）在 ink_figure.py，标题画的主角也用它。
 
 运行（在仓库根目录下）：
     art/.venv/bin/python art/post/hub_scroll.py            # 画 + 全部输出 + 审图 review@2x/hub_review_{states,figures,ui_720}.png（约 1.5 分钟）
@@ -62,6 +63,7 @@ ROOT = ART.parent
 sys.path.insert(0, str(HERE))
 import scroll_qingqiu as Q  # noqa: E402
 import title_screen as T  # noqa: E402
+from ink_figure import Fig, brush, closed_curve, ellipse, fill, hand, knock, line, shape_cover, wash  # noqa: E402,F401
 import vfx_textures as V  # noqa: E402
 from ui_fonts import font  # noqa: E402
 
@@ -182,183 +184,6 @@ class Hub(T.Painting):
     def over(self, a, color, sl=None):
         super().over(a, color, sl)
         self._note(a, sl)
-
-
-def closed_curve(ctrl, per: int = 14) -> np.ndarray:
-    """过控制点的闭合平滑曲线（Catmull-Rom）。"""
-    c = np.asarray(ctrl, np.float64)
-    m = len(c)
-    t = np.linspace(0, 1, per, endpoint=False)[:, None]
-    out = []
-    for i in range(m):
-        p0, p1, p2, p3 = c[(i - 1) % m], c[i], c[(i + 1) % m], c[(i + 2) % m]
-        out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t ** 2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3))
-    return np.vstack(out)
-
-
-def shape_cover(poly, ss: int = 3, soft: float = 0.6, pad: int = 4):
-    """多边形 → (切片, 覆盖度)，只在包围盒里算（超采样抗锯齿，边缘略晕）。"""
-    pts = np.asarray(poly, np.float64)
-    x0, y0 = max(0, int(pts[:, 0].min()) - pad), max(0, int(pts[:, 1].min()) - pad)
-    x1, y1 = min(W, int(pts[:, 0].max()) + pad + 1), min(H, int(pts[:, 1].max()) + pad + 1)
-    sl = (slice(y0, y1), slice(x0, x1))
-    if x1 <= x0 or y1 <= y0:
-        return sl, np.zeros((max(0, y1 - y0), max(0, x1 - x0)))
-    im = Image.new("L", ((x1 - x0) * ss, (y1 - y0) * ss), 0)
-    ImageDraw.Draw(im).polygon([((x - x0) * ss, (y - y0) * ss) for x, y in pts], fill=255)
-    m = V.downsample(np.asarray(im, np.float64) / 255.0, ss)
-    if soft:
-        m = np.clip(blur(m, soft), 0, 1)
-    return sl, m
-
-
-def fill(P: Hub, poly, color, alpha=1.0, *, mode="glaze", rim=0.25, tex=None, smooth=True, near=True, soft=0.6):
-    """一块水墨：闭合轮廓里罩一层墨（罩染时浓淡略不匀），边上一圈水痕略深。smooth=False 时轮廓是折线。
-    mode="over" 是不透明的底（人物的衣服、器物），默认没有浓淡，免得透出后面的东西。"""
-    if tex is None:
-        tex = 0.15 if mode == "glaze" else 0.0
-    pts = closed_curve(poly) if smooth else np.asarray(poly, np.float64)
-    sl, m = shape_cover(pts, soft=soft)
-    if m.size == 0:
-        return sl, m
-    a = m * (1.0 - tex + tex * (0.5 + 0.5 * noise(P.rng, m.shape, 5.0)))
-    if rim:
-        a = a + rim * m * (1 - smoothstep(0.45, 0.95, blur(m, 2.2)))
-    (P.glaze if mode == "glaze" else P.over)(np.clip(a * alpha, 0, 1), color, sl)
-    if near:
-        P.mark_near(m, sl)
-    return sl, m
-
-
-def line(P: Hub, ctrl, w0, w1=None, color=None, alpha=0.95, *, dry=0.25, dry_start=0.5, jitter=0.18, mode="over", n=None,
-         smooth=True, near=True, taper=True):
-    """一笔线：过控制点（smooth）或折线，粗细从 w0 到 w1（半宽，像素），两头略收。"""
-    p = np.asarray(ctrl, np.float64)
-    length = float(np.hypot(*np.diff(p, axis=0).T).sum())
-    n = n or max(8, int(length / 2.5))
-    c = T.curve_pts(p, n) if (smooth and len(p) > 2) else V.arc_resample(p, n)
-    t = np.linspace(0, 1, len(c))
-    hw = w0 + ((w0 if w1 is None else w1) - w0) * t
-    if taper:
-        hw = hw * np.clip(0.45 + 0.55 * np.minimum(t / 0.12, 1) * np.minimum((1 - t) / 0.12, 1) + 0.0, 0.45, 1.0)
-    P.stroke(c, hw, JIAO if color is None else color, alpha, dry=dry, dry_start=dry_start, jitter=jitter, mode=mode, near=near)
-
-
-def ellipse(P: Hub, cx, cy, rx, ry, color, alpha=1.0, *, mode="over", ang=0.0, near=True, soft=0.5):
-    th = np.linspace(0, 2 * math.pi, 48, endpoint=False)
-    ca, sa = math.cos(ang), math.sin(ang)
-    pts = np.stack([cx + rx * np.cos(th) * ca - ry * np.sin(th) * sa, cy + rx * np.cos(th) * sa + ry * np.sin(th) * ca], -1)
-    sl, m = shape_cover(pts, soft=soft)
-    if m.size:
-        (P.glaze if mode == "glaze" else P.over)(m * alpha, color, sl)
-        if near:
-            P.mark_near(m, sl)
-    return pts
-
-
-def brush(P: Hub, ctrl, w, *, color=None, alpha=0.95, smooth=True, press=1.0, nail=0.7, tail=0.3, dry=0.0, dry_start=0.55,
-          gap=None, mode="over", n=None, near=True):
-    """白描的一笔：起笔一顿（钉头），行笔略细，转折处按重，收笔出锋；dry>0 时后段飞白；gap=(t0, t1) 在这一段断开。
-    w 是行笔时的半宽（像素）。"""
-    p = np.asarray(ctrl, np.float64)
-    length = float(np.hypot(*np.diff(p, axis=0).T).sum())
-    n = n or max(10, int(length / 1.4))
-    c = T.curve_pts(p, n) if (smooth and len(p) > 2) else V.arc_resample(p, n)
-    d = np.gradient(c, axis=0)
-    ang = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
-    seg = max(length / max(n - 1, 1), 1e-6)
-    k = np.abs(np.gradient(ang)) / seg
-    k = blur(k[None, :], (2.5, 0))[0]
-    kn = np.clip(k * 16.0, 0, 1)  # 转弯半径 16 像素以内按到最重
-    t = np.linspace(0, 1, n)
-    prof = (0.62 + 0.55 * press * kn) * (1 + nail * np.exp(-(t / 0.06) ** 2))
-    if tail:
-        prof = prof * (0.18 + 0.82 * np.clip((1 - t) / tail, 0, 1) ** 0.7)
-    wob = blur(P.rng.standard_normal((1, n)), (4.0, 0))[0]
-    prof = prof * (1 + 0.12 * wob / (wob.std() + 1e-9))
-    hw = w * prof
-    c_ = JIAO if color is None else color
-    pieces = [(c, hw)]
-    if gap:
-        i0, i1 = int(gap[0] * (n - 1)), int(gap[1] * (n - 1))
-        pieces = [(c[:i0], hw[:i0]), (c[i1:], hw[i1:])]
-    for cc, hh in pieces:
-        if len(cc) >= 3:
-            P.stroke(cc, hh, c_, alpha, dry=dry, dry_start=dry_start, jitter=0.1, mode=mode, near=near)
-
-
-def wash(P: Hub, poly, color, alpha, *, soft=2.4, rough=0.6, ring=0.3, mode="glaze", tex=0.18, smooth=True):
-    """一层淡墨或淡彩：边缘软、略不齐（洇开），干后边上一圈水痕略深。poly 是闭合轮廓（画面坐标）。"""
-    pts = closed_curve(poly) if smooth else np.asarray(poly, np.float64)
-    sl, m = shape_cover(pts, soft=0, pad=int(soft * 3) + 6)
-    if m.size == 0:
-        return
-    ms = blur(m, soft)
-    n1 = noise(P.rng, m.shape, 3.0)
-    ms = ms + 0.10 * rough * n1
-    body = smoothstep(0.28, 0.62, ms)
-    rim = ring * np.exp(-((ms - 0.40) / 0.09) ** 2)
-    a = alpha * np.clip(body * (1 - tex + tex * (0.5 + 0.5 * noise(P.rng, m.shape, 7.0))) + rim, 0, 1)
-    (P.glaze if mode == "glaze" else P.over)(a, color, sl)
-    P.mark_near(body, sl)
-
-
-def knock(P: Hub, poly, smooth=True):
-    """人物所在处的背景擦回纸色（画人物时那里本来是留白的），边缘略外扩一点。"""
-    pts = closed_curve(poly) if smooth else np.asarray(poly, np.float64)
-    sl, m = shape_cover(pts, soft=1.0, pad=6)
-    if m.size == 0:
-        return
-    a = smoothstep(0.08, 0.5, m) * 0.98
-    P.over(a, P.paper0[sl], sl)
-    P.mark_near(a, sl)
-
-
-class Fig:
-    """点景人物的局部坐标：原点在脚底（坐着的人是座位前的地面），y 向上为负；s 缩放，flip=-1 左右翻转。"""
-
-    def __init__(self, P: Hub, fx, fy, s=1.0, flip=1):
-        self.P, self.fx, self.fy, self.s, self.flip = P, fx, fy, s, flip
-
-    def pt(self, x, y):
-        return (self.fx + self.flip * self.s * x, self.fy + self.s * y)
-
-    def pts(self, ctrl):
-        return np.array([self.pt(*p) for p in ctrl])
-
-    def fill(self, ctrl, color, alpha=1.0, **kw):
-        return fill(self.P, self.pts(ctrl), color, alpha, **kw)
-
-    def line(self, ctrl, w0, w1=None, color=None, alpha=0.95, **kw):
-        line(self.P, self.pts(ctrl), w0 * self.s, None if w1 is None else w1 * self.s, color, alpha, **kw)
-
-    def ellipse(self, cx, cy, rx, ry, color, alpha=1.0, **kw):
-        x, y = self.pt(cx, cy)
-        return ellipse(self.P, x, y, rx * self.s, ry * self.s, color, alpha, **kw)
-
-    def brush(self, ctrl, w, **kw):
-        brush(self.P, self.pts(ctrl), w * self.s, **kw)
-
-    def wash(self, ctrl, color, alpha, off=(0.0, 0.0), **kw):
-        wash(self.P, self.pts([(x + off[0], y + off[1]) for x, y in ctrl]), color, alpha, **kw)
-
-    def knock(self, ctrl, **kw):
-        knock(self.P, self.pts(ctrl), **kw)
-
-    def shade(self, ctrl, color, alpha, side=-1.0):
-        """衣服的背光一面：在轮廓里朝 side（局部坐标，-1 = 身后）一侧罩一层墨，往另一侧淡掉。"""
-        pts = self.pts(ctrl)
-        sl, m = shape_cover(closed_curve(pts), soft=0.6)
-        if m.size == 0:
-            return
-        x0, x1 = pts[:, 0].min(), pts[:, 0].max()
-        u = (self.P.X[sl] - (x0 + x1) / 2) / max((x1 - x0) / 2, 1.0) * side * self.flip
-        self.P.glaze(m * alpha * smoothstep(-0.3, 0.9, u) * (0.85 + 0.15 * noise(self.P.rng, m.shape, 4.0)), color, sl)
-
-    def dot(self, x, y, r, color=None, alpha=0.95):
-        gx, gy = self.pt(x, y)
-        self.P.dot(gx, gy, r * self.s, r * self.s, JIAO if color is None else color, alpha)
-        self.P.mark_near(np.ones(1), (slice(int(gy), int(gy) + 1), slice(int(gx), int(gx) + 1)))
 
 
 # ============================================================== 天、远山、雾
@@ -1143,13 +968,6 @@ def profile_face(f: Fig, hx, hy, r, *, brow=True, beard=None, eye=1.0, nose=1.0,
         for k, dx in enumerate((0.0, 0.12, -0.1)):
             f.brush([(hx + (0.62 + dx) * r, hy + 0.85 * r), (hx + (0.72 + dx) * r, hy + 1.5 * r), (hx + (0.6 + dx) * r, hy + 2.2 * r - k * 0.2 * r)],
                     0.75, color=NONG, nail=0.3, tail=0.6, dry=0.3)
-
-
-def hand(f: Fig, x, y, r=3.4, curl=1.0):
-    """一只手：纸色一小团，两笔勾出握着的指节。"""
-    f.knock([(x - r, y - r * 0.8), (x + r, y - r), (x + r * 1.1, y + r * 0.6), (x - r * 0.6, y + r)])
-    f.brush([(x - r * 0.9, y - r * 0.6), (x + r * 0.2, y - r * 1.05), (x + r * 1.05, y - r * 0.2)], 0.55, color=NONG, nail=0.2, tail=0.3)
-    f.brush([(x + r * 0.9 * curl, y + r * 0.1), (x + r * 0.3, y + r * 0.95), (x - r * 0.7, y + r * 0.7)], 0.55, color=NONG, nail=0.2, tail=0.3)
 
 
 def paint_peddler(P: Hub, rng, lights) -> dict:

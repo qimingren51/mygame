@@ -34,7 +34,8 @@ _cache: dict[str, object] = {}
 
 
 def ensure_outputs(force: bool) -> None:
-    srcs = [HERE / n for n in ("hub_scroll.py", "title_screen.py", "scroll_qingqiu.py", "vfx_textures.py", "ui_fonts.py")]
+    srcs = [HERE / n for n in ("hub_scroll.py", "ink_figure.py", "title_screen.py", "scroll_qingqiu.py", "vfx_textures.py",
+                                 "ui_fonts.py")]
     srcs += [H.ART / "style" / "style.py", H.META_RON]
     newest = max(p.stat().st_mtime for p in srcs)
     outs = [MAN, OUT / "hub.png"] + REVIEWS
