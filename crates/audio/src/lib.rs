@@ -465,6 +465,11 @@ fn play_sim_events(
                 let s = a.sfx.ult.clone();
                 a.play(&s);
             }
+            SimEvent::UltNotReady if a.can("ult_not_ready", 0.6) => {
+                // 复用轻一些、短一些的提示鼓点，连续按键时限制间隔。
+                let s = a.sfx.warn.clone();
+                a.play_with(&s, 1.4, -10.0);
+            }
             SimEvent::CoinPicked { .. } if a.can("coin", 0.08) => {
                 let s = a.sfx.coins.clone();
                 a.play_with(&s, 1.0, -8.0);

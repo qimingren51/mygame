@@ -324,6 +324,58 @@ fn merchant_sells_a_chest_for_gold() {
 }
 
 #[test]
+fn uncharged_ult_reports_rejection_without_changing_simulation() {
+    for charge in [0.0, 0.5, 0.999] {
+        let mut sim = quiet(10);
+        let mut control = quiet(10);
+        sim.progress_mut().ult = charge;
+        control.progress_mut().ult = charge;
+        sim.take_events();
+        control.take_events();
+        for _ in 0..60 {
+            sim.step(InputFrame::default(), &[SimCommand::Ult]);
+            control.step(InputFrame::default(), &[]);
+            let mut events = sim.take_events();
+            assert_eq!(events.iter().filter(|e| **e == SimEvent::UltNotReady).count(), 1);
+            assert!(!events.contains(&SimEvent::Ult));
+            events.retain(|e| *e != SimEvent::UltNotReady);
+            assert_eq!(events, control.take_events(), "除了未满提示，其余模拟事件相同");
+            assert_eq!(sim.progress().ult, charge, "失败不消耗充能");
+        }
+        assert!(!sim.hashes().is_empty());
+        assert_eq!(sim.hashes(), control.hashes(), "未满时反复尝试不改变状态哈希");
+    }
+}
+
+#[test]
+fn charged_ult_fires_once_and_rejects_a_second_attempt() {
+    let mut sim = quiet(10);
+    sim.progress_mut().ult = 1.0;
+    sim.take_events();
+    sim.step(InputFrame::default(), &[SimCommand::Ult, SimCommand::Ult]);
+    let events = sim.take_events();
+    let ult_events: Vec<_> =
+        events.iter().filter(|e| matches!(e, SimEvent::Ult | SimEvent::UltNotReady)).copied().collect();
+    assert_eq!(ult_events, [SimEvent::Ult, SimEvent::UltNotReady]);
+    assert_eq!(sim.progress().ult, 0.0);
+    assert!(
+        events.iter().any(|e| matches!(e, SimEvent::Strike { fx: lantern_sim::combat::StrikeFx::Ult, .. }))
+    );
+}
+
+#[test]
+fn ult_outside_play_has_no_rejection_feedback() {
+    let mut sim = quiet(10);
+    sim.progress_mut().pending_levels = 1;
+    sim.step(InputFrame::default(), &[]);
+    assert_eq!(sim.phase(), SimPhase::LevelUp);
+    sim.take_events();
+    sim.step(InputFrame::default(), &[SimCommand::Ult]);
+    assert!(!sim.take_events().iter().any(|e| matches!(e, SimEvent::Ult | SimEvent::UltNotReady)));
+    assert_eq!(sim.phase(), SimPhase::LevelUp);
+}
+
+#[test]
 fn ult_charges_by_clear_amount() {
     let c = content();
     let mut sim = quiet(10);

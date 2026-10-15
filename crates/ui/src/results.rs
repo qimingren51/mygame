@@ -289,15 +289,15 @@ fn results_body(
             );
             if counts {
                 let [time, kills, win, lamps, bonus] = r.oil_parts;
-                let mut detail = format!("存活 {time} · 击杀 {kills}");
+                let mut detail = format!("存活 +{time} · 击杀 {} → +{kills}", r.kills);
                 if win > 0 {
-                    detail.push_str(&format!(" · {} {win}", if r.endless { "夜主" } else { "天明" }));
+                    detail.push_str(&format!(" · {} +{win}", if r.endless { "夜主" } else { "天明" }));
                 }
                 if lamps > 0 {
-                    detail.push_str(&format!(" · 石灯笼 {lamps}"));
+                    detail.push_str(&format!(" · 石灯笼 +{lamps}"));
                 }
                 if bonus > 0 {
-                    detail.push_str(&format!(" · 额外 {bonus}"));
+                    detail.push_str(&format!(" · 额外 +{bonus}"));
                 }
                 p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
                 p.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() })

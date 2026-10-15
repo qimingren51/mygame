@@ -617,6 +617,7 @@ pub(crate) fn handle_commands(
             }
             (SimPhase::Play, SimCommand::Ult) => {
                 if fp.progress.ult < 1.0 {
+                    fp.outbox.0.push(SimEvent::UltNotReady);
                     continue;
                 }
                 fp.progress.ult = 0.0;
