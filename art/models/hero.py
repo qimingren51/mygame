@@ -17,6 +17,11 @@
   walk：轻功式的轻快大步（约 8° 前倾）。游戏里 118 单位/秒、stride_units=80 → 每轮前进 3.2 米，
         这已是奔跑的速度：每只脚只着地约 1.5 帧（着地时脚相对地面不滑），其余是贴地的腾空，
         摆动脚抬得很低（腾空帧最低的脚离地约 2px），像“踏雪无痕”。长摆、发带、马尾强烈后飘，袖子摆动。
+  纵深朝向（S/N 正对、背对镜头，斜向减半）：步子沿镜头纵深迈，画面上两腿前后重叠、看不出交替，所以按朝向
+        （_depth_k，E/W 为 0、和原来完全一样）加大抬膝、后踢、两脚左右分开，左袖横摆，长摆尾端随步子左右甩、
+        后片向两侧分开（N 向露出腿）。冲刺同理：更前倾，长摆、发带向两侧拖开，两腿左右分开、抬膝。
+大氅背面（N/NE/NW 大半个人都是它）：长摆和上身背面按顶点属性 fade 分层晕染（COAT_BANDS：浓墨 → 重墨 → 淡墨），
+  上背中间、长摆往下摆和中缝方向渐淡，边缘仍是浓墨，读得出是布而不是一团黑。
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ if str(ART) not in sys.path:
 from style import bstyle as B  # noqa: E402
 from style import style as S  # noqa: E402
 import lanterns as LAN  # noqa: E402
+import kit as K  # noqa: E402  （lanterns 已把 models/ 加进 sys.path）
 
 H = S.HERO_HEIGHT_M  # 2.2
 
@@ -71,10 +77,57 @@ SWING_LIFT = 0.24  # 摆动脚最高抬起
 WALK_BOB = 0.022  # 起伏约 ±1px：配准检查（FOOT_TOLERANCE_PX=1.5）量的是冠顶
 WALK_LEAN_DEG = 8.0
 IDLE_WIND, WALK_WIND = 0.28, 1.0
+# 纵深朝向的加量（乘 _depth_k；长摆只在背对镜头时分开、甩动，正对镜头时后片在身后，分开了像两片翅膀）
+DEPTH_LIFT = 0.16  # 摆动脚多抬
+DEPTH_KICK = 0.16  # 摆动前段脚跟后踢（S 向这条腿显得短）
+DEPTH_BACK = 0.10  # 后踢再往后一点
+DEPTH_SPREAD = 0.065  # 两脚各往外分开（米）
+DEPTH_COAT_SPLIT = 0.22  # 背对镜头走路：后片尾端向两侧分开，中间露出腿
+DEPTH_COAT_SWAY = 0.10  # 背对镜头走路：长摆尾端随步子左右甩
+# 正对镜头（S，SE/SW 约 0.6，乘 _toward_k）再加：抬膝前顶（膝盖从袍子前面顶出来）、两脚再分开、起伏加大、左袖摆幅加大
+TOWARD_KNEE_UP = 0.16  # 摆动中段脚再抬高（米）
+TOWARD_KNEE_FWD = 0.10  # 同时脚往前收到膝下
+TOWARD_SPREAD = 0.015  # 两脚再往外分开（米）
+TOWARD_BOB = 0.008  # 起伏再加（米；着地中段最低、腾空最高，冠顶配准容差 3px 以内）
+DASH_LEAN_EXTRA = 12.0  # 冲刺多前倾（度）
+DASH_LEAN_TOWARD = 8.0  # 正对镜头再多前倾（度）：从正面看得出扑过来，躯干缩短
+DASH_COAT_SPLIT = (0.20, 0.36)  # 冲刺时长摆尾端向两侧拖开（正对、背对镜头）
+DASH_COAT_FLY = 0.35  # 正对镜头冲刺：长摆少往后上方飘（身后的东西画面上本来就往上，飘高了像一对翅膀）
+DASH_COAT_UPRIGHT = 0.7  # 正对镜头冲刺：长摆绕腰线往回转前倾角的这么多，垂在腿后而不是跟着上身平伸出去
+DASH_RIBBON_SPREAD = 1.1  # 冲刺时发带向两侧
+# 大氅分层晕染：fade 0 是原来的浓墨三档，往上依次淡一档（都是调色板里的颜色）
+_DAN = S.shade_ramp(S.INK["dan"])  # 淡墨三档：亮、中、暗
+COAT_BANDS = [(0.0, [S.INK["zhong"], S.INK["nong"], S.INK["nong"]]),
+              (0.40, [_DAN[2], S.INK["zhong"], S.INK["nong"]]),
+              (0.72, [_DAN[1], _DAN[2], S.INK["zhong"]])]
 
 
 def walk_stride_units() -> float:
     return WALK_STRIDE_UNITS
+
+
+def _facing(parts) -> float:
+    """朝向镜头的程度：S 为 1，N 为 -1，E/W 为 0（斜向 ±0.71）。"""
+    d = parts.get("dir")
+    if d not in S.DIRS:
+        return 0.0
+    c = math.cos(math.radians(S.dir_rotation_deg(S.DIRS.index(d))))
+    return 0.0 if abs(c) < 1e-6 else c
+
+
+def _depth_k(parts) -> float:
+    """朝向的纵深系数：步子沿镜头纵深迈的程度。E/W 为 0，S/N 为 1，斜向约 0.6。"""
+    return abs(_facing(parts)) ** 1.5
+
+
+def _away_k(parts) -> float:
+    """背对镜头的程度：N 为 1，NE/NW 约 0.6，其余 0。"""
+    return max(0.0, -_facing(parts)) ** 1.5
+
+
+def _toward_k(parts) -> float:
+    """正对镜头的程度：S 为 1，SE/SW 约 0.6，其余 0。"""
+    return max(0.0, _facing(parts)) ** 1.5
 
 
 # ================================================================ 材质
@@ -83,8 +136,9 @@ def _materials():
     T = B.toon_material
     m = {
         "white": T("RobeWhite", ramp=[S.PAPER, I["qing"], I["dan"]], seed=1.0, edge=0.45),
-        # 大氅暗面用浓墨而不是焦墨：和焦墨外线拉开一点，墨色占比也不至于过半
-        "coat": T("CoatInk", ramp=[I["zhong"], I["nong"], I["nong"]], seed=2.0, edge=0.35),
+        # 大氅暗面用浓墨而不是焦墨：和焦墨外线拉开一点，墨色占比也不至于过半。
+        # 按顶点属性 fade 分层晕染（没写 fade 的网格就是 0，即原来的浓墨三档）
+        "coat": K.banded_toon_material("CoatInk", COAT_BANDS, noise_amt=0.16, seed=2.0, edge=0.35),
         "trousers": T("Trousers", I["nong"], seed=3.0),
         "boot": T("Boot", I["jiao"], seed=4.0),
         "belt": T("Belt", I["nong"], seed=5.0),
@@ -100,6 +154,10 @@ def _materials():
         "scabbard": T("Scabbard", I["nong"], seed=16.0),
         "eye": B.flat_material("EyeInk", I["jiao"]),
     }
+    # banded_toon_material 不把 seed 传给底下的假卡通材质：手动把晕染噪声的种子设回 2.0，fade=0 处和原来一样
+    for n in m["coat"].node_tree.nodes:
+        if n.type == "TEX_NOISE" and n.noise_dimensions == "4D":
+            n.inputs["W"].default_value += 2.0
     return m
 
 
@@ -162,12 +220,27 @@ def _grid_build(rows, cap=False):
 
 
 # ---------------------------------------------------------------- 大氅
-def _coat_upper_build(segs=36):
-    """大氅上身：比内袍大一圈的壳，前襟敞开（开口自领口向下张开成 V），肩部只有短肩（无袖）。"""
+UPPER_WASH = 0.88  # 上背中间晕开的最大 fade
+
+
+def _upper_fade(theta_deg, z):
+    """大氅上身的晕染：背中间（θ=90°）、腰上到肩胛之间最淡，往两侧、往肩线回到浓墨。"""
+    back = max(0.0, math.sin(math.radians(theta_deg))) ** 2
+    hump = float(np.interp(z, [COAT_TOP, 1.40, 1.55, 1.665, 1.70], [0.35, 1.0, 0.85, 0.2, 0.0]))
+    return UPPER_WASH * back * hump
+
+
+def _coat_upper_build(segs=36, fades=None):
+    """大氅上身：比内袍大一圈的壳，前襟敞开（开口自领口向下张开成 V），肩部只有短肩（无袖）。
+    fades 给一个列表时按顶点顺序填晕染属性（_upper_fade）。"""
     zs = [COAT_TOP, 1.30, 1.39, 1.50, 1.60, 1.665, 1.705, 1.735, NECK_Z + 0.02]
 
     def opening(z):  # 前襟开口半角（度），领口窄、腰间宽
         return float(np.interp(z, [COAT_TOP, 1.40, 1.62, NECK_Z + 0.02], [44, 36, 18, 30]))
+
+    if fades is not None:
+        fades.extend(_upper_fade(-90 + opening(z) + (360 - 2 * opening(z)) * i / segs, z)
+                     for z in zs for i in range(segs + 1))
 
     def build(bm):
         rings = []
@@ -203,27 +276,49 @@ COAT_PANELS = {  # 名字: (θ0, θ1, 长度, 是否前片)
 }
 
 
-def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=6, nv=12):
-    """一片长摆的点阵：从腰带下沿垂下、略外张、尾端收窄成燕尾；随风（wind）向后上方飘，并有行进的波。"""
+def _panel_fade(th_deg, t, front):
+    """长摆的晕染：往下摆渐淡（墨色由浓到淡）；后片靠中缝更淡、靠两侧浓，前片只在下摆淡一点。"""
+    if front:
+        return 0.45 * t * t
+    seam = math.sin(math.radians(th_deg)) ** 2
+    return (0.20 + 0.75 * t ** 1.1) * (0.6 + 0.4 * seam)
+
+
+def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=6, nv=12, split=0.0, sway=0.0, fly=1.0, pitch=0.0,
+                     fades=None):
+    """一片长摆的点阵：从腰带下沿垂下、略外张、尾端收窄成燕尾；随风（wind）向后上方飘，并有行进的波。
+    split：尾端向身体两侧分开（米，左片往 +X、右片往 -X）；sway：尾端整体横摆（米，+X 为正）；
+    都按 t^1.4 从腰往下渐增，0 时与原来完全相同；fly：随风往后上方飘的倍数；pitch：垂下的部分先绕腰线往前转（弧度，
+    抵消上身前倾，让长摆往下垂）。fades 给列表时按顶点顺序填晕染属性。"""
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    yc = (_torso_r(COAT_TOP) * TORSO_SY + COAT_OFF + 0.01) * math.sin(math.radians((th0 + th1) / 2))
     rows = []
     thc, tw = (th0 + th1) / 2, (th1 - th0)
     rx, ry = _torso_r(COAT_TOP) + COAT_OFF, _torso_r(COAT_TOP) * TORSO_SY + COAT_OFF + 0.01
+    side = 1.0 if math.cos(math.radians(thc)) >= 0 else -1.0
     for j in range(nv + 1):
         t = j / nv
         row = []
         for i in range(nu + 1):
             u = i / nu
+            if fades is not None:
+                fades.append(_panel_fade(thc + (u - 0.5) * tw * (1 - 0.28 * t), t, front))
             th = math.radians(thc + (u - 0.5) * tw * (1 - 0.28 * t))
             out = Vector((math.cos(th), math.sin(th) * 0.85, 0)).normalized()
             L = length * (1 - 0.10 * abs(u - 0.5) * 2 * t)  # 尾端中间长、两边短
             p = Vector((rx * math.cos(th), ry * math.sin(th), COAT_TOP)) + out * (0.17 * t ** 1.2) + Vector((0, 0, -L * t))
+            if pitch:  # 绕这片顶边的腰线（y = yc，z = COAT_TOP）往前转：+Y 往 -Y
+                dy_, dz_ = p.y - yc, p.z - COAT_TOP
+                p = Vector((p.x, yc + dy_ * cp + dz_ * sp, COAT_TOP - dy_ * sp + dz_ * cp))
             s = wind * (t ** 1.35) * L
-            p += Vector((0, 0.85 * s, 0.36 * s * t))  # 向后上方飘
+            p += Vector((0, 0.85 * s * fly, 0.36 * s * t * fly))  # 向后上方飘
             if front:
                 p += out * (0.10 * s) + Vector((0, 0.15 * s, 0))  # 前片从腿两侧往后飘（不往外张成裙子）
             amp = (0.010 + 0.05 * wind) * t
             w = math.sin(2 * math.pi * 1.1 * t - phase + u * 1.2 + (0.0 if front else 1.3))
             p += out * (amp * w) + Vector((0, amp * 0.6 * math.cos(2 * math.pi * t - phase + u), 0))
+            if split or sway:
+                p += Vector(((side * split + sway) * t ** 1.4, 0, 0))
             row.append(p)
         rows.append(row)
     return rows
@@ -299,11 +394,14 @@ def _ponytail_points(phase, wind, n=12):
     return pts
 
 
-def _ribbon_points(length, phase, wind, side, n=16):
-    """发带（相对冠后的根点）：从冠后出发，向后、略偏一侧，重力下垂 + 行进的 S 形波。"""
+def _ribbon_points(length, phase, wind, side, n=16, spread=0.0):
+    """发带（相对冠后的根点）：从冠后出发，向后、略偏一侧，重力下垂 + 行进的 S 形波。
+    spread：再往 side 那一侧拉开（冲刺的纵深朝向用，0 时和原来一样）。"""
     d_idle = Vector((0.55 * side, 0.55, -1.0)).normalized()
     d_walk = Vector((0.30 * side, 0.80, -0.62)).normalized()
     dirv = d_idle.lerp(d_walk, wind).normalized()
+    if spread:
+        dirv = (dirv + Vector((math.copysign(spread, side), 0, 0))).normalized()
     sdv = Vector((0, 0, 1)).cross(dirv).normalized()
     up = dirv.cross(sdv).normalized()
     k = 2 * math.pi * 1.4 / length
@@ -385,11 +483,15 @@ def build_hero(lamps=("red",)):
         "inner", chest)
 
     # 大氅：上身壳 + 四片长摆
-    obj("CoatUpper", _coat_upper_build(), M["coat"], "outer", chest, loc=rel((0, 0, 0)), sharp_deg=0)
+    fades: list = []
+    up = obj("CoatUpper", _coat_upper_build(fades=fades), M["coat"], "outer", chest, loc=rel((0, 0, 0)), sharp_deg=0)
+    B.set_point_attr(up, "fade", fades)
     panels = []
     for nm, (a0, a1, ln, front) in COAT_PANELS.items():
-        ob = obj(nm, _grid_build(_coat_panel_rows(a0, a1, ln, front, 0.0, 0.0)), M["coat"], "outer", chest,
-                 loc=rel((0, 0, 0)), sharp_deg=0)
+        fades = []
+        ob = obj(nm, _grid_build(_coat_panel_rows(a0, a1, ln, front, 0.0, 0.0, fades=fades)), M["coat"], "outer",
+                 chest, loc=rel((0, 0, 0)), sharp_deg=0)
+        B.set_point_attr(ob, "fade", fades)
         panels.append((ob, a0, a1, ln, front))
     parts["coat_panels"] = panels
 
@@ -548,13 +650,20 @@ def _tunic_rows(thc, width_deg, phase, wind, nu=5, nv=7, length=0.48):
 
 
 # ================================================================ 姿态
-def _leg_ik(parts, side, target_root: Vector, toe_tilt=0.0):
-    """两段式腿 IK（只在矢状面 y-z 里解，膝盖朝前）。target_root：踝关节在 root 坐标里的位置。"""
+def _leg_ik(parts, side, target_root: Vector, toe_tilt=0.0, dx=0.0):
+    """两段式腿 IK（在矢状面 y-z 里解，膝盖朝前）。target_root：踝关节在 root 坐标里的位置（x 不用）。
+    dx：踝关节相对髋关节往外/往内挪的距离（米，root 的 +X 为正）：整条腿绕前后轴外展，脚掌放平。
+    dx=0 时和原来完全一样。"""
     hip = parts[f"hip_{side}"]
     pel = parts["pelvis"]
     hip_root = pel.location + Vector((hip.location.x, 0, 0))
     d = target_root - hip_root
     dy, dz = d.y, d.z
+    abd = 0.0
+    if dx:  # 外展：先在“髋到踝”那个斜面里解，再整体绕 Y 转过去
+        r = math.hypot(dx, dz)
+        abd = math.atan2(-dx, -dz)
+        dz = -r
     D = min(max(math.hypot(dy, dz), 0.25), L_THIGH + L_SHIN - 1e-4)
     phi = math.atan2(dy, -dz)  # 从“正下”转向 +Y（向后）的角度
     cos_a = (L_THIGH ** 2 + D ** 2 - L_SHIN ** 2) / (2 * L_THIGH * D)
@@ -562,20 +671,36 @@ def _leg_ik(parts, side, target_root: Vector, toe_tilt=0.0):
     cos_k = (L_THIGH ** 2 + L_SHIN ** 2 - D ** 2) / (2 * L_THIGH * L_SHIN)
     bend = math.pi - math.acos(max(-1.0, min(1.0, cos_k)))
     a1 = phi - alpha  # 大腿向前（膝盖在前）
-    hip.rotation_euler = (a1, 0, 0)
     parts[f"knee_{side}"].rotation_euler = (bend, 0, 0)
-    parts[f"ankle_{side}"].rotation_euler = (-(a1 + bend) + toe_tilt, 0, 0)
+    if not dx:
+        hip.rotation_euler = (a1, 0, 0)
+        parts[f"ankle_{side}"].rotation_euler = (-(a1 + bend) + toe_tilt, 0, 0)
+        return
+    hip.rotation_euler = (a1, abd, 0)  # XYZ 欧拉：先绕 X（前后），再绕 Y（外展）
+    # 脚掌：整条链是 Ry(abd)·Rx(a1+bend)·R踝，要让脚只剩脚尖角 Rx(toe_tilt)，不跟着外展侧翻
+    ank = (Matrix.Rotation(-(a1 + bend), 3, "X") @ Matrix.Rotation(-abd, 3, "Y")
+           @ Matrix.Rotation(toe_tilt, 3, "X"))
+    parts[f"ankle_{side}"].rotation_euler = ank.to_euler("XYZ")
 
 
-def _foot_walk(p):
-    """一只脚在一轮里的位置（相对骨盆正下方；y 向前为负）、抬高、脚尖角。p∈[0,1)，p=0 刚着地。"""
+def _foot_walk(p, kd=0.0, fk=0.0):
+    """一只脚在一轮里的位置（相对骨盆正下方；y 向前为负）、抬高、脚尖角。p∈[0,1)，p=0 刚着地。
+    kd：纵深系数（_depth_k）。加大抬脚、摆动前段的脚跟后踢；fk：正对镜头系数（_toward_k），摆动中段再抬脚、
+    脚收到膝下（大腿抬平，膝盖往镜头顶）。都为 0 时与原来完全相同。"""
     if p < DUTY:  # 着地：相对身体匀速后移（与地面不打滑）
         q = p / DUTY
         return -CONTACT_M / 2 + CONTACT_M * q, 0.0, 0.0
     q = (p - DUTY) / (1 - DUTY)  # 摆动：先后踢再向前，抬膝
     s = q * q * (3 - 2 * q)
-    y = CONTACT_M / 2 - CONTACT_M * s + 0.22 * math.sin(math.pi * q) * (1 - q) ** 1.5
-    z = SWING_LIFT * math.sin(math.pi * q) ** 2.5
+    y = CONTACT_M / 2 - CONTACT_M * s + (0.22 + DEPTH_BACK * kd) * math.sin(math.pi * q) * (1 - q) ** 1.5
+    z = (SWING_LIFT + DEPTH_LIFT * kd) * math.sin(math.pi * q) ** 2.5
+    if kd:  # 脚跟后踢：摆动前段小腿折上去（正面看这条腿短一截）
+        z += DEPTH_KICK * kd * math.sin(math.pi * min(q / 0.6, 1.0)) ** 2 * (1 - q)
+    if fk:  # 抬膝前顶：q 0.2–0.75 之间鼓起，约 0.47 最高；q≈0.7 那帧已回到原来的轨迹往下落（那帧两脚都离地，
+        # S 向画面上后脚本来就高，前脚再抬着最低点就离地 12px，算“没着地”），着地不变
+        bump = math.sin(math.pi * min(max((q - 0.2) / 0.55, 0.0), 1.0)) ** 1.5
+        z += TOWARD_KNEE_UP * fk * bump
+        y -= TOWARD_KNEE_FWD * fk * bump
     tilt = math.radians(35) * math.sin(math.pi * min(q * 1.6, 1.0)) * (1 - q)
     return y, z, tilt
 
@@ -587,19 +712,29 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
     sL, sR, armR, lp = parts["sleeve_L"], parts["sleeve_R"], parts["arm_R"], parts["lantern"]
     lp.location = parts["lantern_loc0"]
     _set_core_strength(parts, 1.0)
+    kd, fk = _depth_k(parts), _toward_k(parts)
+    coat_split = coat_sway = rib_spread = 0.0  # 长摆尾端向两侧分开 / 左右甩（米）、发带向两侧（见 _ribbon_points）
+    coat_fly = 1.0  # 长摆随风往后上方飘的倍数
+    coat_pitch = 0.0  # 长摆绕腰线往前转（弧度）
     if anim == "walk":
         p = (frame % n_frames) / n_frames
         wind, rib_phase = WALK_WIND, 2 * ph
-        bob = -WALK_BOB * math.cos(2 * math.pi * (2 * p - DUTY))  # 着地中段最低、腾空最高
+        bob = -(WALK_BOB + TOWARD_BOB * fk) * math.cos(2 * math.pi * (2 * p - DUTY))  # 着地中段最低、腾空最高
         pel.location = (0, 0, PELVIS_Z + bob)  # 重心不压低：着地两端腿伸直（IK 会把脚抬起约 2cm），不显得蹲
         pel.rotation_euler = (0, 0, math.radians(4) * math.sin(ph))  # 骨盆随步子微转
         chest.rotation_euler = (math.radians(WALK_LEAN_DEG), 0, math.radians(-3) * math.sin(ph))  # +X 转 = 前倾
         chest.location = (0, 0, 0)
         for side, off, sx in (("L", 0.0, 1), ("R", 0.5, -1)):
-            y, z, tilt = _foot_walk((p + off) % 1.0)
-            _leg_ik(parts, side, Vector((HIP_X * sx * 0.9, y, ANKLE_Z + z)), tilt)
+            y, z, tilt = _foot_walk((p + off) % 1.0, kd, fk)
+            _leg_ik(parts, side, Vector((HIP_X * sx * 0.9, y, ANKLE_Z + z)), tilt,
+                    dx=sx * (DEPTH_SPREAD * kd + TOWARD_SPREAD * fk))
         swing = math.sin(ph - 0.5)
-        sL.rotation_euler = (math.radians(-12 * swing + 6), 0, math.radians(-4))
+        # 纵深朝向：左袖往前摆时略往里收（正面看左右交替；正对镜头摆得更大）；长摆尾端随步子左右甩、后片向两侧分开
+        sL.rotation_euler = (math.radians(-(12 + 8 * fk) * swing + 6), math.radians((9 * kd + 6 * fk) * swing),
+                             math.radians(-4))
+        ka = _away_k(parts)
+        coat_split = DEPTH_COAT_SPLIT * ka
+        coat_sway = DEPTH_COAT_SWAY * ka * math.sin(ph - 1.2)
         sR.rotation_euler = (math.radians(5 + 6 * swing), 0, 0)
         # 持杖手稳（NW 向杖头正在头顶上方，晃动会被当成配准漂移；上身扭转也只给 ±3°）
         armR.rotation_euler = (math.radians(3 + 0.6 * math.sin(2 * ph)), 0, 0)
@@ -609,6 +744,14 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
         sleeve_back = 0.10
     elif anim in ("dash", "hurt", "death"):
         wind, rib_phase, sleeve_back = _pose_action(parts, anim, frame, n_frames)
+        if anim == "dash":  # 纵深朝向：长摆、发带向两侧拖开（正面、背面都看得见在冲）
+            front_k = kd - _away_k(parts)  # 正对镜头那部分
+            coat_split = DASH_COAT_SPLIT[0] * front_k + DASH_COAT_SPLIT[1] * _away_k(parts)
+            coat_sway = 0.06 * kd * math.sin(ph - 1.0)
+            coat_fly = 1.0 - (1.0 - DASH_COAT_FLY) * front_k
+            lean = 20 + DASH_LEAN_EXTRA * kd * kd + DASH_LEAN_TOWARD * fk * fk  # 同 _pose_action
+            coat_pitch = math.radians(DASH_COAT_UPRIGHT * lean) * front_k
+            rib_spread = DASH_RIBBON_SPREAD * (0.3 * front_k + _away_k(parts))  # 正对镜头时少分开（不然在头顶横成一道弧）
     else:  # idle：重心在右腿，左腿放松；微风；呼吸
         wind, rib_phase = IDLE_WIND, ph
         breath = math.sin(ph)
@@ -647,15 +790,20 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
     top_h = pel.location.z + (COAT_TOP - PELVIS_Z)
     for ob, a0, a1, ln, front in parts["coat_panels"]:
         ln_k = min(ln, max(0.25, top_h - 0.04))
-        _replace_mesh(ob, _grid_build(_coat_panel_rows(a0, a1, ln_k, front, rib_phase, wind)))
+        fades: list = []
+        split = coat_split * (0.5 if front and anim == "walk" else 1.0)
+        _replace_mesh(ob, _grid_build(_coat_panel_rows(a0, a1, ln_k, front, rib_phase, wind, split=split,
+                                                       sway=coat_sway, fly=coat_fly, pitch=coat_pitch,
+                                                       fades=fades)))
+        B.set_point_attr(ob, "fade", fades)
     for ob, thc, w in parts["tunic"]:
         _replace_mesh(ob, _grid_build(_tunic_rows(thc, w, rib_phase, wind * 0.5)))
     _replace_mesh(parts["ponytail"], _strip_build(_ponytail_points(rib_phase, wind_hair), 0.10, 0.05, taper=(1.0, 0.3)))
     rib_a, rib_b = parts["ribbon"]
-    _replace_mesh(rib_a, _strip_build(_ribbon_points(0.95, rib_phase, wind_hair, 1.0), 0.066, 0.008, twist=2.4,
-                                      taper=(0.8, 1.0)))
-    _replace_mesh(rib_b, _strip_build(_ribbon_points(0.80, rib_phase + 1.3, wind_hair, -0.6), 0.060, 0.008, twist=-2.0,
-                                      taper=(0.8, 1.0)))
+    _replace_mesh(rib_a, _strip_build(_ribbon_points(0.95, rib_phase, wind_hair, 1.0, spread=rib_spread), 0.066, 0.008,
+                                      twist=2.4, taper=(0.8, 1.0)))
+    _replace_mesh(rib_b, _strip_build(_ribbon_points(0.80, rib_phase + 1.3, wind_hair, -0.6, spread=rib_spread), 0.060,
+                                      0.008, twist=-2.0, taper=(0.8, 1.0)))
     for sx, ob in zip((-1, 1), parts["sidelocks"]):
         _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind_hair), 0.026, 0.012, taper=(1.0, 0.4)))
     for h in parts["lamps"].values():  # 其余几盏灯的枢轴跟着第一盏；挂件（符纸、剑坠、穗子）随风
@@ -711,18 +859,27 @@ def _pose_action(parts, anim, frame, n):
     sL, sR, armR, lp = parts["sleeve_L"], parts["sleeve_R"], parts["arm_R"], parts["lantern"]
     ph = 2 * math.pi * (frame % n) / n
     if anim == "dash":  # 轻功冲刺：前倾 20°，双腿前后大劈，衣摆发带全展
+        # 纵深朝向（S/N）再多前倾 DASH_LEAN_EXTRA；两腿左右分开，后蹬的脚抬得更高，往前摆的腿抬膝
+        kd = _depth_k(parts)
         p = (frame % n) / n
-        pel.location = (0, 0.02, PELVIS_Z - 0.06 + 0.012 * math.cos(2 * ph))
         pel.rotation_euler = (0, 0, math.radians(5) * math.sin(ph))
         chest.location = (0, 0, 0)
-        chest.rotation_euler = (math.radians(20), 0, math.radians(-4) * math.sin(ph))
-        head.rotation_euler = (math.radians(-14), 0, 0)  # 抬头看前方
+        # 多前倾按 kd² 给：斜向只多一点（NW/NE 灯杖正好在头顶旁边，前倾一变杖头就进“冠顶”量的那一列）；
+        # 正对镜头再多前倾、重心再低一点：头肩往前往下，躯干缩短，从正面看得出是扑过来
+        fk2 = _toward_k(parts) ** 2
+        pel.location = (0, 0.02, PELVIS_Z - 0.06 - 0.04 * fk2 + 0.012 * math.cos(2 * ph))
+        lean = 20 + DASH_LEAN_EXTRA * kd * kd + DASH_LEAN_TOWARD * fk2
+        chest.rotation_euler = (math.radians(lean), 0, math.radians(-4) * math.sin(ph))
+        head.rotation_euler = (math.radians(-14 - 8 * kd * kd - 8 * fk2), 0, 0)  # 抬头看前方
         for side, off, sx in (("L", 0.0, 1), ("R", math.pi, -1)):
-            c = math.cos(2 * math.pi * p + off)
+            a = 2 * math.pi * p + off
+            c = math.cos(a)
             y = -0.44 * c
-            z = 0.04 + 0.16 * max(0.0, c) ** 1.5 * 0 + 0.20 * max(0.0, -math.sin(2 * math.pi * p + off)) * 0.6
             z = 0.03 + (0.16 if c < 0 else 0.0) * (-c)  # 后蹬的脚抬起，前脚贴地
-            _leg_ik(parts, side, Vector((HIP_X * sx * 0.9, y, ANKLE_Z + z)), math.radians(30) * max(0.0, -c))
+            if kd:
+                z += kd * (0.16 * max(0.0, -c) + 0.24 * max(0.0, -math.sin(a)))
+            _leg_ik(parts, side, Vector((HIP_X * sx * 0.9, y, ANKLE_Z + z)), math.radians(30) * max(0.0, -c),
+                    dx=sx * 0.07 * kd)
         sL.rotation_euler = (math.radians(38), 0, math.radians(-8))  # 左袖甩向后
         sR.rotation_euler = (math.radians(14), 0, 0)
         armR.rotation_euler = (math.radians(-6), 0, 0)
