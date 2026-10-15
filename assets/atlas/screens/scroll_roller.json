@@ -1,0 +1,21 @@
+{
+ "file": "scroll_roller.png",
+ "size": [
+  60,
+  832
+ ],
+ "paper_edge_x": 10,
+ "paper_top_y": 16,
+ "paper_height": 800,
+ "rod_center_x": 35.0,
+ "rod_radius": 12.0,
+ "knob_radius": 18.0,
+ "scroll_size": [
+  2400,
+  800
+ ],
+ "blend": "normal",
+ "tint": false,
+ "generator": "art/post/fx_extras.py",
+ "note": "卷轴展开到 x（卷轴画的像素）时：画只画 [0, x)，轴的左上角放在 (x - paper_edge_x, -paper_top_y)，和卷轴画同样缩放、画在画上面。左边 0..paper_edge_x 是压在画上的半透明卷曲阴影；paper_edge_x 往右是卷起的纸（不透明）和轴杆；轴头上下各伸出卷轴 paper_top_y 像素。长夜版、天明版共用。"
+}

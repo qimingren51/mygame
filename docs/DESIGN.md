@@ -447,7 +447,7 @@ assets/data/
   | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片） |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
@@ -499,8 +499,9 @@ assets/data/
   - `bamboo_clump`（竹丛，可打碎的软障碍）和 `bamboo_clump_broken` 同画布、同锚点，打碎时直接换图；meta 里互相用 `broken_variant` / `intact_variant` 指向对方。2 倍下 320²，比别的道具大。
   - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。按游戏里的反馈放大过：狐仙祠高约 38 个世界单位（和石灯笼差不多高、更宽，好当地标），石狐约 32。
 - **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
-- **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15）。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
+- **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15，是在 sRGB 里混合估的；游戏在线性 HDR 里混合，浅色叠在暗处会亮得多，实测用 0.05、0.035）。以后叠在暗处的浅色素材，meta 里的建议不透明度按 sRGB 值的四分之一左右估，或者写“游戏里实测值”。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
 - **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。
+  - 卷轴轴头 `screens/scroll_roller.png`（60×832，透明底）：漆木轴、上下轴头，左边一条卷起来的纸边，长夜版、天明版通用。展开到卷轴的第 x 列时，画卷轴的 [0, x) 列，轴头的左上角放在相对卷轴 (x − 10, −16) 处，同样缩放，画在上面。`scroll_roller.json` 记了 `paper_edge_x`（10，从这一列起和展开的那道边对齐）、`paper_top_y`（16，卷轴上沿）、轴和轴头的位置。
 - **灯驿长卷**（`screens/hub/`，GAMEPLAY 11.6）：灯驿的全屏背景。点亮的心灯在画里一盏盏亮起，通关的地区远山露出晨光。
   - **显示**：按“铺满再居中裁边”缩放，s = max(窗口宽 / 1920, 窗口高 / 1080)，不拉伸、不加黑边；所有叠层和坐标走同一个变换。`safe` [96, 128, 1728, 824] 是 16:10 和 21:9 都留得住的区域，人物、心灯、匾额、`text_safe` 都在里面；四个人物还在 x 240–1680 里，4:3 也看得全。
   - **`hub.png`**：1920×1080 不透明 RGB，长夜，只有墨色。12 盏心灯都不亮；四个人物各自的灯（老灯匠的工作灯、货郎担上的小红灯、灯童的兔子灯、说书人的蜡烛）一直亮着。
@@ -534,6 +535,7 @@ assets/data/
   | 标记印 | `ui/seal_{evo,elite,boss}` 96×160；`ui/seal_record`（新纪录）96×224 | 竖长 |
   | 五行反应印 | `ui/seal_react_{liaoyuan,rongyan,zhubing,ningshuang,zisheng,zhengteng,rongjin,duanmu,lietu,yuni}`（朱白相间的圆角方印、双边栏，两字从上往下读；第一次发生反应时盖在屏幕中间） | 128² |
   | 头像 | `ui/portrait_hero`（主角胸像，装在同款圆框里） | 256² |
+  | 淡墨底 | `ui/ink_wash`、`ui/ink_wash_1`（短的）：横向一笔淡墨，左端饱满、右端枯笔飞白，四边渐隐到全透明，垫在大标题后面（夜主登场、结算）。白色可染（`tint: true`），浓淡在 alpha 里；建议染墨 #17140F、不透明度约 0.6 垫亮字，或染纸色 #EDE4CF、约 0.85 垫墨字（sRGB 估值，游戏里按实测调） | 1024×320、768×256 |
   | 灯 | `ui/icon_lamp_{red,mirror,frost}`（单独渲染的灯笼头，id 同 lamps.ron；注意 `ui/icon_lamp` 和 `ui/icon_lamp_evo` 是灯火法器，不是灯） | 128² |
 
   印章周围和刻掉的笔画是透明的，直接盖在夜色上对比偏低，最好盖在宣纸卡片上或者垫一层浅色底。

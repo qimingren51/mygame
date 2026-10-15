@@ -144,10 +144,10 @@ art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out as
 art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
-art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
-art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons
-mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn}.png assets/atlas/screens/
+art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
+mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
 art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规则检查 assets/atlas
 ```
 
@@ -233,6 +233,19 @@ art/.venv/bin/python art/post/test_scroll_qingqiu.py                          # 
 - `vfx/mist_0..1`：白色、可染色的无缝平铺雾（大团、碎团），2 倍 512²；meta 写 `tileable: true`、`tile_units: 128`、`alpha_hint`（0.2、0.15），**不写 `tile`**（写了打包会跳过）。建议染 #DDD9CF。
 - `weapons/bamboo_spike`：竹刺，锚点居中、朝 +X，`length_units: 28`；`bamboo_spike_trail`：拖尾，叠加、可染色（建议 #A8E6B8），锚点在右端。
 - 卷轴：2400×800 不透明，同一幅画两种天光（长夜只有墨色，天明上色）；左上留给旁白，文字由游戏画。
+
+## 淡墨底、竹叶、卷轴轴头（post/fx_extras.py）
+
+```bash
+art/.venv/bin/python art/post/fx_extras.py        # → out/assets@2x/ui_wash/、vfx_leaves/，out/screens/scroll_roller.{png,json}，审图 review@2x/fx_extras_review.png
+art/.venv/bin/python art/post/test_fx_extras.py   # 自检 13 项（尺寸、白色可染、四边透明、不像圆角方块、确定性、只写自己的文件、能打进图集）
+```
+
+只出 2 倍，质感会话要的三样：
+- `ui/ink_wash`、`ui/ink_wash_1`：大标题后面垫的一笔淡墨；
+- `vfx/bamboo_leaf_0..3`：竹丛打碎时飞的竹叶；
+- `screens/scroll_roller.png`：开场卷轴展开时跟着那道边走的轴头。
+格式和用法见 `docs/DESIGN.md` 第 15 节。打包时 `ui_wash` 跟 ui 一起用 `--no-trim`，`vfx_leaves` 跟 vfx 一起打。
 
 ## 灯驿长卷（post/hub_scroll.py）
 
