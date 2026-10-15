@@ -1,6 +1,7 @@
 //! 结算：天明 / 夜未尽、本局数据、构筑、灯油（移植自网页版 lantern/game.js 的 endRun）。
 //! 灯油和最好成绩记进存档；跑分和观看回放不记。
 
+use bevy::picking::events::PointerClick;
 use bevy::prelude::*;
 
 use lantern_platform::profile::{NewRecord, Recorded, RunRecord};
@@ -16,8 +17,14 @@ use crate::skin::Skin;
 use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(OnEnter(RunState::Over), record)
+    app.init_resource::<ResultInput>()
+        .add_systems(OnEnter(RunState::Over), record)
         .add_systems(Update, (spawn, slide_in, input).chain().run_if(in_state(RunState::Over)));
+}
+
+#[derive(Resource, Default)]
+struct ResultInput {
+    clicked: bool,
 }
 
 /// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
@@ -48,7 +55,9 @@ fn record(
     playback: Option<Res<ReplayPlayback>>,
     mut profile: ResMut<Profile>,
     mut news: ResMut<HubNews>,
+    mut ui: ResMut<ResultInput>,
 ) {
+    ui.clicked = false;
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
     let counts =
@@ -172,7 +181,18 @@ fn spawn(
                     p, c, &fonts, &db, &skin, &r, &sub, omen, &recorded, counts, &arsenal, &build, &profile,
                 )
             });
-            root.spawn(text(&fonts.body, 20.0, PAPER, "Enter / 手柄 A　回到标题"));
+            root.spawn((
+                Node {
+                    min_width: px(240),
+                    padding: UiRect::axes(px(28), px(12)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                skin.image("btn_primary_focus"),
+            ))
+            .with_child(crate::prompts::hint(&fonts.body, 20.0, INK, "{confirm} 回到标题"))
+            .observe(|_: On<PointerClick>, mut ui: ResMut<ResultInput>| ui.clicked = true);
         });
 }
 
@@ -347,7 +367,7 @@ fn results_body(
                 if let Some((line, cost)) = next {
                     let lv = profile.meta_level(&line.id) + 1;
                     let s = if profile.oil >= cost {
-                        format!("灯油 {}　·　可点亮「{}」Lv{lv}（标题界面按 M）", profile.oil, line.name)
+                        format!("灯油 {}　·　可点亮「{}」Lv{lv}（灯驿中点亮）", profile.oil, line.name)
                     } else {
                         format!(
                             "灯油 {}　·　点亮「{}」Lv{lv} 还差 {}",
@@ -365,6 +385,7 @@ fn results_body(
 
 fn input(
     actions: Res<Actions>,
+    mut ui: ResMut<ResultInput>,
     playback: Option<Res<ReplayPlayback>>,
     pending: Option<Res<Pending>>,
     mut next: ResMut<NextState<AppState>>,
@@ -373,7 +394,7 @@ fn input(
     if playback.is_some() || pending.is_some() {
         return;
     }
-    if actions.confirm || actions.back {
+    if actions.confirm || actions.back || std::mem::take(&mut ui.clicked) {
         next.set(AppState::Title);
     }
 }

@@ -16,7 +16,26 @@ use lantern_sim::{RunMode, RunResult, RunSetup};
 
 use crate::settings::{load_with_backup, write_atomic};
 
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
+
+/// 首夜教学的完成项；独立于模拟与回放，完成一项就保存。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OnboardingProgress {
+    pub movement: bool,
+    pub dash: bool,
+    pub ult: bool,
+    pub upgrade: bool,
+}
+
+impl OnboardingProgress {
+    pub fn complete(self) -> bool {
+        self.movement && self.dash && self.ult && self.upgrade
+    }
+    pub fn completed() -> Self {
+        Self { movement: true, dash: true, ult: true, upgrade: true }
+    }
+}
 
 /// 最好成绩。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -103,6 +122,7 @@ pub struct Profile {
     pub totals: Totals,
     pub runs: u32,
     pub wins: u32,
+    pub onboarding: OnboardingProgress,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
@@ -136,6 +156,7 @@ impl Default for Profile {
             totals: Totals::default(),
             runs: 0,
             wins: 0,
+            onboarding: OnboardingProgress::default(),
             path: None,
             save_error: None,
         }
@@ -268,6 +289,9 @@ impl Profile {
                     self.grant(content, k);
                 }
             }
+        }
+        if self.version < 3 && (self.runs > 0 || self.basics) {
+            self.onboarding = OnboardingProgress::completed();
         }
         self.version = SAVE_VERSION;
         true
@@ -753,6 +777,26 @@ mod tests {
         assert!(Profile::load(&dir).save().is_err());
         assert_eq!(std::fs::read_to_string(dir.join("save.ron")).unwrap(), "(oil: lots");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn onboarding_progress_persists_and_v2_veterans_do_not_repeat_it() {
+        let dir = temp("onboarding");
+        let mut p = Profile::load(&dir);
+        p.onboarding.dash = true;
+        p.save().unwrap();
+        let loaded = Profile::load(&dir);
+        assert!(loaded.onboarding.dash);
+        assert!(!loaded.onboarding.complete());
+        std::fs::write(dir.join("save.ron"), "(version: 2, runs: 3, oil: 125)").unwrap();
+        let mut old = Profile::load(&dir);
+        assert!(old.upgrade(&content()));
+        assert!(old.onboarding.complete());
+        assert_eq!(old.oil, 125);
+        let mut first = Profile { version: 2, ..Default::default() };
+        first.upgrade(&content());
+        assert!(!first.onboarding.complete());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// docs/BALANCE.md 第 10.6 节：M2 存档迁移。

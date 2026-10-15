@@ -287,11 +287,11 @@ pub(crate) fn spawn_hud(
     commands.spawn((
         run,
         abs(Some(20.0), None, None, Some(14.0)),
-        children![text(
+        children![crate::prompts::hint(
             &fonts.body,
             16.0,
             DIM,
-            "WASD / 方向键 / 左摇杆　移动　　空格 / 手柄 A　闪避　　E / 手柄 Y　燃灯　　Esc　暂停　　F3　性能"
+            "{move} 移动　{dash} 闪避　{ult} 燃灯　{pause} 暂停"
         )],
     ));
 }
@@ -299,6 +299,8 @@ pub(crate) fn spawn_hud(
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct HudState<'w> {
     content: Res<'w, GameContent>,
+    active: Res<'w, lantern_platform::ActiveInput>,
+    settings: Res<'w, lantern_platform::Settings>,
     tick: Option<Res<'w, Tick>>,
     progress: Option<Res<'w, Progress>>,
     director: Option<Res<'w, Director>>,
@@ -383,7 +385,7 @@ pub(crate) fn update_hud(
         set(
             &mut t,
             if ready {
-                "燃灯　E / 手柄 Y".into()
+                crate::prompts::render("燃灯 {ult}", &s.active, &s.settings)
             } else {
                 format!("燃灯 {}%", (progress.ult * 100.0) as u32)
             },

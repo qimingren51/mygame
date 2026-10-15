@@ -128,7 +128,7 @@ pub(crate) fn spawn(
                         }
                     });
             });
-        p.spawn(text(&fonts.body, 16.0, DIM, "Enter / 手柄 A　继续"));
+        p.spawn(crate::prompts::hint(&fonts.body, 16.0, DIM, "{confirm} 继续"));
     });
 }
 

@@ -36,6 +36,8 @@ enum Shown {
 pub(crate) struct ChoiceUi {
     shown: Shown,
     selected: usize,
+    /// 焦点移到封印按钮时，保留要封印的卡片。
+    card_target: usize,
     /// 已经发出命令，等模拟处理
     waiting: bool,
     /// 打开了多久（防止上一个界面的按键直接把这个确认掉）
@@ -64,6 +66,9 @@ pub(crate) struct Card;
 
 #[derive(Component)]
 pub(crate) struct RerollLabel;
+
+#[derive(Component)]
+struct BanishLabel;
 
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<ChoiceUi>().add_systems(OnExit(lantern_sim::AppState::Run), reset).add_systems(
@@ -165,6 +170,7 @@ fn input(
     phase: Res<SimPhase>,
     flow: Res<Flow>,
     build: Res<Build>,
+    progress: Res<lantern_sim::Progress>,
     mut ui: ResMut<ChoiceUi>,
     mut sim: ResMut<SimCommands>,
 ) {
@@ -182,28 +188,45 @@ fn input(
             if n == 0 {
                 return;
             }
+            let enabled = [flow.rerolls > 0, flow.banishes > 0, true];
             if let Some(h) = ui.hovered.take()
                 && actions.pointer_moved
             {
-                ui.selected = h.min(n - 1);
+                ui.selected = h.min(n + 2);
             }
-            if actions.nav.x != 0 {
-                ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(n as i32) as usize;
+            if actions.nav.y != 0 {
+                ui.selected = if ui.selected < n {
+                    n + enabled.iter().position(|x| *x).unwrap_or(2)
+                } else {
+                    ui.card_target.min(n - 1)
+                };
+            } else if actions.nav.x != 0 {
+                ui.selected = if ui.selected < n {
+                    (ui.selected as i32 + actions.nav.x).rem_euclid(n as i32) as usize
+                } else {
+                    n + crate::navigation::cycle_enabled(ui.selected - n, actions.nav.x, &enabled)
+                };
+            }
+            if ui.selected < n {
+                ui.card_target = ui.selected;
             }
             if ui.age < 0.25 {
                 return;
             }
-            if let Some(i) = actions.pick.map(usize::from).filter(|&i| i < n).or(clicked) {
+            let chosen = actions
+                .pick
+                .map(usize::from)
+                .filter(|&i| i < n)
+                .or(clicked)
+                .or(actions.confirm.then_some(ui.selected));
+            if let Some(i) = chosen.filter(|&i| i < n) {
                 send(&mut ui, SimCommand::Choose(i as u8));
-            } else if actions.confirm {
-                let i = ui.selected;
-                send(&mut ui, SimCommand::Choose(i as u8));
-            } else if actions.reroll && flow.rerolls > 0 {
+            } else if (actions.reroll || chosen == Some(n)) && flow.rerolls > 0 {
                 send(&mut ui, SimCommand::Reroll);
-            } else if actions.banish && flow.banishes > 0 {
-                let i = ui.selected;
+            } else if (actions.banish || chosen == Some(n + 1)) && flow.banishes > 0 {
+                let i = ui.card_target;
                 send(&mut ui, SimCommand::Banish(i as u8));
-            } else if actions.skip {
+            } else if actions.skip || chosen == Some(n + 2) {
                 send(&mut ui, SimCommand::Skip);
             }
         }
@@ -261,14 +284,24 @@ fn input(
             }
         }
         SimPhase::Shop => {
-            // 0 宝箱、1 灯坠、2 离开
+            let Some(shop) = flow.shop else { return };
+            let enabled = [
+                progress.gold >= shop.chest_cost as f32,
+                shop.charm_ok && progress.gold >= shop.charm_cost as f32,
+                true,
+            ];
+            if !enabled[ui.selected.min(2)] {
+                ui.selected = enabled.iter().position(|x| *x).unwrap_or(2);
+            }
             if let Some(h) = ui.hovered.take()
                 && actions.pointer_moved
+                && h < 3
+                && enabled[h]
             {
-                ui.selected = h.min(2);
+                ui.selected = h;
             }
             if actions.nav.x != 0 {
-                ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(3) as usize;
+                ui.selected = crate::navigation::cycle_enabled(ui.selected, actions.nav.x, &enabled);
             }
             if ui.age < 0.25 {
                 return;
@@ -281,7 +314,9 @@ fn input(
                 .or(actions.confirm.then_some(ui.selected));
             if actions.back || actions.skip || chosen == Some(2) {
                 send(&mut ui, SimCommand::Skip);
-            } else if let Some(i @ (0 | 1)) = chosen {
+            } else if let Some(i @ (0 | 1)) = chosen
+                && enabled[i]
+            {
                 send(&mut ui, SimCommand::Choose(i as u8));
             }
         }
@@ -297,15 +332,19 @@ fn highlight(
     ui: Res<ChoiceUi>,
     flow: Res<Flow>,
     mut focus: Query<(&CardFocus, &mut Visibility)>,
-    mut reroll: Query<&mut Text, With<RerollLabel>>,
+    mut reroll: Query<&mut crate::prompts::Prompt, (With<RerollLabel>, Without<BanishLabel>)>,
+    mut banish: Query<&mut crate::prompts::Prompt, (With<BanishLabel>, Without<RerollLabel>)>,
 ) {
     for (f, mut v) in &mut focus {
         v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
     }
     if flow.is_changed() {
         for mut t in &mut reroll {
-            t.0 = format!("R / 手柄 Y　重抽（剩 {} 次）", flow.rerolls);
+            t.0 = format!("{{reroll}} 重抽（剩 {} 次）", flow.rerolls);
         }
+    }
+    for mut t in &mut banish {
+        t.0 = format!("{{banish}} 封印第 {} 项（剩 {} 次）", ui.card_target + 1, flow.banishes);
     }
 }
 
@@ -453,7 +492,7 @@ fn card(
                 }
             });
         }
-        card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
+        card.spawn(crate::prompts::hint(&fonts.title, 22.0, INK_DIM, &format!("{{pick{}}}", i + 1)));
     });
     card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
@@ -496,26 +535,67 @@ fn spawn_level_up(
                 card(row, c, fonts, db, skin, arsenal, build, i, o);
             }
         });
-        root.spawn(Node { column_gap: px(36), ..default() }).with_children(|foot| {
-            foot.spawn(text(&fonts.body, 16.0, PAPER, "1-4 / ← → + Enter　选择"));
-            foot.spawn((
-                RerollLabel,
-                text(&fonts.body, 16.0, PAPER, &format!("R / 手柄 Y　重抽（剩 {rerolls} 次）")),
-            ));
-            if banishes > 0 {
-                foot.spawn(text(
-                    &fonts.body,
-                    16.0,
-                    PAPER,
-                    &format!("C / 手柄 LB　封印选中项（剩 {banishes} 次）"),
+        root.spawn(crate::prompts::hint(
+            &fonts.body,
+            17.0,
+            PAPER,
+            "{nav} 选择　上下切换卡片与操作　{confirm} 确定",
+        ));
+        root.spawn(Node { column_gap: px(16), ..default() }).with_children(|foot| {
+            let labels = [
+                format!("{{reroll}} 重抽（剩 {rerolls} 次）"),
+                format!("{{banish}} 封印第 1 项（剩 {banishes} 次）"),
+                if ember > 0 {
+                    "{skip} 跳过".into()
+                } else {
+                    format!("{{skip}} 跳过（灯油 +{}）", c.run.choices.skip_oil)
+                },
+            ];
+            for (k, label) in labels.iter().enumerate() {
+                let i = offers.len() + k;
+                let enabled = match k {
+                    0 => rerolls > 0,
+                    1 => banishes > 0,
+                    _ => true,
+                };
+                let mut button = foot.spawn((
+                    Node {
+                        min_width: px(240),
+                        padding: UiRect::axes(px(20), px(12)),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    skin.image(if enabled { "btn" } else { "btn_disabled" }),
                 ));
+                button.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
+                button.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
+                button.with_children(|b| {
+                    b.spawn((
+                        CardFocus(i),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(0),
+                            right: px(0),
+                            top: px(0),
+                            bottom: px(0),
+                            ..default()
+                        },
+                        skin.image("focus_ring"),
+                    ));
+                    let mut label = b.spawn(crate::prompts::hint(
+                        &fonts.body,
+                        16.0,
+                        if enabled { INK } else { INK_DIM },
+                        label,
+                    ));
+                    if k == 0 {
+                        label.insert(RerollLabel);
+                    }
+                    if k == 1 {
+                        label.insert(BanishLabel);
+                    }
+                });
             }
-            let skip = if ember > 0 {
-                "X / 手柄 X　跳过".to_string()
-            } else {
-                format!("X / 手柄 X　跳过（灯油 +{}）", c.run.choices.skip_oil)
-            };
-            foot.spawn(text(&fonts.body, 16.0, DIM, &skip));
         });
     });
 }
@@ -571,7 +651,7 @@ fn plain_card(
             Node { max_width: px(176), ..default() },
         ));
         card.spawn(Node { flex_grow: 1.0, ..default() });
-        card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
+        card.spawn(crate::prompts::hint(&fonts.title, 22.0, INK_DIM, &format!("{{pick{}}}", i + 1)));
     });
     card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
@@ -608,7 +688,7 @@ fn spawn_lamp(
                 plain_card(row, fonts, db, skin, i, icon, glyph, color, name, &desc, true);
             }
         });
-        root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择"));
+        root.spawn(crate::prompts::hint(&fonts.body, 16.0, PAPER, "{nav} 选择　{confirm} 确定"));
     });
 }
 
@@ -660,7 +740,7 @@ fn spawn_shop(
             );
             plain_card(row, fonts, db, skin, 2, None, "走", PAPER, "离开", "不买了", true);
         });
-        root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择　　Esc / X　离开"));
+        root.spawn(crate::prompts::hint(&fonts.body, 16.0, PAPER, "{nav} 选择　{confirm} 确定　{back} 离开"));
     });
 }
 
@@ -696,7 +776,12 @@ fn spawn_charm(
                     card(row, i, k);
                 }
             });
-            root.spawn(text(&fonts.body, 16.0, PAPER, "1-3 / ← → + Enter　选择　　Esc / X　放弃"));
+            root.spawn(crate::prompts::hint(
+                &fonts.body,
+                16.0,
+                PAPER,
+                "{nav} 选择　{confirm} 确定　{back} 放弃",
+            ));
         }
         Some(p) => {
             let name = offers.get(p).map_or("", |&k| c.charms[k].name.as_str());
@@ -707,7 +792,12 @@ fn spawn_charm(
                     card(row, i, k);
                 }
             });
-            root.spawn(text(&fonts.body, 16.0, PAPER, "数字键 / ← → + Enter　替换　　Esc / X　返回"));
+            root.spawn(crate::prompts::hint(
+                &fonts.body,
+                16.0,
+                PAPER,
+                "{nav} 选择　{confirm} 替换　{back} 返回",
+            ));
         }
     });
 }
@@ -823,7 +913,7 @@ fn spawn_chest(
                     });
                 }
             });
-            root.spawn(text(&fonts.body, 18.0, PAPER, "Enter / 手柄 A　继续"));
+            root.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} 继续"));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
 }
@@ -1169,5 +1259,69 @@ mod tests {
         // 构筑改变也要刷新描述和输入保护。
         assert_eq!(app.world().resource::<ChoiceUi>().age, 0.0);
         assert!(!app.world().resource::<ChoiceUi>().waiting);
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use lantern_sim::Progress;
+
+    fn app(phase: SimPhase, shown: Shown, flow: Flow) -> App {
+        let mut app = App::new();
+        app.init_resource::<Actions>()
+            .init_resource::<Build>()
+            .init_resource::<Progress>()
+            .init_resource::<SimCommands>()
+            .insert_resource(phase)
+            .insert_resource(flow)
+            .insert_resource(ChoiceUi { shown, age: 1.0, ..default() })
+            .add_systems(Update, input);
+        app
+    }
+
+    #[test]
+    fn card_footer_navigation_banishes_remembered_card_and_gates_duplicate_commands() {
+        let offers = vec![Offer::NewWeapon(0), Offer::NewWeapon(1), Offer::NewPassive(0)];
+        let flow = Flow {
+            choice: Some(lantern_sim::flow::Choice {
+                offers: offers.clone(),
+                inspired: false,
+                level: 2,
+                ember: false,
+            }),
+            rerolls: 1,
+            banishes: 1,
+            ..default()
+        };
+        let mut app = app(SimPhase::LevelUp, Shown::LevelUp(offers, false, 0), flow);
+        app.world_mut().resource_mut::<Actions>().nav = IVec2::X;
+        app.update();
+        assert_eq!(app.world().resource::<ChoiceUi>().selected, 1);
+        app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
+        app.update();
+        assert_eq!(app.world().resource::<ChoiceUi>().selected, 3);
+        app.world_mut().resource_mut::<Actions>().nav = IVec2::X;
+        app.update();
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<SimCommands>().0, vec![SimCommand::Banish(1)]);
+    }
+
+    #[test]
+    fn unaffordable_shop_items_cannot_trap_confirmation() {
+        let flow = Flow {
+            shop: Some(lantern_sim::flow::Shop { chest_cost: 100, charm_cost: 200, charm_ok: true }),
+            ..default()
+        };
+        let mut app = app(SimPhase::Shop, Shown::Shop(100, 200, true), flow);
+        *app.world_mut().resource_mut::<Actions>() = Actions { pick: Some(0), ..default() };
+        app.update();
+        assert_eq!(app.world().resource::<ChoiceUi>().selected, 2);
+        assert!(!app.world().resource::<ChoiceUi>().waiting);
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        assert_eq!(app.world().resource::<SimCommands>().0, vec![SimCommand::Skip]);
     }
 }

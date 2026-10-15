@@ -59,6 +59,8 @@ fn spawn_status(mut commands: Commands, fonts: Res<Fonts>, playback: Option<Res<
 }
 
 fn update_status(
+    active: Res<lantern_platform::ActiveInput>,
+    settings: Res<lantern_platform::Settings>,
     actions: Res<Actions>,
     playback: Option<Res<ReplayPlayback>>,
     phase: Option<Res<SimPhase>>,
@@ -70,7 +72,11 @@ fn update_status(
     let Ok((mut t, mut color)) = q.single_mut() else { return };
     let secs = p.replay.ticks / u64::from(TICK_HZ);
     let mut s = if p.finished {
-        format!("回放结束（{:02}:{:02}）　Enter　回到标题", secs / 60, secs % 60)
+        crate::prompts::render(
+            &format!("回放结束（{:02}:{:02}）　{{confirm}} 回到标题", secs / 60, secs % 60),
+            &active,
+            &settings,
+        )
     } else {
         format!("回放中　种子 {}　共 {:02}:{:02}", p.replay.setup.seed, secs / 60, secs % 60)
     };

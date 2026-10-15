@@ -34,6 +34,7 @@ bevy_app = { version = "=0.20.0", default-features = false, features = ["std"] }
 bevy_ecs = { version = "=0.20.0", default-features = false, features = ["std", "multi_threaded"] }
 bevy_math = { version = "=0.20.0", default-features = false, features = ["std", "libm"] }
 bevy_state = { version = "=0.20.0", default-features = false, features = ["std", "bevy_app"] }
+bevy_input = { version = "=0.20.0", default-features = false, features = ["std", "serialize"] }
 bevy_tasks = { version = "=0.20.0", default-features = false, features = ["multi_threaded"] }
 
 kira = { version = "0.12.5", default-features = false, features = ["cpal"] }

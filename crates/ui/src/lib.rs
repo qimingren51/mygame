@@ -10,6 +10,7 @@ use lantern_sim::{AppState, RunState};
 
 mod bench;
 mod choice;
+mod controls;
 mod cover;
 mod describe;
 mod hub;
@@ -19,8 +20,11 @@ mod hud;
 mod hud_fx;
 mod markers;
 mod moments;
+mod navigation;
+mod onboarding;
 mod pause;
 mod perf;
+mod prompts;
 mod replay_ui;
 mod results;
 mod scroll;
@@ -104,6 +108,9 @@ impl Plugin for UiPlugin {
         hub_scene::register(app);
         results::register(app);
         pause::register(app);
+        controls::register(app);
+        onboarding::register(app);
+        app.add_systems(PostUpdate, prompts::refresh.before(bevy::ui::UiSystems::Prepare));
     }
 }
 

@@ -148,7 +148,7 @@ pub(crate) fn drive(
             text(&fonts.title, 56.0, PAPER, "跑分结果"),
             text(&fonts.body, 18.0, PAPER, &card[0]),
             text(&fonts.body, 14.0, DIM, &card[1]),
-            text(&fonts.body, 18.0, DIM, "Enter / 手柄 A　回到标题"),
+            crate::prompts::hint(&fonts.body, 18.0, DIM, "{confirm} 回到标题"),
         ],
     ));
 }

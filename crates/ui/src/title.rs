@@ -102,13 +102,14 @@ fn random_seed() -> u64 {
     nanos % 1_000_000_000
 }
 
-fn input(
+pub(crate) fn input(
     actions: Res<Actions>,
     content: Res<GameContent>,
     seed: Res<SeedOverride>,
     mut profile: ResMut<Profile>,
     mut news: ResMut<HubNews>,
     mut settings: ResMut<Settings>,
+    mut controls: ResMut<crate::controls::Controls>,
     mut window: PrimaryWindowQuery,
     mut mode: ResMut<TitleMode>,
     mut ui: ResMut<TitleUi>,
@@ -116,6 +117,11 @@ fn input(
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    if controls.is_open() {
+        ui.clicked = None;
+        ui.hovered = None;
+        return;
+    }
     let c = &content.0;
     let clicked = ui.clicked.take();
     let open = |ui: &mut TitleUi| {
@@ -130,7 +136,11 @@ fn input(
                 ui.selected = h;
             }
             if actions.nav.y != 0 {
-                ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(MENU.len() as i32) as usize;
+                ui.selected = crate::navigation::cycle_enabled(
+                    ui.selected,
+                    actions.nav.y,
+                    &[true, profile.basics, true, true, true],
+                );
             }
             // 菜单：0 出发、1 灯驿、2 设置、3 跑分、4 退出；快捷键直接对应
             let act = clicked
@@ -284,7 +294,7 @@ fn input(
             } else if ui.selected < n {
                 let mut a = *actions;
                 a.confirm |= clicked.is_some();
-                settings_ui::adjust(ITEMS[ui.selected], &a, &mut settings, &mut window);
+                settings_ui::adjust(ITEMS[ui.selected], &a, &mut settings, &mut window, &mut controls);
             }
         }
         TitleMode::Meta => {
@@ -361,10 +371,7 @@ fn list_nav(
     {
         ui.selected = h.min(n - 1);
     }
-    let step = actions.nav.y * cols as i32 + if cols > 1 { actions.nav.x } else { 0 };
-    if step != 0 {
-        ui.selected = (ui.selected as i32 + step).rem_euclid(n as i32) as usize;
-    }
+    ui.selected = crate::navigation::grid(ui.selected, actions.nav, n, cols);
     let chosen = actions
         .pick
         .map(usize::from)
@@ -382,7 +389,7 @@ const META_COLUMNS: usize = 2;
 
 /// 标题菜单：(文字, 快捷键)
 const MENU: [(&str, &str); 5] =
-    [("出发", "Enter"), ("灯驿", "M"), ("设置", ""), ("跑分", "B"), ("退出", "Esc")];
+    [("出发", "{confirm}"), ("灯驿", "{hub}"), ("设置", ""), ("跑分", "{bench}"), ("退出", "{back}")];
 
 pub(crate) fn panel() -> impl Bundle {
     (
@@ -553,18 +560,23 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
                     it.spawn(focus(skin, "menu_hl", i, 0.0));
                     let locked = i == 1 && !profile.basics;
                     it.spawn(text(&fonts.title, 40.0, if locked { DIM } else { PAPER }, label));
-                    it.spawn(text(&fonts.body, 15.0, DIM, if locked { "第一夜之后开放" } else { key }));
+                    it.spawn(crate::prompts::hint(
+                        &fonts.body,
+                        15.0,
+                        DIM,
+                        if locked { "第一夜之后开放" } else { key },
+                    ));
                 });
                 clickable(&mut item, i);
             }
             p.spawn(Node { flex_grow: 1.0, ..default() });
             p.spawn(text(&fonts.body, 18.0, hex("#FFD98A"), &hub::purses(profile)));
             p.spawn(text(&fonts.body, 15.0, DIM, &record));
-            p.spawn(text(
+            p.spawn(crate::prompts::hint(
                 &fonts.body,
                 14.0,
                 CINNABAR,
-                concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"), "　　F11　全屏"),
+                concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"), "　　{fullscreen}"),
             ));
         });
 }
@@ -626,12 +638,17 @@ fn omen_panel(
                         text(&fonts.body, 16.0, hex("#9A3324"), &format!("－ {}", def.bad)),
                         Node { max_width: px(200), ..default() },
                     ));
-                    card.spawn(text(&fonts.title, 22.0, INK_DIM, &format!("{}", i + 1)));
+                    card.spawn(crate::prompts::hint(
+                        &fonts.title,
+                        22.0,
+                        INK_DIM,
+                        &format!("{{pick{}}}", i + 1),
+                    ));
                 });
                 clickable(&mut card, i);
             }
         });
-        p.spawn(text(&fonts.body, 18.0, PAPER, "1-3 / ← → + Enter　选择　　Esc　返回"));
+        p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{nav} 选择　{confirm} 确定　{back} 返回"));
     });
 }
 
@@ -723,7 +740,7 @@ fn meta_panel(
                 }
             });
         });
-        p.spawn(text(&fonts.body, 18.0, PAPER, "方向键 选择　Enter　点亮　　Esc　返回"));
+        p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{nav} 选择　{confirm} 点亮　{back} 返回"));
     });
 }
 
@@ -732,10 +749,10 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
         p.spawn(dim_layer());
         p.spawn((
             Node {
-                width: px(460),
+                width: px(580),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                padding: UiRect::axes(px(48), px(40)),
+                padding: UiRect::axes(px(42), px(24)),
                 row_gap: px(4),
                 ..default()
             },
@@ -747,7 +764,7 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
             for (i, &item) in ITEMS.iter().enumerate() {
                 let mut row = panel.spawn(Node {
                     width: percent(100),
-                    padding: UiRect::axes(px(18), px(8)),
+                    padding: UiRect::axes(px(18), px(5)),
                     ..default()
                 });
                 row.with_children(|r| {
@@ -757,6 +774,76 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
                 clickable(&mut row, i);
             }
         });
-        p.spawn(text(&fonts.body, 18.0, PAPER, "↑ ↓ 选择　← → 调整　Enter 切换　　Esc 返回"));
+        p.spawn(crate::prompts::hint(
+            &fonts.body,
+            18.0,
+            PAPER,
+            "{nav} 选择 / 调整　{confirm} 设置　{back} 返回",
+        ));
     });
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    fn app() -> App {
+        let content =
+            Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"))
+                .unwrap();
+        let mut app = App::new();
+        app.insert_resource(GameContent(std::sync::Arc::new(content)))
+            .init_resource::<Actions>()
+            .init_resource::<SeedOverride>()
+            .init_resource::<Profile>()
+            .init_resource::<HubNews>()
+            .init_resource::<Settings>()
+            .init_resource::<TitleMode>()
+            .init_resource::<TitleUi>()
+            .init_resource::<crate::controls::Controls>()
+            .init_resource::<NextState<AppState>>()
+            .add_message::<AppExit>()
+            .add_systems(Update, input);
+        app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        app
+    }
+
+    #[test]
+    fn title_skips_locked_hub_and_settings_opens_rebinding_with_focus_preserved() {
+        let mut app = app();
+        app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
+        app.update();
+        assert_eq!(app.world().resource::<TitleUi>().selected, 2);
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
+        *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::Y, ..default() };
+        for _ in 0..7 {
+            app.update();
+        }
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        assert!(app.world().resource::<crate::controls::Controls>().is_open());
+        *app.world_mut().resource_mut::<Actions>() = Actions { back: true, nav: IVec2::Y, ..default() };
+        app.update();
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
+        assert_eq!(app.world().resource::<TitleUi>().selected, 7);
+    }
+
+    #[test]
+    fn hub_grid_moves_into_shop_and_back() {
+        let mut app = app();
+        *app.world_mut().resource_mut::<TitleMode>() = TitleMode::Hub;
+        *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::X, confirm: true, ..default() };
+        app.update();
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Shop);
+        assert_eq!(app.world().resource::<TitleUi>().selected, 0);
+        *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::Y, ..default() };
+        app.update();
+        assert_eq!(app.world().resource::<TitleUi>().selected, hub::SHOP_COLUMNS);
+        *app.world_mut().resource_mut::<Actions>() = Actions { back: true, ..default() };
+        app.update();
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Hub);
+        assert_eq!(app.world().resource::<TitleUi>().selected, 1);
+    }
 }
