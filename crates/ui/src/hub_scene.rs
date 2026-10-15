@@ -138,6 +138,11 @@ pub(crate) struct HubDawn {
 #[expect(dead_code, reason = "给 hub_fx 的晨光动画读，那边接上以前没人读")]
 pub(crate) struct HubDawnMask(pub String);
 
+/// 这一层贴图的 assets 路径（`hub_fx` 换材质、重设贴图时用）。
+#[derive(Component, Clone, Debug)]
+#[expect(dead_code, reason = "给 hub_fx 读，那边接上以前没人读")]
+pub(crate) struct HubImage(pub String);
+
 /// 人物的聚光（第几个人物）。
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct HubLight(pub usize);
@@ -305,6 +310,7 @@ pub(crate) fn sync_scene(
                     place(&scene, d.rect),
                     ImageNode::new(assets.load(file(&d.file))).with_mode(NodeImageMode::Stretch),
                     HubDawn { region: region.clone(), part: DawnPart::Image },
+                    HubImage(file(&d.file)),
                     HubDawnMask(file(&d.mask)),
                     on,
                 ));
@@ -313,6 +319,7 @@ pub(crate) fn sync_scene(
                         place(&scene, g.rect),
                         add(assets.load(file(&g.file)), Vec4::ONE),
                         HubDawn { region: region.clone(), part: DawnPart::Glow },
+                        HubImage(file(&g.file)),
                         on,
                     ));
                 }
@@ -328,6 +335,7 @@ pub(crate) fn sync_scene(
                         place(&scene, layer.rect),
                         ImageNode::new(assets.load(file(&layer.file))).with_mode(NodeImageMode::Stretch),
                         mark(part),
+                        HubImage(file(&layer.file)),
                         on,
                     ));
                     if let Some([bx, by]) = layer.base {
@@ -338,6 +346,7 @@ pub(crate) fn sync_scene(
                     place(&scene, l.core.rect),
                     add(assets.load(file(&l.core.file)), Vec4::ONE),
                     mark(LampPart::Core),
+                    HubImage(file(&l.core.file)),
                     on,
                 ));
                 let glow = glow_alpha(level, node.max_level);
@@ -345,6 +354,7 @@ pub(crate) fn sync_scene(
                     place(&scene, l.glow.rect),
                     add(assets.load(file(&l.glow.file)), Vec4::new(1.0, 1.0, 1.0, glow)),
                     mark(LampPart::Glow),
+                    HubImage(file(&l.glow.file)),
                     on,
                 ));
             }
