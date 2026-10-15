@@ -72,9 +72,9 @@ fn play_ui_cues(mut cues: MessageReader<UiCue>, mut audio: NonSendMut<Audio>) {
                 let s = a.sfx.scroll_unroll.clone();
                 a.play(&s);
             }
-            // 旁白一行一个音，按五声音阶往上走（D、E、F#、A、B）
+            // 旁白一行一个音，按配乐的 E 角调往上走（E、G、A、C、D、E）
             UiCue::ScrollLine(k) => {
-                const STEPS: [f64; 6] = [0.0, 2.0, 4.0, 7.0, 9.0, 12.0];
+                const STEPS: [f64; 6] = [0.0, 3.0, 5.0, 8.0, 10.0, 12.0];
                 let step = STEPS[usize::from(k).min(STEPS.len() - 1)];
                 let s = a.sfx.scroll_line.clone();
                 a.play_with(&s, 2f64.powf(step / 12.0), -2.0);

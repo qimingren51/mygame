@@ -90,15 +90,15 @@ fn chest(n: usize) -> StaticSoundData {
             b.wood(i * 0.045 * (1.0 - i * 0.08), 0.1, 700.0 + i * 60.0);
         }
         for i in 0..n {
-            b.bell(pent(12 + i as i32 * 2), 0.35 + i as f32 * 0.28, 0.14, 1.4);
+            b.bell(jiao(12 + i as i32 * 2), 0.35 + i as f32 * 0.28, 0.14, 1.4);
         }
-        // 五连：五声之后一记金光，D 和 A 的空五度从低往高扫上去，落定（界面上整卷泛金光）
+        // 五连：五声之后一记金光，A 和 E 的空五度从低往高扫上去，落在主音 E 上（界面上整卷泛金光）
         if gold {
             let t = 0.35 + n as f32 * 0.28;
-            for (j, d) in [10, 13, 15, 18].into_iter().enumerate() {
-                b.bell(pent(d), t + j as f32 * 0.04, 0.09, 2.4);
+            for (j, d) in [12, 15, 17, 20].into_iter().enumerate() {
+                b.bell(jiao(d), t + j as f32 * 0.04, 0.09, 2.4);
             }
-            b.sine(pent(20), t + 0.12, 0.9, 0.025);
+            b.sine(jiao(20), t + 0.12, 0.9, 0.025);
         }
     })
 }
@@ -436,8 +436,8 @@ impl Sfx {
                 }
             }),
             scroll_unroll: render(3.4, |b| {
-                b.pluck(pent(5), 0.0, 0.11, 2.6);
-                b.pluck(pent(10), 0.02, 0.05, 2.2);
+                b.pluck(jiao(5), 0.0, 0.11, 2.6);
+                b.pluck(jiao(10), 0.02, 0.05, 2.2);
                 // 纸响：一串短的带通噪声颗粒，越推越轻
                 for k in 0..18 {
                     let t = 0.05 + k as f32 * 0.095 + (k * 53 % 7) as f32 * 0.008;
@@ -454,8 +454,8 @@ impl Sfx {
                 b.wood(1.84, 0.05, 520.0);
             }),
             scroll_line: render(1.6, |b| {
-                b.bell(pent(15), 0.0, 0.035, 1.4);
-                b.sine(pent(20), 0.02, 0.35, 0.008);
+                b.bell(jiao(15), 0.0, 0.035, 1.4);
+                b.sine(jiao(20), 0.02, 0.35, 0.008);
             }),
             lamp_lit: render(2.6, |b| {
                 b.noise(
@@ -471,7 +471,7 @@ impl Sfx {
                     },
                 );
                 for (i, d) in [10, 14, 17].into_iter().enumerate() {
-                    b.bell(pent(d), 0.12 + i as f32 * 0.05, 0.06, 2.2);
+                    b.bell(jiao(d), 0.12 + i as f32 * 0.05, 0.06, 2.2);
                 }
                 for k in 0..4 {
                     b.noise(0.2 + k as f32 * 0.13, 0.01, 0.03, noise(FilterKind::High, 3400.0));
@@ -479,7 +479,7 @@ impl Sfx {
             }),
             dawn_spread: render(4.5, |b| {
                 for (i, d) in [10, 12, 13, 15, 17, 18, 20].into_iter().enumerate() {
-                    b.pluck(pent(d), i as f32 * 0.32, 0.07, 2.4);
+                    b.pluck(jiao(d), i as f32 * 0.32, 0.07, 2.4);
                 }
                 for (t, f) in [(2.4, 3600.0), (2.75, 4100.0), (3.3, 3800.0)] {
                     chirp(b, t, f, 0.035);
@@ -504,10 +504,10 @@ impl Sfx {
                 }
             }),
             deeper: render(5.0, |b| {
-                b.gong(36.7, 0.0, 0.2);
-                b.bell(pent(0), 0.0, 0.05, 3.5);
-                // 从 D4 沉到 D3
-                b.osc(Wave::Sine, pent(5), 0.05, 3.0, 0.07, Some((pent(0), 2.6)), 0.08);
+                b.gong(41.2, 0.0, 0.2);
+                b.bell(jiao(0), 0.0, 0.05, 3.5);
+                // 从 E4 沉到 E3（配乐的主音）
+                b.osc(Wave::Sine, jiao(5), 0.05, 3.0, 0.07, Some((jiao(0), 2.6)), 0.08);
                 b.noise(
                     0.0,
                     2.4,
