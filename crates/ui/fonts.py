@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """裁剪界面字体子集，输出到 assets/fonts/。
 
-完整的中文字体有十几 MB，这里只保留界面实际用到的字：扫描 crates/ui/src/ 里 Rust 字符串
-字面量中的字（注释不算）、assets/data/ 里内容数据的字符串（法器、心法、夜签的名字和说明）、
-assets/i18n/ 里的文字，再加上 ASCII 和常用标点。
-新增界面文字后重新运行一次。
+完整的中文字体有十几 MB，这里只保留：GB2312 一级字库的 3755 个常用汉字，加上界面实际用到的字
+（扫描 crates/ui/src/ 里 Rust 字符串字面量中的字，注释不算；assets/data/ 里内容数据的字符串；
+assets/i18n/ 里的文字），再加上 ASCII 和常用标点。
+常用字预先放进去，新增界面文字大多不用重新生成，各个分支也就不会老在这几个二进制文件上冲突。
+用到常用字以外的字时（--check 会报缺字），重新运行一次。
 
 用法（在仓库根目录）：
     pip install fonttools
@@ -49,6 +50,18 @@ STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 def non_ascii(literal: str) -> set[str]:
     """字符串字面量里的全部非 ASCII 字（汉字、全角标点、箭头、圆点……）。"""
     return {c for c in literal if ord(c) > 0x7E and not c.isspace() or c == "　"}
+
+
+def common_chars() -> set[str]:
+    """GB2312 一级字库（按拼音排的 3755 个常用汉字）。"""
+    chars = set()
+    for hi in range(0xB0, 0xD8):
+        for lo in range(0xA1, 0xFF):
+            try:
+                chars.add(bytes([hi, lo]).decode("gb2312"))
+            except UnicodeDecodeError:
+                pass
+    return chars
 
 
 def used_chars() -> str:
@@ -96,7 +109,8 @@ def main() -> int:
     text = used_chars()
     if "--check" in sys.argv:
         return check(text)
-    print(f"共 {len(text)} 个字符")
+    text = "".join(sorted(set(text) | common_chars()))
+    print(f"共 {len(text)} 个字符（含常用字）")
     OUT.mkdir(parents=True, exist_ok=True)
     for name, (rel, weight) in FONTS.items():
         font = TTFont(fetch(rel))
