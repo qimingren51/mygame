@@ -39,7 +39,8 @@ pub(crate) fn update_readability(
     let danger = boss.is_some_and(|b| {
         b.in_strike_zone(pos.0, content.0.player.radius) || b.in_strike_zone(visible, content.0.player.radius)
     });
-    let target = if danger { 0.32 } else { 1.0 };
+    // 预警本身够亮，自己的法器压一半就分得清（质感会话定的数）
+    let target = if danger { 0.5 } else { 1.0 };
     let rate = if danger { 24.0 } else { 7.0 };
     readability.gain += (target - readability.gain) * (1.0 - (-time.delta_secs() * rate).exp());
 }
