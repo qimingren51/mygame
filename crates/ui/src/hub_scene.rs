@@ -116,7 +116,6 @@ pub(crate) struct HubLamp {
 
 /// 火苗的底在这一层里的位置（hub.json 的像素，层的左上角为原点，y 向下）。
 #[derive(Component, Clone, Copy, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的摇曳动画读，那边接上以前没人读")]
 pub(crate) struct HubFlameBase(pub Vec2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +126,6 @@ pub(crate) enum DawnPart {
 
 /// 一个地区的晨光。Image 那层默认是普通的 `ImageNode`，要铺开时由 `hub_fx` 换成 `DawnReveal` 材质。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的晨光动画读，那边接上以前没人读")]
 pub(crate) struct HubDawn {
     pub region: String,
     pub part: DawnPart,
@@ -135,12 +133,10 @@ pub(crate) struct HubDawn {
 
 /// 晨光铺开用的灰度图（assets 路径）。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 的晨光动画读，那边接上以前没人读")]
 pub(crate) struct HubDawnMask(pub String);
 
 /// 这一层贴图的 assets 路径（`hub_fx` 换材质、重设贴图时用）。
 #[derive(Component, Clone, Debug)]
-#[expect(dead_code, reason = "给 hub_fx 读，那边接上以前没人读")]
 pub(crate) struct HubImage(pub String);
 
 /// 人物的聚光（第几个人物）。
@@ -383,7 +379,7 @@ pub(crate) fn sync_scene(
 }
 
 /// 光晕亮度：按“等级 ÷ 最大等级”，最暗也有六成。
-fn glow_alpha(level: u32, max: u32) -> f32 {
+pub(crate) fn glow_alpha(level: u32, max: u32) -> f32 {
     if level == 0 { 0.0 } else { 0.6 + 0.4 * level as f32 / max.max(1) as f32 }
 }
 
