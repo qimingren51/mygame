@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{Director, Enemies, Health, HurtBy, Player, Pos, SimEvent, SimOutbox};
+use lantern_sim::{Health, Player, Pos, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
@@ -75,7 +75,7 @@ pub(crate) struct Atmos {
     /// 无尽夜：夜主每退去一次，夜就深一层（目标层数和当前过渡到的深度）
     deeper: u32,
     depth: f32,
-    /// 上一下挨打来自哪边（模拟坐标里的单位向量，y 向下，和屏幕 UV 一致）；不知道时为零
+    /// 上一下挨打来自哪边（模拟坐标里的单位向量，y 向下，和屏幕 UV 一致）；来源就在脚下时为零
     hurt_dir: Vec2,
     heart: f32,
 }
@@ -135,27 +135,10 @@ pub(crate) fn base_vignette() -> Vignette {
     }
 }
 
-/// 挨打的方向：碰撞、冲锋找离主角最近的那种妖物，弹幕和九尾扫算夜主那边，狐火雨从天上来，没有方向。
-/// 模拟事件不带来源位置，这里按场上的情况猜，只用来偏一偏暗角。
-fn hurt_from(by: HurtBy, hero: Vec2, enemies: &Enemies, director: Option<&Director>) -> Vec2 {
-    let at = match by {
-        HurtBy::Contact { kind } | HurtBy::Charge { kind } => {
-            let near = |same: bool| {
-                enemies
-                    .iter_alive()
-                    .filter(|&i| !same || enemies.kind[i] == kind)
-                    .map(|i| Vec2::new(enemies.x[i], enemies.y[i]))
-                    .min_by(|a, b| a.distance_squared(hero).total_cmp(&b.distance_squared(hero)))
-            };
-            near(true).or_else(|| near(false))
-        }
-        HurtBy::Shot | HurtBy::Sweep => director
-            .and_then(|d| d.boss)
-            .and_then(|h| enemies.resolve(h))
-            .map(|i| Vec2::new(enemies.x[i], enemies.y[i])),
-        HurtBy::Rain => None,
-    };
-    at.map_or(Vec2::ZERO, |p| (p - hero).normalize_or_zero())
+/// 挨打时暗角的中心：往来源的反方向挪，挨打的那一边收得更近。
+/// dir 是模拟坐标里的单位向量（y 向下，和屏幕 UV 一致）。
+fn vignette_center(dir: Vec2, hurt: f32) -> Vec2 {
+    Vec2::splat(0.5) - dir * 0.16 * hurt
 }
 
 pub(crate) fn atmos_events(
@@ -163,17 +146,13 @@ pub(crate) fn atmos_events(
     mut atmos: ResMut<Atmos>,
     mut dawn: ResMut<Dawn>,
     hero: Query<&Pos, With<Player>>,
-    enemies: Option<Res<Enemies>>,
-    director: Option<Res<Director>>,
 ) {
     for ev in &outbox.0 {
         match ev {
-            SimEvent::PlayerHurt { by, .. } => {
+            // 伤害从哪儿来：妖物、弹幕、扇形的顶点、狐火雨的落点（模拟坐标）
+            SimEvent::PlayerHurt { from, .. } => {
                 atmos.hurt = 1.0;
-                atmos.hurt_dir = match (hero.single(), &enemies) {
-                    (Ok(p), Some(e)) => hurt_from(*by, p.0, e, director.as_deref()),
-                    _ => Vec2::ZERO,
-                };
+                atmos.hurt_dir = hero.single().map_or(Vec2::ZERO, |p| (*from - p.0).normalize_or_zero());
             }
             SimEvent::Sacrifice { .. } => {
                 atmos.hurt = 1.0;
@@ -255,7 +234,7 @@ pub(crate) fn update_atmos(
         v.intensity = (base.intensity + atmos.hurt * 0.35 + low * (0.3 + 0.2 * beat)) * (1.0 - day * 0.7);
         v.radius = base.radius - low * (0.25 + 0.06 * beat) - atmos.hurt * 0.12;
         // 挨打那一边的暗角收得更近：中心往反方向挪
-        v.center = Vec2::splat(0.5) - atmos.hurt_dir * 0.16 * atmos.hurt;
+        v.center = vignette_center(atmos.hurt_dir, atmos.hurt);
         let red = (atmos.hurt * 0.8 + low * 0.7).min(1.0);
         v.color = base.color.mix(&Color::srgb(0.35, 0.02, 0.03), red);
     }
@@ -358,33 +337,13 @@ fn smooth(x: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn spawn(en: &mut Enemies, kind: u16, x: f32, y: f32) -> usize {
-        let i = en.alloc().unwrap();
-        en.kind[i] = kind;
-        en.x[i] = x;
-        en.y[i] = y;
-        i
-    }
-
     #[test]
-    fn hurt_direction_guesses_the_source() {
-        let mut en = Enemies::default();
-        // 右边最近的不是撞上来的那种；那种在上边（模拟坐标 y 向下）和远处左边
-        spawn(&mut en, 1, 50.0, 0.0);
-        spawn(&mut en, 2, 0.0, -80.0);
-        spawn(&mut en, 2, -300.0, 0.0);
-        let d = hurt_from(HurtBy::Contact { kind: 2 }, Vec2::ZERO, &en, None);
-        assert!(d.distance(Vec2::NEG_Y) < 1e-4, "{d}");
-        // 那种妖物不在场时退回最近的一只
-        let d = hurt_from(HurtBy::Charge { kind: 9 }, Vec2::ZERO, &en, None);
-        assert!(d.distance(Vec2::X) < 1e-4, "{d}");
-        // 狐火雨没有方向；没有夜主时弹幕也没有
-        assert_eq!(hurt_from(HurtBy::Rain, Vec2::ZERO, &en, None), Vec2::ZERO);
-        assert_eq!(hurt_from(HurtBy::Shot, Vec2::ZERO, &en, None), Vec2::ZERO);
-        // 九尾扫算夜主那边
-        let boss = spawn(&mut en, 3, 0.0, 200.0);
-        let director = Director { boss: Some(en.handle(boss)), ..Default::default() };
-        let d = hurt_from(HurtBy::Sweep, Vec2::ZERO, &en, Some(&director));
-        assert!(d.distance(Vec2::Y) < 1e-4, "{d}");
+    fn vignette_leans_toward_the_hit() {
+        // 从右边挨打：中心往左挪，右边收得更近
+        assert!(vignette_center(Vec2::X, 1.0).x < 0.5);
+        // 从下面挨打（模拟坐标 y 向下）：中心往上挪（UV 的 y 也向下）
+        assert!(vignette_center(Vec2::Y, 1.0).y < 0.5);
+        // 受伤的一跳退完就回到正中
+        assert_eq!(vignette_center(Vec2::X, 0.0), Vec2::splat(0.5));
     }
 }
