@@ -62,7 +62,9 @@ pub(crate) fn register(app: &mut App) {
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
         .add_systems(
             Update,
-            (input, redraw, highlight, crate::scroll::animate).chain().run_if(in_state(AppState::Title)),
+            (input, redraw, highlight, crate::scroll::animate, crate::cover::fit_covers)
+                .chain()
+                .run_if(in_state(AppState::Title)),
         );
 }
 
@@ -391,17 +393,13 @@ pub(crate) fn panel() -> impl Bundle {
     )
 }
 
-/// 标题画：一直铺在标题界面的最底下，夜签和心灯面板盖在上面。
+/// 标题画：一直铺在标题界面的最底下，夜签和心灯面板盖在上面。按“铺满再居中裁边”缩放，不拉伸。
 fn spawn_background(mut commands: Commands, skin: Res<Skin>) {
     commands.spawn((
         DespawnOnExit(AppState::Title),
         GlobalZIndex(-1),
-        Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            height: percent(100),
-            ..default()
-        },
+        Node { position_type: PositionType::Absolute, ..default() },
+        crate::cover::Cover(Vec2::new(1920.0, 1080.0)),
         ImageNode::new(skin.title.clone()).with_mode(NodeImageMode::Stretch),
         crate::title_fx::TitleBg,
         UiTransform::default(),

@@ -10,6 +10,7 @@ use lantern_sim::{AppState, RunState};
 
 mod bench;
 mod choice;
+mod cover;
 mod describe;
 mod hub;
 mod hub_fx;
