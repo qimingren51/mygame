@@ -26,6 +26,8 @@ pub(crate) fn register(app: &mut App) {
 /// 墨色（写在晨光里的大字）
 const INK: Color = Color::srgb(0.09, 0.08, 0.07);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
+/// 垫在题字后面的墨（#17140F）
+const WASH_INK: Color = Color::srgb(0.09, 0.078, 0.059);
 
 #[derive(Clone, Copy)]
 enum Anim {
@@ -143,7 +145,7 @@ fn spawn_line(commands: &mut Commands, fonts: &Fonts, line: &str, start: f32, en
 #[derive(Component)]
 struct BaseAlpha(f32);
 
-/// 墨晕：题字后面一团淡墨（羽化很大的阴影），背后是一片火光时字也看得清。数是浓度。
+/// 墨晕：题字后面一笔淡墨（美术的 ui/ink_wash，染墨色），背后是一片火光时字也看得清。数是浓度。
 #[derive(Component)]
 struct Wash(f32);
 
@@ -162,7 +164,7 @@ type Paint<'w, 's> = Query<
         Option<&'static mut BorderColor>,
         Option<&'static mut TextShadow>,
         Option<&'static BaseAlpha>,
-        Option<(&'static Wash, &'static mut BoxShadow)>,
+        Option<&'static Wash>,
     ),
 >;
 
@@ -334,18 +336,22 @@ fn read_events(
                         UiTransform::default(),
                     ))
                     .with_children(|p| {
-                        p.spawn((
-                            Node {
-                                left: percent(33),
-                                right: percent(33),
-                                top: px(16),
-                                bottom: px(10),
-                                border_radius: BorderRadius::all(px(120)),
-                                ..absolute()
-                            },
-                            Wash(0.85),
-                            BoxShadow::new(INK.with_alpha(0.0), px(0), px(0), px(16), px(60)),
-                        ));
+                        // 一笔横的淡墨：中间一段浓淡均匀，正好垫字；按原比例放进框里
+                        if let Some(f) = db.find("ui/ink_wash") {
+                            let mut img = db.ui_image(f);
+                            img.color = WASH_INK.with_alpha(0.0);
+                            p.spawn((
+                                Node {
+                                    left: percent(16),
+                                    right: percent(16),
+                                    top: px(-40),
+                                    bottom: px(-30),
+                                    ..absolute()
+                                },
+                                Wash(0.8),
+                                img,
+                            ));
+                        }
                         let shadow =
                             TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.85) };
                         p.spawn((text(&fonts.title, 36.0, hex(&e.eye), &title), shadow));
@@ -491,12 +497,7 @@ fn set_alpha(e: Entity, a: f32, children: &Query<&Children>, colors: &mut Paint)
             tc.0.set_alpha(a);
         }
         if let Some(mut img) = img {
-            img.color.set_alpha(a);
-        }
-        if let Some((w, mut bs)) = wash {
-            for s in &mut bs.0 {
-                s.color.set_alpha(w.0 * a);
-            }
+            img.color.set_alpha(wash.map_or(1.0, |w| w.0) * a);
         }
         // 每个节点都自带透明的底色和边框，只改有底子（标了 BaseAlpha）的，否则会变成黑块
         if let Some(base) = base {

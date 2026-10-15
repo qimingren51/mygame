@@ -20,6 +20,17 @@ const UNROLL: f32 = 1.8;
 const WORDS_AT: f32 = 1.2;
 const LINE_GAP: f32 = 0.7;
 
+/// 卷轴的轴头（美术的 `screens/scroll_roller.png`，60 × 832，长夜版、天明版共用）：第 10 列对齐
+/// 展开的那道边，上下各伸出 16 像素。下面换算成卷轴画（2400 × 800）的百分比。
+const ROLLER_EDGE: f32 = 10.0 / 2400.0 * 100.0;
+const ROLLER_W: f32 = 60.0 / 2400.0 * 100.0;
+const ROLLER_TOP: f32 = 16.0 / 800.0 * 100.0;
+const ROLLER_H: f32 = 832.0 / 800.0 * 100.0;
+
+/// 轴头：跟着展开的那道边往右走。
+#[derive(Component)]
+pub(crate) struct Roller;
+
 /// 卷轴展开的进度：裁剪框的宽度从 0 拉到整幅。
 #[derive(Component, Default)]
 pub(crate) struct Unroll {
@@ -51,6 +62,7 @@ pub(crate) fn spawn(
         (format!("atlas/screens/scroll_{}.png", region.id), region.scroll.as_str(), PAPER)
     };
     let image: Handle<Image> = assets.load(file);
+    let roller: Handle<Image> = assets.load("atlas/screens/scroll_roller.png");
     // 字号跟着卷轴的实际宽度走：留白的天空约占画宽的 40%，一行放二十五个字左右
     let size = (window_width * WIDTH_VW / 100.0 * 0.0155).clamp(16.0, 44.0);
     commands.entity(root).insert(BackgroundColor(Color::srgb(0.03, 0.035, 0.05))).with_children(|p| {
@@ -82,6 +94,20 @@ pub(crate) fn spawn(
                             ImageNode::new(image).with_mode(NodeImageMode::Stretch),
                         ));
                     });
+                // 轴头：压在画的右边缘，展开时跟着走，像手推开的卷轴
+                frame.spawn((
+                    Roller,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: percent(-ROLLER_EDGE),
+                        top: percent(-ROLLER_TOP),
+                        width: percent(ROLLER_W),
+                        height: percent(ROLLER_H),
+                        ..default()
+                    },
+                    ImageNode::new(roller).with_mode(NodeImageMode::Stretch),
+                    ZIndex(2),
+                ));
                 // 画上留给旁白的天空：约 x 60–950、y 40–390（2400 × 800 的画）
                 frame
                     .spawn(Node {
@@ -110,6 +136,7 @@ pub(crate) fn spawn(
 pub(crate) fn animate(
     time: Res<Time<Real>>,
     mut clips: Query<(&mut Unroll, &mut Node)>,
+    mut rollers: Query<&mut Node, (With<Roller>, Without<Unroll>)>,
     mut lines: Query<(&mut Line, &mut TextColor)>,
     mut cues: MessageWriter<UiCue>,
 ) {
@@ -123,7 +150,11 @@ pub(crate) fn animate(
         u.t += dt;
         // 先快后慢，像手推开的卷轴
         let k = (u.t / UNROLL).clamp(0.0, 1.0);
-        node.width = percent(100.0 * (1.0 - (1.0 - k) * (1.0 - k)));
+        let open = 100.0 * (1.0 - (1.0 - k) * (1.0 - k));
+        node.width = percent(open);
+        for mut r in &mut rollers {
+            r.left = percent(open - ROLLER_EDGE);
+        }
         t = Some(u.t);
     }
     let Some(t) = t else { return };

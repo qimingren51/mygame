@@ -46,6 +46,9 @@ pub(crate) struct PFrames {
     pub drop: FrameId,
     pub wisp: FrameId,
     pub slash: FrameId,
+    /// 美术的竹叶 `vfx/bamboo_leaf_0..3`；图集里没有时是灰片，拉长了当竹叶
+    pub leaves: [FrameId; 4],
+    pub real_leaves: bool,
 }
 
 fn hash(x: i32, y: i32, seed: u32) -> f32 {
@@ -207,6 +210,8 @@ pub(crate) fn setup_particles(
             drop: f("fx/drop"),
             wisp: f("fx/wisp"),
             slash: f("fx/slash"),
+            leaves: [0, 1, 2, 3].map(|i| db.find(&format!("vfx/bamboo_leaf_{i}")).unwrap_or(f("fx/ash"))),
+            real_leaves: db.find("vfx/bamboo_leaf_0").is_some(),
         },
     });
 }
@@ -409,19 +414,25 @@ impl Particles {
         for _ in 0..self.n(n) {
             let d = self.dir();
             let green = BAMBOO_LEAF.mix(&INK, self.rng.range_f32(0.0, 0.45));
+            let frame = self.f.leaves[self.rng.below(4) as usize];
+            // 美术的竹叶按原样；灰片拉长才像叶子
+            let (size, stretch) = if self.f.real_leaves {
+                ((self.rng.range_f32(1.3, 1.8), 0.9), 1.0)
+            } else {
+                ((self.rng.range_f32(1.5, 2.2), 0.9), 2.4)
+            };
             let p = P {
                 vel: Vec2::new(d.x * self.rng.range_f32(40.0, 110.0), self.rng.range_f32(20.0, 90.0)),
                 accel: Vec2::new(0.0, -70.0),
                 drag: 2.6,
-                // 灰片拉长就是一片竹叶
-                size: (self.rng.range_f32(1.5, 2.2), 0.9),
-                stretch: 2.4,
+                size,
+                stretch,
                 color: green.with_alpha(0.95),
                 fade_in: 0.02,
                 rot: self.rng.range_f32(0.0, TAU),
                 spin: self.rng.range_f32(-9.0, 9.0),
                 ..P::new(
-                    self.f.ash,
+                    frame,
                     at + d * self.rng.range_f32(0.0, 14.0),
                     self.rng.range_f32(0.9, 1.7),
                     layer::ACTORS + 1.5,
