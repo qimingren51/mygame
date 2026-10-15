@@ -15,6 +15,7 @@ pub mod atlas;
 mod atmos;
 mod camera;
 mod effects;
+mod feedback;
 mod fx;
 mod ground;
 mod impact;
@@ -74,6 +75,7 @@ impl Plugin for ViewPlugin {
             .init_resource::<actors::GlowRequests>()
             .init_resource::<fx::FxState>()
             .init_resource::<camera::Rig>()
+            .init_resource::<feedback::Feedback>()
             .init_resource::<actors::LanternFlare>()
             .init_resource::<atmos::Atmos>()
             .init_resource::<Dawn>()
@@ -105,6 +107,7 @@ impl Plugin for ViewPlugin {
                     fx::spawn_flash,
                     fx::reset_fx,
                     impact::reset,
+                    feedback::reset_feedback,
                     camera::reset_rig,
                     particles::reset_particles,
                     atmos::reset_atmos,
@@ -134,12 +137,12 @@ impl Plugin for ViewPlugin {
                     // 镜头先定下来，后面的绘制都按这一帧的镜头算
                     (
                         stats::begin,
+                        feedback::prepare_feedback,
                         interpolate,
                         actors::animate_hero,
                         camera::camera_events,
                         camera::update_rig,
                         camera::follow_main_camera,
-                        fx::apply_flash,
                     )
                         .chain(),
                     (
@@ -147,6 +150,7 @@ impl Plugin for ViewPlugin {
                         actors::collect_draws,
                         impact::draw_deaths,
                         fx::read_fx_events,
+                        fx::apply_flash,
                         fx::collect_fx,
                         actors::hero_glow,
                         effects::read_events,

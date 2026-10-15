@@ -30,6 +30,12 @@ impl EnemyHandle {
     pub fn raw(self) -> u32 {
         self.0
     }
+
+    /// 测试里造事件用；模拟里的句柄只从 `Enemies::handle` 来。
+    #[doc(hidden)]
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
 }
 
 /// 冲锋的阶段：冷却（照常追击）、蓄力（原地转向）、冲出（方向锁定）、收势（原地停）。
