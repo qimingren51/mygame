@@ -118,19 +118,11 @@ fn read_events(
                     msg(format!("点亮石灯笼 {lit} / 5"), "光区里的妖物减速、易伤", hex("#FFD98A"), false)
                 }
             }
-            // 换阶段：夜主的台词，下面一行写怎么打
-            SimEvent::BossPhase { phase: 2 } => msg(
-                boss_line(c, |l| &l.phase2).unwrap_or("九尾分出幻身"),
-                "分出幻身：幻身没有影子，照见圈能让它们散去",
-                hex("#D8C8FF"),
-                true,
-            ),
-            SimEvent::BossPhase { phase: 3 } => msg(
-                boss_line(c, |l| &l.phase3).unwrap_or("九尾扫"),
-                "九尾扫：躲开地上的扇形预警",
-                hex("#FF6B5A"),
-                true,
-            ),
+            // 换阶段：标题写新招式，下面一行写怎么打；夜主的台词由 moments.rs 在画面下方写出来
+            SimEvent::BossPhase { phase: 2 } => {
+                msg("分出幻身", "幻身没有影子，照见圈能让它们散去", hex("#D8C8FF"), true)
+            }
+            SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
             SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
             SimEvent::BossDefeated { dawn: false, .. } => msg(
                 boss_line(c, |l| &l.retreat).unwrap_or("夜主退去"),
