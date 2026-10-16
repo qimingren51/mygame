@@ -4,6 +4,7 @@
 //! 前后关系按脚底 y 排序（z 越大越靠前）。光源和自发光帧先攒成 [`Glow`] 请求，由 [`apply_glow`]
 //! 统一写进 Mesh2d 池（光源在光照相机的图层，自发光在暗层之上）。
 
+use std::collections::BTreeMap;
 use std::f32::consts::{FRAC_PI_4, TAU};
 
 use bevy::camera::visibility::RenderLayers;
@@ -13,7 +14,9 @@ use bevy::sprite::Anchor;
 use lantern_content::Stat;
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::boss::BossState;
-use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, SPAWN_GRACE};
+use lantern_sim::enemies::{
+    CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, EnemyHandle, SPAWN_GRACE, TAG_REVEALED,
+};
 use lantern_sim::{
     AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox, Stats,
 };
@@ -199,6 +202,11 @@ struct EnemyFrames {
     /// 九尾扫、召唤（召唤和狐火雨时播）
     sweep: Option<EnemyAnim>,
     summon: Option<EnemyAnim>,
+    /// 竹魅射刺：瞄准时停在蓄力帧，射出后播完
+    shoot: Option<EnemyAnim>,
+    /// 讨封狐：现形那一下，和现形以后走路（没现形时播平时的 disguise）
+    reveal: Option<EnemyAnim>,
+    unmasked: Option<EnemyAnim>,
     floating: bool,
     shadow_scale: f32,
 }
@@ -301,6 +309,9 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
                 charge: e.charge.as_ref().and_then(|_| named(&["pounce", "charge"])),
                 sweep: e.boss.as_ref().and_then(|_| named(&["sweep"])),
                 summon: e.boss.as_ref().and_then(|_| named(&["summon"])),
+                shoot: e.shot.as_ref().and_then(|_| named(&["shoot"])),
+                reveal: e.disguise.as_ref().and_then(|_| named(&["reveal"])),
+                unmasked: e.disguise.as_ref().and_then(|_| named(&["move"])),
                 floating: meta.floating,
                 shadow_scale: shadow_scale(&db, asset, shadow),
             }
@@ -769,6 +780,14 @@ impl BossClock {
     }
 }
 
+/// 每只小妖的出手时刻（画面自己记，模拟里只有状态）：竹魅射出那一刻、讨封狐现形那一刻。
+#[derive(Clone, Copy, Default)]
+struct Track {
+    aiming: bool,
+    shot_at: Option<f32>,
+    revealed_at: Option<f32>,
+}
+
 /// 挑妖物的出手动作要读的模拟状态（DESIGN 第 15 节“妖物动作”）。
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct Moves<'w, 's> {
@@ -776,11 +795,52 @@ pub(crate) struct Moves<'w, 's> {
     boss: Option<Res<'w, BossState>>,
     outbox: Res<'w, SimOutbox>,
     clock: Local<'s, BossClock>,
+    tracks: Local<'s, BTreeMap<EnemyHandle, Track>>,
 }
 
 impl Moves<'_, '_> {
-    fn update(&mut self, now: f32) {
+    fn update(&mut self, now: f32, en: &Enemies) {
         self.clock.update(&self.outbox.0, now);
+        // 死了的、槽位被复用的不再记
+        self.tracks.retain(|h, _| en.resolve(*h).is_some());
+    }
+
+    /// 竹魅、讨封狐的动作；其余的走 [`Self::pick`]。
+    fn pick_minion<'f>(
+        &mut self,
+        f: &'f EnemyFrames,
+        en: &Enemies,
+        i: usize,
+        now: f32,
+    ) -> Option<(&'f EnemyAnim, usize, Option<bool>)> {
+        let def = &self.content.0.enemies[en.kind[i] as usize];
+        if let (Some(a), Some(sh)) = (&f.shoot, &def.shot) {
+            let track = self.tracks.entry(en.handle(i)).or_default();
+            if en.aim_t[i] > 0.0 {
+                track.aiming = true;
+                return Some((a, a.windup_frame(sh.warn - en.aim_t[i]), None));
+            }
+            // 瞄完了：冷却记满的是射出去了，记一半的是被打断
+            if std::mem::take(&mut track.aiming) && en.atk_t[i] > sh.every * 0.75 {
+                track.shot_at = Some(now);
+            }
+            let k = track.shot_at.and_then(|at| a.strike_frame(now - at, false));
+            return k.map(|k| (a, k, None));
+        }
+        if def.disguise.is_some() && en.tags[i] & TAG_REVEALED != 0 {
+            let track = self.tracks.entry(en.handle(i)).or_default();
+            let at = *track.revealed_at.get_or_insert(now);
+            if let Some(a) = &f.reveal
+                && let Some(k) = a.strike_frame(now - at, false)
+            {
+                return Some((a, k, None));
+            }
+            let a = f.unmasked.as_ref()?;
+            let n = a.normal.len();
+            let phase = en.wob[i] / TAU * n as f32;
+            return Some((a, ((now * a.fps + phase) as usize) % n, None));
+        }
+        None
     }
 
     /// 正在出招的妖物：播哪个动作的第几帧，朝不朝左（None：照常朝着主角）。
@@ -866,14 +926,16 @@ pub(crate) fn collect_draws(
     let rect = view_rect(camera.0, camera.1);
     let (ppos, pprev) = *player;
     let player_now = pprev.0.lerp(ppos.0, a);
-    moves.update(t);
+    moves.update(t, &en);
 
     // 夜签“无月”：照见圈外完全看不见；“隐”的精英在照见圈外也看不见
     let no_moon = sight.stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
     for i in en.iter_alive() {
         let p = Vec2::new(en.px[i], en.py[i]).lerp(Vec2::new(en.x[i], en.y[i]), a);
         let s = to_screen(p);
-        if !rect.contains(s) || en.cloaked[i] {
+        // “隐”着的看不见；伪装的讨封狐照样画（画成路人）
+        let disguised = moves.content.0.enemies[en.kind[i] as usize].disguise.is_some();
+        if !rect.contains(s) || (en.cloaked[i] && !disguised) {
             continue;
         }
         if no_moon
@@ -887,10 +949,11 @@ pub(crate) fn collect_draws(
         if n == 0 {
             continue;
         }
-        let (anim, k, face) = moves.pick(f, &en, i, t).unwrap_or_else(|| {
-            let phase = en.wob[i] / TAU * n as f32;
-            (&f.base, ((t * f.base.fps + phase) as usize) % n, None)
-        });
+        let (anim, k, face) =
+            moves.pick_minion(f, &en, i, t).or_else(|| moves.pick(f, &en, i, t)).unwrap_or_else(|| {
+                let phase = en.wob[i] / TAU * n as f32;
+                (&f.base, ((t * f.base.fps + phase) as usize) % n, None)
+            });
         let response = impacts.hits.get(&en.handle(i)).copied();
         let flashing = response.is_some_and(|h| h.flashing()) && !anim.flash.is_empty();
         let frame = if flashing { anim.flash[k] } else { anim.normal[k] };

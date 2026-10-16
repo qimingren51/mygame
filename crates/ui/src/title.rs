@@ -296,9 +296,24 @@ pub(crate) fn input(
             }
         }
         TitleMode::Achievements | TitleMode::Codex => {
-            if *mode == TitleMode::Codex && actions.meta {
-                reader.open = true;
-                return;
+            if *mode == TitleMode::Codex {
+                if actions.meta {
+                    reader.open = true;
+                    return;
+                }
+                // 图鉴翻页：左右键，或者点页签
+                let pages = hub::CODEX_PAGES.len();
+                let tab = clicked.and_then(|k| k.checked_sub(hub::CODEX_TAB)).filter(|&k| k < pages);
+                if let Some(k) = tab {
+                    ui.selected = k;
+                    ui.dirty = true;
+                    return;
+                }
+                if actions.nav.x != 0 {
+                    ui.selected = (ui.selected as i32 + actions.nav.x).rem_euclid(pages as i32) as usize;
+                    ui.dirty = true;
+                    return;
+                }
             }
             if actions.back || actions.confirm || clicked.is_some() {
                 let i = if *mode == TitleMode::Codex { 3 } else { 2 };
@@ -531,7 +546,7 @@ fn redraw(
         },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
-        TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &profile),
+        TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &db, &profile, ui.selected),
         TitleMode::Settings | TitleMode::AdvancedSettings => {
             settings_panel(&mut commands, &fonts, &skin, &settings, *mode == TitleMode::AdvancedSettings)
         }

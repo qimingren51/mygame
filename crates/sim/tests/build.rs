@@ -295,3 +295,25 @@ fn stat_sources_add_up_to_the_final_value() {
     let reveal = stats::sources(&c, &setup, &build, None, 5, Stat::Reveal);
     assert!(reveal.iter().any(|s| s.from == StatSource::Level));
 }
+
+#[test]
+fn codex_keys_cover_forms_fusion_materials_and_passives() {
+    use lantern_sim::weapons::{Form, WeaponSlot};
+    let c = content();
+    let mut arsenal = lantern_sim::Arsenal::default();
+    let mut lamp = WeaponSlot::new(c.weapon_index("lamp").unwrap());
+    lamp.form = Form::Mutated;
+    arsenal.0.push(lamp);
+    let phoenix = c.fusions.iter().position(|f| f.id == "phoenix").unwrap();
+    let mut fused = WeaponSlot::new(c.weapon_index(&c.fusions[phoenix].weapons[0]).unwrap());
+    fused.form = Form::Fused(phoenix);
+    arsenal.0.push(fused);
+    let mut build = lantern_sim::Build::default();
+    build
+        .passives
+        .push(lantern_sim::build::PassiveSlot { def: c.passive_index("jianyi").unwrap(), level: 1 });
+    let keys = lantern_sim::flow::codex_keys(&c, &arsenal, &build);
+    for k in ["w:lamp", "w:lamp_mut", "f:phoenix", "w:crane", "w:crane_evo", "w:lamp_evo", "p:jianyi"] {
+        assert!(keys.contains(k), "{k}: {keys:?}");
+    }
+}

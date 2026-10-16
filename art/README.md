@@ -307,6 +307,37 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
   - 墙上的影子只投在白墙上，地上那段是一团淡墨；
   - 章尾山晨光的上沿在 y 97，21:9 会裁掉最淡的一点天光。
 
+## 重做的妖物（精修三维，render/enemies_v2.py）
+
+试玩第 1 轮用户嫌妖物“造型粗糙、像低模”，按世界观会话的外形描述全部重画（用户在 A 精修三维 / B 手绘分件两种样张里选了 A）。
+素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
+
+```bash
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox    # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
+art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
+art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
+art/.venv/bin/python art/post/atlas_swap.py --atlas assets/atlas --name actors art/out/assets@2x/shade art/out/assets@2x/fox
+art/.venv/bin/python art/post/check_atlas.py
+```
+
+| 文件 | 作用 |
+|---|---|
+| `render/enemies_v2.py` | V2 表（素材 → 模型、帧尺寸、锚点、动画、挂点、碰撞半径、眼色）；出帧、逐帧挂点、meta（`style: "paint"`、`contact_radius`） |
+| `models/v2kit.py` | 公共件：多档带色相偏移的绘画感材质（明暗和毛色分区走同一条色带）、轮廓光、AOV 缝光（夜里透出的微光）、按设计稿投到表面上的贴片（眼、裂缝、脸上的朱砂）、离光越远越粗的墨线、后期（不吸附调色板） |
+| `models/shade_v2.py` `fox_v2.py` | 影妖、赤面狐 |
+| `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
+| `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
+| `post/atlas_swap.py` | 图集里只换几个素材：没换的素材从现有图集还原（不依赖本机 out/），打包后逐帧核对没换的帧逐像素相同 |
+
+- 影妖：帧 224²（原 160²），锚点 (0.5, 0.875) 是下摆墨烟的落地点，高约 46 单位（主角 0.88 倍），眼色暖金 `#FFC46B`。
+  游戏会给悬浮的妖物整体抬高、上下起伏，帧里只留 ±0.5 单位的“呼吸”。
+- `contact_radius`：量法同 `docs/PLAYTEST.md` 的表（朝东的帧，锚点往上 52 单位内每行最靠前的点，取第 90 百分位，各帧取中位数），
+  默认动画的值和 `game_radius` 取小；各动画分别量的值在 `contact_radius_by_anim`。
+- `check_asset.py`：`style: "paint"` 的素材不查调色板比例、墨线占比（多档渐变、焦墨的影妖本来就不在旧的三档色板里），其余照查；
+  四足兽用 `register_band`（赤面狐 [0.70, 0.92]）取躯干做 x 配准，迈步的膝盖不算漂移。
+- 打包：`pack_atlas.py --name actors` 那行命令的素材表已经过时（少了后加的狐祠道具），换素材用 `atlas_swap.py`。
+
 ## 正式管线
 
 ```bash

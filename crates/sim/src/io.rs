@@ -254,7 +254,6 @@ pub enum SimEvent {
     BossArrived {
         kind: u16,
     },
-    /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     /// 远程小妖开始瞄准：方向已锁定，预警线从 pos 沿 dir 画出去
     EnemyAim {
         pos: Vec2,
@@ -271,6 +270,7 @@ pub enum SimEvent {
         pos: Vec2,
         kind: u16,
     },
+    /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,
         illusion: bool,

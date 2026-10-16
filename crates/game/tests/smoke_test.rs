@@ -99,15 +99,33 @@ fn rendered_package_completes_and_reports_failures() {
     let smoke = ["--smoke-test", "--windowed"];
     dir.run(&smoke, true, "冒烟测试通过：初始化完成，窗口渲染 120 帧");
     let assets = dir.0.join("安装 目录/assets");
-    // 图集 JSON 正常但贴图损坏时，必须等待异步解码并报告失败。
-    let image = assets.join("atlas/actors.png");
+    // 图集 JSON 正常但贴图损坏时，必须等待异步解码并报告失败。图集可能分页，按 index.json 找第一页的贴图。
+    let name = first_page_image(&assets.join("atlas"), "actors");
+    let image = assets.join("atlas").join(&name);
     let original = fs::read(&image).unwrap();
     fs::write(&image, b"broken png").unwrap();
-    dir.run(&smoke, false, "actors.png");
+    dir.run(&smoke, false, &name);
     fs::write(&image, &original).unwrap();
     fs::remove_file(&image).unwrap();
-    dir.run(&smoke, false, "actors.png");
+    dir.run(&smoke, false, &name);
     fs::write(image, original).unwrap();
     fs::write(assets.join("fonts/NotoSerifSC-subset.ttf"), "invalid").unwrap();
     dir.run(&smoke, false, "NotoSerifSC-subset.ttf");
+}
+
+/// 某个图集第一页的贴图文件名：index.json 的 pages 列出各页 JSON，页 JSON 的 meta.image 是贴图。
+fn first_page_image(atlas: &Path, name: &str) -> String {
+    let read = |file: &str| -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(atlas.join(file)).unwrap()).unwrap()
+    };
+    let index = read("index.json");
+    let page = index["pages"][name][0].as_str().unwrap_or_else(|| panic!("index.json 里没有 {name} 的分页"));
+    read(page)["meta"]["image"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn first_page_of_the_actor_atlas_exists() {
+    let atlas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/atlas");
+    let name = first_page_image(&atlas, "actors");
+    assert!(atlas.join(&name).is_file(), "{name}");
 }
