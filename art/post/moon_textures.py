@@ -234,16 +234,27 @@ paper_ref_lin, boost_decor = V.paper_ref_lin, V.boost_decor
 
 
 @lru_cache(maxsize=8)
-def atlas(name: str) -> tuple[dict, np.ndarray]:
-    j = json.loads((ATLAS / f"{name}.json").read_text(encoding="utf-8"))
-    page = np.asarray(Image.open(ATLAS / j["meta"]["image"]).convert("RGBA"))
-    return j, page
+def atlas(name: str) -> tuple[dict, dict[str, np.ndarray]]:
+    """读一张图集。分页的（actors_0、actors_1 …，见 index.json）把各页的帧表合到第 0 页的 JSON 里
+    （animations、meta.lantern.assets 只在第 0 页）。返回 (合并后的 JSON, 帧名 → 所在那页的像素)。"""
+    index = json.loads((ATLAS / "index.json").read_text(encoding="utf-8"))
+    merged: dict = {}
+    pages: dict[str, np.ndarray] = {}
+    for fn in index["pages"].get(name) or [f"{name}.json"]:
+        j = json.loads((ATLAS / fn).read_text(encoding="utf-8"))
+        img = np.asarray(Image.open(ATLAS / j["meta"]["image"]).convert("RGBA"))
+        if merged:
+            merged["frames"].update(j["frames"])
+        else:
+            merged = j
+        pages.update(dict.fromkeys(j["frames"], img))
+    return merged, pages
 
 
 def atlas_frame(name: str, key: str) -> tuple[Image.Image, tuple[float, float]]:
     """从图集裁出一帧，按 spriteSourceSize 还原到原画布（裁掉的边补全透明）。返回 (图, 锚点 0..1)。"""
-    j, page = atlas(name)
-    f = j["frames"][key]
+    j, pages = atlas(name)
+    f, page = j["frames"][key], pages[key]
     r, s, src = f["frame"], f["spriteSourceSize"], f["sourceSize"]
     can = np.zeros((src["h"], src["w"], 4), np.uint8)
     can[s["y"] : s["y"] + s["h"], s["x"] : s["x"] + s["w"]] = page[r["y"] : r["y"] + r["h"], r["x"] : r["x"] + r["w"]]
