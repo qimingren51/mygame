@@ -520,6 +520,22 @@ mod tests {
         assert!(c.validate(Path::new("data")).is_err());
     }
 
+    /// 接触半径按画出来的身体算，不超过碰撞半径；不写等于 radius（docs/PLAYTEST.md 的表）。
+    #[test]
+    fn contact_radius_defaults_to_radius_and_cannot_exceed_it() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let lord = &c.enemies[c.enemy_index("stonelord").unwrap()];
+        assert_eq!(lord.contact_radius, Some(14.0));
+        assert!((lord.contact_ratio() - 0.5).abs() < 1e-6);
+        assert_eq!(c.enemies[c.enemy_index("shade").unwrap()].contact_ratio(), 1.0);
+        for bad in [lord.radius + 1.0, 0.0] {
+            let mut c = c.clone();
+            let i = c.enemy_index("stonelord").unwrap();
+            c.enemies[i].contact_radius = Some(bad);
+            assert!(c.validate(Path::new("data")).is_err(), "{bad}");
+        }
+    }
+
     /// 只有灯童问青丘的四句是追问（排在初见前面）；老灯匠、说书人留灯以后的话不是。积累门槛算里程碑。
     #[test]
     fn hub_conditions_classify_story_questions_and_milestones() {

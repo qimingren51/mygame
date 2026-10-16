@@ -73,6 +73,7 @@ fn update(
     player: Query<&Pos, With<Player>>,
     mut echo: ResMut<Echo>,
     guide: Option<Res<crate::onboarding::Onboarding>>,
+    altars: (Option<Res<lantern_sim::GameContent>>, Option<Res<lantern_sim::encounters::Encounters>>),
     mut roots: Query<(&Children, &mut Node), With<Whisper>>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
@@ -113,10 +114,16 @@ fn update(
             _ => "",
         }
     });
+    // 血祭坛要按键献血，站在旁边时提示
+    let (content, encounters) = altars;
+    let at_altar =
+        content.zip(encounters).is_some_and(|(c, e)| player.iter().any(|p| e.altar_near(&c.0, p.0)));
     let template = if !playing {
         String::new()
     } else if echo.left > 0.0 {
         format!("{}　　{{interact}}　略过", echo.words)
+    } else if prompt.is_empty() && at_altar {
+        "{interact}　献血换宝箱".to_string()
     } else {
         prompt.to_string()
     };

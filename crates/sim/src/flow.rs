@@ -230,7 +230,7 @@ pub(crate) struct FlowParams<'w, 's> {
     build: ResMut<'w, Build>,
     stats: ResMut<'w, Stats>,
     effects: ResMut<'w, Effects>,
-    encounters: Res<'w, Encounters>,
+    encounters: ResMut<'w, Encounters>,
     progress: ResMut<'w, Progress>,
     rng: ResMut<'w, SimRng>,
     dirty: ResMut<'w, StatsDirty>,
@@ -626,6 +626,8 @@ pub(crate) fn handle_commands(
                 for (pos, _) in &player {
                     fp.story.interact(pos.0);
                 }
+                // 血祭坛要按交互键才献血（本步的奇遇更新里用掉）
+                fp.encounters.interact = true;
             }
             (SimPhase::Play, SimCommand::Dash) => {
                 let dash = &fp.content.0.player.dash;

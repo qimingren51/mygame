@@ -1,27 +1,29 @@
 // 妖物（移植自网页版 data/enemies.ts）。sprite 是图集里的素材名，eye 是妖眼颜色。
 // rank：Normal 普通 / Elite 精英 / Boss 夜主 / Critter 奇遇小动物（不计击杀）。
 // title：出场提示里的称号；boss：夜主的招式；loot：奇遇小动物被打死时的奖励。
+// radius 是碰撞半径（互相推挤）；contact_radius 是接触伤害按画出来的身体算的半径（不写等于 radius，
+// 冲锋时仍按 radius），数值见 docs/PLAYTEST.md 的接触半径表。
 [
     (id: "shade", name: "影妖", rank: Normal, movement: Chase,
      radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FF8A5B"),
     (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
-     radius: 10.0, hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+     radius: 10.0, contact_radius: Some(6.0), hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
     (id: "golem", name: "石妖", rank: Normal, movement: Chase,
-     radius: 19.0, hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+     radius: 19.0, contact_radius: Some(18.0), hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
     // 赤面狐扑击、青面鬼冲撞（docs/BALANCE.md 第 12.6 节）：离主角 range 以内每 every 秒一次，
     // 原地蓄力 windup 秒（转向跟着主角，出手前 lock 秒锁定方向），然后以 speed 冲 duration 秒，
     // 接触伤害 × damage_mult，冲完停 recover 秒
     (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
-     radius: 24.0, hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
+     radius: 24.0, contact_radius: Some(22.0), hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
      charge: Some((range: 260.0, every: 4.0, windup: 0.6, lock: 0.25, speed: 320.0, duration: 0.45, damage_mult: 1.5,
                    recover: 0.5))),
     (id: "ghoul", name: "青面鬼", rank: Elite, movement: Chase,
-     radius: 30.0, hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#C8FF6B",
+     radius: 30.0, contact_radius: Some(21.0), hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#C8FF6B",
      title: Some("小头目"),
      charge: Some((range: 360.0, every: 5.0, windup: 0.8, lock: 0.3, speed: 380.0, duration: 0.6, damage_mult: 2.0,
                    recover: 1.0))),
     (id: "stonelord", name: "石将", rank: Elite, movement: Chase,
-     radius: 28.0, hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
+     radius: 28.0, contact_radius: Some(14.0), hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
     // 九尾（docs/BALANCE.md 第 12.2 节）：生命 48000（再乘更的倍率；灯阵完整时 ×0.8）。
     // 一阶段：每 2.6 秒一圈 14 发狐火（速度 115、半径 6、伤害 14、存活 6 秒），每 7 秒召唤 6 只影妖。
     // 二阶段（60%）：离你约 200 处分出 2 个幻身，打不死、没有影子，每 3.5 秒放一圈 8 发狐火，
@@ -29,7 +31,7 @@
     // 三阶段（25%）：每 4 秒九尾扫（120° 扇形，半径 220，伤害 25，预警 0.8 秒），狐火环间隔缩到 1.7 秒。
     // 登场 120 秒后狂暴：所有攻击间隔 ×0.6。三更起全程多一招狐火雨。
     (id: "jiuwei", name: "夜主 · 九尾", rank: Boss, movement: Chase,
-     radius: 44.0, hp: 36000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
+     radius: 44.0, contact_radius: Some(40.0), hp: 36000.0, speed: 52.0, damage: 22.0, xp: 0.0, sprite: "boss", eye: "#FFD98A",
      boss: Some((volley_every: 2.6, volley_first: 2.0, volley_warn: 0.8, volley_count: 14, shot_speed: 115.0, shot_radius: 6.0,
                  shot_damage: 14.0, shot_life: 6.0, summon_every: 7.0, summon: "shade", summon_count: 6,
                  summon_radius: 70.0,

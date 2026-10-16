@@ -512,6 +512,7 @@ fn a_pounce_hits_harder_than_a_bump() {
         {
             let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
             en.charge_t[i] = 5.0;
+            en.grace[i] = 0.0;
             if dash {
                 en.charge[i] = CHARGE_DASH;
                 en.charge_t[i] = 1.0;

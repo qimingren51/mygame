@@ -13,7 +13,7 @@ use bevy::sprite::Anchor;
 use lantern_content::Stat;
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::boss::BossState;
-use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP};
+use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, SPAWN_GRACE};
 use lantern_sim::{
     AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox, Stats,
 };
@@ -927,13 +927,18 @@ pub(crate) fn collect_draws(
         if fade <= 0.01 {
             continue;
         }
-        let color = color.with_alpha(fade);
+        let def = &moves.content.0.enemies[en.kind[i] as usize];
+        // 分裂出来的小号按实际碰撞半径画小；刚刷出来的从墨里浮现（这段时间不伤人）
+        let size = Vec2::splat(en.r[i] / def.radius);
+        let born = 1.0 - (en.grace[i] / SPAWN_GRACE).clamp(0.0, 1.0);
+        let color = color.with_alpha(fade * (0.2 + 0.8 * born));
         // 夜主用伪法线受光（lighting::apply_surface_lights 叠在身上）
-        if moves.content.0.enemies[en.kind[i] as usize].boss.is_some() && !flashing {
+        if def.boss.is_some() && !flashing {
             surfaces.0.push(Draw {
                 flip,
                 color,
                 deform,
+                scale: size,
                 ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
             });
         }
@@ -941,22 +946,25 @@ pub(crate) fn collect_draws(
             flip,
             color,
             deform,
+            scale: size,
             ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
         });
         let radius = db.frame(frames.shadow).size.x * f.shadow_scale * 0.5;
-        let source = if moves.content.0.enemies[en.kind[i] as usize].boss.is_some() {
-            lights.dominant(s)
-        } else {
-            lights.sources[0]
-        };
+        let source = if def.boss.is_some() { lights.dominant(s) } else { lights.sources[0] };
         let (offset, stretch) = contact_shadow(s, source, radius);
         pools.enemy_shadow.push(Draw {
-            scale: stretch * f.shadow_scale,
+            scale: stretch * f.shadow_scale * size,
             color: Color::srgba(1.0, 1.0, 1.0, if f.floating { 0.42 } else { 0.62 } * fade),
             ..Draw::new(frames.shadow, (s + offset).extend(layer::SHADOW))
         });
         if !flashing && let Some(&emit) = anim.emit.get(k) {
-            glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade));
+            let before = glow.0.len();
+            glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade * born));
+            if glow.0.len() > before
+                && let Some(g) = glow.0.last_mut()
+            {
+                g.scale = size;
+            }
         }
     }
 

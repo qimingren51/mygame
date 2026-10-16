@@ -84,11 +84,24 @@ pub fn input(tick: u64) -> (InputFrame, Vec<SimCommand>) {
     (InputFrame::quantize(dir), cmds)
 }
 
-/// 机器人走一步：选择阶段做选择，Play 阶段按 input 走（燃灯充满就放）。
+/// 站在血祭坛边上就按交互键：以前碰到就献血，机器人照旧献，平衡对照不变。
+pub fn altar_interact(sim: &SimHarness) -> Option<SimCommand> {
+    let world = sim.world();
+    let content = &world.resource::<crate::GameContent>().0;
+    let encounters = world.resource::<crate::encounters::Encounters>();
+    let near = world
+        .iter_entities()
+        .filter_map(|e| e.get::<crate::Pos>().filter(|_| e.contains::<crate::Player>()))
+        .any(|p| encounters.altar_near(content, p.0));
+    near.then_some(SimCommand::Interact)
+}
+
+/// 机器人走一步：选择阶段做选择，Play 阶段按 input 走（燃灯充满就放，到了血祭坛就献血）。
 pub fn step(sim: &mut SimHarness, input: InputFrame, cmds: &[SimCommand]) {
     let mut all = respond(sim);
     if sim.phase() == SimPhase::Play {
         all.extend_from_slice(cmds);
+        all.extend(altar_interact(sim));
         if sim.progress().ult >= 1.0 {
             all.push(SimCommand::Ult);
         }

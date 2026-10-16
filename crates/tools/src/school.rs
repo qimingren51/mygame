@@ -240,6 +240,7 @@ pub fn step(
     let mut all = plan.respond(sim, content);
     if sim.phase() == SimPhase::Play {
         all.extend_from_slice(cmds);
+        all.extend(bot::altar_interact(sim));
         if sim.progress().ult >= 1.0 {
             all.push(SimCommand::Ult);
         }

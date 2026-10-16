@@ -197,7 +197,10 @@ fn no_charm_to_give_means_gold_instead() {
 /// 让主角挨一下致命伤：在身上摆一只妖物，把它的接触伤害调到很高。
 fn lethal_hit(sim: &mut SimHarness) {
     let i = sim.spawn("shade", Vec2::ZERO).unwrap();
-    sim.world_mut().resource_mut::<lantern_sim::Enemies>().damage[i] = 10_000.0;
+    let mut en = sim.world_mut().resource_mut::<lantern_sim::Enemies>();
+    en.damage[i] = 10_000.0;
+    // 跳过刷出保护（刚刷出的 0.4 秒不伤人）
+    en.grace[i] = 0.0;
     idle(sim, 1);
 }
 

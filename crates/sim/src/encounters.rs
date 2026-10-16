@@ -36,9 +36,19 @@ pub struct Encounters {
     pub list: Vec<Encounter>,
     /// 古灯增益：(`events.ron` 里 buffs 的下标, 剩余时间)
     pub buff: Option<(usize, f32)>,
+    /// 这一步按了交互键（血祭坛要按键确认，碰到不算）；奇遇更新时用掉，步末总是 false
+    pub interact: bool,
 }
 
 impl Encounters {
+    /// 主角站在血祭坛旁边（界面据此提示按键，机器人据此按键）。
+    pub fn altar_near(&self, content: &lantern_content::Content, p: Vec2) -> bool {
+        self.list.iter().any(|e| match content.events.kinds[e.kind].kind {
+            EventKind::Altar { radius, .. } => e.pos.distance_squared(p) < radius * radius,
+            _ => false,
+        })
+    }
+
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_f32(self.next_at);
         h.write_u32(self.list.len() as u32);
@@ -138,6 +148,7 @@ pub(crate) fn update_encounters(
     }
     let p = pos.0;
     let encounters = &mut *encounters;
+    let interact = std::mem::take(&mut encounters.interact);
     if let Some((_, t)) = &mut encounters.buff {
         *t -= DT;
         if *t <= 0.0 {
@@ -181,7 +192,8 @@ pub(crate) fn update_encounters(
                 }
             }
             EventKind::Altar { radius, cost, chests } => {
-                if !done && near(radius) {
+                // 以血换宝箱要玩家自己按交互键确认，路过碰到不算
+                if !done && near(radius) && interact {
                     let amount = (health.max * cost).round();
                     let before = health.hp;
                     health.hp = (health.hp - amount).max(1.0);

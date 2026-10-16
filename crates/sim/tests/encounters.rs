@@ -5,7 +5,7 @@ mod common;
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 use lantern_sim::encounters::{Encounter, Encounters};
-use lantern_sim::{Health, InputFrame, Player, SimEvent, SimHarness};
+use lantern_sim::{Health, InputFrame, Player, SimCommand, SimEvent, SimHarness};
 
 fn encounter(id: &str, hp: f32) -> SimHarness {
     let c = common::content();
@@ -23,8 +23,10 @@ fn encounter(id: &str, hp: f32) -> SimHarness {
 fn lethal_damage_prevents_healing_and_encounter_interactions_in_the_same_step() {
     for id in ["spring", "altar", "shrine", "merchant"] {
         let mut sim = encounter(id, 1.0);
-        sim.spawn("golem", Vec2::new(5.0, 0.0)).unwrap();
-        sim.step(InputFrame::default(), &[]);
+        let i = sim.spawn("golem", Vec2::new(5.0, 0.0)).unwrap();
+        // 跳过刷出保护；血祭坛也按了交互键，照样不能献
+        sim.world_mut().resource_mut::<lantern_sim::Enemies>().grace[i] = 0.0;
+        sim.step(InputFrame::default(), &[SimCommand::Interact]);
 
         let events = sim.take_events();
         assert!(events.iter().any(|e| matches!(e, SimEvent::PlayerDied)), "{id}：确实受了致命伤");
@@ -60,7 +62,7 @@ fn living_players_can_still_heal_and_sacrifice_their_last_health() {
     assert!(!spring.is_over());
 
     let mut altar = encounter("altar", 1.0);
-    altar.step(InputFrame::default(), &[]);
+    altar.step(InputFrame::default(), &[SimCommand::Interact]);
     assert_eq!(altar.player_hp(), 1.0);
     assert!(!altar.is_over());
     assert!(altar.flow().chest.is_some());

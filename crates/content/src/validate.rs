@@ -690,6 +690,12 @@ impl Content {
         c.unique("enemies.ron", "妖物", self.enemies.iter().map(|e| e.id.as_str()))?;
         for e in &self.enemies {
             c.positive("enemies.ron", &[("radius", e.radius), ("hp", e.hp)])?;
+            if let Some(cr) = e.contact_radius {
+                c.positive("enemies.ron", &[("contact_radius", cr)])?;
+                if cr > e.radius {
+                    return c.fail("enemies.ron", format!("{} 的 contact_radius 不能超过 radius", e.id));
+                }
+            }
             c.non_negative("enemies.ron", &[("speed", e.speed), ("damage", e.damage), ("xp", e.xp)])?;
             c.color("enemies.ron", &e.id, &e.eye)?;
             if let Some(ch) = &e.charge {

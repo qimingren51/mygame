@@ -475,7 +475,12 @@ pub struct EnemyDef {
     pub name: String,
     pub rank: Rank,
     pub movement: Movement,
+    /// 碰撞半径：妖物之间互相推挤用
     pub radius: f32,
+    /// 接触伤害按画出来的身体算（docs/PLAYTEST.md 的接触半径表），不超过 radius；不写就等于 radius。
+    /// 冲锋时整个身子扑出去，仍按 radius 算。
+    #[serde(default)]
+    pub contact_radius: Option<f32>,
     pub hp: f32,
     pub speed: f32,
     pub damage: f32,
@@ -499,6 +504,13 @@ pub struct EnemyDef {
     /// 冲锋（扑击、冲撞）
     #[serde(default)]
     pub charge: Option<ChargeDef>,
+}
+
+impl EnemyDef {
+    /// 接触半径占碰撞半径的比例：分裂的小号缩小了 radius，接触范围跟着按比例缩。
+    pub fn contact_ratio(&self) -> f32 {
+        self.contact_radius.map_or(1.0, |c| c / self.radius)
+    }
 }
 
 /// 精英的冲锋（docs/BALANCE.md 第 12.6 节）：离主角 range 以内、冷却好了就原地蓄力 windup 秒

@@ -31,6 +31,9 @@ use crate::atlas::{AtlasDb, FrameId};
 use crate::feedback::{Category, Feedback, Priority, eviction};
 use crate::{MainCamera, layer, to_screen};
 
+/// 狐火弹幕画在离地多高（世界单位，约主角腰部）
+const FOXFIRE_HEIGHT: f32 = 14.0;
+
 /// 透视：地面上的圆画成扁圆
 const FLAT: f32 = 0.62;
 
@@ -954,7 +957,11 @@ pub(crate) fn collect_fx(
             let u = (1.0 - en.charge_t[i] / ch.windup).clamp(0.0, 1.0);
             let at = Vec2::new(en.x[i], en.y[i]);
             let dir = Vec2::new(en.charge_dx[i], en.charge_dy[i]);
-            let len = ch.speed * ch.duration + en.r[i];
+            // 和真实危险区一致：按这一次的实际冲锋速度（含减速、夜深加速）走多远，再加上妖物和主角的半径；
+            // 宽度是冲锋时的接触范围 2 ×（碰撞半径 + 主角半径）
+            let reach = en.r[i] + c.player.radius;
+            let speed = if en.charge_speed[i] > 0.0 { en.charge_speed[i] } else { ch.speed };
+            let len = speed * ch.duration + reach;
             let start = to_screen(at);
             let screen_dir = to_screen(at + dir * len) - start;
             foreground.protect(start + screen_dir * 0.5, len * 0.5 + en.r[i]);
@@ -963,9 +970,9 @@ pub(crate) fn collect_fx(
             let locked = en.charge_t[i] <= ch.lock;
             let (line_a, glow_a) = if locked { (0.95, 0.75) } else { (0.2 + 0.35 * u, 0.12 + 0.25 * u) };
             if let Some((line, head)) = f.charge {
-                // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）；车道宽约为妖物直径的 0.8 倍
+                // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）
                 let (lf, hf) = (db.frame(line), db.frame(head));
-                let k = en.r[i] * 1.6 / lf.width.unwrap_or(lf.size.y);
+                let k = reach * 2.0 / lf.width.unwrap_or(lf.size.y);
                 let head_len = hf.head_len.unwrap_or(hf.size.x) * k;
                 let body = (screen_dir.length() - head_len).max(0.0);
                 let tip = start + screen_dir.normalize_or_zero() * body;
@@ -984,7 +991,7 @@ pub(crate) fn collect_fx(
                 // 没有专用贴图时借剑光拖尾：锚点在右端，放在终点、朝冲锋方向
                 let end = start + screen_dir;
                 let w = db.frame(f.trail).size;
-                let scale = Vec2::new(screen_dir.length() / w.x, en.r[i] * 1.2 / w.y);
+                let scale = Vec2::new(screen_dir.length() / w.x, reach * 2.0 / w.y);
                 pools.fx.push(Draw {
                     scale,
                     rot,
@@ -1511,10 +1518,16 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 夜主弹幕（狐火）
+    // ---- 夜主弹幕（狐火）：判定在地面，火球画在腰部高度，地上留影子——擦过脚下算中，看着也是打在身上
     if let Some(foes) = &res.foes {
         for fo in &foes.0 {
-            let p = lerp(fo.prev, fo.pos);
+            let ground = lerp(fo.prev, fo.pos);
+            pools.fx.push(Draw {
+                scale: Vec2::splat(fo.radius * 2.2 / db.frame(frames.shadow).size.x),
+                color: Color::srgba(1.0, 1.0, 1.0, 0.45),
+                ..Draw::new(frames.shadow, ground.extend(layer::SHADOW))
+            });
+            let p = ground + Vec2::new(0.0, FOXFIRE_HEIGHT);
             glow.add(
                 f.glow,
                 p.extend(layer::EMISSIVE),

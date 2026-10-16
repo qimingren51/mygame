@@ -118,6 +118,7 @@ pub(crate) fn update_enemies(
         en.melt_t[i] -= DT;
         en.hard_t[i] -= DT;
         en.soft_t[i] -= DT;
+        en.grace[i] = (en.grace[i] - DT).max(0.0);
         en.mud[i] = 0.0;
         let def = &content.enemies[en.kind[i] as usize];
 
@@ -239,13 +240,17 @@ pub(crate) fn update_enemies(
         }
 
         let kind = en.kind[i];
-        let (contact, by) = match &def.charge {
+        // 接触按画出来的身体算；冲锋时整个身子扑出去，按碰撞半径（docs/PLAYTEST.md）
+        let (contact, by, reach) = match &def.charge {
             Some(ch) if en.charge[i] == CHARGE_DASH => {
-                (en.damage[i] * ch.damage_mult, HurtBy::Charge { kind })
+                (en.damage[i] * ch.damage_mult, HurtBy::Charge { kind }, en.r[i])
             }
-            _ => (en.damage[i], HurtBy::Contact { kind }),
+            _ => (en.damage[i], HurtBy::Contact { kind }, en.r[i] * def.contact_ratio()),
         };
-        if d < en.r[i] + pr
+        // 冻住、击晕的不伤人（定身照旧还手）；刚刷出来的也先不伤人
+        let harmless = en.frozen[i] > 0.0 || en.stun[i] > 0.0 || en.grace[i] > 0.0;
+        if !harmless
+            && d < reach + pr
             && contact > 0.0
             && hurt_player(&mut player, &mut health, pos.0, contact, (by, Vec2::new(x, y)), &mut ctx)
             && thorn > 0.0
@@ -267,6 +272,7 @@ fn charge(
     speed: f32,
 ) -> Option<Vec2> {
     en.charge_t[i] -= DT;
+    en.charge_speed[i] = speed;
     let done = en.charge_t[i] <= 0.0;
     match en.charge[i] {
         CHARGE_WINDUP => {

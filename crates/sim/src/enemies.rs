@@ -44,6 +44,10 @@ pub const CHARGE_WINDUP: u8 = 1;
 pub const CHARGE_DASH: u8 = 2;
 pub const CHARGE_RECOVER: u8 = 3;
 
+/// 刚刷出的妖物多久内不造成接触伤害（秒）。九尾、召唤词缀在主角身边召唤时，不会同一步就打中；
+/// 画面在这段时间里让它从墨里浮现。
+pub const SPAWN_GRACE: f32 = 0.4;
+
 #[derive(Resource)]
 pub struct Enemies {
     pub x: Vec<f32>,
@@ -108,6 +112,10 @@ pub struct Enemies {
     pub charge_dy: Vec<f32>,
     /// “隐”：在照见圈外，自动瞄准锁定不到
     pub cloaked: Vec<bool>,
+    /// 刚刷出来的保护时间：大于 0 时不造成接触伤害（召唤可能刷在主角身上，见 [`SPAWN_GRACE`]）
+    pub grace: Vec<f32>,
+    /// 这一次冲锋的实际速度（蓄力和冲刺时每步记一次，含减速、夜深加速；预警线按它画多长）
+    pub charge_speed: Vec<f32>,
     /// 控制递减（只对精英）：6 秒内受到的硬控、软控次数与窗口剩余时间
     pub hard_n: Vec<u8>,
     pub hard_t: Vec<f32>,
@@ -175,6 +183,8 @@ impl Default for Enemies {
             charge_dx: f(),
             charge_dy: f(),
             cloaked: vec![false; ENEMY_CAP],
+            grace: f(),
+            charge_speed: f(),
             hard_n: vec![0; ENEMY_CAP],
             hard_t: f(),
             soft_n: vec![0; ENEMY_CAP],
@@ -234,9 +244,11 @@ impl Enemies {
             &mut self.charge_t,
             &mut self.charge_dx,
             &mut self.charge_dy,
+            &mut self.charge_speed,
         ] {
             v[i] = 0.0;
         }
+        self.grace[i] = SPAWN_GRACE;
         self.charge[i] = CHARGE_IDLE;
         self.affix[i] = 0;
         self.tags[i] = 0;
@@ -333,6 +345,7 @@ impl Enemies {
                 self.charge_dy[i],
                 self.hard_t[i],
                 self.soft_t[i],
+                self.grace[i],
             ] {
                 h.write_f32(v);
             }
