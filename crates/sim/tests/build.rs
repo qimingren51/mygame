@@ -186,8 +186,13 @@ fn evolution_offer_needs_max_level_and_passive() {
 
 #[test]
 fn when_everything_is_maxed_only_supplies_remain() {
-    let c = content();
-    let mut sim = fresh(1);
+    // 合璧另有测试（同五行的新法器一多，共鸣到 2 层就会出合璧卡），这里只看升级和进化都满了
+    let mut c = content();
+    c.run.transformations = false;
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.god = true;
+    let mut sim = SimHarness::with_setup(c.clone(), setup);
+    sim.quiet();
     let weapons: Vec<(&str, u32, bool)> = c.weapons.iter().map(|w| (w.id.as_str(), 8, true)).collect();
     let passives: Vec<(&str, u32)> = c.passives.iter().take(6).map(|p| (p.id.as_str(), 5)).collect();
     sim.set_build(&weapons, &passives);
@@ -316,4 +321,23 @@ fn codex_keys_cover_forms_fusion_materials_and_passives() {
     for k in ["w:lamp", "w:lamp_mut", "f:phoenix", "w:crane", "w:crane_evo", "w:lamp_evo", "p:jianyi"] {
         assert!(keys.contains(k), "{k}: {keys:?}");
     }
+}
+
+#[test]
+fn locked_weapons_stay_out_of_the_pool_until_unlocked() {
+    let mut c = content();
+    let locked: Vec<usize> = c.run.choices.locked.iter().map(|id| c.weapon_index(id).unwrap()).collect();
+    assert!(!locked.is_empty(), "v0.3 的新法器先锁着");
+    let sim = fresh(1);
+    let new = |c: &lantern_content::Content| -> Vec<usize> {
+        lantern_sim::build::offers(c, sim.arsenal(), sim.build(), 0.0)
+            .iter()
+            .filter_map(|(o, _)| if let Offer::NewWeapon(d) = *o { Some(d) } else { None })
+            .collect()
+    };
+    assert!(locked.iter().all(|d| !new(&c).contains(d)), "锁着的不进卡池");
+    let hash = c.hash;
+    c.unlock(None);
+    assert!(locked.iter().all(|d| new(&c).contains(d)), "解锁后进卡池");
+    assert_ne!(c.hash, hash, "解锁改变内容哈希，回放不会混用");
 }

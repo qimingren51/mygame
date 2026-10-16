@@ -320,6 +320,9 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
+    /// 还没解锁的法器（ID）：不进卡池。新法器按局解锁之前先锁着（docs/BALANCE.md 第 6.3 节）
+    #[serde(default)]
+    pub locked: Vec<String>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -840,6 +843,83 @@ pub enum WeaponBehavior {
         #[serde(default)]
         escort: Option<EscortDef>,
     },
+    /// 挥一道扇形剑气（铜钱剑 / 天罡，docs/BALANCE.md 第 6.3 节）。arc 是整个扇形的张角（弧度，
+    /// 一整圈就是一周）；方向朝 radius + aim 以内最近的妖物，没有就朝面向；扇形里按距离从近到远
+    /// 最多打 count 只（数量加成照加）。
+    Sweep {
+        arc: f32,
+        aim: f32,
+        knockback: f32,
+        /// 这把剑的命中额外加的暴击率
+        crit_bonus: f32,
+        /// 天罡：暴击的那一下对同一只再斩一次，伤害倍率（0 表示没有）；再斩不再触发
+        #[serde(default)]
+        echo: f32,
+    },
+    /// 放飞孔明灯（孔明灯 / 万灯升，docs/BALANCE.md 第 6.3 节）：每次放 count 盏，各自飘向妖物最密的地方，
+    /// 放飞 fuse 秒后落地爆燃（半径 radius、点 1 层灼烧），落点留下一块火海（zone）。
+    /// 落点：在 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只；同一次放的几盏落点至少隔开 spread。
+    /// 灯以 speed 飘过去，每 retarget 秒在落点附近重新找一次。
+    SkyLantern {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        speed: f32,
+        fuse: f32,
+        retarget: f32,
+        zone: FissureDef,
+    },
+    /// 推浪（沧浪 / 北冥潮，docs/BALANCE.md 第 6.3 节）：朝面向（站着不动时朝最近的妖物）推出一道浪，
+    /// 宽 2 × radius，以 speed 走 travel 远后散掉；数量加成多一道，左右轮流再偏 spread（弧度）。
+    /// 浪碰到的妖物受一次伤害、减速，被浪推着走最多 push（精英一半，夜主不推）。
+    /// ring：以主角为圆心一圈往外扩，扩到 radius；这时 travel 不用，freeze 是命中冻结的秒数。
+    Wave {
+        speed: f32,
+        travel: f32,
+        push: f32,
+        slow: f32,
+        slow_time: f32,
+        spread: f32,
+        #[serde(default)]
+        ring: bool,
+        #[serde(default)]
+        freeze: f32,
+    },
+    /// 连藤（青藤 / 万木春，docs/BALANCE.md 第 6.3 节）：和 radius 以内最近的 count 只各连一根藤，
+    /// 每 cooldown 秒对连着的每只造成 damage；主角回复伤害的 lifesteal，每秒最多 heal_cap + heal_per_level × 等级。
+    /// 目标离开 radius + leash 或死了就断，relink 秒后接新目标。
+    /// bind_every 大于 0 时，每隔这么久把连着的妖物定身 bind 秒（精英减半，夜主免疫）。
+    Vine {
+        leash: f32,
+        relink: f32,
+        lifesteal: f32,
+        heal_cap: f32,
+        heal_per_level: f32,
+        #[serde(default)]
+        bind_every: f32,
+        #[serde(default)]
+        bind: f32,
+    },
+    /// 落塔（镇妖塔 / 玲珑塔，docs/BALANCE.md 第 6.3 节）：每次落 count 座，落点和孔明灯一样挑（range、pick、cluster、spread）。
+    /// 预警 warn 秒后落地，对 radius 以内造成 damage、击晕 stun 秒；之后立 life 秒：把 pull × radius 以内的妖物
+    /// 往塔下吸，每秒 pull_speed（精英一半，夜主不吸），每 tick 秒对 radius 以内造成 damage × tick_scale。
+    /// burst：到时间炸开（玲珑塔）。
+    Tower {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        warn: f32,
+        stun: f32,
+        life: f32,
+        pull: f32,
+        pull_speed: f32,
+        tick: f32,
+        tick_scale: f32,
+        #[serde(default)]
+        burst: Option<TowerBurstDef>,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点
@@ -903,6 +983,15 @@ pub enum GroundKind {
     Fire,
     Bamboo,
     Sword,
+}
+
+/// 玲珑塔到时间炸开：半径、伤害、击晕秒数。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TowerBurstDef {
+    pub radius: f32,
+    pub damage: f32,
+    pub stun: f32,
 }
 
 /// 赤霄：命中熔金（易伤），击杀时分剑。

@@ -68,7 +68,8 @@ fn pair(c: &Content, f: usize) -> (Arsenal, Build) {
 #[test]
 fn every_mutation_requires_key_max_and_counter_and_is_exclusive() {
     let c = content();
-    for d in 0..c.weapons.len() {
+    // 只看有异化的法器（v0.3 的五件新法器先不做异化）
+    for d in (0..c.weapons.len()).filter(|&d| c.weapons[d].mutation.is_some()) {
         let counter = c.weapons.iter().position(|w| w.element.overcomes(c.weapons[d].element)).unwrap();
         let key = c.passive_index(&c.weapons[d].evolution.as_ref().unwrap().passive).unwrap();
         let mut a = Arsenal(vec![
@@ -223,6 +224,7 @@ fn every_mutation_and_fusion_deals_damage_and_replays_deterministically() {
     let cases = c
         .weapons
         .iter()
+        .filter(|w| w.mutation.is_some())
         .map(|w| (Form::Mutated, w.id.as_str()))
         .chain(c.fusions.iter().enumerate().map(|(f, d)| (Form::Fused(f), d.weapons[0].as_str())));
     for (form, id) in cases {
