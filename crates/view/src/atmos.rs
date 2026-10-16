@@ -15,11 +15,12 @@ use bevy::prelude::*;
 
 use lantern_core::Pcg32;
 use lantern_sim::combat::StrikeFx;
-use lantern_sim::{AppState, Health, Player, Pos, RunState, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Director, Health, Player, Pos, RunState, SimEvent, SimOutbox};
 
 use crate::actors::{GlowRequests, Pools};
 use crate::fx::ult_flare;
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
+use crate::palette::{TIDE_AMBIENT_GAIN, TIDE_DECOR_GAIN, TIDE_PARTICLE_GAIN, dawn_ambient};
 use crate::particles::{INK, Particles};
 use crate::{Feel, MainCamera, layer, to_screen};
 
@@ -87,6 +88,8 @@ pub(crate) struct Atmos {
     /// 短弧从收到事件时开始计时，首帧保持峰值。
     hurt_at: Option<f64>,
     heart: f32,
+    /// 妖潮、合围的压迫感（0 → 1，慢慢跟上）：环境底光略压，装饰的萤火、夜雾、迷雾压低
+    pub(crate) tide: f32,
 }
 
 impl Default for Atmos {
@@ -123,6 +126,7 @@ impl Default for Atmos {
             heart: 0.0,
             hurt_dir: Vec2::ZERO,
             hurt_at: None,
+            tide: 0.0,
         }
     }
 }
@@ -136,6 +140,7 @@ pub(crate) fn reset_atmos(mut atmos: ResMut<Atmos>, mut dawn: ResMut<Dawn>) {
     atmos.gloom = 0.0;
     atmos.deeper = 0;
     atmos.depth = 0.0;
+    atmos.tide = 0.0;
     dawn.t = None;
 }
 
@@ -246,8 +251,12 @@ pub(crate) fn update_atmos(
     >,
     mut light: Single<&mut Camera, With<LightCamera>>,
     feel: Res<Feel>,
+    director: Option<Res<Director>>,
 ) {
     let rdt = real.delta_secs().min(0.1);
+    // 妖潮、合围：约 1.5 秒压下去，结束后约 3 秒回来
+    let tide = director.is_some_and(|d| d.surge_t > 0.0 || !d.encircle.is_empty());
+    let (target, rate) = if tide { (1.0, 1.4) } else { (0.0, 0.7) };
     let dt = time.delta_secs();
     let t = time.elapsed_secs();
     let atmos = &mut *atmos;
@@ -256,6 +265,7 @@ pub(crate) fn update_atmos(
     atmos.gloom = (atmos.gloom - rdt / atmos.gloom_len).max(0.0);
     // 夜沉下去要慢，3 秒左右过渡完
     atmos.depth += (atmos.deeper as f32 - atmos.depth) * (1.0 - (-rdt * 1.2).exp());
+    atmos.tide += (target - atmos.tide) * (1.0 - (-rdt * rate).exp());
     if let Some(dt_dawn) = &mut dawn.t {
         *dt_dawn += rdt;
     }
@@ -302,18 +312,11 @@ pub(crate) fn update_atmos(
     } else {
         1.0
     };
-    let dawn_col = if day < 0.5 {
-        LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (day / 0.5)
-            + LinearRgba::from(NIGHT_AMBIENT) * (1.0 - day / 0.5)
-    } else {
-        let k = (day - 0.5) / 0.5;
-        LinearRgba::from(Color::srgb(1.0, 0.98, 0.94)) * k
-            + LinearRgba::from(Color::srgb(1.0, 0.82, 0.66)) * (1.0 - k)
-    };
+    // 天明：夜色经过暖桃到鱼肚白（色板 palette.rs，和美术的 style.py 同值）
     let ambient = if day > 0.0 {
-        dawn_col
+        dawn_ambient(day)
     } else {
-        let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth);
+        let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth) * (1.0 - (1.0 - TIDE_AMBIENT_GAIN) * atmos.tide);
         LinearRgba::rgb(night.red * deep, night.green * deep, night.blue * deep)
     };
     light.clear_color = ClearColorConfig::Custom(Color::LinearRgba(ambient.with_alpha(1.0)));
@@ -329,8 +332,10 @@ pub(crate) fn update_atmos(
     }
     pools.dissolve = smooth((day - 0.15) / 0.6);
 
-    // ---- 萤火：绕着镜头飘，忽明忽暗；天亮了就散
+    // ---- 萤火：绕着镜头飘，忽明忽暗；天亮了就散；妖潮、合围时压低（危险色留在最前面）
     let center = cam_tf.translation.truncate();
+    let motes_gain = 1.0 - (1.0 - TIDE_PARTICLE_GAIN) * atmos.tide;
+    let decor_gain = 1.0 - (1.0 - TIDE_DECOR_GAIN) * atmos.tide;
     let night_k = 1.0 - day;
     // 精简特效：萤火和夜雾都不画
     if feel.lite {
@@ -355,7 +360,7 @@ pub(crate) fn update_atmos(
                 (center + m.off).extend(layer::EMISSIVE - 1.0),
                 Vec2::splat(0.45),
                 0.0,
-                color.with_alpha(0.15 + 0.6 * blink * night_k),
+                color.with_alpha((0.15 + 0.6 * blink * night_k) * motes_gain),
             );
         }
     }
@@ -373,7 +378,7 @@ pub(crate) fn update_atmos(
             (center + w.off).extend(layer::EMISSIVE - 4.0),
             Vec2::new(w.scale * 1.6, w.scale * 0.8),
             0.0,
-            Color::srgb(0.5, 0.6, 0.82).with_alpha(0.07 * edge * (1.0 - day)),
+            Color::srgb(0.5, 0.6, 0.82).with_alpha(0.07 * edge * (1.0 - day) * decor_gain),
             w.flip,
         );
     }
