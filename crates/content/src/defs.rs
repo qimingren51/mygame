@@ -310,6 +310,9 @@ pub struct ChoicesDef {
     pub late_after: f32,
     pub weight_passive_up: f32,
     pub weight_new_passive: f32,
+    /// 分组预算与初期构筑保护；缺省沿用旧数据的逐项权重和抽样方式。
+    #[serde(default)]
+    pub build_rhythm: Option<BuildRhythmDef>,
     /// 已有 2 点以上的五行，选项权重乘以它
     pub owned_element_mult: f32,
     /// 夜签偏重：同系、其他系的权重倍率
@@ -331,6 +334,17 @@ pub struct ChoicesDef {
     pub charm_offers: u32,
     pub elite_charm: f32,
     pub charm_gold: u32,
+}
+
+/// 内容增加时，新法器/新心法只分摊类别内部的权重，不再挤占已有法器升级。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BuildRhythmDef {
+    pub new_weapon: f32,
+    pub new_weapon_late: f32,
+    pub new_passive: f32,
+    /// 已持有且未质变法器的缺失进化心法，在心法类别内部的偏向。
+    pub owned_key_mult: f32,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；

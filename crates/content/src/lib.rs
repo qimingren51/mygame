@@ -354,6 +354,32 @@ mod tests {
     }
 
     #[test]
+    fn build_rhythm_is_optional_and_validates_each_budget() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        assert!(c.run.choices.build_rhythm.is_some());
+        let text = std::fs::read_to_string(repo_data_dir().join("run.ron")).unwrap();
+        let old = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("build_rhythm:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(ron::from_str::<RunDef>(&old).unwrap().choices.build_rhythm.is_none());
+        let edits: [fn(&mut BuildRhythmDef); 4] = [
+            |w| w.new_weapon = 0.0,
+            |w| w.new_weapon_late = -1.0,
+            |w| w.new_passive = f32::NAN,
+            |w| w.owned_key_mult = f32::INFINITY,
+        ];
+        for edit in edits {
+            let mut bad = c.clone();
+            edit(bad.run.choices.build_rhythm.as_mut().unwrap());
+            assert!(
+                bad.validate(Path::new("data")).unwrap_err().to_string().contains("choices.build_rhythm")
+            );
+        }
+    }
+
+    #[test]
     fn mutation_fusion_fields_are_validated() {
         let c = Content::load(&repo_data_dir()).unwrap();
         for w in c.weapons.iter().filter_map(|w| w.mutation.as_ref()) {

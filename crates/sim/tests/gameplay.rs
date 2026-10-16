@@ -37,8 +37,10 @@ fn a_normal_run_spawns_kills_and_levels_up() {
     assert!(hits >= kills && kills > 20, "法器应该命中并击杀妖物：命中 {hits}，击杀 {kills}");
     assert_eq!(sim.progress().kills, kills);
     assert!(sim.progress().level >= 3 && levels >= 2, "应该捡到魂火升级，现在 {} 级", sim.progress().level);
-    let build = sim.arsenal().0.len() + sim.build().passives.len();
-    assert!(build >= 3, "升级时应该选到了新法器或心法，现在只有 {build} 项");
+    // 初期可连续强化起手法器；验证升级已投入构筑，不要求玩家必须扩充装备种类。
+    let invested: u32 = sim.arsenal().0.iter().map(|w| w.level).sum::<u32>()
+        + sim.build().passives.iter().map(|p| p.level).sum::<u32>();
+    assert!(invested >= 3, "升级应实际投入法器或心法，现在累计只有 {invested} 级");
 }
 
 #[test]

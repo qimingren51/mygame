@@ -301,7 +301,65 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
             *w *= ch.insight_mult;
         }
     }
+    if let Some(weights) = &ch.build_rhythm {
+        for (offer, weight) in &mut out {
+            if let Offer::NewPassive(d) = *offer
+                && arsenal.0.iter().any(|w| {
+                    !w.transformed()
+                        && !build.is_banned(Banned::Weapon(w.def))
+                        && content.weapons[w.def]
+                            .evolution
+                            .as_ref()
+                            .is_some_and(|e| content.passive_index(&e.passive) == Some(d))
+                })
+            {
+                *weight *= weights.owned_key_mult;
+            }
+        }
+        normalize_new_offers(content, &mut out, secs);
+    }
     out
+}
+
+/// 只归一化新牌；已有升级、进化仍保留各自权重。类别没有合法候选时不挪用它的预算。
+fn normalize_new_offers(content: &Content, pool: &mut [(Offer, f32)], secs: f32) {
+    let ch = &content.run.choices;
+    let Some(weights) = &ch.build_rhythm else { return };
+    let weapon_budget = if secs < ch.late_after { weights.new_weapon } else { weights.new_weapon_late };
+    for (weapon, budget) in [(true, weapon_budget), (false, weights.new_passive)] {
+        let in_category = |offer: Offer| {
+            if weapon { matches!(offer, Offer::NewWeapon(_)) } else { matches!(offer, Offer::NewPassive(_)) }
+        };
+        let total: f32 = pool.iter().filter(|(o, _)| in_category(*o)).map(|(_, w)| w).sum();
+        if total > 0.0 {
+            for (_, weight) in pool.iter_mut().filter(|(o, _)| in_category(*o)) {
+                *weight *= budget / total;
+            }
+        }
+    }
+}
+
+/// 升级选项与封印补牌按类别抽取；每抽走一张重新分配剩余类别的预算。
+/// 否则同一屏的第二、三抽仍会因类别条目增多而稀释已有升级。
+pub fn pick_choice_offers(
+    content: &Content,
+    rng: &mut Pcg32,
+    pool: &[(Offer, f32)],
+    secs: f32,
+    n: usize,
+) -> Vec<Offer> {
+    if content.run.choices.build_rhythm.is_none() {
+        return pick_weighted(rng, pool, n);
+    }
+    let mut pool = pool.to_vec();
+    let mut picks = Vec::with_capacity(n);
+    while picks.len() < n && !pool.is_empty() {
+        normalize_new_offers(content, &mut pool, secs);
+        let Some(offer) = pick_weighted(rng, &pool, 1).first().copied() else { break };
+        picks.push(offer);
+        pool.retain(|(o, _)| *o != offer);
+    }
+    picks
 }
 
 /// 合璧只接受两件正统进化，且两系投入均达二阶；每次应用时重新验证。
@@ -406,57 +464,95 @@ pub fn roll_choices(
         n += 1;
         inspired = true;
     }
-    let mut picks = pick_weighted(rng, &pool, n);
+    let mut picks = pick_choice_offers(content, rng, &pool, secs, n);
     let pity = &content.run.choices.pity;
-    let mut forced = 0;
-    // 保底放进来（或本来就抽到）的项，质变卡多时也不能挤掉
-    let mut pinned: Vec<Offer> = Vec::new();
-    // 保底一：前几次升级至少出现几件不同的新法器
-    if build.levelups <= pity.early_levels {
+    let keys: Vec<_> = arsenal
+        .0
+        .iter()
+        .filter_map(|w| {
+            if w.transformed() || build.is_banned(Banned::Weapon(w.def)) || w.level < pity.key_level {
+                return None;
+            }
+            let evo = content.weapons[w.def].evolution.as_ref()?;
+            let pd = content.passive_index(&evo.passive)?;
+            let offer = Offer::NewPassive(pd);
+            (build.passive_level(pd) == 0 && pool.iter().any(|(o, _)| *o == offer))
+                .then_some((offer, w.is_max_level(content)))
+        })
+        .collect();
+    // 先保护已抽中的合法钥匙，再处理任何补牌；否则靠后的法器钥匙会被前者挤掉。
+    let mut pinned: Vec<Offer> =
+        picks.iter().copied().filter(|offer| keys.iter().any(|(key, _)| key == offer)).collect();
+    let early = build.levelups <= pity.early_levels;
+    if early && content.run.choices.build_rhythm.is_some() {
+        let upgrades: Vec<_> =
+            pool.iter().copied().filter(|(o, _)| matches!(o, Offer::WeaponUp(_))).collect();
+        let shown = picks.iter().copied().find(|o| matches!(o, Offer::WeaponUp(_)));
+        if let Some(offer) = shown.or_else(|| pick_weighted(rng, &upgrades, 1).first().copied()) {
+            pin_choice(&mut picks, offer, &mut pinned);
+        }
+    }
+    if early {
+        // 到剩余次数恰好够用时保留新法器；之前自然抽到的仍由最终展示结果计数。
         let have = build.early_new.len() as u32;
         let left = pity.early_levels - build.levelups + 1;
         let fresh_new = |o: &Offer| matches!(o, Offer::NewWeapon(d) if !build.early_new.contains(d));
-        if have < pity.early_new_weapons
-            && pity.early_new_weapons - have >= left
-            && !picks.iter().any(fresh_new)
-        {
+        if have < pity.early_new_weapons && pity.early_new_weapons - have >= left {
+            let shown = picks.iter().copied().find(fresh_new);
             let cands: Vec<_> = pool.iter().copied().filter(|(o, _)| fresh_new(o)).collect();
-            if let Some(&o) = pick_weighted(rng, &cands, 1).first() {
-                force(&mut picks, o, &mut forced);
-                pinned.push(o);
+            if let Some(offer) = shown.or_else(|| pick_weighted(rng, &cands, 1).first().copied()) {
+                pin_choice(&mut picks, offer, &mut pinned);
             }
         }
-        for o in &picks {
-            if let Offer::NewWeapon(d) = *o
+    }
+    // 最后一格心法用掉之前，至少给一次当前法器的配对选择；封印/满栏仍以合法池为准。
+    if content.run.choices.build_rhythm.is_some()
+        && build.passives.len() as u32 + 1 == content.run.choices.slots
+    {
+        let key = arsenal
+            .0
+            .iter()
+            .enumerate()
+            .filter_map(|(k, w)| {
+                if w.transformed() || build.is_banned(Banned::Weapon(w.def)) {
+                    return None;
+                }
+                let evo = content.weapons[w.def].evolution.as_ref()?;
+                let offer = Offer::NewPassive(content.passive_index(&evo.passive)?);
+                pool.iter().any(|(o, _)| *o == offer).then_some((w.level, std::cmp::Reverse(k), offer))
+            })
+            .max_by_key(|(level, order, _)| (*level, *order));
+        if let Some((_, _, offer)) = key {
+            pin_choice(&mut picks, offer, &mut pinned);
+        }
+    }
+    // 保底二：法器练到 key_level 以上却缺进化心法时，按概率把那门心法放进选项；
+    // key_guarantee_after 秒以后满级仍缺心法时必放（不再掷骰）
+    for (offer, max_level) in keys {
+        if !picks.contains(&offer)
+            && ((secs >= pity.key_guarantee_after && max_level) || rng.chance(pity.key_chance))
+        {
+            pin_choice(&mut picks, offer, &mut pinned);
+        }
+    }
+    if content.run.transformations {
+        picks = arrange_forms(&pool, picks, &pinned, n);
+    }
+    // 后续保底和质变排卡可能换掉自然抽中的牌；只有最终出现在这一屏上的才算“见过”。
+    record_shown_weapons(content, build, &picks);
+    (picks, inspired)
+}
+
+pub(crate) fn record_shown_weapons(content: &Content, build: &mut Build, choices: &[Offer]) {
+    if build.levelups <= content.run.choices.pity.early_levels {
+        for offer in choices {
+            if let Offer::NewWeapon(d) = *offer
                 && !build.early_new.contains(&d)
             {
                 build.early_new.push(d);
             }
         }
     }
-    // 保底二：法器练到 key_level 以上却缺进化心法时，按概率把那门心法放进选项；
-    // key_guarantee_after 秒以后满级仍缺心法时必放（不再掷骰）
-    for w in &arsenal.0 {
-        let Some(evo) = &content.weapons[w.def].evolution else { continue };
-        let Some(pd) = content.passive_index(&evo.passive) else { continue };
-        let missing = !w.transformed() && w.level >= pity.key_level && build.passive_level(pd) == 0;
-        let offer = Offer::NewPassive(pd);
-        if !missing || !pool.iter().any(|(o, _)| *o == offer) {
-            continue;
-        }
-        if !picks.contains(&offer)
-            && ((secs >= pity.key_guarantee_after && w.is_max_level(content)) || rng.chance(pity.key_chance))
-        {
-            force(&mut picks, offer, &mut forced);
-        }
-        if picks.contains(&offer) {
-            pinned.push(offer);
-        }
-    }
-    if content.run.transformations {
-        picks = arrange_forms(&pool, picks, &pinned, n);
-    }
-    (picks, inspired)
 }
 
 /// 质变卡保底（异化与合璧打开时）：合璧每次必展示；有分岔时正统与异化成对展示，优先最先持有的一件；
@@ -492,18 +588,18 @@ fn arrange_forms(pool: &[(Offer, f32)], picks: Vec<Offer>, pinned: &[Offer], n: 
     keep
 }
 
-/// 把保底的一项放进选项：替换从后往前第一个不是保底放进来的。
-fn force(picks: &mut Vec<Offer>, o: Offer, forced: &mut usize) {
-    if picks.contains(&o) {
-        return;
+/// 保底项已有时直接保护；补入时只替换未保护项，不能挤掉自然抽中的另一项保底。
+fn pin_choice(picks: &mut Vec<Offer>, offer: Offer, pinned: &mut Vec<Offer>) {
+    if !picks.contains(&offer) {
+        if let Some(slot) = picks.iter_mut().rev().find(|o| !pinned.contains(o)) {
+            *slot = offer;
+        } else {
+            picks.push(offer);
+        }
     }
-    if picks.len() > *forced {
-        let k = picks.len() - 1 - *forced;
-        picks[k] = o;
-    } else {
-        picks.push(o);
+    if !pinned.contains(&offer) {
+        pinned.push(offer);
     }
-    *forced += 1;
 }
 
 /// 应用一个选项。返回需要演出的进化（法器在 [`Arsenal`] 里的位置）。

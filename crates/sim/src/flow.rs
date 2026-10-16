@@ -14,7 +14,10 @@ use lantern_content::Stat;
 use lantern_core::Stream;
 
 use crate::boss::Foes;
-use crate::build::{Awaken, Build, Offer, apply_offer, offers, pick_weighted, roll_choices};
+use crate::build::{
+    Awaken, Build, Offer, apply_offer, offers, pick_choice_offers, pick_weighted, record_shown_weapons,
+    roll_choices,
+};
 use crate::charms::{Survival, charm_candidates, charm_slots, roll_charms};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes, heal};
 use crate::encounters::Encounters;
@@ -755,7 +758,8 @@ pub(crate) fn handle_commands(
                         .into_iter()
                         .filter(|(o, _)| !shown.contains(o))
                         .collect();
-                    pick_weighted(fp.rng.0.get(Stream::Choice), &pool, 1).first().copied()
+                    let secs = fp.secs();
+                    pick_choice_offers(c, fp.rng.0.get(Stream::Choice), &pool, secs, 1).first().copied()
                 };
                 if let Some(choice) = &mut fp.flow.choice {
                     match new {
@@ -767,6 +771,12 @@ pub(crate) fn handle_commands(
                     if choice.offers.is_empty() {
                         choice.offers.push(Offer::Oil);
                     }
+                }
+                if let Some(choice) = &fp.flow.choice
+                    && !choice.ember
+                {
+                    let shown = choice.offers.clone();
+                    record_shown_weapons(c, &mut fp.build, &shown);
                 }
                 fp.outbox.0.push(SimEvent::Banished);
             }

@@ -703,6 +703,17 @@ impl Content {
                 ("choices.unfavor_mult", ch.unfavor_mult),
             ],
         )?;
+        if let Some(w) = &ch.build_rhythm {
+            c.positive(
+                "run.ron",
+                &[
+                    ("choices.build_rhythm.new_weapon", w.new_weapon),
+                    ("choices.build_rhythm.new_weapon_late", w.new_weapon_late),
+                    ("choices.build_rhythm.new_passive", w.new_passive),
+                    ("choices.build_rhythm.owned_key_mult", w.owned_key_mult),
+                ],
+            )?;
+        }
         c.fraction("run.ron", "choices.pity.key_chance", ch.pity.key_chance)?;
         c.fraction("run.ron", "choices.heal", ch.heal)?;
         c.fraction("run.ron", "choices.elite_charm", ch.elite_charm)?;
