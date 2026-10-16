@@ -873,7 +873,7 @@ pub(crate) fn particle_events(
     let mut pulses = 0;
     parts.begin_frame(feel.lite);
     for &index in &feedback.selected {
-        let ev = &outbox.0[index];
+        let Some(ev) = outbox.0.get(index) else { continue };
         parts.priority = Priority::of(ev);
         parts.category = Category::of(ev);
         match *ev {

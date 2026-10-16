@@ -98,17 +98,19 @@ fn update_status(
     }
 }
 
-/// 快进到 `--from`（事件直接丢掉）；时间没推进时让出本帧，下帧继续。
+/// 快进到 `--from`（快进中的事件直接丢掉）；时间没推进时让出本帧，下帧继续。
 fn seek(world: &mut World) {
     let Some(ReplaySeek(secs)) = world.remove_resource::<ReplaySeek>() else { return };
     let target = u64::from(secs) * u64::from(TICK_HZ);
+    // 只丢快进出来的事件：这一帧正常模拟的事件留着，画面的特效仲裁可能已经记下了它们的下标
+    let keep = world.resource::<SimOutbox>().0.len();
     while world.resource::<Tick>().0 < target
         && world.get_resource::<ReplayPlayback>().is_some_and(|p| !p.finished)
         && *world.resource::<SimPhase>() != SimPhase::Over
     {
         let before = world.resource::<Tick>().0;
         world.run_schedule(FixedUpdate);
-        world.resource_mut::<SimOutbox>().0.clear();
+        world.resource_mut::<SimOutbox>().0.truncate(keep);
         if world.resource::<Tick>().0 <= before {
             // 选择和演出停顿也会暂停 tick；结束前保留目标，但不能在本帧空转。
             if *world.resource::<SimPhase>() != SimPhase::Over
