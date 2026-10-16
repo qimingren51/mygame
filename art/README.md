@@ -132,7 +132,7 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 ## 界面图标、地面装饰与一键生成（post/ui_icons.py、post/ground_decor.py、post/make_2d.py）
 
 ```bash
-art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图，2 倍另出逐帧特效（约 7 分钟）
+art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图，2 倍另出逐帧特效和新法器（约 9 分钟）
 art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 LANTERN_ART_DENSITY 时会 1 倍、2 倍各跑一遍
 ```
 
@@ -154,7 +154,7 @@ art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out as
 art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
-art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
 mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
@@ -288,6 +288,19 @@ art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 17 项（清单、me
 - 叠加帧在超采样的亮度场里画（笔毛纹理的飞白、干笔断续），最后软饱和到 alpha 0.8、蓝噪声抖动；可染的 RGB 恒为白。
 - `slash` 的画布从清单的 256×128 改成 256×448（锚点在弧心 (16, 224)，外沿半径 200 像素），放大到铜钱剑的扫击半径时不糊。
 - 审图：每组一条纸色底、一条夜色底（宣纸 × 月夜底色）的帧条；`_ingame` 是 1080p 的近似游戏画面（月夜底色 + 灯笼光照池），特效按实际大小摆。
+
+## 抢先体验的新法器（post/weapon_textures_ea.py）
+
+```bash
+art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>_ingame.png（约 2 分钟）
+art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 14 项（清单、meta、颜色、四边、亮度、淡出、朝向、旋风是一整圈且顺时针转、十字两道、确定性、只写自己的文件、图集）
+```
+
+只出 2 倍，Pillow + numpy；画法、帧的约定和审图都沿用 `vfx_frames.py`。`docs/BALANCE.md` 6.3 节五件新法器的“画面”一件一件做，
+帧名 `weapons/<名字>_<帧号>`（meta 的 name 是 weapons），跟 vfx 一起打包（`$A/weapons_ea`）。格式见 `docs/DESIGN.md` 第 15 节“抢先体验的新法器”。
+
+- 铜钱剑：挥击的刀光直接用 `vfx/slash_0..5`（建议染铜金 #F2C46A）；这里补命中的铜钱火星 `coin_spark_0..4`（自带铜金色）、
+  天罡的旋风 `coin_whirl_0..5` 和再斩的十字斩痕 `coin_cross_0..3`（白色可染）。
 
 ## 灯驿长卷（post/hub_scroll.py）
 

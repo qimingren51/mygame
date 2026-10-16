@@ -679,15 +679,16 @@ def meta_entries(batch: dict, frames: dict[str, list[Image.Image]]) -> dict:
     return files
 
 
-def write(frames: dict[str, list[Image.Image]], batch: dict) -> dict:
-    OUT.mkdir(parents=True, exist_ok=True)
-    meta_path = OUT / "meta.json"
+def write(frames: dict[str, list[Image.Image]], batch: dict, out: Path = OUT, name: str = "vfx", generator: str = GENERATOR) -> dict:
+    """写 PNG 和 meta.json（name 决定图集里的帧名前缀）。meta 里别的批次的条目保留。"""
+    out.mkdir(parents=True, exist_ok=True)
+    meta_path = out / "meta.json"
     files = json.loads(meta_path.read_text(encoding="utf-8"))["files"] if meta_path.exists() else {}
     files.update(meta_entries(batch, frames))
-    for name, imgs in frames.items():
+    for key, imgs in frames.items():
         for i, img in enumerate(imgs):
-            V.save_png(img, OUT / f"{name}_{i}.png")
-    meta = {"name": "vfx", "generator": GENERATOR, "format": "PNG RGBA，直通（非预乘）alpha", "px_per_unit": PPU, "files": files}
+            V.save_png(img, out / f"{key}_{i}.png")
+    meta = {"name": name, "generator": generator, "format": "PNG RGBA，直通（非预乘）alpha", "px_per_unit": PPU, "files": files}
     meta_path.write_text(V.dump_json(meta), encoding="utf-8")
     return meta
 

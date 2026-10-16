@@ -45,7 +45,7 @@ def composite(bg_lin: np.ndarray, img: Image.Image, blend: str, tint: np.ndarray
     return over * light if light is not None else over
 
 
-def strip_sheet(key: str, batch: dict, frames: dict, path) -> None:
+def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = None, note: str | None = None) -> None:
     paper = np.asarray(Image.open(M.ATLAS / "paper.png").convert("RGB"), dtype=np.float64) / 255.0
     paper_lin = M.to_lin(paper)
     night = M.lin(NIGHT)
@@ -75,9 +75,10 @@ def strip_sheet(key: str, batch: dict, frames: dict, path) -> None:
     height = sum(2 * r[4][0].shape[0] + 3 * gap + 12 for r in rows) + 70
     out = Image.new("RGB", (width, height), (24, 24, 26))
     d = ImageDraw.Draw(out)
-    d.text((pad, 10), f"逐帧特效 {key}：每组上一条纸色底（宣纸）、下一条夜色底（宣纸 × 月夜 {NIGHT}）；叠加帧按染色 × 1.5 加上去，墨花受光照。2 倍原大（1080p 游戏里是 0.64 倍）",
+    head = title or f"逐帧特效 {key}"
+    d.text((pad, 10), f"{head}：每组上一条纸色底（宣纸）、下一条夜色底（宣纸 × 月夜 {NIGHT}）；叠加帧按染色 × 1.5 加上去，墨花受光照。2 倍原大（1080p 游戏里是 0.64 倍）",
            fill=(240, 239, 236), font=M.font(19))
-    d.text((pad, 38), "叠加帧审图染色：五行命中按元素色（金 #E9D9A6 木 #6FD6A0 水 #6FB8FF 火 #FF8A3D 土 #C9925A），冲击波 #FFE2A8，刀光按金；暴击自带白金、不染",
+    d.text((pad, 38), note or "叠加帧审图染色：五行命中按元素色（金 #E9D9A6 木 #6FD6A0 水 #6FB8FF 火 #FF8A3D 土 #C9925A），冲击波 #FFE2A8，刀光按金；暴击自带白金、不染",
            fill=(195, 194, 183), font=M.font(15))
     y = 70
     for name, spec, imgs, sc, strips in rows:
@@ -93,32 +94,34 @@ def strip_sheet(key: str, batch: dict, frames: dict, path) -> None:
     V.save_png(out, path)
 
 
-# 1080p 合成：(特效, 帧, 世界坐标 x, y（模拟坐标，y 向下）, 摆法)
+# 1080p 合成：(特效, 帧, 世界坐标 x, y（模拟坐标，y 向下）, 摆法, 想要的半径（世界单位，按 meta 的 radius_px 缩放；None 是原大）)
+# 摆法：hero 放在主角身上（刀光、旋风的弧心），body 打在妖物身上（脚底往上约 22），ground 贴地
 INGAME_B1 = [
-    ("slash", 2, (0.0, 12.0), "hero"),
-    ("hit_metal", 1, (62.0, -82.0), "body"),
-    ("hit_fire", 2, (125.0, 72.0), "body"),
-    ("hit_water", 1, (-168.0, -100.0), "body"),
-    ("hit_earth", 2, (-238.0, 58.0), "body"),
-    ("crit", 0, (250.0, 128.0), "body"),
-    ("hit_wood", 1, (288.0, -128.0), "body"),
-    ("kill_ink", 5, (-322.0, -46.0), "ground"),
-    ("shockwave", 2, (-90.0, 150.0), "ground"),
+    ("slash", 2, (0.0, 12.0), "hero", 85.0),  # 铜钱剑 Lv8 的扫击半径，朝 +X（右边那只）
+    ("hit_metal", 1, (62.0, -82.0), "body", None),
+    ("hit_fire", 2, (125.0, 72.0), "body", None),
+    ("hit_water", 1, (-168.0, -100.0), "body", None),
+    ("hit_earth", 2, (-238.0, 58.0), "body", None),
+    ("crit", 0, (250.0, 128.0), "body", None),
+    ("hit_wood", 1, (288.0, -128.0), "body", None),
+    ("kill_ink", 5, (-322.0, -46.0), "ground", None),
+    ("shockwave", 2, (-90.0, 150.0), "ground", None),
 ]
 
 
-def ingame(key: str, batch: dict, frames: dict, path) -> None:
+def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = None, title: str | None = None) -> None:
     sp = M.scene_sprites()
     sc = M.K / M.PPU
     paper = np.asarray(Image.open(M.ATLAS / "paper.png").convert("RGB"))
     img = M.paper_layer(paper)
+    placements = INGAME_B1 if placements is None else placements
     # 地上的墨花（画在暗层之下，受光照）
-    for name, fi, (x, y), how in INGAME_B1:
+    for name, fi, (x, y), how, _r in placements:
         if name in frames and how == "ground" and batch[name][3] == "normal":
             anc = batch[name][2]
             M.blit(img, M.premul(frames[name][fi]), *M.to_screen(x, y), anc, sc)
     # 角色（死掉的那只不画，只留墨花）
-    dead = {(x, y) for name, _, (x, y), how in INGAME_B1 if name == "kill_ink"}
+    dead = {(x, y) for name, _, (x, y), how, _r in placements if name == "kill_ink"}
     items = [(y, f, x) for f, x, y, _ in M.ENEMIES if (x, y) not in dead] + [(M.HERO_POS[1], "hero", M.HERO_POS[0])]
     for y, f, x in sorted(items):
         if f == "hero":
@@ -139,24 +142,24 @@ def ingame(key: str, batch: dict, frames: dict, path) -> None:
     big = np.asarray(Image.fromarray(np.round(M.to_srgb(lmq) * 255).astype(np.uint8)).resize((M.SW, M.SH), Image.BILINEAR), dtype=np.float64) / 255.0
     img = img * M.to_lin(big).astype(np.float32)
     # 叠加特效（暗层之上，× 1.5）
-    for name, fi, (x, y), how in INGAME_B1:
+    for name, fi, (x, y), how, want_r in placements:
         if name not in frames or batch[name][3] != "add":
             continue
         spec = batch[name]
         im, anc = frames[name][fi], spec[2]
         px, py = M.to_screen(x, y)
-        scale = sc
+        scale = sc if want_r is None else want_r * M.PPU / spec[6]["radius_px"] * sc
         if how == "body":
             py -= 22 * M.K  # 打在身上：脚底往上约 22 世界单位
-        if how == "hero":  # 刀光：弧心放在主角，按铜钱剑 Lv8 半径 85 缩放，朝 +X（右边那只）
-            scale = 85 * M.PPU / F.SLASH_R * sc
+        if how == "hero":  # 刀光、旋风：弧心放在主角腰上
             py -= 10 * M.K
         M.blit(img, M.premul(im, tint=tint_of(name, spec)), px, py, anc, scale, mode="add", gain=EMIT_HDR)
     out = Image.fromarray(np.round(M.to_srgb(np.clip(img, 0, 1)) * 255).astype(np.uint8), "RGB")
     d = ImageDraw.Draw(out)
-    d.text((16, 12), f"逐帧特效 {key}：1080p 游戏大小（1 世界单位 = 2.57 像素），月夜底色 {NIGHT} + 灯笼光照池；叠加特效画在暗层之上 × 1.5，墨花画在地上",
+    head = title or f"逐帧特效 {key}"
+    d.text((16, 12), f"{head}：1080p 游戏大小（1 世界单位 = 2.57 像素），月夜底色 {NIGHT} + 灯笼光照池；叠加特效画在暗层之上 × 1.5，墨花画在地上",
            fill=(240, 239, 236), font=M.font(20))
-    for name, fi, (x, y), how in INGAME_B1:
+    for name, fi, (x, y), how, _r in placements:
         if name not in frames:
             continue
         px, py = M.to_screen(x, y)
