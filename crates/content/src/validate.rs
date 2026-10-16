@@ -246,7 +246,14 @@ impl Checker<'_> {
                 && lv.cooldown <= 0.0)
             || (matches!(
                 b,
-                WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
+                WeaponBehavior::Orbit { .. }
+                    | WeaponBehavior::Pulse { .. }
+                    | WeaponBehavior::Drop { .. }
+                    | WeaponBehavior::Sweep { .. }
+                    | WeaponBehavior::SkyLantern { .. }
+                    | WeaponBehavior::Wave { .. }
+                    | WeaponBehavior::Vine { .. }
+                    | WeaponBehavior::Tower { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -386,6 +393,109 @@ impl Checker<'_> {
                 }
                 self.positive(file, &[("Seeker.range", *range), ("Seeker.steer", *steer)])?;
                 self.non_negative(file, &[("Seeker.rest", *rest)])
+            }
+            WeaponBehavior::Sweep { arc, aim, knockback, crit_bonus, echo } => {
+                self.positive(file, &[("Sweep.arc", *arc)])?;
+                if *arc > std::f32::consts::TAU + 1e-3 {
+                    return self.fail(file, format!("\"{id}\"：Sweep.arc 不能超过一整圈"));
+                }
+                self.non_negative(
+                    file,
+                    &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
+                )?;
+                self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
+            }
+            WeaponBehavior::SkyLantern { range, pick, cluster, spread, speed, fuse, retarget, zone } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：SkyLantern.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[
+                        ("SkyLantern.range", *range),
+                        ("SkyLantern.speed", *speed),
+                        ("SkyLantern.fuse", *fuse),
+                        ("SkyLantern.retarget", *retarget),
+                    ],
+                )?;
+                self.non_negative(file, &[("SkyLantern.cluster", *cluster), ("SkyLantern.spread", *spread)])?;
+                self.fissure(file, zone)
+            }
+            WeaponBehavior::Wave { speed, travel, push, slow, slow_time, spread, ring, freeze } => {
+                self.positive(file, &[("Wave.speed", *speed)])?;
+                if !ring {
+                    self.positive(file, &[("Wave.travel", *travel)])?;
+                }
+                self.non_negative(
+                    file,
+                    &[
+                        ("Wave.push", *push),
+                        ("Wave.slow_time", *slow_time),
+                        ("Wave.spread", *spread),
+                        ("Wave.freeze", *freeze),
+                    ],
+                )?;
+                self.fraction(file, "Wave.slow", *slow)
+            }
+            WeaponBehavior::Vine { leash, relink, lifesteal, heal_cap, heal_per_level, bind_every, bind } => {
+                self.non_negative(
+                    file,
+                    &[
+                        ("Vine.leash", *leash),
+                        ("Vine.relink", *relink),
+                        ("Vine.heal_cap", *heal_cap),
+                        ("Vine.heal_per_level", *heal_per_level),
+                        ("Vine.bind_every", *bind_every),
+                        ("Vine.bind", *bind),
+                    ],
+                )?;
+                if (*bind_every > 0.0) != (*bind > 0.0) {
+                    return self
+                        .fail(file, format!("\"{id}\"：Vine.bind_every 和 bind 要么都写，要么都不写"));
+                }
+                self.fraction(file, "Vine.lifesteal", *lifesteal)
+            }
+            WeaponBehavior::Tower {
+                range,
+                pick,
+                cluster,
+                spread,
+                warn,
+                stun,
+                life,
+                pull,
+                pull_speed,
+                tick,
+                tick_scale,
+                burst,
+            } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：Tower.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[("Tower.range", *range), ("Tower.life", *life), ("Tower.tick", *tick)],
+                )?;
+                self.non_negative(
+                    file,
+                    &[
+                        ("Tower.cluster", *cluster),
+                        ("Tower.spread", *spread),
+                        ("Tower.warn", *warn),
+                        ("Tower.stun", *stun),
+                        ("Tower.pull", *pull),
+                        ("Tower.pull_speed", *pull_speed),
+                        ("Tower.tick_scale", *tick_scale),
+                    ],
+                )?;
+                if let Some(b) = burst {
+                    self.positive(
+                        file,
+                        &[("Tower.burst.radius", b.radius), ("Tower.burst.damage", b.damage)],
+                    )?;
+                    self.non_negative(file, &[("Tower.burst.stun", b.stun)])?;
+                }
+                Ok(())
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {
@@ -676,6 +786,14 @@ impl Content {
         let ch = &r.choices;
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
+        }
+        for id in &ch.locked {
+            if self.weapon_index(id).is_none() {
+                return c.fail("run.ron", format!("choices.locked 引用了不存在的法器 \"{id}\""));
+            }
+            if *id == self.player.start_weapon || self.lamps.iter().any(|l| l.start_weapon == *id) {
+                return c.fail("run.ron", format!("choices.locked 里的 \"{id}\" 是起手法器，不能锁"));
+            }
         }
         c.positive(
             "run.ron",

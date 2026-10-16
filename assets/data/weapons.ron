@@ -184,4 +184,138 @@
             level: (cooldown: 2.9, count: 3, radius: 90.0, damage: 120.0),
         )),
     ),
+    // v0.3 的五件新法器（docs/BALANCE.md 第 6.3 节），每个五行两件。
+    (
+        id: "coin_sword", name: "铜钱剑", icon: "钱", element: Metal,
+        desc: "朝最近的妖物挥出扇形剑气，自带暴击。", short: "扇形剑气，自带暴击",
+        flavor: "七枚铜钱排成北斗。挥一下，斩一片。",
+        // 120° 扇形；方向朝 radius + 40 以内最近的妖物，没有就朝面向；扇形里从近到远最多打 count 只；暴击率 +15%
+        behavior: Sweep(arc: 2.0944, aim: 40.0, knockback: 20.0, crit_bonus: 0.15),
+        levels: [
+            (cooldown: 1.20, count: 3, radius: 70.0, damage: 20.0),
+            (cooldown: 1.14, count: 3, radius: 72.0, damage: 25.0),
+            (cooldown: 1.08, count: 4, radius: 76.0, damage: 30.0),
+            (cooldown: 1.02, count: 4, radius: 78.0, damage: 36.0),
+            (cooldown: 0.96, count: 5, radius: 80.0, damage: 42.0),
+            (cooldown: 0.90, count: 5, radius: 85.0, damage: 48.0),
+            (cooldown: 0.85, count: 6, radius: 85.0, damage: 54.0),
+            (cooldown: 0.80, count: 6, radius: 85.0, damage: 60.0),
+        ],
+        evolution: Some((
+            name: "天罡", passive: "ruimu",
+            desc: "周身剑气旋风，暴击时再斩一次。", short: "剑气绕身，暴击再斩",
+            flavor: "斗柄绕着北极转，剑气绕着你转。",
+            // 一整圈；暴击的那一下对同一只再斩一次（× 1.0，再斩不再触发）
+            behavior: Sweep(arc: 6.2832, aim: 40.0, knockback: 25.0, crit_bonus: 0.15, echo: 1.0),
+            level: (cooldown: 0.80, count: 10, radius: 100.0, damage: 100.0),
+        )),
+    ),
+    (
+        id: "sky_lantern", name: "孔明灯", icon: "孔", element: Fire,
+        desc: "放飞孔明灯，飘向妖物最密的地方，落地爆燃，留下火海。", short: "灯飘向妖群，落地爆燃",
+        flavor: "狐村的孩子还你的。它往妖最多的地方飘，再落下来。",
+        // 落点：360 以内最近的 24 只里，挑 100 以内同伴最多的那只；几盏至少隔开 120。灯每秒飘 60，3 秒后落地。
+        // 火海：半径 0.8 倍，3 秒，每 0.5 秒伤害 × 0.12
+        behavior: SkyLantern(range: 360.0, pick: 24, cluster: 100.0, spread: 120.0, speed: 60.0, fuse: 3.0, retarget: 0.5,
+            zone: (kind: Fire, radius_scale: 0.8, life: 3.0, tick: 0.5, damage_scale: 0.12, slow: 0.0, slow_time: 0.0)),
+        levels: [
+            (cooldown: 3.4, count: 1, radius: 44.0, damage: 34.0),
+            (cooldown: 3.3, count: 1, radius: 46.0, damage: 42.0),
+            (cooldown: 3.2, count: 2, radius: 48.0, damage: 48.0),
+            (cooldown: 3.1, count: 2, radius: 50.0, damage: 56.0),
+            (cooldown: 3.0, count: 2, radius: 52.0, damage: 64.0),
+            (cooldown: 2.8, count: 2, radius: 56.0, damage: 72.0),
+            (cooldown: 2.7, count: 2, radius: 56.0, damage: 81.0),
+            (cooldown: 2.6, count: 2, radius: 56.0, damage: 90.0),
+        ],
+        evolution: Some((
+            name: "万灯升", passive: "luxin",
+            desc: "满天孔明灯同时坠落。", short: "八盏齐落，满地火海",
+            flavor: "薪尽火传。一盏传十盏，十盏传满天。",
+            // 每 5 秒 8 盏，落点在 480 以内分散挑，2 秒落地
+            behavior: SkyLantern(range: 480.0, pick: 48, cluster: 100.0, spread: 120.0, speed: 120.0, fuse: 2.0, retarget: 0.5,
+                zone: (kind: Fire, radius_scale: 0.8, life: 3.0, tick: 0.5, damage_scale: 0.12, slow: 0.0, slow_time: 0.0)),
+            level: (cooldown: 5.0, count: 8, radius: 64.0, damage: 160.0),
+        )),
+    ),
+    (
+        id: "wave", name: "沧浪", icon: "浪", element: Water,
+        desc: "朝面向推出一道浪（站着不动时朝最近的妖物），打伤、减速并推开碰到的妖物。", short: "推浪开路，减速妖物",
+        flavor: "沧浪之水，推得动船，也推得开妖。",
+        // 浪速 320，走 260 后散掉；最多推 140（精英一半，夜主不推）；减速 40%，1.5 秒；
+        // 数量加成多出来的浪左右轮流偏 25°
+        behavior: Wave(speed: 320.0, travel: 260.0, push: 140.0, slow: 0.4, slow_time: 1.5, spread: 0.4363),
+        levels: [
+            (cooldown: 3.2, count: 1, radius: 50.0, damage: 12.0),
+            (cooldown: 3.1, count: 1, radius: 52.0, damage: 15.0),
+            (cooldown: 3.0, count: 1, radius: 62.0, damage: 18.0),
+            (cooldown: 2.9, count: 1, radius: 64.0, damage: 21.0),
+            (cooldown: 2.8, count: 1, radius: 66.0, damage: 25.0),
+            (cooldown: 2.6, count: 1, radius: 76.0, damage: 28.0),
+            (cooldown: 2.5, count: 1, radius: 78.0, damage: 32.0),
+            (cooldown: 2.4, count: 1, radius: 80.0, damage: 36.0),
+        ],
+        evolution: Some((
+            name: "北冥潮", passive: "hanyi",
+            desc: "以自身为中心，一圈巨浪往外扩散，推开并冻结妖物。", short: "巨浪四散，推开冻结",
+            flavor: "北冥的潮水翻上来，卷走的妖都冻在浪里。",
+            // 一圈扩到 300（速度 400），往外推 160；冻结 1 秒（精英减半，夜主免疫）
+            behavior: Wave(speed: 400.0, travel: 0.0, push: 160.0, slow: 0.0, slow_time: 0.0, spread: 0.0, ring: true, freeze: 1.0),
+            level: (cooldown: 5.0, count: 1, radius: 300.0, damage: 40.0),
+        )),
+    ),
+    (
+        id: "vine", name: "青藤", icon: "藤", element: Wood,
+        desc: "和附近最近的几只妖物各连一根青藤，持续造成伤害，回复伤害的 4%。", short: "藤连妖物，吸血续命",
+        flavor: "藤缠上去，就把它的力气吸给你。",
+        // 目标离开连线距离 + 40 或死了就断，0.3 秒后接新目标；每秒最多回复 0.5 + 0.125 × 等级
+        behavior: Vine(leash: 40.0, relink: 0.3, lifesteal: 0.04, heal_cap: 0.5, heal_per_level: 0.125),
+        levels: [
+            (cooldown: 0.5, count: 2, radius: 140.0, damage: 6.0),
+            (cooldown: 0.5, count: 2, radius: 145.0, damage: 7.5),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 9.0),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 10.5),
+            (cooldown: 0.5, count: 3, radius: 155.0, damage: 12.0),
+            (cooldown: 0.5, count: 4, radius: 160.0, damage: 13.5),
+            (cooldown: 0.5, count: 4, radius: 165.0, damage: 15.5),
+            (cooldown: 0.5, count: 5, radius: 170.0, damage: 18.0),
+        ],
+        evolution: Some((
+            name: "万木春", passive: "huichun",
+            desc: "同时连八只妖物，每 4 秒把连着的妖物缠住 1 秒。", short: "八藤齐连，定时缠住",
+            flavor: "病树前头万木春。藤蔓一发，满地都是。",
+            // 缠住 1 秒（精英减半，夜主不缠）；回复照样 4%，每秒最多 2.5
+            behavior: Vine(leash: 40.0, relink: 0.3, lifesteal: 0.04, heal_cap: 2.5, heal_per_level: 0.0, bind_every: 4.0, bind: 1.0),
+            level: (cooldown: 0.5, count: 8, radius: 200.0, damage: 30.0),
+        )),
+    ),
+    (
+        id: "tower", name: "镇妖塔", icon: "塔", element: Earth,
+        desc: "在妖物最密的地方落下宝塔，砸晕一片，再把周围的妖物吸到塔下。", short: "落塔吸妖，聚成一团",
+        flavor: "土伯拿它压门缝。塔一落，周围的妖都被吸到塔底。",
+        // 落点：300 以内最近的 24 只里，挑 100 以内同伴最多的那只（几座至少隔开 120）；预警 0.5 秒，落地击晕 0.5 秒。
+        // 立 4 秒：2.2 倍半径以内往塔下吸，每秒 90（精英一半，夜主不吸）；每 0.5 秒伤害 × 0.15
+        behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
+                        pull: 2.2, pull_speed: 90.0, tick: 0.5, tick_scale: 0.15),
+        levels: [
+            (cooldown: 9.0, count: 1, radius: 44.0, damage: 30.0),
+            (cooldown: 8.8, count: 1, radius: 46.0, damage: 36.0),
+            (cooldown: 8.5, count: 1, radius: 52.0, damage: 42.0),
+            (cooldown: 8.2, count: 1, radius: 54.0, damage: 50.0),
+            (cooldown: 7.9, count: 1, radius: 56.0, damage: 58.0),
+            (cooldown: 7.6, count: 1, radius: 60.0, damage: 64.0),
+            (cooldown: 7.3, count: 1, radius: 60.0, damage: 72.0),
+            (cooldown: 7.0, count: 1, radius: 60.0, damage: 80.0),
+        ],
+        evolution: Some((
+            name: "玲珑塔", passive: "panshi",
+            desc: "每 10 秒落一座，把几乎全屏的妖物吸到塔下，4 秒后一起炸开。", short: "全屏吸妖，到时炸开",
+            flavor: "托塔天王手里那一座。整片的妖收进去，再一起炸出来。",
+            // 吸的范围 64 × 7.8 ≈ 500，每秒 140；到时间炸开：半径 140，伤害 200，击晕 1 秒
+            behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
+                            pull: 7.8, pull_speed: 140.0, tick: 0.5, tick_scale: 0.15,
+                            burst: Some((radius: 140.0, damage: 200.0, stun: 1.0))),
+            level: (cooldown: 10.0, count: 1, radius: 64.0, damage: 160.0),
+        )),
+    ),
 ]

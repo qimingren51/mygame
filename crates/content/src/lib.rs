@@ -124,6 +124,21 @@ impl Content {
         Ok(content)
     }
 
+    /// 解锁法器（`choices.locked` 里的 ID；`None` 是全部）。工具、测试用；内容哈希跟着变。
+    pub fn unlock(&mut self, ids: Option<&[&str]>) {
+        let before = self.run.choices.locked.len();
+        self.run.choices.locked.retain(|id| ids.is_some_and(|ids| !ids.contains(&id.as_str())));
+        if self.run.choices.locked.len() != before {
+            self.hash = (self.hash ^ 0x756e_6c6f_636b_0000 ^ self.run.choices.locked.len() as u64)
+                .wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    /// 法器 d 是否还锁着。
+    pub fn weapon_locked(&self, d: usize) -> bool {
+        self.run.choices.locked.iter().any(|id| *id == self.weapons[d].id)
+    }
+
     /// 打开异化与合璧（EA 内容，`run.ron` 里默认关闭）。工具、测试用；内容哈希跟着变，
     /// 打开时录下的回放不会在关着开关的版本上重放。
     pub fn enable_transformations(&mut self) {
