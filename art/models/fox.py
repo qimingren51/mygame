@@ -52,17 +52,33 @@ def _fox_head(prefix, parent, M, eye_mat, s=1.0, ear_h=0.30):
     obj(f"{prefix}Skull", K.ellipsoid((0.15 * s, 0.15 * s, 0.14 * s)), M["fur"], "outer", parent)
     obj(f"{prefix}MaskFace", K.ellipsoid((0.135 * s, 0.10 * s, 0.13 * s)), M["mask"], "outer", parent,
         loc=(0, -0.075 * s, 0.01 * s))
-    obj(f"{prefix}Snout", K.ellipsoid((0.075 * s, 0.17 * s, 0.07 * s)), M["mask"], "outer", parent,
-        loc=(0, -0.20 * s, -0.045 * s), rot=(math.radians(-10), 0, 0))
-    obj(f"{prefix}Nose", K.ellipsoid((0.025 * s, 0.02 * s, 0.018 * s)), M["ink"], "none", parent,
-        loc=(0, -0.365 * s, -0.035 * s))
+    # 吻部从面具向鼻尖连续收细，保留狐狸的楔形侧影，避免椭圆嘴像扁圆的鸟喙。
+    snout = K.curve_points((0, -0.13 * s, -0.025 * s), (0, -0.33 * s, -0.060 * s), n=8)
+    obj(f"{prefix}Snout", K.tube_build(snout, lambda t: s * (0.018 + 0.075 * (1 - t) ** 0.8),
+                                      16, flat=0.63), M["mask"], "outer", parent, sharp_deg=0)
+    obj(f"{prefix}Nose", K.ellipsoid((0.021 * s, 0.019 * s, 0.016 * s)), M["ink"], "none", parent,
+        loc=(0, -0.335 * s, -0.058 * s))
     for sx in (-1, 1):  # 朱砂眼纹（眼角上挑的一笔）+ 耳朵
         pts = [Vector((0.035 * sx * s, -0.168 * s, 0.035 * s)), Vector((0.08 * sx * s, -0.15 * s, 0.05 * s)),
                Vector((0.115 * sx * s, -0.11 * s, 0.085 * s))]
-        obj(f"{prefix}Mark{sx:+d}", K.strip_build(pts, 0.022 * s, 0.006 * s, side_hint=Vector((0, 0, 1)),
-                                                  taper=(1.0, 0.3)), M["red"], "none", parent)
-        K.limb(f"{prefix}Ear{sx:+d}", (0.075 * sx * s, -0.01 * s, 0.10 * s),
-               (0.11 * sx * s, 0.02 * s, (0.10 + ear_h) * s), 0.055 * s, 0.0, M["fur"], "outer", parent, segs=8)
+        obj(f"{prefix}Mark{sx:+d}", K.strip_build(pts, 0.038 * s, 0.006 * s, side_hint=Vector((0, 0, 1)),
+                                                  taper=(1.0, 0.2)), M["red"], "none", parent)
+        cheek = [Vector((0.045 * sx * s, -0.178 * s, -0.012 * s)),
+                 Vector((0.09 * sx * s, -0.145 * s, -0.038 * s)),
+                 Vector((0.13 * sx * s, -0.09 * s, -0.010 * s))]
+        obj(f"{prefix}CheekMark{sx:+d}", K.strip_build(cheek, 0.030 * s, 0.005 * s,
+            side_hint=Vector((0, 0, 1)), taper=(0.85, 0.15)), M["red"], "none", parent)
+        # 复用现有狐耳构造器，只给赤面狐宽底、外撇的三角耳；不更改九尾的参数。
+        base = Vector((0.092 * sx * s, 0.005 * s, 0.105 * s))
+        tip = Vector((0.16 * sx * s, 0.025 * s, (0.10 + ear_h) * s))
+        facing = Vector((-0.65, -0.76, 0))
+        obj(f"{prefix}Ear{sx:+d}", _ear_build(base, tip, 0.080 * s, 0.036 * s, facing),
+            M["fur"], "outer", parent, sharp_deg=0)
+        axis = (tip - base).normalized()
+        front = (facing - axis * facing.dot(axis)).normalized()
+        obj(f"{prefix}EarInner{sx:+d}", _ear_build(base + axis * 0.035 * s + front * 0.027 * s,
+            tip - axis * 0.065 * s + front * 0.006 * s, 0.049 * s, 0.012 * s, facing),
+            M["robe"], "none", parent, sharp_deg=0)
     obj(f"{prefix}Brow", K.ellipsoid((0.022 * s, 0.01 * s, 0.022 * s), 10, 6), M["red"], "none", parent,
         loc=(0, -0.168 * s, 0.10 * s))  # 额心朱砂点
     return K.slit_eyes(prefix, parent, Vector((0, -0.172 * s, 0.035 * s)), 0.105 * s,
@@ -91,7 +107,7 @@ def _tail_zones(t):  # 尾尖朱砂，前面一圈藤黄
 
 # ================================================================ 赤面狐
 # (仰角：0=水平向后 90=竖直向上, 长度, 相位, 左右偏移)。E 向画面里展开成扇形，三条分得开
-FOX_TAILS = [(15, 1.15, 0.0, 0.06), (48, 1.30, 1.1, -0.04), (80, 1.10, 2.2, 0.02)]
+FOX_TAILS = [(15, 1.10, 0.0, 0.11), (49, 1.25, 1.1, -0.09), (80, 1.08, 2.2, 0.03)]
 
 
 def build_fox():
@@ -99,7 +115,7 @@ def build_fox():
     细长的趾行腿，三条大尾巴。"""
     from hero import _sleeve_build  # 主角的广袖构造器（下垂的袖兜 + 浓墨袖口）
     M = _mats("Fox")
-    M["under"] = K.toon("FoxUnder", ramp=[S.PAPER, S.INK["qing"], S.INK["dan"]], seed=57.0)
+    M["under"] = K.toon("FoxUnder", ramp=[S.PAPER_SHADOW, S.INK["qing"], S.INK["dan"]], seed=57.0)
     eye = B.emissive_material("FoxEye", S.EYE["fox"], 1.0)
     root = B.empty("FoxRoot")
     yaw = K.yaw_pivot("FoxYaw", root, -18)
@@ -149,7 +165,7 @@ def build_fox():
         sh = B.empty(f"FoxShoulder{nm}", body, loc=(0.18 * sx, -0.30, 1.42))
         A_ = Vector((0, 0, 0))
         cuff = Vector((0.07 * sx, -0.30, -0.30))
-        obj(f"FoxSleeve{nm}", _sleeve_build(A_, cuff, [(0.0, 0.07), (0.4, 0.10), (1.0, 0.17)], 0.32),
+        obj(f"FoxSleeve{nm}", _sleeve_build(A_, cuff, [(0.0, 0.07), (0.4, 0.10), (1.0, 0.145)], 0.29),
             [M["robe"], M["robe_dark"], M["robe_dark"]], "outer", sh, sharp_deg=0)
         K.limb(f"FoxArm{nm}", cuff, cuff + Vector((-0.02 * sx, -0.20, -0.08)), 0.03, 0.022, M["fur"], "outer", sh)
         tipb = cuff + Vector((-0.02 * sx, -0.20, -0.08))
@@ -167,7 +183,7 @@ def build_fox():
         parts[f"hip_{nm}"], parts[f"knee_{nm}"] = hip, knee
     troot = Vector((0, 0.40, 1.00))
     for i, (ang, ln, tph, xo) in enumerate(FOX_TAILS):
-        ob = obj(f"FoxTail{i}", K.tube_build(_fox_tail(troot, ang, ln, 0.0, tph, xo), K.bushy(0.12), 12, _tail_zones),
+        ob = obj(f"FoxTail{i}", K.tube_build(_fox_tail(troot, ang, ln, 0.0, tph, xo), K.bushy(0.13, peak=0.40), 16, _tail_zones),
                  [M["fur"], M["gold"], M["red"]], "outer", body, sharp_deg=0)
         parts["tails"].append((ob, troot, ang, ln, tph, xo))
     sockets = {"eyes": sock, "feet": B.empty("FoxFeet", root)}
@@ -222,7 +238,7 @@ FOX_POUNCE = [
     (-0.10, 0.06, 6, 46, -22, 30, 34, 12, 1.00, 12, 0.15),
     (-0.20, 0.12, 10, 58, -34, 46, 48, 20, 1.00, 24, 0.20),  # 伏到底（预警）
     (0.16, -0.04, 30, 36, 30, -6, -72, -6, 0.45, -2, 0.70),  # 蹬地扑出：后腿蹬直，前爪前探
-    (0.30, -0.10, 36, 32, 38, -2, -84, -10, 0.30, -6, 0.90),  # 最高、身体拉平
+    (0.30, -0.10, 36, 32, 38, -2, -84, -10, 0.62, -6, 0.90),  # 最高、身体拉平
     (0.12, -0.06, 26, 38, 10, 10, -66, -4, 0.45, 0, 0.70),  # 下落
     (-0.12, 0.00, 10, 46, -26, 36, -40, 2, 0.85, 8, 0.30),  # 落地：前爪按地
 ]
@@ -252,7 +268,7 @@ def pose_fox(parts, anim, frame, n):
         parts[f"arm_{nm}"].rotation_euler = (math.radians(9 * s), 0, 0)
     M = parts["M"]
     for ob, troot, ang, ln, tph, xo in parts["tails"]:
-        K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))
+        K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang, ln, ph, tph, xo), K.bushy(0.13, peak=0.40), 16, _tail_zones))
     for ob, c, w, i, ln, r, fl in parts["rags"]:
         K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, phase=ph, wind=0.12, seed=i,
                                                          tatter=0.10, flare=fl)))
@@ -278,7 +294,7 @@ def _pose_fox_pounce(parts, frame):
         parts[f"knee_{nm}"].rotation_euler = (math.radians(knee + 4 - stag * 0.5), 0, 0)
         parts[f"arm_{nm}"].rotation_euler = (math.radians(arm + 6 * sgn), 0, 0)
     for ob, troot, ang, ln, tph, xo in parts["tails"]:
-        K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang * tk + ta, ln, ph, tph, xo), K.bushy(0.12), 12, _tail_zones))
+        K.replace_mesh(ob, K.tube_build(_fox_tail(troot, ang * tk + ta, ln, ph, tph, xo), K.bushy(0.13, peak=0.40), 16, _tail_zones))
     for ob, c, w, i, ln, r, fl in parts["rags"]:
         K.replace_mesh(ob, K.grid_build(K.rag_panel_rows(c, w, r, 1.00, ln, phase=ph, wind=wind, seed=i,
                                                          tatter=0.10, flare=fl)))

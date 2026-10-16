@@ -218,7 +218,11 @@ def produce(name: str, timings: dict, out_root: Path = ASSETS, only_frames: dict
         anchor = S.BIG_ENEMY_ANCHOR if extra.get("anchor_kind") == "big_enemy" else S.ANCHOR
         anims = [("move", n, fps, {})] + BATCH2_ACTIONS.get(name, [])
         jobs, anim_extra = _enemy_jobs(anims, only_anims, only_frames)
-        render_asset(name, S.FRAME[fk], getattr(M, f"build_{fn}"), jobs, ASSETS,
+        build = getattr(M, f"build_{fn}")
+        if name == "fox":
+            from fox_style import build_styled_fox
+            build = build_styled_fox
+        render_asset(name, S.FRAME[fk], build, jobs, ASSETS,
                      pose=getattr(M, f"pose_{fn}"), sockets_wanted=("eyes",), flash=True, timings=timings, anchor=anchor,
                      merge=bool(only_anims),
                      meta_extra={**extra, **({"default_anim": "move"} if name in BATCH2_ACTIONS else {}),

@@ -347,6 +347,8 @@ art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自
 | `render/produce.py` | 正式出图 + 自检 + 审图 |
 | `render/hero_style.py` | 主角、头像和样张共用的材质与细线；灯笼叠层临时恢复原线宽 |
 | `render/hero_review.py` | 主角独立审图：八方向、关键动作、五种动作动图、头像旧新对照 |
+| `render/fox_style.py` | 赤面狐正式出图与样张共用的材质和细线，只作用赤面狐 |
+| `render/fox_sample.py` `fox_review.py` | 赤面狐四姿态对比与完整动作日夜审图、动图 |
 | `render/qingqiu_review.py` | 青丘妖物的样张、审图和动图 |
 | `render/lantern_review.py` | 灯笼拆层的样张和审图（合成、旧帧对比热图、道具）；`full` 出正式素材的 8 向动图、三灯夜景、全帧对比 |
 | `render/lamp_icons.py` | 灯的界面图标 `ui/icon_lamp_<灯>`（灯笼头单独渲染，装进图标圆框） |
@@ -384,6 +386,8 @@ meta 里的 `vertical_motion`（整个素材或单个动画）表示动画本身
 - 审图：`LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lantern_review.py full`（约 4 分钟）——每盏灯 walk、idle、
   dash、death 的 8 向动图（宣纸底 / 夜里），三盏灯并排的夜景，旧单遍帧对比底图 + 红纸灯的全帧差异（按动画 × 朝向），自检报告。
   整套主角 + 三份叠层 2 倍约 55 分钟（208 个姿态 × 4 遍，每遍约 3.5 秒）。
+
+**赤面狐**：`produce.py --only fox` 使用专属材质与细线，保留 move 8 帧、pounce 6 帧、底图/emit/flash 和原有挂点。`LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/fox_sample.py` 制作四姿态样张；样张编号不等于完整动画编号，不能直接打包。完整出图后运行同目录的 `fox_review.py`，查看逐帧日夜图与动作动图；月夜合成仍需结合实机查看。
 
 **灯的界面图标**（`render/lamp_icons.py`，只出 2 倍）：
 
