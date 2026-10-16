@@ -56,7 +56,7 @@ fn ult_feedback(
     outbox: Res<SimOutbox>,
     progress: Option<Res<Progress>>,
     mut bars: Query<(&mut UltBar, &mut UiTransform)>,
-    mut hints: Query<&mut TextColor, With<UltHint>>,
+    mut hints: Query<(&mut TextColor, &mut Node), With<UltHint>>,
 ) {
     let ready = progress.is_some_and(|p| p.ult >= 1.0);
     for (mut bar, mut tf) in &mut bars {
@@ -74,8 +74,9 @@ fn ult_feedback(
         let age = ULT_HINT_SECS - bar.remaining;
         let shake = (1.0 - age / 0.3).max(0.0);
         tf.translation = Val2::px((age * 70.0).sin() * 6.0 * shake * shake, 0.0);
-        for mut color in &mut hints {
+        for (mut color, mut node) in &mut hints {
             color.0 = GOLD.with_alpha((bar.remaining / 0.35).min(1.0));
+            node.display = if bar.remaining > 0.0 { Display::Flex } else { Display::None };
         }
     }
 }
@@ -199,7 +200,7 @@ mod tests {
             .init_resource::<Progress>()
             .add_systems(Update, ult_feedback);
         let bar = app.world_mut().spawn((UltBar::default(), UiTransform::default())).id();
-        let hint = app.world_mut().spawn((UltHint, TextColor(GOLD.with_alpha(0.0)))).id();
+        let hint = app.world_mut().spawn((UltHint, TextColor(GOLD.with_alpha(0.0)), Node::default())).id();
         app.world_mut().resource_mut::<Time<Real>>().advance_by(Duration::from_millis(50));
         app.update();
         assert_eq!(app.world().get::<TextColor>(hint).unwrap().0.alpha(), 0.0);

@@ -36,6 +36,12 @@ pub(crate) struct HpFill;
 pub(crate) struct ShieldFill;
 
 #[derive(Component)]
+pub(crate) struct ShieldLabel;
+
+#[derive(Component)]
+pub(crate) struct ShieldBar;
+
+#[derive(Component)]
 pub(crate) struct HpLabel;
 
 #[derive(Component)]
@@ -75,6 +81,8 @@ pub(crate) const FOOTER_BOTTOM: f32 = 14.0;
 
 const BAR_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
+const SHIELD: Color = Color::srgb(0.62, 0.83, 1.0);
+const LOW_HP: Color = Color::srgb(1.0, 0.45, 0.36);
 
 fn abs(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f32>) -> Node {
     Node {
@@ -91,7 +99,14 @@ fn abs(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f
 fn bar(skin: &Skin, width: f32, height: f32, fill: impl Bundle, fill_skin: &str) -> impl Bundle {
     let inset = (height * 4.0 / 36.0).max(1.0);
     (
-        Node { width: px(width), height: px(height), padding: UiRect::all(px(inset)), ..default() },
+        Node {
+            width: px(width),
+            max_width: percent(100),
+            height: px(height),
+            flex_shrink: 0.0,
+            padding: UiRect::all(px(inset)),
+            ..default()
+        },
         skin.image("bar_track"),
         children![(
             fill,
@@ -217,78 +232,103 @@ pub(crate) fn spawn_hud(
             ..abs(Some(0.0), Some(0.0), None, Some(FOOTER_BOTTOM))
         },
         children![
-            (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
             (
                 crate::hud_fx::HpBar,
                 UiTransform::default(),
-                Node { width: px(280), height: px(18), padding: UiRect::all(px(2)), ..default() },
-                skin.image("bar_track"),
+                Node {
+                    width: px(360),
+                    max_width: percent(100),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(3),
+                    ..default()
+                },
                 children![
-                    // 掉血的残影：只画掉掉的那一截，比血条慢半拍缩回（hud_fx.rs）
                     (
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: px(2),
-                            right: px(2),
-                            top: px(2),
-                            bottom: px(2),
+                            width: percent(100),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
+                            column_gap: px(8),
                             ..default()
                         },
-                        children![(
-                            crate::hud_fx::HpTrail,
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: percent(100),
-                                width: percent(0),
-                                height: percent(100),
-                                border_radius: BorderRadius::all(px(4)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(1.0, 0.93, 0.84, 0.85)),
-                        )],
+                        children![
+                            (HpLabel, text(&fonts.body, 19.0, PAPER, "生命 100 / 100")),
+                            (ShieldLabel, text(&fonts.body, 15.0, SHIELD, "")),
+                        ],
                     ),
                     (
-                        HpFill,
-                        Node { width: percent(100), height: percent(100), ..default() },
-                        skin.image("bar_fill_hp")
-                    ),
-                    (
-                        ShieldFill,
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: px(2),
-                            top: px(1),
-                            width: percent(0),
-                            height: px(6),
+                            width: percent(100),
+                            height: px(26),
+                            padding: UiRect::all(px(3)),
                             ..default()
                         },
-                        skin.image("bar_fill_shield")
+                        skin.image("bar_track"),
+                        children![
+                            // 残影与生命填充共享内边距，掉血时不覆盖护盾。
+                            (
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: px(3),
+                                    right: px(3),
+                                    top: px(3),
+                                    bottom: px(3),
+                                    ..default()
+                                },
+                                children![(
+                                    crate::hud_fx::HpTrail,
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: percent(100),
+                                        width: percent(0),
+                                        height: percent(100),
+                                        border_radius: BorderRadius::all(px(4)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(1.0, 0.93, 0.84, 0.85)),
+                                )],
+                            ),
+                            (
+                                HpFill,
+                                Node { width: percent(100), height: percent(100), ..default() },
+                                skin.image("bar_fill_hp")
+                            ),
+                        ],
                     ),
+                    (ShieldBar, Visibility::Hidden, bar(&skin, 360.0, 12.0, ShieldFill, "bar_fill_shield"),),
                 ],
             ),
             (
                 crate::hud_fx::UltBar::default(),
                 UiTransform::default(),
                 Node {
+                    width: px(280),
+                    max_width: percent(100),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    row_gap: px(4),
+                    row_gap: px(3),
                     ..default()
                 },
                 children![
-                    bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
-                    (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
+                    bar(&skin, 280.0, 18.0, UltFill, "bar_fill_xp"),
                     (
-                        crate::hud_fx::UltHint,
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: percent(100),
-                            top: px(-4),
-                            width: px(100),
-                            margin: UiRect::left(px(12)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: px(10),
+                            flex_wrap: FlexWrap::Wrap,
+                            max_width: percent(100),
                             ..default()
                         },
-                        text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "燃灯未满"),
+                        children![
+                            (UltLabel, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "燃灯")),
+                            (
+                                crate::hud_fx::UltHint,
+                                Node { display: Display::None, ..default() },
+                                text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "燃灯未满"),
+                            ),
+                        ],
                     ),
                 ],
             ),
@@ -319,13 +359,16 @@ pub(crate) fn update_control_hints(
     setup: Res<RunSetup>,
     profile: Option<Res<lantern_platform::Profile>>,
     mut hints: Query<&mut Node, With<ControlHints>>,
+    mut footer: Query<&mut Visibility, With<HudFooter>>,
 ) {
+    // 选择卡片、暂停和结算已有自己的操作区，底部血条不要透出来遮住说明。
+    let playing = *state.get() == RunState::Playing && *phase == SimPhase::Play;
+    for mut visibility in &mut footer {
+        visibility.set_if_neq(if playing { Visibility::Inherited } else { Visibility::Hidden });
+    }
     // 前两局之后不再显示底部的按键提示（试玩反馈：文字太多）
     let novice = profile.is_none_or(|p| p.runs < 2);
-    let visible = novice
-        && *state.get() == RunState::Playing
-        && *phase == SimPhase::Play
-        && !matches!(setup.mode, RunMode::Bench { .. });
+    let visible = novice && playing && !matches!(setup.mode, RunMode::Bench { .. });
     for mut node in &mut hints {
         let display = if visible { Display::Flex } else { Display::None };
         if node.display != display {
@@ -354,7 +397,7 @@ pub(crate) fn update_hud(
         Query<&mut Text, With<Clock>>,
         Query<&mut Text, With<Kills>>,
         Query<&mut Text, With<LevelLabel>>,
-        Query<&mut Text, With<HpLabel>>,
+        Query<(&mut Text, &mut TextColor, Has<ShieldLabel>), Or<(With<HpLabel>, With<ShieldLabel>)>>,
         Query<(&mut Text, &mut TextColor), With<UltLabel>>,
         Query<&mut Text, With<ComboLabel>>,
         Query<&mut Text, With<BuffLabel>>,
@@ -367,7 +410,8 @@ pub(crate) fn update_hud(
         Query<&mut Node, With<UltFill>>,
         Query<&mut Node, With<BossFill>>,
     )>,
-    mut boss_bar: Query<&mut Visibility, With<BossBar>>,
+    mut boss_bar: Query<&mut Visibility, (With<BossBar>, Without<ShieldBar>)>,
+    mut shield_bar: Query<&mut Visibility, (With<ShieldBar>, Without<BossBar>)>,
 ) {
     let c = &s.content.0;
     let (Some(tick), Some(progress)) = (s.tick, s.progress) else { return };
@@ -401,11 +445,31 @@ pub(crate) fn update_hud(
         n.width = percent((progress.xp / need * 100.0).clamp(0.0, 100.0));
     }
     if let Ok((h, p)) = player.single() {
-        for mut t in &mut texts.p3() {
-            set(&mut t, format!("生命 {} / {}", h.hp.ceil() as i32, h.max.round() as i32));
+        let hp = (h.hp / h.max.max(1.0)).clamp(0.0, 1.0);
+        for (mut t, mut color, shield) in &mut texts.p3() {
+            if shield {
+                set(
+                    &mut t,
+                    if p.shield_max > 0.0 {
+                        format!("护盾 {} / {}", p.shield.ceil() as i32, p.shield_max.ceil() as i32)
+                    } else {
+                        String::new()
+                    },
+                );
+            } else {
+                set(&mut t, format!("生命 {} / {}", h.hp.ceil() as i32, h.max.round() as i32));
+                color.0 = if hp <= 0.3 { LOW_HP } else { PAPER };
+            }
         }
         for mut n in &mut fills.p1() {
-            n.width = percent((h.hp / h.max * 100.0).clamp(0.0, 100.0));
+            n.width = percent(hp * 100.0);
+        }
+        for mut visibility in &mut shield_bar {
+            visibility.set_if_neq(if p.shield_max > 0.0 {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
         }
         for mut n in &mut fills.p2() {
             n.width = percent(if p.shield_max > 0.0 {
@@ -416,19 +480,19 @@ pub(crate) fn update_hud(
         }
     }
     for mut n in &mut fills.p3() {
-        n.width = percent(progress.ult * 100.0);
+        n.width = percent(progress.ult.clamp(0.0, 1.0) * 100.0);
     }
     for (mut t, mut color) in &mut texts.p4() {
         let ready = progress.ult >= 1.0;
         set(
             &mut t,
             if ready {
-                crate::prompts::render("燃灯 {ult}", &s.active, &s.settings)
+                crate::prompts::render("{ult} 燃灯 · 就绪", &s.active, &s.settings)
             } else {
                 format!("燃灯 {}%", (progress.ult * 100.0) as u32)
             },
         );
-        color.0 = if ready { GOLD } else { DIM };
+        color.0 = if ready { GOLD } else { PAPER };
     }
     for mut t in &mut texts.p5() {
         set(&mut t, if progress.combo >= 10 { format!("连斩 {}", progress.combo) } else { String::new() });

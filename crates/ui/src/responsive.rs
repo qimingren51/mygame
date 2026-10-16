@@ -9,15 +9,22 @@ use bevy::window::PrimaryWindow;
 const DESIGN_SIZE: Vec2 = Vec2::new(1280.0, 720.0);
 
 pub(crate) const PANEL_WIDTH_PERCENT: f32 = 90.0;
-/// 升级卡的宽度（choice.rs 的卡片按它排）
-pub(crate) const CARD_WIDTH: f32 = 256.0;
-pub(crate) const CARD_GAP: f32 = 22.0;
+/// 升级卡的尺寸（choice.rs 的卡片按它排，docs/PLAYTEST.md 第 3 项定的 300×460）
+pub(crate) const CARD_WIDTH: f32 = 300.0;
+pub(crate) const CARD_HEIGHT: f32 = 460.0;
+pub(crate) const CARD_GAP: f32 = 20.0;
+/// 升级页除卡片以外的高度：页头、聚焦说明、操作提示、按钮
+const UPGRADE_CHROME: f32 = 280.0;
 
 #[derive(Component)]
 pub(crate) enum FitViewport {
     Fixed(Vec2),
     Upgrades(usize),
 }
+
+/// 卡片网格与画布使用同一个列数，避免浮点边界使 flex 额外换行。
+#[derive(Component)]
+pub(crate) struct UpgradeCards(pub usize);
 
 impl FitViewport {
     /// 准备页的可选行随解锁增加，为每行和页头、页脚留足空间。
@@ -60,27 +67,43 @@ fn panel_scale(logical_size: Vec2, min_size: Vec2) -> f32 {
 /// 在一行到多行之间选择字号最大的排法；同样大时优先少换行。
 /// 输入只用逻辑视口，返回排版画布的最小尺寸，不依赖窗口或 ECS。
 fn upgrade_canvas(logical_size: Vec2, cards: usize) -> Vec2 {
+    upgrade_layout(logical_size, cards).0
+}
+
+fn upgrade_layout(logical_size: Vec2, cards: usize) -> (Vec2, usize) {
     let cards = cards.max(1);
     let mut best_size = Vec2::ZERO;
     let mut best_scale = 0.0;
+    let mut best_columns = 1;
     for columns in 1..=cards {
         let rows = cards.div_ceil(columns) as f32;
         let width = CARD_WIDTH * columns as f32 + CARD_GAP * (columns - 1) as f32;
-        // 每张卡为名称、说明和共鸣/进化提示留足高度；另留页头、操作提示及焦点框空间。
-        let size =
-            Vec2::new(width / (PANEL_WIDTH_PERCENT / 100.0), 280.0 + rows * 440.0 + (rows - 1.0) * CARD_GAP);
+        // 窄画布里的说明、操作提示和页脚按钮会换行；这部分高度也要参与选列和缩放。
+        // 否则单卡仍按宽屏的页脚高度缩放，整页居中时标题会被推到窗口上方。
+        let chrome = UPGRADE_CHROME
+            + match columns {
+                1 => 140.0,
+                2 => 60.0,
+                _ => 0.0,
+            };
+        let size = Vec2::new(
+            width / (PANEL_WIDTH_PERCENT / 100.0),
+            chrome + rows * CARD_HEIGHT + (rows - 1.0) * CARD_GAP,
+        );
         let scale = panel_scale(logical_size, size);
         if scale >= best_scale {
             best_size = size;
             best_scale = scale;
+            best_columns = columns;
         }
     }
-    best_size
+    (best_size, best_columns)
 }
 
 fn fit_viewport(
     window: Single<&Window, With<PrimaryWindow>>,
     mut panels: Query<(&FitViewport, &mut Node, &mut UiTransform)>,
+    mut grids: Query<(&UpgradeCards, &mut Node), Without<FitViewport>>,
 ) {
     for (panel, mut node, mut transform) in &mut panels {
         let scale = panel_scale(window.size(), panel.min_size(window.size()));
@@ -101,6 +124,12 @@ fn fit_viewport(
             scale: Vec2::splat(scale),
             ..default()
         });
+    }
+    for (cards, mut node) in &mut grids {
+        let (_, columns) = upgrade_layout(window.size(), cards.0);
+        if node.grid_template_columns.len() != columns {
+            node.grid_template_columns = vec![GridTrack::px(CARD_WIDTH); columns];
+        }
     }
 }
 
@@ -199,6 +228,7 @@ mod tests {
     #[test]
     fn title_and_upgrade_layouts_fit_small_windows_and_high_dpi() {
         for physical in [
+            Vec2::new(3440.0, 1440.0),
             Vec2::new(1920.0, 1080.0),
             Vec2::new(1280.0, 720.0),
             Vec2::new(1024.0, 768.0),

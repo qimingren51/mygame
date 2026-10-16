@@ -48,13 +48,12 @@ fn spawn_status(mut commands: Commands, fonts: Res<Fonts>, playback: Option<Res<
         DespawnOnExit(AppState::Run),
         Node {
             position_type: PositionType::Absolute,
-            left: px(0),
-            right: px(0),
-            top: px(14),
-            justify_content: JustifyContent::Center,
+            left: px(20),
+            top: px(112),
+            max_width: px(360),
             ..default()
         },
-        children![(ReplayStatus, text(&fonts.body, 18.0, PAPER, "回放中"))],
+        children![(ReplayStatus, text(&fonts.body, 14.0, PAPER, "回放中"))],
     ));
 }
 

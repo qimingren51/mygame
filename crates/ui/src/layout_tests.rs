@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use lantern_content::Content;
 use lantern_platform::Profile;
+use lantern_sim::weapons::WeaponSlot;
 use lantern_sim::{Arsenal, Build, Offer};
 use lantern_view::{AssetRoot, atlas::AtlasDb};
 
@@ -25,6 +26,9 @@ fn setup() -> App {
         bevy::text::TextPlugin,
         bevy::ui::UiPlugin,
     ))
+    .init_resource::<lantern_platform::ActiveInput>()
+    .init_resource::<lantern_platform::Settings>()
+    .add_systems(Update, crate::prompts::refresh)
     .init_asset::<TextureAtlasLayout>()
     .insert_resource(AssetRoot(root.clone()))
     .insert_resource(lantern_sim::GameContent(Content::load(&root.join("data")).unwrap().into()));
@@ -58,6 +62,7 @@ fn assert_fits_after_resize(app: &mut App) {
         (800, 600, 1.5),
         (640, 360, 2.0),
         (360, 640, 1.0),
+        (3440, 1440, 1.0),
         (1920, 1080, 1.0),
     ] {
         let world = app.world_mut();
@@ -134,37 +139,50 @@ fn meta_text_fits_after_resize_and_dpi_changes() {
 
 #[test]
 fn four_upgrade_cards_with_notes_and_banish_hint_fit_after_resize() {
-    let mut app = setup();
-    app.world_mut()
-        .run_system_once(
-            |mut commands: Commands,
-             c: Res<lantern_sim::GameContent>,
-             fonts: Res<Fonts>,
-             skin: Res<skin::Skin>,
-             db: Res<AtlasDb>| {
-                let build = Build { points: [c.0.elements.thresholds[0] - 1; 5], tiers: [1; 5], ..default() };
-                choice::spawn_level_up(
-                    &mut commands,
-                    &c.0,
-                    &fonts,
-                    &db,
-                    &skin,
-                    &Arsenal::default(),
-                    &build,
-                    &[Offer::NewWeapon(0), Offer::NewWeapon(1), Offer::NewPassive(0), Offer::NewPassive(1)],
-                    true,
-                    2,
-                    0,
-                    3,
-                    3,
-                );
-            },
-        )
-        .unwrap();
-    // 检查入场动画结束后的卡片尺寸。
-    let world = app.world_mut();
-    for mut transform in world.query_filtered::<&mut UiTransform, With<choice::Card>>().iter_mut(world) {
-        *transform = UiTransform::default();
+    // 四卡保留正常选择；一至三卡覆盖补给池收窄后，说明和页脚更容易换行的情况。
+    for count in 1..=4 {
+        let mut app = setup();
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      c: Res<lantern_sim::GameContent>,
+                      fonts: Res<Fonts>,
+                      skin: Res<skin::Skin>,
+                      db: Res<AtlasDb>| {
+                    let build =
+                        Build { points: [c.0.elements.thresholds[0] - 1; 5], tiers: [1; 5], ..default() };
+                    let mut weapon = WeaponSlot::new(0);
+                    weapon.level = c.0.weapons[0].levels.len() as u32 - 1;
+                    let arsenal = Arsenal(vec![weapon]);
+                    let offers = [
+                        Offer::NewPassive(c.0.passive_index("dengxin").unwrap()),
+                        Offer::WeaponUp(0),
+                        Offer::NewWeapon(1),
+                        Offer::NewPassive(1),
+                    ];
+                    choice::spawn_level_up(
+                        &mut commands,
+                        &c.0,
+                        &fonts,
+                        &db,
+                        &skin,
+                        &arsenal,
+                        &build,
+                        &offers[..count],
+                        count == 4,
+                        2,
+                        0,
+                        3,
+                        3,
+                    );
+                },
+            )
+            .unwrap();
+        // 检查入场动画结束后的卡片尺寸。
+        let world = app.world_mut();
+        for mut transform in world.query_filtered::<&mut UiTransform, With<choice::Card>>().iter_mut(world) {
+            *transform = UiTransform::default();
+        }
+        assert_fits_after_resize(&mut app);
     }
-    assert_fits_after_resize(&mut app);
 }

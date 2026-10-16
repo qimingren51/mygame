@@ -16,13 +16,17 @@
 
 | 编号 | 终端 | 分支 / worktree（均在 `/home/ming/mygame-worktrees/` 下） | 任务 | 状态 |
 | --- | --- | --- | --- | --- |
-| A1 | pts/3 | `feat/epic-ui` / `ui` | 升级卡与主角 HUD | 已接单，实施中 |
-| A2 | pts/4 | `feat/epic-weapons` / `weapons` | 铜钱剑完整玩法与构筑辨识 | 已接单，实施中 |
-| A3 | pts/5 | `feat/epic-enemies` / `enemies` | 青丘三种妖物与公平攻击 | 已接单，实施中 |
-| A4 | pts/6 | `feat/epic-actors` / `actors` | 主角与妖物动作表现 | 已接单，实施中 |
-| A5 | pts/7 | `feat/epic-scene` / `scene` | 清晰月夜与场景层次 | 已接单，实施中 |
-| A6 | pts/8 | `feat/epic-feedback` / `feedback` | 打击反馈、特效与声音 | 已接单，实施中 |
-| A7 | pts/9 | `feat/epic-inspection` / `inspection` | 局内属性与构筑信息 | 已接单，实施中 |
+| A1 | pts/3 | `feat/epic-ui` / `ui` | 升级卡与主角 HUD | 已审查并合入 develop |
+| A2 | pts/4 | `feat/epic-weapons` / `weapons` | 铜钱剑完整玩法与构筑辨识 | 已审查并合入 develop |
+| A3 | pts/5 | `feat/epic-enemies` / `enemies` | 青丘三种妖物与公平攻击 | 已审查并合入 develop |
+| A4 | pts/6 | `feat/epic-actors` / `actors` | 主角与妖物动作表现 | 已审查并合入 develop |
+| A5 | pts/7 | `feat/epic-scene` / `scene` | 清晰月夜与场景层次 | 已审查并合入 develop |
+| A6 | pts/8 | `feat/epic-feedback` / `feedback` | 打击反馈、特效与声音 | 已审查并合入 develop |
+| A7 | pts/9 | `feat/epic-inspection` / `inspection` | 局内属性与构筑信息 | 已审查并合入 develop |
+| A9 | pts/10（用户追加） | 只读 `/home/ming/mygame-worktrees/develop` 当前工作区 | 实机视觉审查 | 审查完成，两项意见已处理 |
+| A10 | pts/0（用户追加） | 只读 `/home/ming/mygame-worktrees/develop` 当前工作区 | 玩法与兼容性审查 | 审查完成，伪装显示问题已修复 |
+
+9 号和 10 号是用户追加的独立终端；按用户指定编号报到，不套用前七路的 TTY 分配。总协调占原第 1 个会话，A1–A7 对应其余七个原始终端；编号 A9/A10 沿用用户对新增会话的称呼。
 
 ## 共同设计方向
 
@@ -93,6 +97,10 @@
 
 ## 交付与集成
 
+**A9 · 实机视觉审查**：只读当前集成工作区与 `/home/ming/mygame/.git/coordination/review/` 中实际截图（`baseline-play.png`、`develop-play.png`、`develop-inspection.png`、`develop-stats-page2.png`、`combat-action-*.png`、`boss-ending-*.png`）。指出本轮最多 3 个会影响使用的具体视觉问题，注明截图与可定位位置；区分实际缺陷和后续美术目标。A1 正修窄窗升级卡，A6 正复核铜钱剑轮廓，避免重复修改。只写 `reports/A9.md`，不修改代码、不生成资产、不运行构建。完成后保持报告可读即可。
+
+**A10 · 玩法与兼容性审查**：只读当前集成树的 `git diff HEAD`，重点检查新增远程蓄力的取消/出生保护、讨封狐现形、铜钱剑再斩、回放和存档边界。参考已有测试结果 `/home/ming/mygame/.git/coordination/workspace-tests.log`，不要重复全量测试。只提交有代码证据的具体问题或“本轮未发现阻塞问题”，写入 `reports/A10.md`；不改文件、不新增测试、不启动 Cargo。只需审查本轮变更，不展开全仓审计。
+
 - 不向 `master` 推送任何内容，也不从原工作区运行 Git 写操作。
 - 不碰其他会话的未提交内容；不使用 reset/clean/强推。不创建额外审批、CI 或校验框架。
 - 可以开 subagents 做范围明确的独立任务，但文件归属仍由本负责人负责，不因分派扩大本轮范围。
@@ -107,3 +115,9 @@
 目标是交付一轮有可玩变化的青丘版本。“顶级 AAA 质感”仍需持续的资产制作、实机演出和用户试玩，不能据一次代码改动宣称完成。
 
 基线验证：`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` 已通过。窗口渲染与音频性能用例沿用其原有 ignored 标记，未运行，不视为实机验收。七路均已收到任务并写入接单报告。
+
+## 首轮交付结果
+
+本轮实现与追加审查完成。场景提交 `f5b5332`，战斗内容提交 `9dd67e5`，界面与本节随最后一次提交交付。最终格式、工作区 Clippy、工作区测试均通过（427 通过、2 项保持既有 ignored），字体与色板检查通过。实机对比与仍需美术打磨的范围见 [PLAYTEST.md](PLAYTEST.md)。提交均在本地 develop，未推送远端；原工作区分支保留。
+
+各负责人本轮停止等待，不自行扩展范围。下一轮从当前 develop 的内容出发再分派；现有工作树保留交付原稿供审查，不覆盖或清理。
