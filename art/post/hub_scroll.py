@@ -146,11 +146,12 @@ CHARACTERS = [
 
 # 路灯：灯童说“回来一回，路边就添一盏灯”。守灯人每回来一次，门外路边多亮一盏，最多 10 盏；底图里没有，全在叠层里。
 # 按点亮的顺序：先是出门那条石板路两边（近门的两盏小一些，往前的两盏大一些），再沿着院前的路往两边排开，
-# 都站在名字和提示文字之间的空地上。(立杆点 x, 地面 y, 大小, 灯挂在杆的哪一边 ±1)
+# 都站在人物的名字之间。底部提示条（text_safe[1]）上面空出一截：灯身到 y 880 为止，光晕到 890 为止
+# （游戏把说话的人的台词写在提示条里，路灯亮起时火苗、光晕会放大）。(立杆点 x, 地面 y, 大小, 灯挂在杆的哪一边 ±1)
 ROAD_LAMPS = [
-    (1290.0, 852.0, 0.82, 1), (1030.0, 856.0, 0.82, 1), (1322.0, 896.0, 1.0, 1), (1002.0, 896.0, 1.0, -1),
-    (1404.0, 895.0, 0.98, -1), (712.0, 896.0, 1.0, -1), (1670.0, 893.0, 0.96, 1), (528.0, 895.0, 1.0, 1),
-    (246.0, 892.0, 0.97, -1), (178.0, 890.0, 0.95, 1),
+    (1290.0, 852.0, 0.82, 1), (1030.0, 856.0, 0.82, 1), (1322.0, 874.0, 1.0, 1), (1064.0, 874.0, 1.0, -1),
+    (1404.0, 874.0, 0.98, -1), (648.0, 874.0, 1.0, -1), (1670.0, 873.0, 0.96, 1), (548.0, 874.0, 1.0, 1),
+    (246.0, 873.0, 0.97, -1), (178.0, 872.0, 0.95, 1),
 ]
 
 def meta_ids() -> list[str]:
@@ -1893,10 +1894,12 @@ def review_dawn_fix(base: Image.Image, old_dir: Path, dawns: dict, path: Path) -
     out.save(path, optimize=True)
 
 
-def label_block(c: dict) -> tuple:
-    """名字和行当那块文字大约占的地方（label 点往两边各 110、往下 46 像素）。"""
+def label_text(c: dict) -> list[tuple]:
+    """名字和行当实际写字的地方（游戏里）：名字一行 39 像素字、每字约 39 宽；行当一行 21 像素字、约 7 个字宽；
+    都以 label 点为中，从 label 点往下共约 64 像素。返回 [名字的框, 行当的框]。"""
     x, y = c["label"]
-    return (x - 110, y, 220, 46)
+    nw, rw = 39 * len(c["name"]), 21 * 7
+    return [(x - nw / 2, y, nw, 40), (x - rw / 2, y + 40, rw, 24)]
 
 
 def review_road(base: Image.Image, lamps, dawns, road, ids, path: Path) -> None:
@@ -1924,7 +1927,7 @@ def review_road(base: Image.Image, lamps, dawns, road, ids, path: Path) -> None:
 
 
 def review_road_ui(full: Image.Image, path: Path) -> None:
-    """路灯 10 盏 + 心灯全亮 + 青丘天明，缩到 1280×720 写上名字：橙框 = 名字块（label ±110、往下 46），淡蓝框 = 人物点击区，
+    """路灯 10 盏 + 心灯全亮 + 青丘天明，缩到 1280×720 写上名字：橙框 = 名字和行当实际写字的地方，淡蓝框 = 人物点击区，
     红框 = text_safe，黄框 = 路灯的灯身 rect。下面是院前那一带放大 2 倍（原图像素）。"""
     k = 1280 / W
     im = full.resize((1280, 720), Image.LANCZOS).convert("RGBA")
@@ -1948,7 +1951,7 @@ def review_road_ui(full: Image.Image, path: Path) -> None:
     plain = im.convert("RGB")
     bd = ImageDraw.Draw(im)
     for c in CHARACTERS:
-        for (x, y, w, h), colr in ((c["rect"], (80, 160, 220, 200)), (label_block(c), (240, 150, 40, 230))):
+        for (x, y, w, h), colr in [(c["rect"], (80, 160, 220, 200))] + [(r, (240, 150, 40, 230)) for r in label_text(c)]:
             bd.rectangle([x * k, y * k, (x + w) * k, (y + h) * k], outline=colr, width=1)
     for (x, y, w, h) in TEXT_SAFE:
         bd.rectangle([x * k, y * k, (x + w) * k, (y + h) * k], outline=(220, 50, 50, 255), width=1)
@@ -1964,7 +1967,7 @@ def review_road_ui(full: Image.Image, path: Path) -> None:
     out.paste(boxed, (1300, 34))
     d = ImageDraw.Draw(out)
     d.text((8, 6), "1280×720：心灯全亮、路灯 10 盏、青丘天明，写上名字和提示", font=f, fill=(225, 225, 225))
-    d.text((1308, 6), "同上加框：橙 = 名字块，淡蓝 = 点击区，红 = text_safe，数字 = 路灯点亮顺序", font=f, fill=(225, 225, 225))
+    d.text((1308, 6), "同上加框：橙 = 名字 / 行当的字，淡蓝 = 点击区，红 = text_safe，数字 = 路灯点亮顺序", font=f, fill=(225, 225, 225))
     d.text((8, 760), "院前那一带原大（x 140–1760，y 780–910）", font=f, fill=(225, 225, 225))
     out.paste(band, (0, 790))
     out.save(path, optimize=True)

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import sys
@@ -367,9 +368,15 @@ def test_dawn_only_on_the_top():
 # ============================================================== 路灯
 
 
-def label_blocks() -> list:
-    """名字和行当那块文字大约占的地方：label 点往两边各 110、往下 46 像素。"""
-    return [(c["label"][0] - 110, c["label"][1], 220, 46) for c in man()["characters"]]
+def label_text() -> list:
+    """名字和行当在游戏里实际写字的地方：名字一行（39 像素字，每字约 39 宽）、行当一行（21 像素字，约 7 个字宽），
+    都以 label 点为中，从 label 点往下共约 64 像素。（游戏里名字块有 420 宽，但字只占中间这些。）"""
+    out = []
+    for c in man()["characters"]:
+        x, y = c["label"]
+        nw, rw = 39 * len(c["name"]), 21 * 7
+        out += [(x - nw / 2, y, nw, 40), (x - rw / 2, y + 40, rw, 24)]
+    return out
 
 
 def overlap(a, b) -> bool:
@@ -380,17 +387,20 @@ def overlap(a, b) -> bool:
 
 def test_road_lamps_layout():
     """路灯 1–10 盏，每盏四层（灯身、火苗普通，内圈、外圈叠加），文件名 road_<n>…；四层都在 safe 里；
-    看得见的灯（灯身、火苗、内圈）不碰人物点击区、名字块（label ±110、往下 46）、text_safe 和心灯；
-    外圈光晕是光不是灯：落在名字真正写字的地方（label ±75）和 text_safe 上几乎为 0，挨着名字块、点击区边上的也不亮；
+    看得见的灯（灯身、火苗、内圈）不碰人物点击区、名字和行当的字、text_safe 和心灯；
+    底部提示条上面空出一截（游戏在那里写台词，路灯亮起时会放大）：灯身底边 ≤ 提示条上沿 − 24，光晕底边 ≤ 提示条上沿 − 14；
+    外圈光晕是光不是灯：落在名字和行当的字上、text_safe 里几乎为 0，挨着点击区边上的也不亮；
     路灯之间不重叠；近的大、远的小。"""
     m = man()
     rl = m.get("road_lamps")
     assert rl and 1 <= len(rl) <= 10, f"road_lamps 应有 1–10 盏：{None if rl is None else len(rl)}"
     assert len(rl) == len(H.ROAD_LAMPS), f"road_lamps {len(rl)} 盏，脚本里排了 {len(H.ROAD_LAMPS)} 个位置"
-    keep_off = [c["rect"] for c in m["characters"]] + label_blocks() + [list(r) for r in m["text_safe"]]
+    texts = [(int(math.floor(x)), y, int(math.ceil(w)) + 1, h) for (x, y, w, h) in label_text()]
+    keep_off = [c["rect"] for c in m["characters"]] + texts + [list(r) for r in m["text_safe"]]
     lamp_rects = [v["rect"] for e in m["lamps"].values() for k, v in e.items() if k in ("body", "flame", "core")]
-    text = rect_mask([(c["label"][0] - 75, c["label"][1], 150, 46) for c in m["characters"]] + [list(r) for r in m["text_safe"]])
-    edge = rect_mask(keep_off)
+    text = rect_mask(texts + [list(r) for r in m["text_safe"]])
+    edge = rect_mask([c["rect"] for c in m["characters"]])
+    band = m["text_safe"][1][1]  # 底部提示条的上沿
     bodies = []
     for n, e in enumerate(rl):
         assert set(e) == {"body", "flame", "core", "glow"}, f"路灯 {n} 应有四层：{sorted(e)}"
@@ -402,12 +412,16 @@ def test_road_lamps_layout():
         for part in ("body", "flame", "core"):
             for r in keep_off + lamp_rects:
                 assert not overlap(e[part]["rect"], r), f"路灯 {n}.{part} {e[part]['rect']} 碰到了 {r}"
+        bx, by, bw, bh = e["body"]["rect"]
+        assert by + bh <= band - 24, f"路灯 {n} 的灯身底边 y {by + bh} 离提示条（上沿 {band}）太近，应 ≤ {band - 24}"
+        gx, gy, gw, gh = e["glow"]["rect"]
+        assert gy + gh <= band - 14, f"路灯 {n} 的光晕底边 y {gy + gh} 离提示条（上沿 {band}）太近，应 ≤ {band - 14}"
         x, y, w, h = e["glow"]["rect"]
         g = img(e["glow"]["file"], "RGBA")[..., 3]
         on_text = (g * text[y:y + h, x:x + w]).max()
-        assert on_text <= 0.03, f"路灯 {n} 的光晕落在名字的字上 / 文字区里（{on_text:.3f}）"
+        assert on_text <= 0.03, f"路灯 {n} 的光晕落在名字 / 行当的字上或文字区里（{on_text:.3f}）"
         on_edge = (g * edge[y:y + h, x:x + w]).max()
-        assert on_edge <= 0.25, f"路灯 {n} 的光晕漏到名字块、点击区边上太亮（{on_edge:.3f}）"
+        assert on_edge <= 0.25, f"路灯 {n} 的光晕漏到点击区边上太亮（{on_edge:.3f}）"
         bodies.append(e["body"]["rect"])
     for i in range(len(bodies)):
         for j in range(i + 1, len(bodies)):
@@ -451,18 +465,30 @@ def test_road_lamps_render():
 
 
 def test_existing_outputs_unchanged():
-    """原有的各层和游戏里正在用的（assets/atlas/screens/hub/）逐字节相同；hub.json 原有的键和值都没变，只多了 road_lamps。"""
+    """和游戏里正在用的（assets/atlas/screens/hub/）比：底图和路灯以外的各层逐字节相同；hub.json 里路灯以外的键和值都没变，
+    road_lamps 的盏数、每盏的层、文件名、混合方式都和游戏里的一样，只有 rect、base 的数可以变。"""
     if not ASSETS.exists():
         print("      （跳过：没有 assets/atlas/screens/hub/）")
         return
     old = json.loads((ASSETS / "hub.json").read_text(encoding="utf-8"))
     new = man()
     for k, v in old.items():
-        assert new.get(k) == v, f"hub.json 的 {k} 变了"
+        if k != "road_lamps":
+            assert new.get(k) == v, f"hub.json 的 {k} 变了"
     assert set(new) - set(old) <= {"road_lamps"}, f"hub.json 多了别的键：{sorted(set(new) - set(old))}"
-    diff = [p.name for p in sorted(ASSETS.iterdir()) if p.name != "hub.json" and p.read_bytes() != (OUT / p.name).read_bytes()]
+    if "road_lamps" in old:
+        ro, rn = old["road_lamps"], new["road_lamps"]
+        assert len(ro) == len(rn), f"路灯的盏数变了：{len(ro)} → {len(rn)}"
+        for n, (eo, en) in enumerate(zip(ro, rn)):
+            assert set(eo) == set(en), f"路灯 {n} 的层变了"
+            for part in eo:
+                assert set(eo[part]) == set(en[part]), f"路灯 {n}.{part} 的键变了"
+                for key in eo[part]:
+                    if key not in ("rect", "base"):
+                        assert eo[part][key] == en[part][key], f"路灯 {n}.{part} 的 {key} 变了"
+    diff = [p.name for p in sorted(ASSETS.iterdir())
+            if p.name != "hub.json" and not p.name.startswith("road_") and p.read_bytes() != (OUT / p.name).read_bytes()]
     assert not diff, f"这些文件和游戏里的不一样了：{diff[:6]}"
-
 
 # ============================================================== 底图
 
