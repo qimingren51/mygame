@@ -734,3 +734,4 @@ M3 之后是抢先体验（3 个地区、2 处险地、10 件法器）和 1.0（
 - 需要改对方负责的文件时，先发消息商量。
 - 接口约定（图集格式、帧命名、内容数据结构）变化时，在本文对应的章节里更新。
 - 新增或改名先改 `docs/LORE.md`，再由架构会话改 `assets/data/`；数值以 `docs/BALANCE.md` 为准。
+- **试玩修正轮**（`docs/PLAYTEST.md`）：第 1 轮（2026-10-16）起由用户指定美术会话统筹，各会话把进度报给美术会话，由它更新 PLAYTEST.md。这一轮临时放宽分工：玩法会话可以在分支上改 `crates/sim` 和 `assets/data` 里法器、妖物的代码和数据，开 PR 由架构会话合并；世界观会话可以直接改 `assets/data/*.ron` 的 `name`、`desc`、`flavor`、`short` 和 `stat_labels.ron` 的标签与说明；质感会话可以改 `crates/view/src/{lighting,fx,impact,effects}.rs` 里和观感有关的常量与画法，推送前告诉架构会话。样张先给用户看，用户选定之前不批量画、不推送；打版本标签之前先问用户。
