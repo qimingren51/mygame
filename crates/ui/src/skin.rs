@@ -7,7 +7,7 @@ use bevy::sprite::{BorderRect, SliceScaleMode, TextureSlicer};
 use bevy::ui::VisualBox;
 use bevy::ui::widget::NodeImageMode;
 
-use lantern_platform::paths;
+use lantern_view::AssetRoot;
 
 struct Item {
     name: String,
@@ -26,8 +26,8 @@ pub(crate) struct Skin {
     pub logo: Handle<Image>,
 }
 
-pub(crate) fn load_skin(mut commands: Commands, assets: Res<AssetServer>) {
-    let path = paths::asset_dir().join("atlas/skin/skin.json");
+pub(crate) fn load_skin(mut commands: Commands, assets: Res<AssetServer>, root: Res<AssetRoot>) {
+    let path = root.0.join("atlas/skin/skin.json");
     let json: serde_json::Value = match std::fs::read_to_string(&path).map(|t| serde_json::from_str(&t)) {
         Ok(Ok(v)) => v,
         other => {
@@ -88,5 +88,47 @@ impl Skin {
         };
         // 皮肤画满整个节点（含内边距），内边距只影响里面的文字
         ImageNode { visual_box: VisualBox::BorderBox, ..ImageNode::new(it.image.clone()).with_mode(mode) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::io::AssetSourceId;
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn skin_and_asset_server_read_the_supplied_root() {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("提灯 皮肤-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(dir.join("atlas/skin")).unwrap();
+        let root = dir.canonicalize().unwrap();
+        let json = r#"{"scale":7,"items":{}}"#;
+        fs::write(root.join("atlas/skin/skin.json"), json).unwrap();
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin { file_path: root.to_str().unwrap().to_owned(), ..default() },
+        ))
+        .init_asset::<Image>()
+        .insert_resource(AssetRoot(root))
+        .add_systems(Startup, load_skin);
+        app.update();
+        // 皮肤 JSON 必须使用传入的根目录，不能重新查找仓库里的那一份。
+        assert_eq!(app.world().resource::<Skin>().scale, 7.0);
+        let server = app.world().resource::<AssetServer>();
+        let source = server.get_source(AssetSourceId::Default).unwrap();
+        let bytes = bevy::tasks::block_on(async {
+            let mut reader = source.reader().read(Path::new("atlas/skin/skin.json")).await.unwrap();
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await.unwrap();
+            bytes
+        });
+        assert_eq!(bytes, json.as_bytes());
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

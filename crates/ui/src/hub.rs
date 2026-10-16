@@ -189,8 +189,9 @@ fn frame(
     sub: &str,
     hint: &str,
     body: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    commands.spawn(panel()).with_children(|p| {
+) -> Entity {
+    let mut root = commands.spawn(panel());
+    root.with_children(|p| {
         p.spawn(dim_layer());
         p.spawn((
             Node {
@@ -222,6 +223,7 @@ fn frame(
             p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, hint));
         }
     });
+    root.id()
 }
 
 /// 钱袋：灯油、铜钱。
@@ -548,7 +550,7 @@ pub(crate) fn prep_panel(
     let rows = prep_rows(c, profile);
     let last = &profile.last;
     let hint = "{nav} 选择 / 更换　{confirm} 确定　{back} 返回";
-    frame(
+    let root = frame(
         commands,
         fonts,
         skin,
@@ -710,4 +712,5 @@ pub(crate) fn prep_panel(
             }
         },
     );
+    commands.entity(root).insert(crate::responsive::FitViewport::for_prep(rows.len()));
 }

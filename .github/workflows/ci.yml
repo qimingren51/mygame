@@ -7,20 +7,28 @@ on:
     paths:
       - 'crates/**'
       - 'assets/**'
+      - 'packaging/**'
+      - 'web/lantern/icons/icon-512.png'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - 'rustfmt.toml'
+      - '.cargo/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     paths:
       - 'crates/**'
       - 'assets/**'
+      - 'packaging/**'
+      - 'web/lantern/icons/icon-512.png'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - 'rustfmt.toml'
+      - '.cargo/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 env:
@@ -41,6 +49,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 格式
         run: cargo fmt --all --check
+      - name: Windows 图标与清单
+        run: |
+          python3 -m pip install --quiet Pillow
+          python3 packaging/windows/test_resources.py
+      - name: 发布包校验文件
+        run: |
+          python3 -m pip install --quiet PyYAML
+          python3 packaging/test_release.py
       - name: 界面字体子集不缺字
         run: |
           pip install --quiet fonttools
@@ -54,6 +70,13 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      # 无 GPU 的 runner 使用 DX12 的 WARP 软件适配器。
+      WGPU_BACKEND: dx12
+      WGPU_FORCE_FALLBACK_ADAPTER: '1'
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v5
       - name: 安装 Rust（版本见 rust-toolchain.toml）
@@ -61,5 +84,96 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 模拟测试（含跨平台确定性黄金测试）
         run: cargo test --locked -p lantern_core -p lantern_content -p lantern_sim
+      # PR 上只检查能否编译；下面这些（冷缓存要四十多分钟）只在推送到 master 和手动运行时跑。
+      # 打 v* 标签发布前，先确认 master 上这几步是绿的。
       - name: 检查游戏能在 Windows 上编译
+        if: github.event_name == 'pull_request'
         run: cargo check --locked -p lantern
+      - name: 平台层和游戏测试（含参数解析、窗口渲染和资源失败）
+        if: github.event_name != 'pull_request'
+        run: cargo test --locked -p lantern_platform -p lantern -p lantern_audio -p lantern_view
+      - name: 构建发布版
+        if: github.event_name != 'pull_request'
+        run: cargo build --release --locked -p lantern
+      - name: 检查 EXE 图标、版本信息与清单
+        if: github.event_name != 'pull_request'
+        run: |
+          python -m pip install --quiet Pillow pefile
+          if ($LASTEXITCODE -ne 0) { throw '安装资源测试依赖失败' }
+          python packaging/windows/test_resources.py --exe target/release/lantern.exe
+      - name: 检查发布包 EXE 只依赖系统 DLL
+        if: github.event_name != 'pull_request'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw '找不到 Visual C++ 工具' }
+          $dumpbin = Get-ChildItem "$installation/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dumpbin) { throw '找不到 dumpbin.exe' }
+          $output = & $dumpbin.FullName /nologo /dependents target/release/lantern.exe
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin 检查失败' }
+          $output | Write-Host
+          $dlls = @($output | ForEach-Object {
+            if ($_ -match '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { $Matches[1].ToLowerInvariant() }
+          } | Sort-Object -Unique)
+          if ($dlls.Count -eq 0) { throw '没有解析到 DLL 依赖，拒绝跳过检查' }
+          # 黑名单 + System32 检查：系统 DLL 随依赖升级会变（例如音频的 mmdevapi.dll），白名单维护不过来；
+          # CI 机器装了 Visual C++ 运行库，System32 里有它，所以运行库要单独拦下。
+          foreach ($dll in $dlls) {
+            if ($dll -match '^(api-ms-win-|ext-ms-win-)[a-z0-9-]+\.dll$') { continue }
+            if ($dll -match '^(vcruntime|msvcp|concrt|vccorlib|vcomp|ucrtbased)') {
+              throw "依赖了 Visual C++ 运行库：$dll（应静态链接 CRT，见 .cargo/config.toml）"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot "System32/$dll"))) {
+              throw "发现非系统 DLL 依赖：$dll"
+            }
+          }
+      - name: 打包、解压并从中文空格临时目录运行冒烟测试
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "提灯 冒烟-$([guid]::NewGuid())"
+          $package = Join-Path $root '打包/提灯 夜行'
+          $unpacked = Join-Path $root '解压 目录'
+          $working = Join-Path $root '临时 工作目录'
+          New-Item -ItemType Directory -Path $package, $working -Force | Out-Null
+          Copy-Item target/release/lantern.exe $package
+          Copy-Item assets $package -Recurse
+          Copy-Item packaging/README.txt $package
+          $archive = Join-Path $root '提灯 夜行.zip'
+          Compress-Archive -Path $package -DestinationPath $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $exe = Join-Path $unpacked '提灯 夜行/lantern.exe'
+          # 避免开发环境的覆盖路径或日志过滤影响发布包验证。
+          Remove-Item Env:LANTERN_ASSETS -ErrorAction SilentlyContinue
+          $env:RUST_LOG = 'info'
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $exe
+          $start.WorkingDirectory = $working
+          $start.UseShellExecute = $false
+          $start.ArgumentList.Add('--smoke-test')
+          $start.ArgumentList.Add('--windowed')
+          $process = [System.Diagnostics.Process]::Start($start)
+          if (-not $process.WaitForExit(180000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw '冒烟测试超时（180 秒）'
+          }
+          $logDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'lantern/logs'
+          $log = Get-ChildItem -LiteralPath $logDir -Filter "lantern-*-$($process.Id).log" | Select-Object -First 1
+          if (-not $log) { throw '冒烟测试没有生成日志' }
+          $text = Get-Content -LiteralPath $log.FullName -Raw -Encoding utf8
+          Write-Host $text
+          if ($process.ExitCode -ne 0) { throw "冒烟测试退出码：$($process.ExitCode)" }
+          if ($text -notmatch '冒烟测试通过：初始化完成，窗口渲染 120 帧') {
+            throw '冒烟测试没有完成初始化和 120 帧窗口渲染'
+          }
+      - name: 保存 Windows 冒烟测试日志
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-logs
+          path: ~/AppData/Roaming/lantern/logs/*.log
+          if-no-files-found: ignore

@@ -11,15 +11,18 @@ use lantern_sim::{InputFrame, ReplayPlayback, RunState, SimCommand, SimCommands,
 
 pub mod bindings;
 mod cue;
+pub mod diagnostics;
 mod input;
 pub mod paths;
 pub mod profile;
 pub mod replays;
 mod rumble;
 pub mod settings;
+#[cfg(windows)]
+mod window_icon;
 
 pub use bindings::{Action, ActiveInput, InputDevice, Rebind};
-pub use cue::{MenuSoundscape, UiCue};
+pub use cue::{AudioUnavailable, MenuSoundscape, UiCue};
 pub use profile::{HubNews, Profile};
 pub use settings::Settings;
 
@@ -77,6 +80,8 @@ impl Plugin for PlatformPlugin {
             .init_resource::<MenuSoundscape>()
             .configure_sets(PreUpdate, (InputSet::Gather, InputSet::Feed).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
+        #[cfg(windows)]
+        app.add_systems(Update, window_icon::set_window_icon);
         input::register(app);
         replays::register(app);
         rumble::register(app);

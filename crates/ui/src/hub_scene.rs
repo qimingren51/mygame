@@ -27,7 +27,7 @@ use bevy::ui_render::ui_material::UiMaterialKey;
 use serde::Deserialize;
 
 use lantern_content::Content;
-use lantern_platform::{HubNews, Profile, paths};
+use lantern_platform::{HubNews, Profile};
 use lantern_sim::AppState;
 
 use crate::cover::Cover;
@@ -229,8 +229,8 @@ fn radial(size: u32) -> Image {
     )
 }
 
-fn load(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let path = paths::asset_dir().join(DIR).join("hub.json");
+fn load(mut commands: Commands, mut images: ResMut<Assets<Image>>, root: Res<lantern_view::AssetRoot>) {
+    let path = root.0.join(DIR).join("hub.json");
     let json = match std::fs::read_to_string(&path).map(|t| serde_json::from_str::<HubJson>(&t)) {
         Ok(Ok(j)) => j,
         Err(_) => return,

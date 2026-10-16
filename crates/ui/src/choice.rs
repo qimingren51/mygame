@@ -13,6 +13,7 @@ use lantern_sim::{Arsenal, Build, GameContent, Offer, RunState, SimCommand, SimC
 use lantern_view::atlas::AtlasDb;
 
 use crate::describe::{OfferInfo, Rarity, element_color, hex, offer_info, offer_note};
+use crate::responsive::{CARD_GAP, CARD_WIDTH, FitViewport, PANEL_WIDTH_PERCENT};
 use crate::skin::Skin;
 use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
@@ -393,6 +394,7 @@ fn card_summary(s: &str) -> String {
 fn overlay(skin: &Skin) -> impl Bundle {
     (
         ChoiceRoot,
+        FitViewport::default(),
         DespawnOnExit(lantern_sim::AppState::Run),
         GlobalZIndex(10),
         Node {
@@ -468,7 +470,7 @@ fn card(
         Card,
         Rise::after(0.04 + i as f32 * 0.07),
         Node {
-            width: px(256),
+            width: px(CARD_WIDTH),
             min_height: px(380),
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
@@ -604,7 +606,7 @@ fn card(
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
 }
 
-fn spawn_level_up(
+pub(super) fn spawn_level_up(
     commands: &mut Commands,
     c: &Content,
     fonts: &Fonts,
@@ -619,7 +621,8 @@ fn spawn_level_up(
     rerolls: u32,
     banishes: u32,
 ) {
-    commands.spawn(overlay(skin)).with_children(|root| {
+    // 小窗口、高缩放时整页等比缩小；窄窗口里卡片换行（docs/DESIGN.md 第 11 节）。
+    commands.spawn(overlay(skin)).insert(FitViewport::Upgrades(offers.len())).with_children(|root| {
         root.spawn(Node {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
@@ -636,7 +639,18 @@ fn spawn_level_up(
             };
             head.spawn(text(&fonts.body, 18.0, if inspired { hex("#FFD98A") } else { DIM }, &sub));
         });
-        root.spawn(Node { column_gap: px(22), ..default() }).with_children(|row| {
+        let cards = offers.len() as f32;
+        root.spawn(Node {
+            width: percent(PANEL_WIDTH_PERCENT),
+            max_width: px(CARD_WIDTH * cards + CARD_GAP * (cards - 1.0).max(0.0)),
+            flex_wrap: FlexWrap::Wrap,
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            column_gap: px(CARD_GAP),
+            row_gap: px(CARD_GAP),
+            ..default()
+        })
+        .with_children(|row| {
             for (i, &o) in offers.iter().enumerate() {
                 card(row, c, fonts, db, skin, arsenal, build, i, o);
             }
