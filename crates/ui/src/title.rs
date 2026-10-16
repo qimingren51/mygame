@@ -15,7 +15,7 @@ use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
 use crate::settings_ui::{self, ADVANCED_ITEMS, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
-use crate::{CINNABAR, DIM, Fonts, INK, INK_DIM, PAPER, SeedOverride, bench, hub, on_paper, text};
+use crate::{CINNABAR, DIM, Fonts, GodMode, INK, INK_DIM, PAPER, SeedOverride, bench, hub, on_paper, text};
 
 /// 标题界面上打开的面板。
 #[derive(Resource, Default, Clone, Debug, PartialEq)]
@@ -128,7 +128,7 @@ pub(crate) fn random_seed() -> u64 {
 pub(crate) fn input(
     actions: Res<Actions>,
     content: Res<GameContent>,
-    seed: Res<SeedOverride>,
+    (seed, god): (Res<SeedOverride>, Res<GodMode>),
     mut profile: ResMut<Profile>,
     mut news: ResMut<HubNews>,
     mut settings: ResMut<Settings>,
@@ -186,7 +186,8 @@ pub(crate) fn input(
                         ui.dirty = true;
                     } else {
                         // 第一局直接出发：一更、初始的灯，不抽夜签、不挂灯坠
-                        let setup = profile.run_setup(c, seed);
+                        let mut setup = profile.run_setup(c, seed);
+                        setup.god = god.0;
                         info!("出发，种子 {seed}（第一夜）");
                         depart(c, &profile, setup, &mut mode, &mut ui, &mut commands, &mut next);
                     }
@@ -224,6 +225,7 @@ pub(crate) fn input(
                 .or(actions.confirm.then_some(ui.selected));
             if let Some(i) = chosen {
                 let mut setup = profile.run_setup(c, seed);
+                setup.god = god.0;
                 setup.omen = picks.get(i).cloned();
                 info!("出发，种子 {seed}，夜签 {:?}", setup.omen);
                 depart(c, &profile, setup, &mut mode, &mut ui, &mut commands, &mut next);
@@ -896,6 +898,7 @@ mod input_tests {
         app.insert_resource(GameContent(std::sync::Arc::new(content)))
             .init_resource::<Actions>()
             .init_resource::<SeedOverride>()
+            .init_resource::<GodMode>()
             .init_resource::<Profile>()
             .init_resource::<HubNews>()
             .init_resource::<Settings>()
@@ -914,6 +917,44 @@ mod input_tests {
 
     fn cues(app: &App) -> Vec<UiCue> {
         app.world().resource::<Messages<UiCue>>().iter_current_update_messages().copied().collect()
+    }
+
+    #[test]
+    fn god_mode_applies_to_first_night_and_omen_departures() {
+        for god in [false, true] {
+            for returning in [false, true] {
+                let mut app = app();
+                app.insert_resource(GodMode(god));
+                app.insert_resource(SeedOverride(Some(42)));
+                if returning {
+                    let picks = draw_omens(&app.world().resource::<GameContent>().0, 42, 3);
+                    app.insert_resource(TitleMode::Omen { seed: 42, picks });
+                    let mut profile = app.world_mut().resource_mut::<Profile>();
+                    profile.basics = true;
+                    profile.saw_scroll(crate::scroll::REGION, false);
+                }
+                app.insert_resource(Actions { confirm: true, ..default() });
+                app.update();
+                if !returning {
+                    // 首次出发经开场卷轴；跳过墨幕后确认，验证设置没有丢失。
+                    app.world_mut().resource_scope(|world, mut t: Mut<crate::transition::InkTransition>| {
+                        let mut mode = world.resource_mut::<TitleMode>();
+                        let mut selected = 0;
+                        t.skip(&mut mode, &mut selected);
+                    });
+                    assert!(matches!(*app.world().resource::<TitleMode>(), TitleMode::Scroll { .. }));
+                    app.update();
+                }
+                let setup = app.world().resource::<RunSetup>();
+                assert_eq!(setup.god, god);
+                assert_eq!(setup.seed, 42);
+                assert_eq!(setup.omen.is_some(), returning);
+                assert!(matches!(
+                    *app.world().resource::<NextState<AppState>>(),
+                    NextState::Pending(AppState::Run)
+                ));
+            }
+        }
     }
 
     #[test]

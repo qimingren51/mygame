@@ -16,22 +16,24 @@ use lantern_content::Content;
 use lantern_core::step::{MAX_CATCHUP_TICKS, TICK_HZ};
 use lantern_platform::{PlatformPlugin, Profile, Settings, diagnostics, diagnostics::fatal, paths};
 use lantern_sim::{GameContent, Replay, ReplayPlayback, SimPlugin};
-use lantern_ui::{ReplaySeek, SeedOverride, UiPlugin};
+use lantern_ui::{GodMode, ReplaySeek, SeedOverride, UiPlugin};
 use lantern_view::ViewPlugin;
 
-const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--replay <回放文件> [--from <秒>]] [--smoke-test（初始化后渲染 120 帧）]";
+const USAGE: &str = "用法：lantern [--seed <数字>] [--windowed] [--god（无敌调试，不计奖励与成绩）] [--replay <回放文件> [--from <秒>]] [--smoke-test（初始化后渲染 120 帧）]";
 
 #[derive(Debug)]
 struct Args {
     seed: Option<u64>,
     windowed: bool,
+    god: bool,
     replay: Option<PathBuf>,
     from: Option<u32>,
     smoke_test: bool,
 }
 
 fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String> {
-    let mut args = Args { seed: None, windowed: false, replay: None, from: None, smoke_test: false };
+    let mut args =
+        Args { seed: None, windowed: false, god: false, replay: None, from: None, smoke_test: false };
     let mut it = values.into_iter();
     while let Some(a) = it.next() {
         match a.to_str() {
@@ -42,6 +44,7 @@ fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String
                 );
             }
             Some("--windowed") => args.windowed = true,
+            Some("--god") => args.god = true,
             Some("--smoke-test") => args.smoke_test = true,
             Some("--replay") => {
                 args.replay = Some(it.next().ok_or("--replay 后面要跟回放文件的路径")?.into())
@@ -60,6 +63,9 @@ fn parse_args(values: impl IntoIterator<Item = OsString>) -> Result<Args, String
     }
     if args.smoke_test && (args.replay.is_some() || args.from.is_some()) {
         return Err("--smoke-test 不能与 --replay 或 --from 一起使用".into());
+    }
+    if args.god && args.replay.is_some() {
+        return Err("回放使用录制时的无敌设置，不能与 --god 一起使用".into());
     }
     Ok(args)
 }
@@ -120,9 +126,12 @@ fn main() -> AppExit {
     if args.windowed {
         settings.fullscreen = false;
     }
+    if args.god {
+        info!("已启用无敌调试：本次启动的新对局不计奖励与成绩");
+    }
 
     let window = Window {
-        title: "提灯夜行".into(),
+        title: if args.god { "提灯夜行 · 无敌调试" } else { "提灯夜行" }.into(),
         resolution: WindowResolution::new(1280, 720),
         mode: if settings.fullscreen {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
@@ -143,6 +152,7 @@ fn main() -> AppExit {
     .insert_resource(Time::<Fixed>::from_hz(f64::from(TICK_HZ)))
     .insert_resource(GameContent(Arc::new(content)))
     .insert_resource(SeedOverride(args.seed))
+    .insert_resource(GodMode(args.god))
     .insert_resource(Profile::load(&paths::data_dir()))
     .add_plugins((
         SimPlugin,
@@ -182,6 +192,7 @@ mod tests {
         let args = parse_args([]).unwrap();
         assert_eq!(args.seed, None);
         assert!(!args.windowed);
+        assert!(!args.god);
         assert_eq!(args.replay, None);
         assert_eq!(args.from, None);
         assert!(!args.smoke_test);
@@ -195,6 +206,16 @@ mod tests {
         assert!(args.windowed);
         assert_eq!(args.replay, Some(PathBuf::from("回放 目录/夜行.ron")));
         assert_eq!(args.from, Some(12));
+    }
+
+    #[test]
+    fn parses_god_mode_for_manual_play_but_preserves_replay_settings() {
+        let args = parse_args(["--god", "--windowed", "--seed", "42"].map(OsString::from)).unwrap();
+        assert!(args.god && args.windowed);
+        assert_eq!(args.seed, Some(42));
+        for values in [["--god", "--replay", "night.ron"], ["--replay", "night.ron", "--god"]] {
+            assert!(parse_args(values.map(OsString::from)).unwrap_err().contains("回放使用录制时"));
+        }
     }
 
     #[test]
