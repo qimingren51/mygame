@@ -55,7 +55,7 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     let source = Source::Weapon(slot.def as u16);
     let element = Some(if on_hit.is_some() { Element::Fire } else { ctx.content.weapons[slot.def].element });
     if let Some(e) = escort {
-        // 绕身巨凤：沿环路转，每 every 秒对所在位置一击并点燃
+        // 绕身巨凤：沿环路转；每 every 秒以主角为圆心、凤飞的整圈一击，点燃并击退，护住近身
         slot.prev_angle = slot.angle;
         slot.angle += e.spin * DT;
         slot.count = 1;
@@ -65,14 +65,15 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
         if slot.inner_t <= 0.0 {
             slot.inner_t = e.every;
             let mut s = Strike::new(
-                p + slot.orbit_offset(slot.angle, 0),
-                Area::Circle(slot.size),
+                p,
+                Area::Circle(slot.radius + slot.size),
                 lv.damage * e.ratio,
                 source,
                 StrikeFx::None,
             );
             s.element = Some(Element::Fire);
             s.ignite = 1.0;
+            s.knockback = e.knockback;
             ctx.strikes.0.push(s);
         }
     }

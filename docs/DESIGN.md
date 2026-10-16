@@ -207,7 +207,7 @@ Points(2), Favor,                                                 // 夜签“�
 
 **法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）。用已有行为做新法器，只需要写数据。
 
-**异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false，数据里也写着 false。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。要打开：`lantern-tools kite --transformations`（`--fusion` 自动打开），测试里调 `Content::enable_transformations()`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
+**异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
 - **形态**：`WeaponSlot.form` 是互斥的 `Form::Base | Evolved | Mutated | Fused(fusion_id)`。`behavior()`、`stats()`、`name()`、`desc()`、`flavor()` 都按形态读取；`transformed()` 只表示已质变，不代表有合璧资格。`can_mutate` 要求开关打开、能正统进化，另持有克制本系的任意满级法器。进化或异化后不能改选，进化不重置法器的计时和纸鹤。异化本系计四点。
 - **合璧**：`fusions.ron` 定义三种合璧，`FusionDef { id, name, desc, flavor, weapons: [String; 2], behavior, level }`，RON 里写成 `weapons: ("crane", "lamp")`。加载时校验：材料存在、不同、各有正统进化和异化（正统与异化二选一是合璧的代价）、五行相生、行为和第一件材料同一种，以及行为数值和未知字段。`can_fuse` 在抽卡和应用时都核验两件 `Form::Evolved`、两系至少二阶和封印。合璧用一个槽替换两件，挂在第一件材料上；材料仍视为持有，不能重新抽回；两系各计四点。`occupied_slots` 统一容量判断：通常一格；挂着限制法器件数的灯坠（`max_weapons`，断剑）时两格，抽灯坠也按材料数判断。
@@ -303,7 +303,7 @@ assets/data/
   stats.ron        属性的基础值与上下限（第 6.6 节）
   elements.ron     五行、共鸣四阶与计点、相生、太极、印记与十种反应
   weapons.ron      法器：行为、五行、每级数值表、正统进化、异化
-  fusions.ron      合璧（EA，run.ron 的 transformations 打开才出现）：两件正统进化材料、合璧后的行为与数值
+  fusions.ron      合璧（EA，run.ron 的 transformations 打开才出现，v0.2 起默认打开）：两件正统进化材料、合璧后的行为与数值
   passives.ron     心法
   enemies.ron      妖物、精英、夜主招式（阶段、幻身、扫击、狐火雨）、奇遇小动物的奖励
   affixes.ron      精英词缀

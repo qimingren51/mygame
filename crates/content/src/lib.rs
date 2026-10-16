@@ -327,9 +327,9 @@ mod tests {
     }
 
     #[test]
-    fn transformations_flag_defaults_off() {
+    fn transformations_are_on_and_the_flag_still_switches() {
         let c = Content::load(&repo_data_dir()).unwrap();
-        assert!(!c.run.transformations, "异化与合璧是 EA 内容，默认关闭");
+        assert!(c.run.transformations, "试玩第 1 轮起默认打开（docs/PLAYTEST.md 第 6 项）");
         let text = std::fs::read_to_string(repo_data_dir().join("run.ron")).unwrap();
         let without: String = text
             .lines()
@@ -337,12 +337,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(!ron::from_str::<RunDef>(&without).unwrap().transformations, "不写开关时关闭");
-        let on = text.replace("transformations: false", "transformations: true");
-        assert!(ron::from_str::<RunDef>(&on).unwrap().transformations);
-        let mut enabled = c.clone();
+        let off = text.replace("transformations: true", "transformations: false");
+        assert!(!ron::from_str::<RunDef>(&off).unwrap().transformations);
+        let mut off = c.clone();
+        off.run.transformations = false;
+        let mut enabled = off.clone();
         enabled.enable_transformations();
         assert!(enabled.run.transformations);
-        assert_ne!(enabled.hash, c.hash, "打开开关后的回放不能在关着的内容上重放");
+        assert_ne!(enabled.hash, off.hash, "打开开关后的回放不能在关着的内容上重放");
         let mut cap = c.clone();
         cap.run.ground_cap = 0;
         assert!(cap.validate(Path::new("data")).unwrap_err().to_string().contains("run.ron"));

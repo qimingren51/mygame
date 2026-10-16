@@ -376,6 +376,7 @@ impl Checker<'_> {
                             ("巨凤判定半径", e.size),
                         ],
                     )?;
+                    self.non_negative(file, &[("巨凤击退", e.knockback)])?;
                 }
                 if *pick == 0 {
                     return self.fail(file, format!("\"{id}\"：Seeker.pick 至少为 1"));

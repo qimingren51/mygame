@@ -529,8 +529,9 @@ fn ground_zones_chip_bamboo_like_other_area_damage() {
 
 #[test]
 fn with_the_flag_off_there_are_no_mutations_or_fusions() {
-    let off = common::content();
-    assert!(!off.run.transformations, "默认关闭");
+    assert!(common::content().run.transformations, "试玩第 1 轮起默认打开");
+    let mut off = common::content();
+    off.run.transformations = false;
     let on = content();
     let (a, mut b, _) = crowded(&on);
     let bell = a.0.iter().position(|w| on.weapons[w.def].id == "bell").unwrap();

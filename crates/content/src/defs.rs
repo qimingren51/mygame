@@ -895,7 +895,8 @@ pub struct FeatherDef {
     pub ratio: f32,
 }
 
-/// 绕身巨凤：半径 radius、转速 spin（弧度/秒）、判定半径 size，每 every 秒造成“当前伤害 × ratio”并点燃。
+/// 绕身巨凤：沿半径 radius 的环路以 spin（弧度/秒）转，画面上凤身大小 size；每 every 秒以主角为圆心、
+/// 半径 radius + size 的圆造成“当前伤害 × ratio”、点燃并击退 knockback——护住近身，替代被吃掉的不夜城那圈灯。
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EscortDef {
@@ -904,6 +905,8 @@ pub struct EscortDef {
     pub ratio: f32,
     pub spin: f32,
     pub size: f32,
+    #[serde(default)]
+    pub knockback: f32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]

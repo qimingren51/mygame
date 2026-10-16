@@ -6,7 +6,7 @@
 //!
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
 //!       [--skill novice|regular|expert|circle] [--lamp <id>] [--school <流派>|all] [--combo <反应>|all]
-//!       [--fusion <合璧 ID>|all] [--transformations]（打开异化与合璧；内容里默认关闭，--fusion 自动打开）
+//!       [--fusion <合璧 ID>|all] [--transformations]（打开异化与合璧；内容里已默认打开，留着兼容旧命令）
 //!       [--assert-build-pace]（检查 3／6／9 分钟的构筑节奏）
 //!       [--csv <目录>]（每 30 秒一行的 timeline.csv、每局一行的 runs.csv）[--jobs <线程数>]
 //!       [--endless]（无尽夜，最多打 40 分钟）[--god]（主角无敌）
@@ -1009,7 +1009,7 @@ pub fn kite_cmd(args: &[OsString]) -> Result<(), String> {
     let skill_name = text("--skill")?.unwrap_or_else(|| "expert".into());
     let skill = Skill::by_name(&skill_name).ok_or("--skill 只能是 novice、regular、expert、circle")?;
     let mut content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
-    // 异化与合璧是 EA 内容，默认关闭；跑合璧路线或显式要求时才打开
+    // 异化与合璧在内容里默认打开；旧命令带 --transformations 或 --fusion 时照样打开
     let transformations = args.iter().any(|a| a == "--transformations") || value("--fusion").is_some();
     if transformations {
         content.enable_transformations();

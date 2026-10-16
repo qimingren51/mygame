@@ -204,5 +204,5 @@
     // 同类区域压在同一只妖物上只算最强的一块（镇岳的地裂不叠加）
     ground_cap: 64,
     // 异化与合璧（docs/GAMEPLAY.md 第 6.5、6.6 节）属于 EA 内容，默认关闭：不出异化、合璧卡
-    transformations: false,
+    transformations: true,
 )
