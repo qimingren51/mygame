@@ -476,7 +476,7 @@ assets/data/
 
   | 图集 | 内容 |
   | --- | --- |
-  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
+  | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns；狐祠庭院的大狐仙祠 fox_shrine_grand、石牌坊 fox_gate、檐下留灯 fox_eave_lamp 和 fox_eave_lamp_lit），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
   | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片） |
@@ -531,6 +531,15 @@ assets/data/
 - **青丘道具**：
   - `bamboo_clump`（竹丛，可打碎的软障碍）和 `bamboo_clump_broken` 同画布、同锚点，打碎时直接换图；meta 里互相用 `broken_variant` / `intact_variant` 指向对方。2 倍下 320²，比别的道具大。
   - `fox_shrine`（狐仙祠）和 `fox_lanterns`（狐灯）有 `_emit`，meta 写了光色 `light_color: "#8FE3C8"` 和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90）。狐灯可以在 `glow` 放一盏大光，或者在 `glow_0..2` 各放一盏小光。`stone_fox`（石狐）不发光。按游戏里的反馈放大过：狐仙祠高约 38 个世界单位（和石灯笼差不多高、更宽，好当地标），石狐约 32。
+  - **狐祠庭院**（每局一座）：
+    - `fox_shrine_grand`：正殿，2 倍下 512²，高约 98、宽约 90 个世界单位。按这个尺寸画的，原样摆，不要放大 `fox_shrine`。挂点 `glow`（右前檐角的青灯，`light_color: "#8FE3C8"`，光半径 115）和 `eave_lamp`（左次间檐下挂钩的下端，挂留灯）；meta 的 `eave_lamp_asset` 写了挂哪件。
+    - `fox_gate`：入口的石牌坊（冲天柱式，不是鸟居），2 倍下 384²，宽约 74、高约 75 个世界单位。锚点在两柱之间的地面中点，放在中轴上、正殿前面，不发光。
+    - `fox_eave_lamp`（没点）和 `fox_eave_lamp_lit`（点着）：檐下的留灯，同画布、同锚点、同纸纹，点灯时直接换图；meta 里用 `lit_variant` / `unlit_variant` 互指。约 17 × 10.5 个世界单位，不到石灯笼一半高，形制也不同，不会被当成灯阵的灯。点着的那张有 `_emit`，在 `flame` 挂点放光：`light_color: "#FF9A4A"`（主角红纸灯的火，“留灯”就是留下自己的火），光半径 50。
+  - **挂着的道具**：`category: "prop"` 且 `anchor_kind: "hanging"` 的道具（目前只有两张留灯）不用道具的落地锚点。锚点是挂绳顶端的挂钩，现在是 (0.5, 0.1)，图挂在锚点下面。游戏这样画它：
+    - 锚点对准宿主道具的挂点（`fox_shrine_grand` 的 `eave_lamp`）；
+    - 画在宿主之上、和宿主同一排序深度，缩放跟宿主一致；
+    - 不落地：`shadow_radius_px` 为 0，不加接触阴影，不占脚底碰撞；
+    - 光半径同其他发光道具，按宿主缩放的平方根放大。
 - **竹刺**：`weapons/bamboo_spike` 锚点居中、朝 +X，按飞行方向旋转，不拉伸；meta 的 `length_units` 是竹刺长度（28 个世界单位）。`bamboo_spike_trail` 是拖尾（叠加、可染色），锚点在右端，和竹刺放在同一点、同样旋转，画在竹刺下面。
 - **迷雾**：`vfx/mist_0`（大团）、`mist_1`（碎团）是 512² 的无缝平铺贴图，帧不裁边。meta 有 `tileable: true`、`tile_units: 128`（一张覆盖 128 个世界单位）和建议不透明度 `alpha_hint`（0.2、0.15，是在 sRGB 里混合估的；游戏在线性 HDR 里混合，浅色叠在暗处会亮得多，实测用 0.05、0.035）。以后叠在暗处的浅色素材，meta 里的建议不透明度按 sRGB 值的四分之一左右估，或者写“游戏里实测值”。在图集里不能用纹理重复，游戏按 `tile_units` 铺一格格的四边形；两层用不同速度漂移，叠在暗层之上、普通混合。贴图是白的，染 `#DDD9CF`。
 - **开场卷轴**：`screens/scroll_qingqiu.png`、`scroll_qingqiu_dawn.png`，2400×800 不透明 RGB。第一次进入青丘时展开长夜版，旁白见 docs/LORE.md 青丘一节的“卷轴”；拿回青丘的烛火、天明以后用天明版（LORE 第 8 节“画面建议”：每拿回一缕烛火，那个地区的颜色回到画里）。左上约 x 60–950、y 40–390 是空的天空，留给旁白（长夜版用纸色字，天明版用墨色字），文字由游戏画。

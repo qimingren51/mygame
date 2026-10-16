@@ -186,8 +186,11 @@ art/.venv/bin/python art/post/title_screen.py --sample   # 只出候选 out/scre
 ## 青丘道具（render/props_qingqiu.py）
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → out/assets@2x/<道具>/，审图 review@2x/qq_props_sample.png（约 30 秒）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → out/assets@2x/<道具>/，审图 review@2x/qq_props_sample.png（约 1 分半）
 ```
+
+审图两张：`qq_props_sample.png`（前五件）和 `qq_courtyard_sample.png`（狐祠庭院四件：和主角、石灯笼、放大 2.5 倍的小狐仙祠比大小；
+大狐仙祠挂上留灯，宣纸上、主角灯光里、灯光外；照 `crates/view/src/ground.rs` 摆的庭院，光半径按游戏的世界单位）。
 
 只出 2 倍。渲法同 `produce.py` 的道具（`render_asset`、`PROP_ANCHOR`、`idle_S_00` 一帧、渲染锁）；模型在 `models/qingqiu_props.py`。
 `--only a,b` 只重渲部分，`--review` 只自检和重拼审图，`--sample` 渲到 `out/qq_props_sample@2x/` 试样。EXR 中间文件放 `out/_tmp_qq/`。
@@ -199,8 +202,15 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/props_qingqiu.py   # → o
 | `fox_shrine` | 192² | 石龛、朱砂柱、淡墨四坡翘角顶；龛里白石狐，台阶上有供品，檐角一盏小青灯（`_emit`）。约 1.3 米（地标：和石灯笼差不多高，宽得多）。挂点 `glow` |
 | `stone_fox` | 192² | 方石座上侧身蹲坐的石狐，带苔，褪色红围嘴，不发光。约 1.2 米 |
 | `fox_lanterns` | 192² | 木柱、竹梁、翘角瓦檐，三盏带竹篾的青纸灯（`_emit`），柱上一条朱砂纸符。挂点 `glow`（中心）和 `glow_0..2` |
+| `fox_shrine_grand` | 512² | 狐祠庭院的正殿，按这个尺寸建，原样摆（不要放大）：两层台基、四级台阶，三开间（明间龛里白石狐，次间小龛供白石狐珠、墙前垂褪色朱砂布幡），四根朱砂柱，重檐淡墨四坡顶、葫芦宝顶，供桌上团子、香炉、果子；右前檐角一盏小青灯（`_emit`）。约 98 × 90 单位（主角的 1.8 倍高）。挂点 `glow`（青灯，光半径 115）、`eave_lamp`（左次间檐下铁钩的下端，挂留灯） |
+| `fox_gate` | 384² | 狐祠庭院入口的石牌坊（冲天柱式一间两柱一楼，不是鸟居）：夹杆石方墩，柱头宝珠，三层额枋带浮雕花板、空白石匾（只有一方朱砂小印）、雀替，两柱之间一段淡墨翘角瓦顶；带苔，左柱系褪色红布，不发光。约 75 × 74 单位，门洞净宽约 1.8 米、净高 2.4 米。锚点在两柱之间的地面中点 |
+| `fox_eave_lamp` | 160² | 檐下留灯（没点）：小圆纸灯笼，素白纸、十二根竹篾，木顶盖、木底托、朱砂穗，挂绳顶上一个小铁钩；不发光。约 17 × 10.5 单位（不到石灯笼一半高）。`anchor_kind: "hanging"`，锚点 (0.5, 0.1) 是挂钩顶端；挂点 `flame`（灯芯）；`lit_variant` |
+| `fox_eave_lamp_lit` | 160² | 同画布、同锚点、同纸纹：点着的留灯，纸壳透出暖色灯芯（`_emit`），`light_color: "#FF9A4A"`（主角红纸灯的火）、光半径 50。挂点 `flame`；`unlit_variant` |
 
-发光的两件在 meta 里写了 `light_color: "#8FE3C8"`（青火）和建议的光半径 `light_radius_units`（狐灯 140、狐仙祠 90，世界单位）；meta 里还有 `region: "qingqiu"`。
+发光的青丘道具在 meta 里写了 `light_color`（青火 `#8FE3C8`；留灯 `#FF9A4A`）和建议的光半径 `light_radius_units`（世界单位：狐灯 140、狐仙祠 90、
+大狐仙祠 115、留灯 50）；meta 里还有 `region: "qingqiu"`。挂着的道具（`anchor_kind: "hanging"`，现在只有留灯）锚点是挂钩顶端，
+`check_asset.py` 只要求锚点 x = 0.5、y ≤ 0.25；它的“身高中位数”量的是锚点以上，所以是 0。
+`fox_eave_lamp_lit` 的灯芯占了大半个灯，`palette_extra` 里多列了纸纹压暗的灯芯色和灯芯与竹篾的过渡色（同 `lanterns.palette_extra`）。
 
 ## 青丘妖物与新动作（render/produce.py、render/qingqiu_review.py）
 

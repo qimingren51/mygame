@@ -6,7 +6,8 @@
 
 检查项：
   1. meta.json 结构：name/size/anchor/anims/sockets；每个动画有 frames/fps/dirs，朝向都在 DIRS 里；
-     anchor：道具（category=prop）用 PROP_ANCHOR，大体型妖物（anchor_kind=big_enemy）用 BIG_ENEMY_ANCHOR，其余 ANCHOR；
+     anchor：道具（category=prop）用 PROP_ANCHOR（挂着的道具 anchor_kind=hanging：x=0.5、y≤HANGING_ANCHOR_MAX_Y），
+     大体型妖物（anchor_kind=big_enemy）用 BIG_ENEMY_ANCHOR，其余 ANCHOR；
      px_per_unit：素材的出图密度（缺省按 2，即 1 倍）。像素阈值（配准容差、外线宽、帧尺寸）都按
      素材自己的密度换算，所以 1 倍和 2 倍的文件夹用同一个脚本、任何环境变量下都能检查
   2. 每个 <动画>_<朝向>_<帧号>.png 都存在、是 RGBA、尺寸等于 meta.size；附带的 _emit/_flash 图尺寸一致
@@ -53,6 +54,8 @@ from style import style as S  # noqa: E402
 
 LIGHT_COLORS = [S.LANTERN_LIGHT, S.FLAME_LIGHT, S.SOUL_LIGHT, *S.EYE.values()]
 PALETTE_MIN_SHARE = 0.90
+HANGING_ANCHOR_MAX_Y = 0.25  # 挂着的道具（anchor_kind=hanging）：锚点 y 不超过帧高的这个比例
+EXTRA_FRAMES_1X = (192, 256)  # FRAME 之外的道具帧（1 倍像素）：石牌坊 192、大狐仙祠 256（qingqiu_props.py）
 LINE_RATIO_RANGE = (0.05, 0.65)  # 主角墨氅背面（W/NW）墨色本来就多，上限 65%
 BODY_WINDOW = 0.15  # 中间列半宽（相对帧宽）：求底线、脚点
 TOP_WINDOW = 0.06  # 求“头顶”时用更窄的列（头顶/冠就在锚点正上方，两侧摆动的灯笼不算）
@@ -149,7 +152,11 @@ def check_asset(asset_dir: Path) -> dict:
     W, H = meta["size"]
     if meta.get("category") == "overlay":
         return check_overlay(asset_dir, meta, errors, warns, info)
-    if meta.get("category") == "prop":
+    if meta.get("category") == "prop" and meta.get("anchor_kind") == "hanging":
+        # 挂着的道具（檐下留灯）：锚点是挂钩顶端，在中线上、帧的上部
+        ok = meta["anchor"][0] == 0.5 and 0.0 < meta["anchor"][1] <= HANGING_ANCHOR_MAX_Y
+        want_anchor = list(meta["anchor"]) if ok else [0.5, f"≤{HANGING_ANCHOR_MAX_Y}"]
+    elif meta.get("category") == "prop":
         want_anchor = S.PROP_ANCHOR
     elif meta.get("anchor_kind") == "big_enemy":
         want_anchor = S.BIG_ENEMY_ANCHOR
@@ -164,7 +171,7 @@ def check_asset(asset_dir: Path) -> dict:
     foot_tol = S.FOOT_TOLERANCE_PX * k
     line_outer = S.LINE_OUTER_PX * k
     info["px_per_unit"] = ppu
-    if W != H or W not in [round(v * k) for v in S.FRAME.values()]:
+    if W != H or W not in [round(v * k) for v in (*S.FRAME.values(), *(v * S.DENSITY for v in EXTRA_FRAMES_1X))]:
         warns.append(f"meta.size = {meta['size']}，不在 FRAME 规定的尺寸里")
     expected: list[tuple[str, str, int]] = []
     for an, a in meta["anims"].items():
