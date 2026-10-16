@@ -236,3 +236,32 @@ fn codex_pages_with_everything_unlocked_fit_after_resize() {
         assert_fits_after_resize(&mut app);
     }
 }
+
+#[test]
+fn codex_hides_locked_weapons_until_obtained() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+    let c = Content::load(&root).unwrap();
+    let Some(locked) = (0..c.weapons.len()).find(|&d| c.weapon_locked(d)) else { return };
+    let name = c.weapons[locked].name.clone();
+    let count = |profile: &Profile| {
+        let mut app = setup();
+        let p = profile.clone();
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      c: Res<lantern_sim::GameContent>,
+                      fonts: Res<Fonts>,
+                      skin: Res<skin::Skin>,
+                      db: Res<AtlasDb>| {
+                    crate::hub::codex_panel(&mut commands, &c.0, &fonts, &skin, &db, &p, 1);
+                },
+            )
+            .unwrap();
+        let world = app.world_mut();
+        world.query::<&Text>().iter(world).filter(|t| t.0 == name).count()
+    };
+    let mut profile = Profile::default();
+    assert_eq!(count(&profile), 0, "锁着、没拿到过的不列");
+    profile.codex.insert(format!("w:{}", c.weapons[locked].id));
+    assert_eq!(count(&profile), 1);
+}

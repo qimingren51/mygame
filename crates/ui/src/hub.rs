@@ -464,9 +464,13 @@ struct CodexEntry {
 }
 
 /// 法器页：每件法器一行（本体、进化、异化），最后一行合璧；异化与合璧关着时不列。
-fn weapon_entries(c: &Content) -> Vec<Vec<CodexEntry>> {
+/// 还锁着的法器（`run.ron` 的 `choices.locked`）拿到过才列，免得满页都是拿不到的空位。
+fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
     let mut rows = Vec::new();
-    for w in &c.weapons {
+    for (d, w) in c.weapons.iter().enumerate() {
+        if c.weapon_locked(d) && !profile.codex.contains(&format!("w:{}", w.id)) {
+            continue;
+        }
         let color = element_color(c, w.element);
         let mut row = vec![CodexEntry {
             key: format!("w:{}", w.id),
@@ -583,7 +587,7 @@ pub(crate) fn codex_panel(
 ) {
     let page = page.min(CODEX_PAGES.len() - 1);
     let rows = match page {
-        1 => weapon_entries(c),
+        1 => weapon_entries(c, profile),
         2 => passive_entries(c),
         _ => Vec::new(),
     };
