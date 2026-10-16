@@ -5,8 +5,10 @@
 //! - [`seeker`] 扑击（纸鹤 / 千鹤引）
 //! - [`drop`] 落印（山印 / 镇岳），以及进化后的地裂
 //! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
+//! - [`sky_lantern`] 孔明灯（孔明灯 / 万灯升）
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use bevy_math::{Vec2, ops};
 
 use lantern_content::{Content, WeaponBehavior, WeaponLevel};
@@ -24,6 +26,7 @@ pub mod drop;
 pub mod orbit;
 pub mod pulse;
 pub mod seeker;
+pub mod sky_lantern;
 pub mod sweep;
 pub mod volley;
 
@@ -236,6 +239,16 @@ impl Arsenal {
     }
 }
 
+/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、地裂）。
+/// 合成一个参数，免得 `update_weapons` 超过 Bevy 的参数个数上限。
+#[derive(SystemParam)]
+pub(crate) struct Props<'w> {
+    shots: ResMut<'w, volley::Shots>,
+    seals: ResMut<'w, drop::Seals>,
+    lanterns: ResMut<'w, sky_lantern::SkyLanterns>,
+    ground: ResMut<'w, drop::Fissures>,
+}
+
 /// 法器在一步里需要的东西。
 pub(crate) struct Ctx<'a> {
     pub content: &'a Content,
@@ -251,6 +264,7 @@ pub(crate) struct Ctx<'a> {
     pub strikes: &'a mut Strikes,
     pub shots: &'a mut volley::Shots,
     pub seals: &'a mut drop::Seals,
+    pub lanterns: &'a mut sky_lantern::SkyLanterns,
     pub ground: &'a mut drop::Fissures,
     pub outbox: &'a mut SimOutbox,
     pub bamboo: &'a mut crate::bamboo::Bamboo,
@@ -268,9 +282,7 @@ pub(crate) fn update_weapons(
     mut arsenal: ResMut<Arsenal>,
     mut hits: ResMut<HitQueue>,
     mut strikes: ResMut<Strikes>,
-    mut shots: ResMut<volley::Shots>,
-    mut seals: ResMut<drop::Seals>,
-    mut ground: ResMut<drop::Fissures>,
+    mut props: Props,
     mut outbox: ResMut<SimOutbox>,
     mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
@@ -279,6 +291,7 @@ pub(crate) fn update_weapons(
     let t = tick.secs();
     let en = &mut *en;
     let (pos, hero) = *player;
+    let props = &mut props;
     for slot in &mut arsenal.0 {
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
@@ -296,9 +309,10 @@ pub(crate) fn update_weapons(
             rng: rng.0.get(lantern_core::Stream::Combat),
             hits: &mut hits,
             strikes: &mut strikes,
-            shots: &mut shots,
-            seals: &mut seals,
-            ground: &mut ground,
+            shots: &mut props.shots,
+            seals: &mut props.seals,
+            lanterns: &mut props.lanterns,
+            ground: &mut props.ground,
             outbox: &mut outbox,
             bamboo: &mut bamboo,
             found: &mut found,
@@ -310,6 +324,7 @@ pub(crate) fn update_weapons(
             WeaponBehavior::Seeker { .. } => seeker::update(&mut ctx, slot),
             WeaponBehavior::Drop { .. } => drop::update(&mut ctx, slot),
             WeaponBehavior::Sweep { .. } => sweep::update(&mut ctx, slot),
+            WeaponBehavior::SkyLantern { .. } => sky_lantern::update(&mut ctx, slot),
         }
     }
 }

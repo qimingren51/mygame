@@ -853,6 +853,20 @@ pub enum WeaponBehavior {
         #[serde(default)]
         echo: f32,
     },
+    /// 放飞孔明灯（孔明灯 / 万灯升，docs/BALANCE.md 第 6.3 节）：每次放 count 盏，各自飘向妖物最密的地方，
+    /// 放飞 fuse 秒后落地爆燃（半径 radius、点 1 层灼烧），落点留下一块火海（zone）。
+    /// 落点：在 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只；同一次放的几盏落点至少隔开 spread。
+    /// 灯以 speed 飘过去，每 retarget 秒在落点附近重新找一次。
+    SkyLantern {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        speed: f32,
+        fuse: f32,
+        retarget: f32,
+        zone: FissureDef,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点

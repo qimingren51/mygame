@@ -205,9 +205,11 @@ Points(2), Favor,                                                 // 夜签“�
 - **升级选项**：权重同网页版，已到一阶的五行 ×1.5；灵光一闪的概率是属性 `Inspiration`。保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上缺进化心法时，每次升级 25% 把那门心法放进选项（`run.ron` 的 `pity`）。封印（`SimCommand::Banish`）把选中的一项永久移出本局卡池，换一个新选项，次数来自属性 `Banishes`。
 - 新增一种动作 = 给枚举加一个变体，再在 `lantern_sim::combat` 里写处理分支。之后任何法器、共鸣、夜签、心法都能用它。M2.5 的五行反应、灯坠按这个方式加（docs/GAMEPLAY.md 第 16 节）。
 
-**法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）、`Sweep` 扇形挥击（铜钱剑，进化后一整圈）。用已有行为做新法器，只需要写数据。
+**法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）、`Sweep` 扇形挥击（铜钱剑，进化后一整圈）、`SkyLantern` 孔明灯（落地爆燃留火海）。用已有行为做新法器，只需要写数据。
 
 **扇形挥击**（`sim/weapons/sweep.rs`，docs/BALANCE.md 第 6.3 节）：冷却好了就朝 `radius + aim` 以内最近的妖物挥（锁定不到的不算；没有就朝主角面向 `Player.facing`，所以 `weapons::Ctx` 带着 `facing`）。扇形里的妖物按距离从近到远、同距离按槽位，最多打 `count`（加数量加成）只；距离算上妖物半径，角度看妖物中心。命中带 `Hit.crit_bonus`（这一击额外的暴击率）。天罡的 `echo`：暴击的那一下在 `resolve_hits` 里往队尾追加一次同目标的再斩（伤害 × echo，再斩不再触发）。每次出手发 `SimEvent::Sweep { pos, dir, arc, radius, weapon, evolved }` 给画面画刀光。新法器暂时没有 `WeaponIdentity`，画面和音效走通用的那一套。
+
+**孔明灯**（`sim/weapons/sky_lantern.rs`，docs/BALANCE.md 第 6.3 节）：冷却好了放飞 `count`（加数量加成）盏，灯放进 `SkyLanterns` 资源，由 `update_sky_lanterns`（紧跟 `update_seals`）每步推进。落点：主角 `range` 以内最近的 `pick` 只里，挑 `cluster` 以内同伴最多的那只（一样多取更近的），离已选落点不到 `spread` 的跳过；附近没有妖物就落在面向前方 150，几盏左右错开 `spread`。灯以 `speed` 飘向落点，每 `retarget` 秒在原落点 1.5 × `cluster` 以内重找一次；飞满 `fuse` 秒在当前位置落地：一次火属性的圆形 `Strike`（`ignite` 1 层），再按 `zone` 往地裂池加一块火海。落地发 `SimEvent::LanternBurst { pos, radius, evolved }`。落点圈画面直接读 `SkyLanterns`（`t`、`fuse`、`target`、`radius`）。灯、山印、地裂、飞剑合成 `weapons::Props` 一个系统参数，免得 `update_weapons` 超过 Bevy 的 16 个参数上限。
 
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 

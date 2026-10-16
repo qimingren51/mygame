@@ -279,6 +279,12 @@ pub enum SimEvent {
         weapon: u16,
         evolved: bool,
     },
+    /// 孔明灯落地爆燃（evolved：万灯升）
+    LanternBurst {
+        pos: Vec2,
+        radius: f32,
+        evolved: bool,
+    },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,

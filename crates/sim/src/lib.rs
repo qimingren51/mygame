@@ -268,6 +268,7 @@ impl Plugin for SimPlugin {
                         combat::run_actions,
                         weapons::update_weapons,
                         weapons::drop::update_seals,
+                        weapons::sky_lantern::update_sky_lanterns,
                         weapons::drop::update_ground,
                         player::dash_strike,
                         reveal::flame_band,

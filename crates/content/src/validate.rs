@@ -250,6 +250,7 @@ impl Checker<'_> {
                     | WeaponBehavior::Pulse { .. }
                     | WeaponBehavior::Drop { .. }
                     | WeaponBehavior::Sweep { .. }
+                    | WeaponBehavior::SkyLantern { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -400,6 +401,22 @@ impl Checker<'_> {
                     &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
                 )?;
                 self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
+            }
+            WeaponBehavior::SkyLantern { range, pick, cluster, spread, speed, fuse, retarget, zone } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：SkyLantern.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[
+                        ("SkyLantern.range", *range),
+                        ("SkyLantern.speed", *speed),
+                        ("SkyLantern.fuse", *fuse),
+                        ("SkyLantern.retarget", *retarget),
+                    ],
+                )?;
+                self.non_negative(file, &[("SkyLantern.cluster", *cluster), ("SkyLantern.spread", *spread)])?;
+                self.fissure(file, zone)
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {

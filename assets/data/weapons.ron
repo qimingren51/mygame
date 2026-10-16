@@ -210,4 +210,32 @@
             level: (cooldown: 0.80, count: 10, radius: 100.0, damage: 100.0),
         )),
     ),
+    (
+        id: "sky_lantern", name: "孔明灯", icon: "孔", element: Fire,
+        desc: "放飞孔明灯，飘向妖物最密的地方，落地爆燃，留下火海。",
+        flavor: "灯里写着一个人的名字。飘到哪儿，哪儿就亮一片。",
+        // 落点：360 以内最近的 24 只里，挑 100 以内同伴最多的那只；几盏至少隔开 120。灯每秒飘 60，3 秒后落地。
+        // 火海：半径 0.8 倍，3 秒，每 0.5 秒伤害 × 0.12
+        behavior: SkyLantern(range: 360.0, pick: 24, cluster: 100.0, spread: 120.0, speed: 60.0, fuse: 3.0, retarget: 0.5,
+            zone: (kind: Fire, radius_scale: 0.8, life: 3.0, tick: 0.5, damage_scale: 0.12, slow: 0.0, slow_time: 0.0)),
+        levels: [
+            (cooldown: 3.4, count: 1, radius: 44.0, damage: 34.0),
+            (cooldown: 3.3, count: 1, radius: 46.0, damage: 42.0),
+            (cooldown: 3.2, count: 2, radius: 48.0, damage: 48.0),
+            (cooldown: 3.1, count: 2, radius: 50.0, damage: 56.0),
+            (cooldown: 3.0, count: 2, radius: 52.0, damage: 64.0),
+            (cooldown: 2.8, count: 2, radius: 56.0, damage: 72.0),
+            (cooldown: 2.7, count: 2, radius: 56.0, damage: 81.0),
+            (cooldown: 2.6, count: 2, radius: 56.0, damage: 90.0),
+        ],
+        evolution: Some((
+            name: "万灯升", passive: "luxin",
+            desc: "满天孔明灯同时坠落。",
+            flavor: "上元夜，一城的人一齐放灯。落下来的时候，天也跟着落下来。",
+            // 每 5 秒 8 盏，落点在 480 以内分散挑，2 秒落地
+            behavior: SkyLantern(range: 480.0, pick: 48, cluster: 100.0, spread: 120.0, speed: 120.0, fuse: 2.0, retarget: 0.5,
+                zone: (kind: Fire, radius_scale: 0.8, life: 3.0, tick: 0.5, damage_scale: 0.12, slow: 0.0, slow_time: 0.0)),
+            level: (cooldown: 5.0, count: 8, radius: 64.0, damage: 160.0),
+        )),
+    ),
 ]
