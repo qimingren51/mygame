@@ -248,6 +248,7 @@ impl Checker<'_> {
                     | WeaponBehavior::Pulse { .. }
                     | WeaponBehavior::Drop { .. }
                     | WeaponBehavior::Sweep { .. }
+                    | WeaponBehavior::Vine { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -398,6 +399,21 @@ impl Checker<'_> {
                     &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
                 )?;
                 self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
+            }
+            WeaponBehavior::Vine { break_extra, reconnect, leech, heal_per_second, bind } => {
+                self.non_negative(file, &[("Vine.break_extra", *break_extra)])?;
+                self.positive(file, &[("Vine.reconnect", *reconnect)])?;
+                self.fraction(file, "Vine.leech", *leech)?;
+                for level in 1..=8 {
+                    self.positive(file, &[("Vine.heal_per_second", heal_per_second.at(level as f32))])?;
+                }
+                if let Some(bind) = bind {
+                    self.positive(
+                        file,
+                        &[("Vine.bind.every", bind.every), ("Vine.bind.duration", bind.duration)],
+                    )?;
+                }
+                Ok(())
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {
@@ -1322,6 +1338,40 @@ impl Content {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vine_content_rejects_invalid_links_and_healing_parameters() {
+        let c = Content::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).unwrap();
+        let vine = c.weapon_index("vine").unwrap();
+        for (field, value) in [
+            ("break_extra", -1.0),
+            ("reconnect", 0.0),
+            ("leech", 1.1),
+            ("heal", f32::NAN),
+            ("bind", 0.0),
+            ("radius", 0.0),
+            ("cooldown", 0.0),
+        ] {
+            let mut bad = c.clone();
+            let evo = bad.weapons[vine].evolution.as_mut().unwrap();
+            let WeaponBehavior::Vine { break_extra, reconnect, leech, heal_per_second, bind } =
+                &mut evo.behavior
+            else {
+                panic!("青藤必须使用连线行为");
+            };
+            match field {
+                "break_extra" => *break_extra = value,
+                "reconnect" => *reconnect = value,
+                "leech" => *leech = value,
+                "heal" => heal_per_second.0 = value,
+                "bind" => bind.as_mut().unwrap().every = value,
+                "radius" => evo.level.radius = value,
+                "cooldown" => evo.level.cooldown = value,
+                _ => unreachable!(),
+            }
+            assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("weapons.ron"));
+        }
+    }
 
     #[test]
     fn sweep_content_rejects_invalid_geometry_and_damage_parameters() {

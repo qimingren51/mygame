@@ -128,6 +128,7 @@ pub(crate) fn impact_group(identity: WeaponIdentity, crit: bool) -> (usize, &'st
         Crane => (3, ["crane_hit", "crane_crit"], 0.06),
         Seal => (4, ["seal_hit", "seal_crit"], 0.10),
         CoinSword => (5, ["coin_sword_hit", "coin_sword_crit"], 0.07),
+        Vine => (6, ["vine_hit", "vine_crit"], 0.09),
     };
     (index, keys[usize::from(crit)], gap)
 }
@@ -144,6 +145,7 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
         Crane => 0.13,
         Seal => 0.22,
         CoinSword => 0.16,
+        Vine => 0.12,
     };
     render_seeded(life, 0x92a4_017b_u32.wrapping_add((index * 37 + variant * 101) as u32), |b| {
         match identity {
@@ -187,6 +189,12 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
                         0.035 * gain / (i + 1) as f32,
                     );
                 }
+            }
+            Vine => {
+                // 短促木质拨响与叶片摩擦，连续吸血不堆成长尾噪声。
+                b.wood(0.0, 0.055 * gain, 430.0 + v * 31.0);
+                b.noise(0.006, 0.045, 0.035 * gain, noise(FilterKind::Band, 1450.0 + v * 140.0));
+                b.sine(jiao(10 + variant as i32), 0.005, 0.08, 0.025 * gain);
             }
             CoinSword => {
                 b.wood(0.0, 0.09 * gain, 780.0 + v * 35.0);

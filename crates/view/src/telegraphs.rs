@@ -10,9 +10,10 @@ use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 use lantern_content::Content;
 use lantern_sim::boss::{BossState, DangerArea};
-use lantern_sim::{AppState, Enemies, GameContent, Player, Pos, PrevPos};
+use lantern_sim::{AppState, Director, Enemies, GameContent, Player, Pos, PrevPos, RunState};
 
-use crate::{layer, to_screen};
+use crate::boss_cues::{BossCues, Release, ReleaseShape};
+use crate::{Feel, layer, to_screen};
 
 #[derive(Resource)]
 pub(crate) struct Readability {
@@ -66,6 +67,21 @@ fn ranged_warning(en: &Enemies, i: usize, content: &Content) -> Option<(DangerAr
         DangerArea::Lane { start, end, radius: shot.radius + content.player.radius },
         (1.0 - en.aim_t[i] / shot.warn).clamp(0.0, 1.0),
     ))
+}
+
+/// 只按当前模拟脚点判断近身危险；插值只用于绘制位置，越界当帧即撤下提示。
+fn strike_progress(boss: &BossState, player: Vec2, reach: f32) -> Option<f32> {
+    boss.sweeps
+        .iter()
+        .filter(|s| s.danger(reach).contains(player))
+        .map(|s| (s.t / s.warn.max(f32::EPSILON)).clamp(0.0, 1.0))
+        .chain(
+            boss.drops
+                .iter()
+                .filter(|r| r.danger(reach).contains(player))
+                .map(|r| (r.t / r.warn.max(f32::EPSILON)).clamp(0.0, 1.0)),
+        )
+        .max_by(f32::total_cmp)
 }
 
 #[derive(Component)]
@@ -213,6 +229,48 @@ impl InkMesh {
         }
     }
 
+    fn release(&mut self, release: &Release, lite: bool) {
+        let u = release.progress();
+        let fade = (1.0 - u).powi(2);
+        let (area, confirm, gain) = match release.shape {
+            ReleaseShape::Sweep(area) | ReleaseShape::Rain(area) => (area, u < 0.16, 1.0),
+            ReleaseShape::Volley { origin, illusion } => (
+                DangerArea::Circle { center: origin, radius: 32.0 * (1.0 - u * 0.28) },
+                false,
+                if illusion { 0.65 } else { 1.0 },
+            ),
+        };
+        let points = boundary(area);
+        // 已结算的余迹不再用朱砂填色：接触帧浅金确认，随后断为淡墨短笔。
+        // 近身危险边界仍在 0.5–0.7 层，比这份装饰余迹更靠前。
+        let dark = Color::srgba(0.09, 0.065, 0.05, fade * gain * 0.55);
+        let light = Color::srgba(1.0, 0.88, 0.64, fade * gain * if confirm { 0.9 } else { 0.6 });
+        let spacing = if lite { 8 } else { 4 };
+        for k in 0..points.len() {
+            if !confirm && k % spacing != 0 {
+                continue;
+            }
+            let (a, b) = (points[k], points[(k + 1) % points.len()]);
+            self.line(a, b, if confirm { 3.6 } else { 2.4 }, 0.25, [dark; 2]);
+            self.line(a, b, if confirm { 1.8 } else { 0.9 }, 0.35, [light; 2]);
+        }
+    }
+
+    fn player_warning(&mut self, at: Vec2, reach: f32, progress: f32) {
+        let radius = (reach + 4.0).clamp(12.0, 22.0);
+        let urgent = ((progress - 0.7) / 0.3).clamp(0.0, 1.0);
+        let dark = Color::srgba(0.055, 0.025, 0.04, 0.9);
+        let red = Color::srgba(1.0, 0.29, 0.17, 0.85 + urgent * 0.1);
+        // 四个短括角留出整个脚点中心，不铺圆盘，也不靠闪烁和震屏催促。
+        for (x, y) in [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)] {
+            let corner = at + Vec2::new(x, y) * radius;
+            for end in [corner - Vec2::new(x * 5.0, 0.0), corner - Vec2::new(0.0, y * 5.0)] {
+                self.line(corner, end, 3.8, 0.8, [dark; 2]);
+                self.line(corner, end, 1.2 + urgent * 0.6, 0.9, [red; 2]);
+            }
+        }
+    }
+
     fn finish(self) -> Mesh {
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -225,12 +283,21 @@ impl InkMesh {
 
 pub(crate) fn draw(
     boss: Option<Res<BossState>>,
+    director: Option<Res<Director>>,
+    run: Option<Res<State<RunState>>>,
     enemies: Option<Res<Enemies>>,
     content: Res<GameContent>,
+    cues: Res<BossCues>,
+    feel: Res<Feel>,
+    fixed: Res<Time<Fixed>>,
+    player: Single<(&Pos, &PrevPos), With<Player>>,
     q: Single<(&Mesh2d, &mut Visibility), With<TelegraphMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let mut ink = InkMesh::default();
+    for release in cues.releases() {
+        ink.release(release, feel.lite);
+    }
     if let Some(boss) = boss {
         let reach = content.0.player.radius;
         for v in boss.volleys() {
@@ -244,6 +311,14 @@ pub(crate) fn draw(
         }
         for drop in &boss.drops {
             ink.warning(drop.danger(reach), drop.t / drop.warn);
+        }
+        let (pos, previous) = *player;
+        if director.is_some_and(|d| d.boss.is_some())
+            && run.is_none_or(|state| *state.get() != RunState::Over)
+            && let Some(progress) = strike_progress(&boss, pos.0, reach)
+        {
+            let visible = previous.0.lerp(pos.0, fixed.overstep_fraction());
+            ink.player_warning(visible, reach, progress);
         }
     }
     if let Some(en) = enemies {
@@ -268,6 +343,45 @@ pub(crate) fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foot_warning_is_only_for_current_strike_zones_and_leaves_the_center_clear() {
+        use lantern_sim::boss::{RainDrop, Sweep, Volley};
+        let mut boss = BossState {
+            sweeps: vec![Sweep {
+                origin: Vec2::ZERO,
+                dir: 0.0,
+                angle: PI * 0.5,
+                radius: 100.0,
+                damage: 1.0,
+                t: 0.4,
+                warn: 0.8,
+            }],
+            drops: vec![RainDrop { pos: Vec2::new(80.0, 0.0), radius: 20.0, damage: 1.0, t: 0.7, warn: 0.8 }],
+            ..default()
+        };
+        assert_eq!(strike_progress(&boss, Vec2::new(80.0, 0.0), 11.0), Some(0.7 / 0.8));
+        assert_eq!(strike_progress(&boss, Vec2::new(-80.0, 0.0), 11.0), None);
+        assert_eq!(strike_progress(&boss, Vec2::new(112.0, 0.0), 11.0), None, "离开真实外缘立即退下");
+        boss.sweeps.clear();
+        boss.drops.clear();
+        boss.volley = Some(Volley {
+            origin: Vec2::ZERO,
+            offset: 0.0,
+            count: 14,
+            speed: 115.0,
+            radius: 6.0,
+            damage: 1.0,
+            life: 6.0,
+            t: 0.7,
+            warn: 0.8,
+        });
+        assert_eq!(strike_progress(&boss, Vec2::new(80.0, 0.0), 11.0), None, "长弹道不能让脚边常亮");
+        let mut ink = InkMesh::default();
+        ink.player_warning(Vec2::ZERO, 11.0, 1.0);
+        assert!(!ink.positions.is_empty());
+        assert!(ink.positions.iter().all(|p| Vec2::new(p[0], p[1]).length() > 11.0), "脚点中心留空");
+    }
 
     #[test]
     fn projected_boundaries_match_hit_geometry_in_every_direction() {

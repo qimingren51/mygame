@@ -6,7 +6,8 @@
   "ground",
   "lanterns",
   "ui",
-  "vfx"
+  "vfx",
+  "weapon_icons"
  ],
  "paper": true,
  "pages": {
@@ -31,6 +32,9 @@
   "cards": [
    "cards_0.json",
    "cards_1.json"
+  ],
+  "weapon_icons": [
+   "weapon_icons.json"
   ]
  }
 }

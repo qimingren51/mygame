@@ -188,6 +188,7 @@ fn residue_life(identity: WeaponIdentity) -> f32 {
         WeaponIdentity::Bell => 0.7,
         WeaponIdentity::Crane => 0.9,
         WeaponIdentity::Seal => 1.0,
+        WeaponIdentity::Vine => 0.55,
     }
 }
 
@@ -998,6 +999,11 @@ pub(crate) fn collect_fx(
             // 锁定以后线停下、变亮，给玩家躲的信号
             let locked = en.charge_t[i] <= ch.lock;
             let (line_a, glow_a) = if locked { (0.95, 0.75) } else { (0.2 + 0.35 * u, 0.12 + 0.25 * u) };
+            // 贴着主角的车道保留完整危险硬边，软辉光退让，免得交叠红带盖住脚点与近身提示。
+            let along =
+                ((hero - start).dot(screen_dir) / screen_dir.length_squared().max(1.0)).clamp(0.0, 1.0);
+            let distance = hero.distance(start + screen_dir * along);
+            let glow_a = glow_a * (0.22 + 0.78 * ((distance - reach) / 40.0).clamp(0.0, 1.0));
             if let Some((line, head)) = f.charge {
                 // 车道锚点在起点、沿 X 拉伸，箭头接在末端不拉伸（DESIGN 第 15 节）
                 let (lf, hf) = (db.frame(line), db.frame(head));
@@ -1904,6 +1910,7 @@ fn draw_residue(
         Sword | CoinSword => rgb(0xf5e6b4),
         Bell => rgb(0xc6eeff),
         Crane => rgb(0x92dcb4),
+        Vine => rgb(0x71b68a),
         Seal => rgb(0xb79a6b),
     };
     if matches!(identity, Sword | CoinSword) {

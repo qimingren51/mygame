@@ -867,6 +867,16 @@ pub enum WeaponBehavior {
         #[serde(default)]
         echo: f32,
     },
+    /// 持续连住近处妖物；离开 radius + break_extra 后断藤，reconnect 秒后重新选目标。
+    Vine {
+        break_extra: f32,
+        reconnect: f32,
+        leech: f32,
+        /// 每秒回复上限，x 为法器等级；回复倍率在此预算之后计算。
+        heal_per_second: Quad,
+        #[serde(default)]
+        bind: Option<VineBindDef>,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点
@@ -884,6 +894,14 @@ pub enum WeaponBehavior {
         #[serde(default)]
         fissure: Option<FissureDef>,
     },
+}
+
+/// 万木春定期缠绕当前连线目标，沿用精英控制递减与夜主免疫。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct VineBindDef {
+    pub every: f32,
+    pub duration: f32,
 }
 
 /// 内环火海：每隔 every 秒对周身 radius 内的妖物造成“当前等级伤害 × ratio”。

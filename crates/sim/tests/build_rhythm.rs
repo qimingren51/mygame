@@ -238,6 +238,8 @@ fn naturally_drawn_keys_survive_later_pity() {
 #[test]
 fn absent_rhythm_preserves_the_legacy_seed_42_opening() {
     let mut c = common::content();
+    // 固定当时的六件法器池，新增内容不属于旧抽样算法的兼容范围。
+    c.weapons.retain(|w| ["lamp", "sword", "bell", "crane", "seal", "coin_sword"].contains(&w.id.as_str()));
     c.run.choices.build_rhythm = None;
     let expected = vec![
         Offer::NewPassive(c.passive_index("zhezhi").unwrap()),

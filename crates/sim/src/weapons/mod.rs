@@ -5,6 +5,7 @@
 //! - [`seeker`] 扑击（纸鹤 / 千鹤引）
 //! - [`drop`] 落印（山印 / 镇岳），以及进化后的地裂
 //! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
+//! - [`vine`] 持续连线与吸血（青藤 / 万木春）
 
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
@@ -25,6 +26,7 @@ pub mod orbit;
 pub mod pulse;
 pub mod seeker;
 pub mod sweep;
+pub mod vine;
 pub mod volley;
 
 pub(crate) const TAU: f32 = std::f32::consts::TAU;
@@ -75,6 +77,8 @@ pub struct WeaponSlot {
     pub radius: f32,
     pub size: f32,
     pub cranes: Vec<Crane>,
+    /// 连线、重连、缠绕和回复预算；仅青藤行为使用。
+    pub vine: Option<vine::VineState>,
 }
 
 impl WeaponSlot {
@@ -92,6 +96,7 @@ impl WeaponSlot {
             radius: 0.0,
             size: 0.0,
             cranes: Vec::new(),
+            vine: None,
         }
     }
 
@@ -232,6 +237,9 @@ impl Arsenal {
                 h.write_f32(c.vel.x);
                 h.write_f32(c.vel.y);
             }
+            if let Some(vine) = &w.vine {
+                vine.hash_into(h);
+            }
         }
     }
 }
@@ -280,6 +288,10 @@ pub(crate) fn update_weapons(
     let en = &mut *en;
     let (pos, hero) = *player;
     for slot in &mut arsenal.0 {
+        if matches!(slot.behavior(content), WeaponBehavior::Vine { .. }) {
+            vine::update(content, &stats, &grid, en, pos.0, slot, &mut hits, &mut found);
+            continue;
+        }
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
             orbit::update(content, &stats, &grid, en, pos.0, t, slot, &mut hits, &mut bamboo, &mut found);
@@ -304,7 +316,7 @@ pub(crate) fn update_weapons(
             found: &mut found,
         };
         match slot.behavior(content) {
-            WeaponBehavior::Orbit { .. } => {}
+            WeaponBehavior::Orbit { .. } | WeaponBehavior::Vine { .. } => {}
             WeaponBehavior::Volley { .. } => volley::fire(&mut ctx, slot),
             WeaponBehavior::Pulse { .. } => pulse::update(&mut ctx, slot),
             WeaponBehavior::Seeker { .. } => seeker::update(&mut ctx, slot),

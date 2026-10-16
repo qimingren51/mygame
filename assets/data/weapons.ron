@@ -210,4 +210,28 @@
             level: (cooldown: 0.80, count: 10, radius: 100.0, damage: 100.0),
         )),
     ),
+    (
+        id: "vine", name: "青藤", icon: "藤", element: Wood,
+        desc: "藤蔓连住近处妖物，持续造成伤害并汲取生命；拉远后断开，稍后再接。", short: "连藤汲血，拉远即断",
+        flavor: "枯木遇雨还会发芽。妖气里也藏着一口春气。",
+        behavior: Vine(break_extra: 40.0, reconnect: 0.3, leech: 0.04, heal_per_second: (0.5, 0.125, 0.0)),
+        levels: [
+            (cooldown: 0.5, count: 2, radius: 140.0, damage: 6.0),
+            (cooldown: 0.5, count: 2, radius: 145.0, damage: 7.5),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 9.0),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 10.5),
+            (cooldown: 0.5, count: 3, radius: 155.0, damage: 12.0),
+            (cooldown: 0.5, count: 4, radius: 160.0, damage: 13.5),
+            (cooldown: 0.5, count: 4, radius: 165.0, damage: 15.5),
+            (cooldown: 0.5, count: 5, radius: 170.0, damage: 18.0),
+        ],
+        evolution: Some((
+            name: "万木春", passive: "huichun",
+            desc: "八藤连阵汲取生命，每四秒缠住相连妖物。精英缠绕减半，夜主不受缠绕。", short: "八藤汲血，万木缠身",
+            flavor: "病树前头，万木逢春。枯过的地方，又长出叶来。",
+            behavior: Vine(break_extra: 40.0, reconnect: 0.3, leech: 0.04, heal_per_second: (2.5, 0.0, 0.0),
+                bind: Some((every: 4.0, duration: 1.0))),
+            level: (cooldown: 0.5, count: 8, radius: 200.0, damage: 30.0),
+        )),
+    ),
 ]

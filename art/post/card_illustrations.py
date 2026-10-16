@@ -4,7 +4,7 @@
 在仓库根目录运行：
     art/.venv/bin/python art/post/card_illustrations.py --source art/out/cards/source --out assets/atlas
 
-每次提供全部 39 张原图；文件名见 CARD_NAMES。只做 Lanczos 缩小，不裁切、
+每次提供全部 41 张原图；文件名见 CARD_NAMES。只做 Lanczos 缩小，不裁切、
 补画或调色。中间文件留在临时目录，最终仅写 cards 图集和 index.json。
 """
 
@@ -44,6 +44,8 @@ CARD_NAMES = {
     "card_seal_mut": "竹印",
     "card_coin_sword": "铜钱剑",
     "card_coin_sword_evo": "天罡",
+    "card_vine": "青藤",
+    "card_vine_evo": "万木春",
     "card_phoenix": "百鸟朝凤",
     "card_sword_grove": "万剑冢",
     "card_frost_rain": "霜天剑雨",

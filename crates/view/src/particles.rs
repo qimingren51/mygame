@@ -432,6 +432,7 @@ impl Particles {
             Some(CoinSword) => (self.f.streak, 0.08, 0.22, 3.0),
             Some(Bell) => (self.f.ember, 0.04, 1.0, 1.0),
             Some(Crane) => (self.f.ash, 0.05, 0.65, 1.5),
+            Some(Vine) => (self.f.streak, 0.06, 0.13, 2.0),
             Some(Seal) => (self.f.drop, 0.06, 0.5, 1.7),
             _ => (self.f.ember, 0.06, 1.0, 1.0),
         };
@@ -454,7 +455,13 @@ impl Particles {
             core: true,
             ..P::new(frame, at, life, layer::EMISSIVE + 1.2)
         });
-        let n = self.n(if crit { 6 } else { 4 });
+        let n = self.n(if identity == Some(Vine) {
+            2
+        } else if crit {
+            6
+        } else {
+            4
+        });
         for k in 0..n {
             let d = emission_dir(dir, fallback, self.rng.next_f32(), self.rng.next_f32());
             let mut p = P {
@@ -502,6 +509,16 @@ impl Particles {
                     p.spin = if k % 2 == 0 { 18.0 } else { -16.0 };
                     p.stretch = 1.8;
                     p.drag = 4.0;
+                }
+                Some(Vine) => {
+                    p.frame = self.f.ash;
+                    p.color = Color::srgb(0.39, 0.68, 0.46);
+                    p.glow = false;
+                    p.spin = if k % 2 == 0 { 8.0 } else { -7.0 };
+                    p.life = 0.18;
+                    p.size = (0.24, 0.07);
+                    p.vel *= 0.45;
+                    p.accel = Vec2::NEG_Y * 65.0;
                 }
                 Some(Seal) => {
                     p.frame = if k == n - 1 { self.f.smoke } else { self.f.ash };

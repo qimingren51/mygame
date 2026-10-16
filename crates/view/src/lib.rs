@@ -13,6 +13,7 @@ use lantern_sim::{AppState, GameContent, Player, Pos, PrevPos};
 mod actors;
 pub mod atlas;
 mod atmos;
+mod boss_cues;
 mod camera;
 mod effects;
 mod feedback;
@@ -29,6 +30,7 @@ mod particles;
 pub mod smoke;
 mod stats;
 mod telegraphs;
+mod vines;
 
 use atlas::AtlasDb;
 pub use atmos::{DAWN_LEN, Dawn};
@@ -88,6 +90,8 @@ impl Plugin for ViewPlugin {
             .init_resource::<actors::GlowRequests>()
             .init_resource::<fx::FxState>()
             .init_resource::<telegraphs::Readability>()
+            .init_resource::<boss_cues::BossCues>()
+            .init_resource::<vines::VineView>()
             .init_resource::<camera::Rig>()
             .init_resource::<feedback::Feedback>()
             .init_resource::<actors::LanternFlare>()
@@ -126,6 +130,8 @@ impl Plugin for ViewPlugin {
                     fx::reset_fx,
                     impact::reset,
                     telegraphs::spawn,
+                    boss_cues::reset,
+                    vines::spawn,
                     feedback::reset_feedback,
                     camera::reset_rig,
                     particles::reset_particles,
@@ -172,6 +178,7 @@ impl Plugin for ViewPlugin {
                     (
                         impact::read_events,
                         telegraphs::update_readability,
+                        vines::draw,
                         actors::collect_draws,
                         impact::draw_deaths,
                         fx::read_fx_events,
@@ -188,6 +195,7 @@ impl Plugin for ViewPlugin {
                         (atmos::atmos_events, atmos::draw_hurt_arc, atmos::update_atmos).chain(),
                         mist::update_mist,
                         particles::update_particles,
+                        boss_cues::update,
                         telegraphs::draw,
                         (
                             ground::scroll_paper,

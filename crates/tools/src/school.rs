@@ -32,7 +32,7 @@ const SCHOOLS: [(&str, &str, &[&str], &[&str], &[&str], &[Element]); 8] = [
         &["broken_sword"],
         &[Element::Metal],
     ),
-    ("百鸟", "", &["crane"], &["zhezhi", "huichun", "jixing"], &["longevity"], &[Element::Wood]),
+    ("百鸟", "", &["crane", "vine"], &["zhezhi", "huichun", "jixing"], &["longevity"], &[Element::Wood]),
     ("寒川", "frost", &["bell"], &["jingxin", "hanyi", "yinhun"], &["ice_soul"], &[Element::Water]),
     ("星火", "red", &["lamp"], &["changming", "luxin", "dengxin"], &["wind_wheel"], &[Element::Fire]),
     ("不动", "", &["seal"], &["houde", "panshi", "zaiwu"], &["pillar", "longevity"], &[Element::Earth]),

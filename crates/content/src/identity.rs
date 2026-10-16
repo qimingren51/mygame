@@ -10,11 +10,12 @@ pub enum WeaponIdentity {
     Crane,
     Seal,
     CoinSword,
+    Vine,
 }
 
 impl WeaponIdentity {
-    pub const ALL: [Self; 6] =
-        [Self::Lamp, Self::Sword, Self::Bell, Self::Crane, Self::Seal, Self::CoinSword];
+    pub const ALL: [Self; 7] =
+        [Self::Lamp, Self::Sword, Self::Bell, Self::Crane, Self::Seal, Self::CoinSword, Self::Vine];
 
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
@@ -24,6 +25,7 @@ impl WeaponIdentity {
             "crane" => Some(Self::Crane),
             "seal" => Some(Self::Seal),
             "coin_sword" => Some(Self::CoinSword),
+            "vine" => Some(Self::Vine),
             _ => None,
         }
     }
@@ -43,8 +45,9 @@ mod tests {
             Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"))
                 .unwrap();
         c.weapons.reverse();
-        for (id, identity) in
-            ["lamp", "sword", "bell", "crane", "seal", "coin_sword"].into_iter().zip(WeaponIdentity::ALL)
+        for (id, identity) in ["lamp", "sword", "bell", "crane", "seal", "coin_sword", "vine"]
+            .into_iter()
+            .zip(WeaponIdentity::ALL)
         {
             assert_eq!(WeaponIdentity::resolve(&c, Some(c.weapon_index(id).unwrap() as u16)), Some(identity));
         }

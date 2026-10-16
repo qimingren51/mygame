@@ -210,6 +210,10 @@ Points(2), Favor,                                                 // 夜签“�
 
 **扇形挥击**（`sim/weapons/sweep.rs`，BALANCE 6.3）：冷却后朝 `radius + aim` 内最近的可锁定妖物出手，无目标时朝 `Player.facing`。扇形按妖物中心判断角度，半径计入妖物碰撞半径；按距离、槽位排序，最多打 `count + Amount` 只。`Hit.crit_bonus` 增加本击暴击率，天罡的 `Hit.echo` 在暴击时追加一次同目标命中，再斩的 echo 清零；已被前一击杀死的目标不再结算。出手发 `SimEvent::Sweep { pos, dir, arc, radius, weapon, evolved }`，再斩实际结算时发 `SweepEcho { pos, weapon }`（目标中心）。表现使用世界坐标、实际攻击半径与弧度张角，不把攻击区域按装饰环压扁；事件和 `Hit.sweep_echo` 只供音画使用。
 
+**青藤连线**（`sim/weapons/vine.rs`，BALANCE 6.3）：`WeaponBehavior::Vine` 配置断藤余距、重连等待、吸血比例、每秒回复预算和可选缠绕。`WeaponSlot.vine` 保留带代数的目标句柄、每根断藤的重连时间、缠绕周期与回复余额，均进入状态哈希；最近目标连住后不因另一只更近就抖动换线，死亡、隐身、超距立即断开。数量、范围、伤害间隔和缠绕周期沿用各自属性倍率；缠绕时长仍走精英递减/夜主免疫规则。
+
+青藤命中携带 `Hit.leech`，在统一伤害管线中以实际扣除的生命计算，所有藤共用一秒预算，之后乘回复倍率并沿用满血转盾；不以过量伤害回复，也不救活已死亡主角。`view/vines.rs` 只读有效连线与真实 Hit，批量绘制藤、叶片、返光和缠绕；不借画面状态参与选敌或伤害。卡画、图标与命中材质按 `vine` ID 解析。
+
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
 - **形态**：`WeaponSlot.form` 是互斥的 `Form::Base | Evolved | Mutated | Fused(fusion_id)`。`behavior()`、`stats()`、`name()`、`desc()`、`flavor()` 都按形态读取；`transformed()` 只表示已质变，不代表有合璧资格。`can_mutate` 要求开关打开、能正统进化，另持有克制本系的任意满级法器。进化或异化后不能改选，进化不重置法器的计时和纸鹤。异化本系计四点。

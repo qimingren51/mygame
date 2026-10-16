@@ -11,6 +11,7 @@
 //! - Death 阶段处理死亡：掉落、击杀触发器、连斩、燃灯充能、击败夜主。
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use bevy_math::{Vec2, ops};
 
 use lantern_content::{
@@ -30,6 +31,7 @@ use crate::reveal::{Reveal, Vuln};
 use crate::run::{Director, Progress, SimView};
 use crate::spatial::Grid;
 use crate::stats::{ActiveTrigger, Effects, Stats};
+use crate::weapons::Arsenal;
 use crate::weapons::volley::{ShotEffects, ShotSpec, Shots};
 use crate::{GameContent, Health, HitKind, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
@@ -111,6 +113,8 @@ pub struct Hit {
     pub echo: f32,
     /// 天罡再斩的表现标记；只在目标仍存活、实际结算这一击时发事件
     pub sweep_echo: bool,
+    /// 青藤：仅按这一击实际扣除的生命回复，预算由对应法器共用。
+    pub leech: f32,
 }
 
 impl Hit {
@@ -135,6 +139,7 @@ impl Hit {
             crit_bonus: 0.0,
             echo: 0.0,
             sweep_echo: false,
+            leech: 0.0,
         }
     }
 
@@ -441,6 +446,12 @@ fn on_enemy(
     }
 }
 
+#[derive(SystemParam)]
+pub(crate) struct HitState<'w> {
+    hits: ResMut<'w, HitQueue>,
+    arsenal: ResMut<'w, Arsenal>,
+}
+
 pub(crate) fn resolve_hits(
     content: Res<GameContent>,
     stats: Res<Stats>,
@@ -450,22 +461,24 @@ pub(crate) fn resolve_hits(
     progress: Res<Progress>,
     tick: Res<Tick>,
     mut rng: ResMut<SimRng>,
-    mut hits: ResMut<HitQueue>,
+    state: HitState,
     mut en: ResMut<Enemies>,
     mut deaths: ResMut<Deaths>,
     mut queue: ResMut<ActionQueue>,
     mut log: ResMut<DamageLog>,
     mut outbox: ResMut<SimOutbox>,
     mut react: ReactRes,
-    player: Single<(&Player, &Pos)>,
+    player: Single<(&mut Player, &Pos, &mut Health)>,
 ) {
+    let HitState { mut hits, mut arsenal } = state;
+    let (mut hero, hero_pos, mut health) = player.into_inner();
     let content = &content.0;
     let rng = rng.0.get(Stream::Combat);
     let en = &mut *en;
     let crit_chance = stats.get(Stat::CritChance);
     let crit_mult = stats.get(Stat::CritMult);
     // 加成区：定海神针的站定、移动加成也算在这里
-    let dmg_mult = stats.get(Stat::Damage) + stance(&stats, &content.player.charms, player.0);
+    let dmg_mult = stats.get(Stat::Damage) + stance(&stats, &content.player.charms, &hero);
     let stun_crit = stats.get(Stat::StunCrit) > 0.0;
     let freeze_time = stats.get(Stat::FreezeTime);
     let zones = &content.elements.zones;
@@ -529,8 +542,17 @@ pub(crate) fn resolve_hits(
             dmg = en.hp[i];
         }
         // 统计只计实际打掉的血（溢出的不算）
-        log.add(hit.source, dmg.min(en.hp[i].max(0.0)));
+        let dealt = dmg.min(en.hp[i].max(0.0));
+        log.add(hit.source, dealt);
         en.hp[i] -= dmg;
+        if hit.leech > 0.0
+            && let Source::Weapon(weapon) = hit.source
+            && let Some(vine) =
+                arsenal.0.iter_mut().find(|w| w.def == weapon as usize).and_then(|w| w.vine.as_mut())
+        {
+            let amount = vine.drain(dealt * hit.leech) * stats.get(Stat::Healing);
+            heal_overflow(&mut hero, &mut health, &stats, amount, &mut outbox);
+        }
         en.flash[i] = 0.08;
         // 词缀“狂”：生命低于一半后移速和接触伤害提高
         if en.affix[i] != 0
@@ -552,7 +574,7 @@ pub(crate) fn resolve_hits(
         } else {
             HitKind::Normal
         };
-        let (impact_pos, incoming_dir) = hit_contact(pos, en.r[i], hit.from, player.1.0, hit.incoming);
+        let (impact_pos, incoming_dir) = hit_contact(pos, en.r[i], hit.from, hero_pos.0, hit.incoming);
         if hit.sweep_echo
             && let Source::Weapon(weapon) = hit.source
         {
@@ -932,6 +954,7 @@ pub(crate) fn process_strikes(
                 crit_bonus: 0.0,
                 echo: 0.0,
                 sweep_echo: false,
+                leech: 0.0,
             };
             // 燃灯对夜主：每次不超过它最大生命的一定比例
             if boss && s.boss_fraction > 0.0 {
