@@ -265,7 +265,8 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
     if occupied_slots(content, arsenal, build) < weapon_slots(content, build) {
         let weight = if secs < ch.late_after { ch.weight_new_weapon } else { ch.weight_new_weapon_late };
         for d in 0..content.weapons.len() {
-            if !arsenal.0.iter().any(|w| w.contains(content, d)) && !banned_w(d) {
+            if !arsenal.0.iter().any(|w| w.contains(content, d)) && !banned_w(d) && !content.weapon_locked(d)
+            {
                 out.push((Offer::NewWeapon(d), weight));
             }
         }

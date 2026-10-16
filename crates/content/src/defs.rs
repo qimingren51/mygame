@@ -320,6 +320,9 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
+    /// 还没解锁的法器（ID）：不进卡池。新法器按局解锁之前先锁着（docs/BALANCE.md 第 6.3 节）
+    #[serde(default)]
+    pub locked: Vec<String>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,

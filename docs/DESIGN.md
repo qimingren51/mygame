@@ -217,6 +217,8 @@ Points(2), Favor,                                                 // 夜签“�
 
 **落塔**（`sim/weapons/tower.rs`，docs/BALANCE.md 第 6.3 节）：冷却好了落 `count`（加数量加成）座，落点和孔明灯共用 `weapons::densest`（同样的 `range / pick / cluster / spread`，附近没有妖物就落在面向前方 150）。塔放进 `Towers` 资源，由 `update_towers`（紧跟 `update_waves`）推进：预警 `warn` 秒（画面读 `Towers` 画预警圈），落地是一次带击晕的圆形 `Strike`，发 `SimEvent::TowerLand`；之后立 `life` 秒，每步把 `pull × radius` 以内的妖物直接往塔心挪 `pull_speed × DT`（精英一半，夜主不挪，挪到离塔心 1 为止），每 `tick` 秒一次 `damage × tick_scale` 的圆形 `Strike`；到时间收走，有 `burst`（玲珑塔）就再炸一次带击晕的 `Strike`，发 `SimEvent::TowerBurst`。
 
+**未解锁的法器**：`run.ron` 的 `choices.locked`（法器 ID）里的法器不出“新法器”卡（`Content::weapon_locked`），校验要求 ID 存在、不是起手法器。工具用 `Content::unlock` 放开（`lantern-tools kite --unlock all|<ID>,…`），内容哈希跟着变。按局解锁做出来以后，解锁状态由存档经 `RunSetup` 进模拟。新法器的四个资源（`SkyLanterns`、`Waves`、`Vines`、`Towers`）空的时候不写状态哈希，没带这几件法器的局哈希和加它们之前一样。
+
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
 - **形态**：`WeaponSlot.form` 是互斥的 `Form::Base | Evolved | Mutated | Fused(fusion_id)`。`behavior()`、`stats()`、`name()`、`desc()`、`flavor()` 都按形态读取；`transformed()` 只表示已质变，不代表有合璧资格。`can_mutate` 要求开关打开、能正统进化，另持有克制本系的任意满级法器。进化或异化后不能改选，进化不重置法器的计时和纸鹤。异化本系计四点。

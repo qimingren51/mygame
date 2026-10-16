@@ -36,7 +36,11 @@ pub struct VineSet {
 pub struct Vines(pub Vec<VineSet>);
 
 impl Vines {
+    /// 空的时候什么都不写：没带这件法器的局，哈希和加它之前一样。
     pub fn hash_into(&self, h: &mut StateHasher) {
+        if self.0.is_empty() {
+            return;
+        }
         h.write_u32(self.0.len() as u32);
         for v in &self.0 {
             h.write_u32(v.def as u32);

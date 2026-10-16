@@ -57,7 +57,11 @@ pub struct Wave {
 pub struct Waves(pub Vec<Wave>);
 
 impl Waves {
+    /// 空的时候什么都不写：没带这件法器的局，哈希和加它之前一样。
     pub fn hash_into(&self, h: &mut StateHasher) {
+        if self.0.is_empty() {
+            return;
+        }
         h.write_u32(self.0.len() as u32);
         for w in &self.0 {
             for v in [w.origin.x, w.origin.y, w.dir.x, w.dir.y, w.s, w.reach, w.half, w.damage] {

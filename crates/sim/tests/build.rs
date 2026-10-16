@@ -322,3 +322,22 @@ fn codex_keys_cover_forms_fusion_materials_and_passives() {
         assert!(keys.contains(k), "{k}: {keys:?}");
     }
 }
+
+#[test]
+fn locked_weapons_stay_out_of_the_pool_until_unlocked() {
+    let mut c = content();
+    let locked: Vec<usize> = c.run.choices.locked.iter().map(|id| c.weapon_index(id).unwrap()).collect();
+    assert!(!locked.is_empty(), "v0.3 的新法器先锁着");
+    let sim = fresh(1);
+    let new = |c: &lantern_content::Content| -> Vec<usize> {
+        lantern_sim::build::offers(c, sim.arsenal(), sim.build(), 0.0)
+            .iter()
+            .filter_map(|(o, _)| if let Offer::NewWeapon(d) = *o { Some(d) } else { None })
+            .collect()
+    };
+    assert!(locked.iter().all(|d| !new(&c).contains(d)), "锁着的不进卡池");
+    let hash = c.hash;
+    c.unlock(None);
+    assert!(locked.iter().all(|d| new(&c).contains(d)), "解锁后进卡池");
+    assert_ne!(c.hash, hash, "解锁改变内容哈希，回放不会混用");
+}

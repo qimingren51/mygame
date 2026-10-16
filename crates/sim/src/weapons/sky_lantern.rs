@@ -41,7 +41,11 @@ pub struct SkyLantern {
 pub struct SkyLanterns(pub Vec<SkyLantern>);
 
 impl SkyLanterns {
+    /// 空的时候什么都不写：没带这件法器的局，哈希和加它之前一样。
     pub fn hash_into(&self, h: &mut StateHasher) {
+        if self.0.is_empty() {
+            return;
+        }
         h.write_u32(self.0.len() as u32);
         for l in &self.0 {
             for v in

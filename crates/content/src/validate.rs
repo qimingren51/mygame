@@ -787,6 +787,14 @@ impl Content {
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
         }
+        for id in &ch.locked {
+            if self.weapon_index(id).is_none() {
+                return c.fail("run.ron", format!("choices.locked 引用了不存在的法器 \"{id}\""));
+            }
+            if *id == self.player.start_weapon || self.lamps.iter().any(|l| l.start_weapon == *id) {
+                return c.fail("run.ron", format!("choices.locked 里的 \"{id}\" 是起手法器，不能锁"));
+            }
+        }
         c.positive(
             "run.ron",
             &[
