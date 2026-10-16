@@ -33,6 +33,7 @@ mod movement;
 pub mod omens;
 pub mod pickups;
 pub mod player;
+mod ranged;
 pub mod reactions;
 pub mod replay;
 pub mod reveal;
@@ -261,7 +262,7 @@ impl Plugin for SimPlugin {
                         .chain()
                         .in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
-                    (boss::boss_attacks, boss::elite_summons).chain().in_set(SimSet::Ai),
+                    (boss::boss_attacks, boss::elite_summons, ranged::enemy_shots).chain().in_set(SimSet::Ai),
                     (movement::update_enemies, crowd::separate).chain().in_set(SimSet::Move),
                     (
                         combat::run_actions,

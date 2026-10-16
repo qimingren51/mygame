@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::{
-    Action, Content, ContentError, Effect, Element, Rank, ReactionEffect, Stat, WeaponBehavior, When,
+    Action, Content, ContentError, Effect, Element, Movement, Rank, ReactionEffect, Stat, WeaponBehavior,
+    When,
 };
 
 /// 卡面一行、提示条正文的字数上限（docs/LORE-TEXT.md 第 6 节）
@@ -521,6 +522,15 @@ impl Content {
             c.range("run.ron", "spawn.mix.share", m.share)?;
         }
         c.range("run.ron", "spawn.packs.interval", s.packs.interval)?;
+        for a in &s.ambush {
+            enemy_ref("run.ron", "spawn.ambush", &a.enemy)?;
+            c.non_negative("run.ron", &[("spawn.ambush.from", a.from)])?;
+            c.positive("run.ron", &[("spawn.ambush.every", a.every)])?;
+            c.range("run.ron", "spawn.ambush.dist", a.dist)?;
+            if a.max == 0 {
+                return c.fail("run.ron", format!("spawn.ambush 的 \"{}\" max 至少为 1", a.enemy));
+            }
+        }
         for m in &s.packs.mix {
             enemy_ref("run.ron", "spawn.packs.mix", &m.enemy)?;
             if !s.mix.iter().any(|x| x.enemy == m.enemy) {
@@ -730,6 +740,45 @@ impl Content {
                 if ch.lock > ch.windup {
                     return c.fail("enemies.ron", format!("{} 的 charge.lock 不能超过 windup", e.id));
                 }
+                c.non_negative("enemies.ron", &[("charge.jitter", ch.jitter)])?;
+                if ch.jitter >= ch.every {
+                    return c.fail("enemies.ron", format!("{} 的 charge.jitter 要小于 every", e.id));
+                }
+            }
+            // 绕圈、守距要写距离带，别的移动方式不写
+            match (e.movement, e.band) {
+                (Movement::Circle | Movement::Keep, Some((near, far))) => {
+                    if !(near > 0.0 && far > near) {
+                        return c.fail("enemies.ron", format!("{} 的 band 要满足 0 < 近 < 远", e.id));
+                    }
+                }
+                (Movement::Circle | Movement::Keep, None) => {
+                    return c.fail("enemies.ron", format!("{} 绕圈或守距，要写 band", e.id));
+                }
+                (_, Some(_)) => {
+                    return c.fail("enemies.ron", format!("{} 不绕圈也不守距，不用写 band", e.id));
+                }
+                _ => {}
+            }
+            if let Some(sh) = &e.shot {
+                c.positive(
+                    "enemies.ron",
+                    &[
+                        ("shot.every", sh.every),
+                        ("shot.warn", sh.warn),
+                        ("shot.range", sh.range),
+                        ("shot.speed", sh.speed),
+                        ("shot.damage", sh.damage),
+                        ("shot.radius", sh.radius),
+                        ("shot.life", sh.life),
+                    ],
+                )?;
+                if sh.warn >= sh.every {
+                    return c.fail("enemies.ron", format!("{} 的 shot.warn 要短于 every", e.id));
+                }
+            }
+            if let Some(d) = &e.disguise {
+                c.positive("enemies.ron", &[("disguise.speed", d.speed)])?;
             }
             if let Some(b) = &e.boss {
                 c.positive(

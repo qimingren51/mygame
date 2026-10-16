@@ -147,9 +147,11 @@ impl SimHarness {
     /// 关掉常规刷怪、成群、时间表和奇遇，只留下测试自己摆的妖物。
     pub fn quiet(&mut self) {
         let world = self.app.world_mut();
+        let ambush = world.resource::<GameContent>().0.run.spawn.ambush.len();
         let mut d = world.resource_mut::<Director>();
         d.spawn_acc = f32::NEG_INFINITY;
         d.next_pack = f32::INFINITY;
+        d.ambush_t = vec![f32::INFINITY; ambush];
         world.resource_mut::<RunPlan>().schedule.clear();
         world.resource_mut::<Encounters>().next_at = f32::INFINITY;
     }

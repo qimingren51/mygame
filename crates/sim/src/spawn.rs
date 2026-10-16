@@ -75,7 +75,15 @@ fn spawn_in_pool(
         en.summon_t[i] = b.summon_every;
     }
     if let Some(ch) = &def.charge {
-        en.charge_t[i] = ch.every;
+        en.charge_t[i] = crate::movement::charge_every(ch, en.wob[i]);
+    }
+    // 远程小妖：第一刺错开出手，免得一群一起射
+    if let Some(sh) = &def.shot {
+        en.atk_t[i] = sh.every * (0.5 + 0.5 * en.wob[i] / TAU);
+    }
+    // 伪装的妖物刷出来时还没现形
+    if def.disguise.is_some() {
+        en.cloaked[i] = true;
     }
     Some(i)
 }
@@ -152,6 +160,7 @@ pub(crate) fn update_spawns(
     mut en: ResMut<Enemies>,
     mut outbox: ResMut<SimOutbox>,
     mut survival: ResMut<Survival>,
+    bamboo: Res<crate::bamboo::Bamboo>,
 ) {
     let content = &content.0;
     let s = &content.run.spawn;
@@ -226,6 +235,37 @@ pub(crate) fn update_spawns(
             let y = by + rng.range_f32(-packs.spread, packs.spread);
             spawn_enemy(content, &stats, &mut en, rng, kind, x, y, m);
         }
+    }
+
+    // 伏击：竹魅从离主角 dist 以内一丛立着的竹子里钻出来（docs/BALANCE.md 第 12.1 节）
+    if director.ambush_t.len() != s.ambush.len() {
+        director.ambush_t = s.ambush.iter().map(|a| a.from).collect();
+    }
+    for (k, a) in s.ambush.iter().enumerate() {
+        if t < director.ambush_t[k] {
+            continue;
+        }
+        let kind = content.enemy_index(&a.enemy).expect("内容校验保证引用存在") as u16;
+        if en.iter_alive().filter(|&i| en.kind[i] == kind).count() >= a.max as usize {
+            director.ambush_t[k] = t + a.every;
+            continue;
+        }
+        let (lo, hi) = (a.dist.0 * a.dist.0, a.dist.1 * a.dist.1);
+        let fits = |c: &&crate::bamboo::Clump| {
+            let d2 = c.pos.distance_squared(p);
+            c.standing() && d2 >= lo && d2 <= hi
+        };
+        let n = bamboo.clumps.iter().filter(fits).count();
+        if n == 0 {
+            // 附近没有竹子：过一会儿再找
+            director.ambush_t[k] = t + 2.0;
+            continue;
+        }
+        let at = bamboo.clumps.iter().filter(fits).nth(rng.below(n as u32) as usize).map(|c| c.pos);
+        if let Some(at) = at {
+            spawn_enemy(content, &stats, &mut en, rng, kind, at.x, at.y, m);
+        }
+        director.ambush_t[k] = t + a.every;
     }
 
     // 合围：预警之后在视野外围成一圈，加速合拢

@@ -465,6 +465,7 @@ fn hurt_name(content: &Content, by: HurtBy) -> String {
         HurtBy::Shot => "弹幕".into(),
         HurtBy::Sweep => "九尾扫".into(),
         HurtBy::Rain => "狐火雨".into(),
+        HurtBy::Spike { kind } => format!("{}·竹刺", content.enemies[kind as usize].name),
     }
 }
 
