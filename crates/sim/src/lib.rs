@@ -53,7 +53,7 @@ pub use harness::SimHarness;
 pub use io::{HitKind, HurtBy, InputFrame, SimCommand, SimCommands, SimEvent, SimOutbox};
 pub use replay::{Replay, ReplayLog, ReplayPlayback};
 pub use run::{Director, Progress, RunMode, SimView};
-pub use stats::{Effects, Stats};
+pub use stats::{Effects, StatContribution, StatSource, Stats};
 pub use tick::{HashCheckpoint, HashLog, SimRng, Tick};
 pub use weapons::Arsenal;
 

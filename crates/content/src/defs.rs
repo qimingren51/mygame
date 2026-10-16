@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Effect;
+use crate::{Effect, Stat};
 
 /// 二次曲线 a + b·x + c·x²。x 通常是分钟数或等级。
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
@@ -1557,6 +1557,110 @@ impl HubWhen {
             Self::MetaLevels(_) | Self::MetaLevel(..) | Self::Runs(_) | Self::Wins(_) => true,
             Self::All(ws) => ws.iter().any(Self::is_milestone),
             _ => false,
+        }
+    }
+}
+
+/// 局内属性面板的一组（`stat_labels.ron`，docs/LORE-TEXT.md 第 8 节）。只有文字，不计入内容哈希。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StatGroupDef {
+    pub name: String,
+    /// 总是全部列出（基础）；其余组默认只列和基础值不同的
+    #[serde(default)]
+    pub always: bool,
+    pub stats: Vec<StatLabelDef>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StatLabelDef {
+    pub stat: Stat,
+    /// 2–4 个字
+    pub label: String,
+    /// 悬停说明，不超过 16 个字
+    pub hint: String,
+    pub format: StatFormat,
+    /// 并进来一起显示的倍率（灯焰带的 FlameBandMult）
+    #[serde(default)]
+    pub times: Option<Stat>,
+}
+
+/// 属性面板上数值的写法（docs/LORE-TEXT.md 第 8 节：倍率写成百分比加减，次数、格数写整数）。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum StatFormat {
+    /// 120、2、0.5
+    Number,
+    /// 0.2/秒
+    PerSecond,
+    /// 倍率，写和 1 的差：+20%、-6%
+    Multiplier,
+    /// 5%
+    Percent,
+    /// 带符号：+10%、-10%
+    PercentChange,
+    /// 每秒回复生命上限的比例：1%/秒
+    PercentPerSecond,
+    /// ×2.0
+    Times,
+    /// 3
+    Count,
+    /// +1
+    CountChange,
+    /// 2.4 秒
+    Seconds,
+    /// 2 级；0 写“无”
+    Rank,
+    /// 有、无
+    Flag,
+}
+
+/// 去掉末尾多余的 0：1.50 → 1.5，2.0 → 2。
+fn trim(v: f32, decimals: usize) -> String {
+    let s = format!("{v:.decimals$}");
+    if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
+}
+
+/// 带符号；四舍五入后是 0 的写 +0。
+fn signed(v: f32, decimals: usize) -> String {
+    let s = trim(v, decimals);
+    match s.strip_prefix('-') {
+        Some(rest) if rest.trim_start_matches(['0', '.']).is_empty() => "+0".into(),
+        Some(_) => s,
+        None => format!("+{s}"),
+    }
+}
+
+impl StatFormat {
+    /// 属性的当前值。
+    pub fn show(self, v: f32) -> String {
+        match self {
+            // 照见圈、拾取这类大数不写小数
+            Self::Number => trim(v, if v.abs() >= 10.0 { 0 } else { 1 }),
+            Self::PerSecond => format!("{}/秒", trim(v, 2)),
+            Self::Multiplier => format!("{}%", signed((v - 1.0) * 100.0, 1)),
+            Self::Percent => format!("{}%", trim(v * 100.0, 1)),
+            Self::PercentChange => format!("{}%", signed(v * 100.0, 1)),
+            Self::PercentPerSecond => format!("{}%/秒", trim(v * 100.0, 2)),
+            Self::Times => format!("×{}", trim(v, 2)),
+            Self::Count => trim(v.round(), 0),
+            Self::CountChange => signed(v.round(), 0),
+            Self::Seconds => format!("{} 秒", trim(v, 2)),
+            Self::Rank if v < 1.0 => "无".into(),
+            Self::Rank => format!("{} 级", trim(v.round(), 0)),
+            Self::Flag => if v > 0.0 { "有" } else { "无" }.into(),
+        }
+    }
+
+    /// 一项来源加上的值（加值部分）：+20、+5%、-0.24 秒。
+    pub fn delta(self, v: f32) -> String {
+        match self {
+            Self::Number | Self::Rank | Self::Count | Self::CountChange | Self::Flag => signed(v, 1),
+            Self::PerSecond => format!("{}/秒", signed(v, 2)),
+            Self::Multiplier | Self::Percent | Self::PercentChange => format!("{}%", signed(v * 100.0, 1)),
+            Self::PercentPerSecond => format!("{}%/秒", signed(v * 100.0, 2)),
+            Self::Times => format!("×{}", signed(v, 2)),
+            Self::Seconds => format!("{} 秒", signed(v, 2)),
         }
     }
 }

@@ -11,6 +11,8 @@ use crate::{
 /// 卡面一行、提示条正文的字数上限（docs/LORE-TEXT.md 第 6 节）
 pub const CARD_SHORT: usize = 12;
 pub const TOAST_SHORT: usize = 8;
+/// 属性面板悬停说明的字数上限（docs/LORE-TEXT.md 第 8 节）
+pub const STAT_HINT: usize = 16;
 
 struct Checker<'a> {
     dir: &'a Path,
@@ -1183,6 +1185,38 @@ impl Content {
                 .any(|j| j.text.trim().is_empty() || (!(13..=18).contains(&j.page) && !j.clue.is_empty()))
         {
             return c.fail("journals.ron", "手记须完整覆盖 1–30 页，正文不能为空，谜语仅在卷三".into());
+        }
+        // ---- stat_labels.ron ----
+        // 每项属性恰好出现一次（灯焰带倍率写在 times 里），基础一组总是显示。
+        let mut listed = Vec::new();
+        for g in &self.stat_labels {
+            if g.name.trim().is_empty() || g.stats.is_empty() {
+                return c.fail("stat_labels.ron", "每组要有名字和至少一项属性".into());
+            }
+            for l in &g.stats {
+                listed.push(l.stat);
+                listed.extend(l.times);
+                let n = l.label.chars().count();
+                if !(2..=4).contains(&n) {
+                    return c.fail("stat_labels.ron", format!("{:?} 的标签“{}”要 2–4 个字", l.stat, l.label));
+                }
+                let n = l.hint.chars().filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c)).count();
+                if l.hint.trim().is_empty() || n > STAT_HINT {
+                    return c.fail(
+                        "stat_labels.ron",
+                        format!("{:?} 的说明“{}”要有，最多 {STAT_HINT} 个字", l.stat, l.hint),
+                    );
+                }
+            }
+        }
+        for s in crate::Stat::ALL {
+            let n = listed.iter().filter(|&&x| x == s).count();
+            if n != 1 {
+                return c.fail("stat_labels.ron", format!("{s:?} 要出现一次，现在出现 {n} 次"));
+            }
+        }
+        if !self.stat_labels.iter().any(|g| g.always) {
+            return c.fail("stat_labels.ron", "要有一组 always: true（基础）".into());
         }
         fn valid_when(w: &crate::HubWhen, content: &Content) -> bool {
             use crate::HubWhen;

@@ -45,6 +45,8 @@ pub struct Content {
     pub regions: Vec<RegionDef>,
     /// 守灯人手记（纯文字，不计入内容哈希）。
     pub journals: Vec<JournalDef>,
+    /// 局内属性面板的分组和标签（只有文字，不计入哈希）
+    pub stat_labels: Vec<StatGroupDef>,
     /// 玩法数据文件原文的哈希（FNV-1a）。回放只能在玩法内容相同的版本上重放。
     pub hash: u64,
 }
@@ -114,6 +116,7 @@ impl Content {
             hub: read(data_dir, "hub.ron", &mut 0)?,
             regions: read(data_dir, "regions.ron", &mut 0)?,
             journals: read(data_dir, "journals.ron", &mut 0)?,
+            stat_labels: read(data_dir, "stat_labels.ron", &mut 0)?,
             hash: 0,
         };
         content.hash = hash;
@@ -247,6 +250,52 @@ mod tests {
         c.enemies.push(dup);
         let err = c.validate(Path::new("data")).unwrap_err().to_string();
         assert!(err.contains("enemies.ron") && err.contains("重复"), "{err}");
+    }
+
+    #[test]
+    fn stat_labels_cover_every_stat_once_and_format_values() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let listed: usize = c.stat_labels.iter().map(|g| g.stats.len()).sum();
+        // 灯焰带倍率并进灯焰带
+        assert_eq!(listed + 1, Stat::COUNT);
+        assert!(c.stat_labels[0].always && c.stat_labels[0].stats.len() == 12);
+        let mut bad = c.clone();
+        bad.stat_labels[1].stats.pop();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].hint = "一二三四五六七八九十一二三四五六七".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].label = "命".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        use StatFormat::*;
+        for (f, v, shown) in [
+            (Number, 120.0, "120"),
+            (Number, 2.5, "2.5"),
+            (PerSecond, 0.2, "0.2/秒"),
+            (Multiplier, 1.2, "+20%"),
+            (Multiplier, 0.94, "-6%"),
+            (Multiplier, 1.0, "+0%"),
+            (Multiplier, 1.005, "+0.5%"),
+            (Number, 131.3, "131"),
+            (PercentChange, -0.0001, "+0%"),
+            (Percent, 0.05, "5%"),
+            (PercentChange, 0.1, "+10%"),
+            (PercentChange, -0.1, "-10%"),
+            (PercentPerSecond, 0.01, "1%/秒"),
+            (Times, 2.2, "×2.2"),
+            (Count, 3.0, "3"),
+            (CountChange, 1.0, "+1"),
+            (Seconds, 2.4, "2.4 秒"),
+            (Rank, 0.0, "无"),
+            (Rank, 2.0, "2 级"),
+            (Flag, 1.0, "有"),
+        ] {
+            assert_eq!(f.show(v), shown, "{f:?} {v}");
+        }
+        assert_eq!(Number.delta(20.0), "+20");
+        assert_eq!(Multiplier.delta(0.1), "+10%");
+        assert_eq!(Seconds.delta(-0.24), "-0.24 秒");
     }
 
     #[test]

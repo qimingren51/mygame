@@ -9,7 +9,7 @@ use lantern_platform::Profile;
 use lantern_sim::{Arsenal, Build, Offer};
 use lantern_view::{AssetRoot, atlas::AtlasDb};
 
-use crate::{Fonts, choice, responsive, skin, title};
+use crate::{Fonts, choice, responsive, skin, stats_panel, title};
 
 fn setup() -> App {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
@@ -166,5 +166,27 @@ fn four_upgrade_cards_with_notes_and_banish_hint_fit_after_resize() {
     for mut transform in world.query_filtered::<&mut UiTransform, With<choice::Card>>().iter_mut(world) {
         *transform = UiTransform::default();
     }
+    assert_fits_after_resize(&mut app);
+}
+
+#[test]
+fn stats_panel_with_every_stat_fits_after_resize() {
+    let mut app = setup();
+    app.world_mut()
+        .run_system_once(
+            |mut commands: Commands,
+             c: Res<lantern_sim::GameContent>,
+             fonts: Res<Fonts>,
+             skin: Res<skin::Skin>| {
+                let c = &c.0;
+                let mut arsenal = Arsenal::default();
+                for id in ["lamp", "sword", "bell", "crane", "seal"] {
+                    arsenal.0.push(lantern_sim::weapons::WeaponSlot::new(c.weapon_index(id).unwrap()));
+                }
+                let stats = lantern_sim::Stats::base(c);
+                stats_panel::spawn_preview(&mut commands, c, &fonts, &skin, &stats, &arsenal, true);
+            },
+        )
+        .unwrap();
     assert_fits_after_resize(&mut app);
 }

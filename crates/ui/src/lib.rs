@@ -33,6 +33,7 @@ mod results;
 mod scroll;
 mod settings_ui;
 mod skin;
+mod stats_panel;
 mod story;
 mod title;
 mod title_fx;
@@ -122,6 +123,7 @@ impl Plugin for UiPlugin {
         journals::register(app);
         story::register(app);
         pause::register(app);
+        stats_panel::register(app);
         controls::register(app);
         onboarding::register(app);
         app.add_systems(PostUpdate, prompts::refresh.before(bevy::ui::UiSystems::Prepare));

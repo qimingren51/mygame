@@ -103,20 +103,69 @@ enum Source {
     Charm,
 }
 
+/// 属性的一项来源（局内属性面板悬停时列出）。下标指向内容里对应的列表。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatSource {
+    /// 主角等级（照见圈、灯光随等级变大）
+    Level,
+    Meta(usize),
+    Attribute(usize),
+    Lamp(usize),
+    Charm(usize),
+    Omen(usize),
+    Difficulty(usize),
+    Passive(usize),
+    /// 五行下标、第几阶（从 0 起）
+    Tier(usize, usize),
+    Sheng(usize),
+    Taiji,
+    Buff(usize),
+}
+
+/// 一项来源给某个属性的加值和乘值。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StatContribution {
+    pub from: StatSource,
+    pub add: f32,
+    pub mul: f32,
+}
+
 struct Acc {
     add: [f32; Stat::COUNT],
     mul: [f32; Stat::COUNT],
     rules: u32,
     effects: Effects,
+    /// 要列来源的属性（界面用；模拟里是 None）
+    trace: Option<Stat>,
+    found: Vec<StatContribution>,
 }
 
 impl Acc {
-    fn apply(&mut self, list: &[Effect], times: f32, source: Source, index: usize) {
+    fn note(&mut self, from: StatSource, s: Stat, add: f32, mul: f32) {
+        if self.trace != Some(s) {
+            return;
+        }
+        match self.found.last_mut() {
+            Some(last) if last.from == from => {
+                last.add += add;
+                last.mul += mul;
+            }
+            _ => self.found.push(StatContribution { from, add, mul }),
+        }
+    }
+
+    fn apply(&mut self, list: &[Effect], times: f32, source: Source, index: usize, from: StatSource) {
         for (k, e) in list.iter().enumerate() {
             let key = ((source as u32) << 24) | ((index as u32 & 0xffff) << 8) | (k as u32 & 0xff);
             match e {
-                Effect::Add(s, v) => self.add[*s as usize] += v * times,
-                Effect::Mul(s, v) => self.mul[*s as usize] += v * times,
+                Effect::Add(s, v) => {
+                    self.add[*s as usize] += v * times;
+                    self.note(from, *s, v * times, 0.0);
+                }
+                Effect::Mul(s, v) => {
+                    self.mul[*s as usize] += v * times;
+                    self.note(from, *s, 0.0, v * times);
+                }
                 Effect::Trigger { on, chance, only, action } => {
                     let t = ActiveTrigger {
                         key,
@@ -154,42 +203,92 @@ pub fn collect(
     buff: Option<usize>,
     level: u32,
 ) -> (Stats, Effects) {
-    let mut acc =
-        Acc { add: [0.0; Stat::COUNT], mul: [0.0; Stat::COUNT], rules: 0, effects: Effects::default() };
+    let acc = accumulate(content, setup, build, buff, level, None);
+    let mut v = [0.0; Stat::COUNT];
+    for (i, d) in content.stats.iter().enumerate() {
+        v[i] = ((d.base + acc.add[i]) * (1.0 + acc.mul[i])).clamp(d.min, d.max);
+    }
+    v[Stat::MaxHp as usize] = v[Stat::MaxHp as usize].round();
+    // 载物：每点护甲让加成区再加一点
+    v[Stat::Damage as usize] += v[Stat::Armor as usize] * v[Stat::ArmorToDamage as usize];
+    (Stats { v, rules: acc.rules }, acc.effects)
+}
+
+/// 某一项属性的来源明细（局内属性面板用），和 [`collect`] 走同一套汇总；加值、乘值都是 0 的不列。
+pub fn sources(
+    content: &Content,
+    setup: &RunSetup,
+    build: &Build,
+    buff: Option<usize>,
+    level: u32,
+    stat: Stat,
+) -> Vec<StatContribution> {
+    let mut found = accumulate(content, setup, build, buff, level, Some(stat)).found;
+    found.retain(|c| c.add != 0.0 || c.mul != 0.0);
+    found
+}
+
+fn accumulate(
+    content: &Content,
+    setup: &RunSetup,
+    build: &Build,
+    buff: Option<usize>,
+    level: u32,
+    trace: Option<Stat>,
+) -> Acc {
+    let mut acc = Acc {
+        add: [0.0; Stat::COUNT],
+        mul: [0.0; Stat::COUNT],
+        rules: 0,
+        effects: Effects::default(),
+        trace,
+        found: Vec::new(),
+    };
     let grown = level.saturating_sub(1) as f32;
-    acc.mul[Stat::Reveal as usize] += content.player.reveal.per_level * grown;
-    acc.mul[Stat::Light as usize] += content.player.reveal.light_per_level * grown;
+    for (s, per) in [
+        (Stat::Reveal, content.player.reveal.per_level),
+        (Stat::Light, content.player.reveal.light_per_level),
+    ] {
+        acc.mul[s as usize] += per * grown;
+        acc.note(StatSource::Level, s, 0.0, per * grown);
+    }
     for (i, node) in content.meta.nodes.iter().enumerate() {
         let lv = setup.meta.get(&node.id).copied().unwrap_or(0).min(node.max_level);
         if lv > 0 {
-            acc.apply(&node.per_level, lv as f32, Source::Meta, i);
+            acc.apply(&node.per_level, lv as f32, Source::Meta, i, StatSource::Meta(i));
             for (k, step) in node.levels.iter().take(lv as usize).enumerate() {
-                acc.apply(step, 1.0, Source::Meta, i * 8 + k);
+                acc.apply(step, 1.0, Source::Meta, i * 8 + k, StatSource::Meta(i));
             }
         }
     }
     for (i, a) in content.attributes.list.iter().enumerate() {
         let lv = setup.attributes.get(&a.id).copied().unwrap_or(0).min(a.max_level);
         if lv > 0 {
-            acc.apply(&a.per_level, lv as f32, Source::Attribute, i);
+            acc.apply(&a.per_level, lv as f32, Source::Attribute, i, StatSource::Attribute(i));
         }
     }
     let lamp = setup.lamp_index(content);
-    acc.apply(&content.lamps[lamp].effects, 1.0, Source::Lamp, lamp);
+    acc.apply(&content.lamps[lamp].effects, 1.0, Source::Lamp, lamp, StatSource::Lamp(lamp));
     for &k in &build.charms {
-        acc.apply(&content.charms[k].effects, 1.0, Source::Charm, k);
+        acc.apply(&content.charms[k].effects, 1.0, Source::Charm, k, StatSource::Charm(k));
     }
     if let Some(i) = setup.omen.as_ref().and_then(|o| content.omen_index(&o.id)) {
-        acc.apply(&content.omens[i].effects, 1.0, Source::Omen, i);
+        acc.apply(&content.omens[i].effects, 1.0, Source::Omen, i, StatSource::Omen(i));
     }
     // 难度“更”：第 n 更包含前面各更的规则（difficulty.ron 里每一更写的是相对一更的修正）
     let tier = (setup.tier.max(1) as usize - 1).min(content.difficulty.len() - 1);
-    acc.apply(&content.difficulty[tier].effects, 1.0, Source::Difficulty, tier);
+    acc.apply(&content.difficulty[tier].effects, 1.0, Source::Difficulty, tier, StatSource::Difficulty(tier));
     for slot in &build.passives {
         let def = &content.passives[slot.def];
-        acc.apply(&def.per_level, slot.level as f32, Source::Passive, slot.def);
+        acc.apply(
+            &def.per_level,
+            slot.level as f32,
+            Source::Passive,
+            slot.def,
+            StatSource::Passive(slot.def),
+        );
         for lv in def.levels.iter().take(slot.level as usize) {
-            acc.apply(lv, 1.0, Source::Passive, slot.def);
+            acc.apply(lv, 1.0, Source::Passive, slot.def, StatSource::Passive(slot.def));
         }
     }
     for (e, def) in content.elements.elements.iter().enumerate() {
@@ -199,20 +298,20 @@ pub fn collect(
             if tier.superseded && k + 1 < reached {
                 continue;
             }
-            acc.apply(&tier.effects, 1.0, Source::Tier, e * 8 + k);
+            acc.apply(&tier.effects, 1.0, Source::Tier, e * 8 + k, StatSource::Tier(e, k));
         }
     }
     let no_sheng = acc.rules & Rule::NoSheng.bit() != 0;
     for (i, s) in content.elements.sheng.iter().enumerate() {
         if !no_sheng && build.sheng.get(i).copied().unwrap_or(false) {
-            acc.apply(&s.effects, 1.0, Source::Sheng, i);
+            acc.apply(&s.effects, 1.0, Source::Sheng, i, StatSource::Sheng(i));
         }
     }
     if build.taiji {
-        acc.apply(&content.elements.taiji.effects, 1.0, Source::Taiji, 0);
+        acc.apply(&content.elements.taiji.effects, 1.0, Source::Taiji, 0, StatSource::Taiji);
     }
     if let Some(b) = buff {
-        acc.apply(&content.events.buffs[b].effects, 1.0, Source::Buff, b);
+        acc.apply(&content.events.buffs[b].effects, 1.0, Source::Buff, b, StatSource::Buff(b));
     }
     // 五帝钱这类按共鸣阶数算的效果
     let on = build.tiers.iter().filter(|&&t| t >= 1).count() as f32;
@@ -224,17 +323,11 @@ pub fn collect(
                     v += all;
                 }
                 acc.add[stat as usize] += v;
+                acc.note(StatSource::Charm(k), stat, v, 0.0);
             }
         }
     }
-    let mut v = [0.0; Stat::COUNT];
-    for (i, d) in content.stats.iter().enumerate() {
-        v[i] = ((d.base + acc.add[i]) * (1.0 + acc.mul[i])).clamp(d.min, d.max);
-    }
-    v[Stat::MaxHp as usize] = v[Stat::MaxHp as usize].round();
-    // 载物：每点护甲让加成区再加一点
-    v[Stat::Damage as usize] += v[Stat::Armor as usize] * v[Stat::ArmorToDamage as usize];
-    (Stats { v, rules: acc.rules }, acc.effects)
+    acc
 }
 
 /// 构筑变化后重算属性。周期触发器保留已经过的时间；生命上限提高时当前生命同时加上差值。

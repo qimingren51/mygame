@@ -267,3 +267,31 @@ fn elites_drop_a_chest_that_opens_when_picked_up() {
     }
     assert!(opened, "精英死后应该掉宝箱并打开");
 }
+
+#[test]
+fn stat_sources_add_up_to_the_final_value() {
+    use lantern_sim::{StatSource, stats};
+    let c = content();
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.attributes.insert("health".into(), 2);
+    let mut build = lantern_sim::Build::default();
+    let houde = c.passive_index("houde").unwrap();
+    build.passives.push(lantern_sim::build::PassiveSlot { def: houde, level: 2 });
+    for stat in [Stat::MaxHp, Stat::Armor, Stat::Reveal] {
+        let (all, _) = stats::collect(&c, &setup, &build, None, 5);
+        let found = stats::sources(&c, &setup, &build, None, 5, stat);
+        let d = c.stat(stat);
+        let add: f32 = found.iter().map(|s| s.add).sum();
+        let mul: f32 = found.iter().map(|s| s.mul).sum();
+        let v = ((d.base + add) * (1.0 + mul)).clamp(d.min, d.max);
+        let v = if stat == Stat::MaxHp { v.round() } else { v };
+        assert!((v - all.get(stat)).abs() < 1e-4, "{stat:?}: {v} vs {}", all.get(stat));
+        // 同一来源合成一条
+        assert!(found.windows(2).all(|w| w[0].from != w[1].from));
+    }
+    let hp = stats::sources(&c, &setup, &build, None, 5, Stat::MaxHp);
+    assert!(hp.iter().any(|s| s.from == StatSource::Passive(houde)));
+    assert!(hp.iter().any(|s| matches!(s.from, StatSource::Attribute(_))));
+    let reveal = stats::sources(&c, &setup, &build, None, 5, Stat::Reveal);
+    assert!(reveal.iter().any(|s| s.from == StatSource::Level));
+}
