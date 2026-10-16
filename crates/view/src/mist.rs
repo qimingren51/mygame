@@ -130,7 +130,12 @@ pub(crate) fn update_mist(
     let (thick, slow) = if fog { (FOG_THICK, FOG_DRIFT) } else { (1.0, 1.0) };
     for (m, mut tf, mat, mut vis) in &mut q {
         let (_, alpha, drift) = LAYERS[m.0];
-        vis.set_if_neq(if feel.lite && m.0 > 0 { Visibility::Hidden } else { Visibility::Inherited });
+        // 平时是月夜，不铺雾（试玩第 1 轮：全屏薄雾把暗处抬成一片灰）；只有“浓雾”的夜里铺
+        let shown = fog && !(feel.lite && m.0 > 0);
+        vis.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
+        if !shown {
+            continue;
+        }
         tf.translation = center.extend(tf.translation.z);
         tf.scale = (half * 2.0).extend(1.0);
         let Some(mut material) = materials.get_mut(&mat.0) else { continue };
