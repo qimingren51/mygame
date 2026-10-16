@@ -87,7 +87,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
 
 ### 协作
 
-目前有五个 Claude 会话分工合作（架构、美术、玩法与数值、世界观与命名、质感），各自负责的文件见 `docs/DESIGN.md` 第 19 节。改对方负责的文件之前，先发消息商量。推送前先 `git pull --rebase origin master`。
+当前八个 Codex 会话按 `docs/TEAM.md` 分工，在独立 worktree 开发，由总协调审查后集成到 `develop`。本轮不向 `master` 合并或推送，不执行旧的 `git pull --rebase origin master` 流程。历史分工见 `docs/DESIGN.md` 第 19 节；当前文件归属与跨会话接口以任务板为准。
 
 ## 网页小游戏（`web/`）
 
