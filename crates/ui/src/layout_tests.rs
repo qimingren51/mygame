@@ -209,3 +209,30 @@ fn hud_shows_the_omen_and_element_icons_from_the_atlas() {
     );
     assert!(world.query::<&Text>().iter(world).any(|t| t.0 == name));
 }
+
+#[test]
+fn codex_pages_with_everything_unlocked_fit_after_resize() {
+    for page in 0..crate::hub::CODEX_PAGES.len() {
+        let mut app = setup();
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      c: Res<lantern_sim::GameContent>,
+                      fonts: Res<Fonts>,
+                      skin: Res<skin::Skin>,
+                      db: Res<AtlasDb>| {
+                    let c = &c.0;
+                    let mut profile = Profile::default();
+                    profile.reactions = u32::MAX;
+                    profile.codex.extend(c.weapons.iter().flat_map(|w| {
+                        [format!("w:{}", w.id), format!("w:{}_evo", w.id), format!("w:{}_mut", w.id)]
+                    }));
+                    profile.codex.extend(c.fusions.iter().map(|f| format!("f:{}", f.id)));
+                    profile.codex.extend(c.passives.iter().map(|p| format!("p:{}", p.id)));
+                    crate::hub::codex_panel(&mut commands, c, &fonts, &skin, &db, &profile, page);
+                },
+            )
+            .unwrap();
+        assert_fits_after_resize(&mut app);
+    }
+}

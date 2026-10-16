@@ -111,6 +111,9 @@ pub struct Profile {
     pub achievements: BTreeSet<String>,
     /// 见过的反应（按 `elements.ron` 里 reactions 的下标置位，跨局累计）
     pub reactions: u32,
+    /// 图鉴：拿到过的法器、进化、异化、合璧、心法（键见 `lantern_sim::flow::codex_keys`）
+    #[serde(default)]
+    pub codex: BTreeSet<String>,
     pub last: LastPick,
     /// 灯驿里已经见过的人物（`hub.ron` 的 ID）
     pub met: BTreeSet<String>,
@@ -156,6 +159,7 @@ impl Default for Profile {
             cleared: 0,
             achievements: BTreeSet::new(),
             reactions: 0,
+            codex: BTreeSet::new(),
             last: LastPick::default(),
             met: BTreeSet::new(),
             hub_lines_seen: BTreeSet::new(),
@@ -692,6 +696,7 @@ impl Profile {
         self.events.extend(r.events.iter().cloned());
         self.journals.extend(r.journals.iter().copied().filter(|p| (1..=30).contains(p)));
         self.reactions |= r.feats.reactions;
+        self.codex.extend(r.feats.codex.iter().cloned());
         let t = &mut self.totals;
         t.kills += u64::from(r.kills);
         t.seconds += f64::from(r.seconds);
@@ -818,6 +823,25 @@ mod tests {
         assert!(std::fs::read_to_string(dir.join("save.bak")).unwrap().contains("oil: 123"));
         assert_eq!(std::fs::read_to_string(dir.join("save.ron.broken")).unwrap(), "broken");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn codex_accumulates_across_runs_and_survives_a_save() {
+        let c = content();
+        let mut p = Profile::default();
+        let mut r = result(false, 60.0, 10, 0, 0);
+        r.feats.codex = ["w:lamp".to_string(), "p:jianyi".to_string()].into();
+        p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        r.feats.codex = ["w:lamp_evo".to_string()].into();
+        p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        assert_eq!(p.codex.len(), 3);
+        let back: Profile = ron::from_str(&ron::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back.codex, p.codex);
+        // 旧存档没有这一项
+        let mut old = ron::to_string(&Profile::default()).unwrap();
+        old = old.replace("codex:[],", "");
+        assert!(!old.contains("codex"));
+        assert!(ron::from_str::<Profile>(&old).unwrap().codex.is_empty());
     }
 
     #[test]
