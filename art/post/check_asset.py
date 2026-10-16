@@ -17,6 +17,8 @@
      （有的话）比；某个朝向整体偏离全素材中位数只给警告（道具可能高过头顶）
   6. 调色板：不透明的非墨线像素里，≥90% 离调色板（full_palette + 发光色）在 PALETTE_TOLERANCE 以内
   7. 墨线占比：在合理范围 LINE_RATIO_RANGE 内
+     （重做的妖物 meta.style = "paint"：多档带色相偏移的渐变、焦墨的影妖本来就不在旧的三档色板里，
+      这两项只记在 info 里、不算错；其余各项照查）
   8. 挂点：meta.sockets 里每个挂点都覆盖每个动画、每个朝向、每一帧
 
 “配准漂移”（检查项 4，沿用 FOOT_TOLERANCE_PX）：
@@ -26,6 +28,8 @@
   - y：锚点正上方窄列（±TOP_WINDOW×宽）里最高的不透明像素（冠顶/帽尖），亚像素
   - x：同一窄列里，锚点以上身高 40%~62% 的躯干条带的 alpha 加权重心（同组各帧用同一条带）
   同一动画同一朝向各帧离中位数不超过 FOOT_TOLERANCE_PX；悬浮素材（floating）和 register_x_only 只查 x；
+  四足兽（赤面狐）锚点上方 40%~62% 正好是腹下和腿，迈步时膝盖会摆进取样列，meta.register_band 可以改用别的高度比例
+  （例如 [0.70, 0.92]，躯干）；
   只播一次的动画（meta anims.<名>.loop=false，主角死亡）不查配准；
   vertical_motion（跳跃等本来就大幅上下的动画）也只查 x，并且不查逐帧身高。
 “着地”：非悬浮、非道具素材，锚点附近最低的不透明像素要在锚点上方 6% 身高到下方 10% 帧高之间
@@ -239,9 +243,10 @@ def check_asset(asset_dir: Path) -> dict:
         if m:
             groups.setdefault((an, d), []).append(((an, d, i), m))
     drift_max = 0.0
+    band_frac = meta.get("register_band", BAND)  # 取 x 配准的条带（锚点以上身高的比例）
     for (an, d), lst in groups.items():
         gh = float(np.median([m["height"] for _, m in lst]))
-        band = (ay - BAND[1] * gh, ay - BAND[0] * gh)  # 同组用同一条带
+        band = (ay - band_frac[1] * gh, ay - band_frac[0] * gh)  # 同组用同一条带
         for k, m in lst:
             m["reg_x"] = measure(frames[k][..., 3] / 255.0, ax, ay, band)["reg_x"]
         fx = np.array([m["reg_x"] for _, m in lst])
@@ -297,6 +302,8 @@ def check_asset(asset_dir: Path) -> dict:
             share = 1.0
         shares.append(share)
         nm = f"{k[0]}_{k[1]}_{k[2]:02d}.png"
+        if meta.get("style") == "paint":  # 绘画感的新画法：不查色板比例、墨线占比（见文件头第 6、7 项）
+            continue
         if share < PALETTE_MIN_SHARE:
             errors.append(f"{nm}：非墨线像素只有 {share:.1%} 在调色板容差内（要求 ≥{PALETTE_MIN_SHARE:.0%}）")
         if not (LINE_RATIO_RANGE[0] <= ratio <= LINE_RATIO_RANGE[1]):
