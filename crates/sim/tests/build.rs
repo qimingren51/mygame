@@ -186,8 +186,13 @@ fn evolution_offer_needs_max_level_and_passive() {
 
 #[test]
 fn when_everything_is_maxed_only_supplies_remain() {
-    let c = content();
-    let mut sim = fresh(1);
+    // 合璧另有测试（同五行的新法器一多，共鸣到 2 层就会出合璧卡），这里只看升级和进化都满了
+    let mut c = content();
+    c.run.transformations = false;
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.god = true;
+    let mut sim = SimHarness::with_setup(c.clone(), setup);
+    sim.quiet();
     let weapons: Vec<(&str, u32, bool)> = c.weapons.iter().map(|w| (w.id.as_str(), 8, true)).collect();
     let passives: Vec<(&str, u32)> = c.passives.iter().take(6).map(|p| (p.id.as_str(), 5)).collect();
     sim.set_build(&weapons, &passives);
