@@ -38,7 +38,8 @@ ACCENT = {
 SKIN = "#E9D0AB"  # 皮肤：淡赭
 
 # 夜色与光
-NIGHT_AMBIENT = "#161B2C"  # 光照图的底色（游戏里同值）
+NIGHT_AMBIENT = "#46557F"  # 普通月夜底光（游戏里同值）
+NO_MOON_AMBIENT = "#161B2C"  # 夜签“无月”：保留深夜底色
 LANTERN_LIGHT = "#FFC27A"  # 灯笼暖光
 FLAME_LIGHT = "#FF9A4D"  # 火焰
 SOUL_LIGHT = "#BFEFFF"  # 魂火冷光
@@ -86,7 +87,8 @@ RUNTIME_COLORS = {
     "INK": INK["jiao"],                         # #17140F，墨滴、灰、化墨与轮廓同色
     "GOLD": ACCENT["tenghuang"],               # #E2B23A，金火星
     "DUST": mix(INK["zhong"], INK["dan"], 0.5), # #6A645A，受光尘土；运行时 alpha=0.4
-    "NIGHT_AMBIENT": NIGHT_AMBIENT,             # #161B2C，保持夜色
+    "NIGHT_AMBIENT": NIGHT_AMBIENT,             # #46557F，月夜
+    "NO_MOON_AMBIENT": NO_MOON_AMBIENT,         # #161B2C，无月
     "LANTERN_LIGHT": LANTERN_LIGHT,             # #FFC27A
     "FLAME_LIGHT": FLAME_LIGHT,                 # #FF9A4D，FIRE 同值
     "SOUL_LIGHT": SOUL_LIGHT,                   # #BFEFFF

@@ -2,7 +2,7 @@
 //! 一张盖 128 个世界单位，白色可染。图集里不能重复采样，一格格铺开会在格子边上露出接缝，
 //! 所以等图集加载好，把这两帧拷成单独的、重复采样的贴图，每层一个盖住镜头的大四边形，
 //! UV 跟着世界坐标走、各自漂移。叠在暗层之上、普通混合：夜里像月光下的雾，天明时淡一半，成了晨雾。
-//! 夜签“浓雾”（灯光范围 −30%）的夜里雾浓得多、飘得慢，让减掉的灯光看得见。
+//! 仅夜签“浓雾”（灯光范围 −30%）时出现，漂移较慢；普通月夜不铺雾，保留地面与妖物墨线。
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -127,19 +127,22 @@ pub(crate) fn update_mist(
     // 天明时淡一半；妖潮、合围时也压低（和萤火、夜雾一起，危险色留在最前面）
     let fade = (1.0 - 0.5 * dawn.progress()) * (1.0 - (1.0 - TIDE_DECOR_GAIN) * atmos.tide);
     let fog = setup.is_some_and(|s| s.omen.as_ref().is_some_and(|o| o.id == "fog"));
-    let (thick, slow) = if fog { (FOG_THICK, FOG_DRIFT) } else { (1.0, 1.0) };
     for (m, mut tf, mat, mut vis) in &mut q {
         let (_, alpha, drift) = LAYERS[m.0];
-        vis.set_if_neq(if feel.lite && m.0 > 0 { Visibility::Hidden } else { Visibility::Inherited });
+        let shown = fog && !(feel.lite && m.0 > 0);
+        vis.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
+        if !shown {
+            continue;
+        }
         tf.translation = center.extend(tf.translation.z);
         tf.scale = (half * 2.0).extend(1.0);
         let Some(mut material) = materials.get_mut(&mat.0) else { continue };
         // 四边形左上角在世界里的位置（贴图 v 向下，世界 y 向上）；贴图本身往 drift 方向漂
-        let corner = Vec2::new(center.x - half.x, center.y + half.y) - drift * slow * t;
+        let corner = Vec2::new(center.x - half.x, center.y + half.y) - drift * FOG_DRIFT * t;
         let offset = Vec2::new(corner.x, -corner.y) / TILE;
         material.uv_transform =
             Affine2::from_scale_angle_translation(half * 2.0 / TILE, 0.0, offset.rem_euclid(Vec2::ONE));
-        material.color = TINT.with_alpha(alpha * thick * fade);
+        material.color = TINT.with_alpha(alpha * FOG_THICK * fade);
     }
 }
 

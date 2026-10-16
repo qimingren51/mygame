@@ -1,6 +1,6 @@
 //! 氛围（docs/FEEL.md 第 4 节）：萤火与夜雾、暗角、受伤与濒死、夜主登场压暗、天明。
 //!
-//! - 萤火和夜雾都叠加在暗层之上：萤火是暗处的小光点，夜雾是暗处泛起的一层冷蓝薄雾。
+//! - 萤火和夜雾都叠加在暗层之上；冷蓝夜雾只在“浓雾”夜签出现，普通月夜保持清晰。
 //! - 暗角用 Bevy 自带的 `Vignette`，平时很淡；受伤时一跳，生命低于三成时随心跳收紧、泛红。
 //! - 天明：击败夜主后，光照图的底色在 3 秒内从夜色变成晨光，剩下的妖物化成墨烟
 //!   （docs/GAMEPLAY.md 第 4.2、14 节）。只改画面，模拟照常结束。
@@ -20,7 +20,7 @@ use lantern_sim::{AppState, Director, Health, Player, Pos, RunState, SimEvent, S
 use crate::actors::{GlowRequests, Pools};
 use crate::fx::ult_flare;
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
-use crate::palette::{TIDE_AMBIENT_GAIN, TIDE_DECOR_GAIN, TIDE_PARTICLE_GAIN, dawn_ambient};
+use crate::palette::{NO_MOON_AMBIENT, TIDE_AMBIENT_GAIN, TIDE_DECOR_GAIN, TIDE_PARTICLE_GAIN, dawn_ambient};
 use crate::particles::{INK, Particles};
 use crate::{Feel, MainCamera, layer, to_screen};
 
@@ -252,7 +252,10 @@ pub(crate) fn update_atmos(
     mut light: Single<&mut Camera, With<LightCamera>>,
     feel: Res<Feel>,
     director: Option<Res<Director>>,
+    (stats, setup): (Option<Res<lantern_sim::Stats>>, Option<Res<lantern_sim::RunSetup>>),
 ) {
+    let no_moon = stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
+    let fog = setup.as_ref().is_some_and(|s| s.omen.as_ref().is_some_and(|o| o.id == "fog"));
     let rdt = real.delta_secs().min(0.1);
     // 妖潮、合围：约 1.5 秒压下去，结束后约 3 秒回来
     let tide = director.is_some_and(|d| d.surge_t > 0.0 || !d.encircle.is_empty());
@@ -303,7 +306,7 @@ pub(crate) fn update_atmos(
     }
 
     // ---- 光照图底色：夜色 → 夜主登场时更暗 → 天明时变成晨光
-    let night = NIGHT_AMBIENT.to_linear();
+    let night = if no_moon { NO_MOON_AMBIENT } else { NIGHT_AMBIENT }.to_linear();
     // 夜主登场：0.4 秒压暗，停一会儿，最后 1.5 秒慢慢回来（短的按比例缩）
     let gloom = if atmos.gloom > 0.0 {
         let len = atmos.gloom_len;
@@ -312,13 +315,9 @@ pub(crate) fn update_atmos(
     } else {
         1.0
     };
-    // 天明：夜色经过暖桃到鱼肚白（色板 palette.rs，和美术的 style.py 同值）
-    let ambient = if day > 0.0 {
-        dawn_ambient(day)
-    } else {
-        let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth) * (1.0 - (1.0 - TIDE_AMBIENT_GAIN) * atmos.tide);
-        LinearRgba::rgb(night.red * deep, night.green * deep, night.blue * deep)
-    };
+    // 天明从当局底光起步，剩余压暗随夜色一起退去，不在第一帧跳回普通月夜。
+    let deep = gloom * (1.0 - DEPTH_STEP * atmos.depth) * (1.0 - (1.0 - TIDE_AMBIENT_GAIN) * atmos.tide);
+    let ambient = dawn_ambient(LinearRgba::rgb(night.red * deep, night.green * deep, night.blue * deep), day);
     light.clear_color = ClearColorConfig::Custom(Color::LinearRgba(ambient.with_alpha(1.0)));
 
     // ---- 天明时妖物化烟
@@ -365,7 +364,10 @@ pub(crate) fn update_atmos(
         }
     }
 
-    // ---- 夜雾：大片冷蓝的薄雾慢慢横移，叠加在暗层之上，暗处泛起一层月色，亮处几乎看不出
+    // ---- 夜雾仅在“浓雾”夜签出现；普通月夜不叠亮雾，以免墨线和地面被抬成平灰。
+    if !fog {
+        return;
+    }
     for w in &mut atmos.wisps {
         w.off.x += w.vel * dt;
         if w.off.x > 560.0 {

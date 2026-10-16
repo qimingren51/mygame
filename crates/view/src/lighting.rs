@@ -39,8 +39,8 @@ const LIGHTMAP_SCALE: f32 = 0.5;
 /// 自发光的亮度倍数（主画面是 HDR）。超过 1 的部分由辉光晕开。
 pub const EMIT_HDR: f32 = 1.5;
 
-/// 夜色：没有光照到的地方乘以它
-pub const NIGHT_AMBIENT: Color = Color::srgb(0.086, 0.106, 0.173);
+/// 普通月夜底光，与运行时/美术色板同源；无月由氛围系统按当局夜签选择。
+pub const NIGHT_AMBIENT: Color = crate::palette::NIGHT_AMBIENT;
 
 // ---------------------------------------------------------------------------
 // 混合方式扩展

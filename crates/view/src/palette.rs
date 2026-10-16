@@ -8,7 +8,10 @@ use bevy::prelude::*;
 pub(crate) const INK: Color = Color::srgb_u8(23, 20, 15);
 pub(crate) const GOLD: Color = Color::srgb_u8(226, 178, 58);
 pub(crate) const DUST: Color = Color::srgb_u8(106, 100, 90);
-pub const NIGHT_AMBIENT: Color = Color::srgb_u8(22, 27, 44);
+/// 普通月夜：暗处仍能辨认地面和妖物，灯下保持暖色。
+pub const NIGHT_AMBIENT: Color = Color::srgb_u8(70, 85, 127);
+/// 夜签“无月”：保留原来的深夜底色。
+pub const NO_MOON_AMBIENT: Color = Color::srgb_u8(22, 27, 44);
 pub(crate) const LANTERN_LIGHT: Color = Color::srgb_u8(255, 194, 122);
 pub(crate) const FLAME_LIGHT: Color = Color::srgb_u8(255, 154, 77);
 pub(crate) const SOUL_LIGHT: Color = Color::srgb_u8(191, 239, 255);
@@ -30,15 +33,16 @@ pub(crate) const WARNING_ALPHA_MIN: f32 = 0.85;
 pub(crate) const DAWN_LANTERN_GAIN: f32 = 0.35;
 pub(crate) const DAWN_PARTICLE_GAIN: f32 = 0.2;
 
-/// 天明经过暖桃再到鱼肚白；不直接在 sRGB 分量上插值，以免中段灰暗。
-pub(crate) fn dawn_ambient(progress: f32) -> LinearRgba {
+/// 从当局底光经过暖桃再到鱼肚白；包括无月与妖潮/夜主压暗，避免天明起点跳亮。
+/// 在线性空间插值，以免中段灰暗。
+pub(crate) fn dawn_ambient(night: LinearRgba, progress: f32) -> LinearRgba {
     let day = progress.clamp(0.0, 1.0);
     let (from, to, t) = if day < 0.5 {
-        (NIGHT_AMBIENT, DAWN_PEACH, day * 2.0)
+        (night, DAWN_PEACH.to_linear(), day * 2.0)
     } else {
-        (DAWN_PEACH, DAWN_WHITE, (day - 0.5) * 2.0)
+        (DAWN_PEACH.to_linear(), DAWN_WHITE.to_linear(), (day - 0.5) * 2.0)
     };
-    from.to_linear().mix(&to.to_linear(), t)
+    from.mix(&to, t)
 }
 
 #[cfg(test)]
@@ -52,22 +56,32 @@ mod tests {
     #[test]
     fn ink_and_night_match_art_srgb() {
         assert_eq!(INK.to_srgba().to_u8_array(), [0x17, 0x14, 0x0f, 255]);
-        assert_eq!(NIGHT_AMBIENT.to_srgba().to_u8_array(), [0x16, 0x1b, 0x2c, 255]);
+        assert_eq!(NIGHT_AMBIENT.to_srgba().to_u8_array(), [0x46, 0x55, 0x7f, 255]);
+        assert_eq!(NO_MOON_AMBIENT.to_srgba().to_u8_array(), [0x16, 0x1b, 0x2c, 255]);
     }
 
     #[test]
     fn dawn_is_continuous_and_brightens_through_warm_peach() {
-        assert_eq!(dawn_ambient(-1.0), NIGHT_AMBIENT.to_linear());
-        assert_eq!(dawn_ambient(0.5), DAWN_PEACH.to_linear());
-        assert_eq!(dawn_ambient(2.0), DAWN_WHITE.to_linear());
-        let mut last = luminance(dawn_ambient(0.0));
-        for i in 1..=100 {
-            let c = dawn_ambient(i as f32 / 100.0);
-            assert!(luminance(c) > last);
-            assert_eq!(c.alpha, 1.0);
-            last = luminance(c);
+        for base in [NIGHT_AMBIENT, NO_MOON_AMBIENT] {
+            // 包含妖潮/夜主压暗，天明不能先跳回未经压暗的普通月夜。
+            for gain in [1.0, TIDE_AMBIENT_GAIN, 0.55] {
+                let base = base.to_linear();
+                let night = LinearRgba::rgb(base.red * gain, base.green * gain, base.blue * gain);
+                let at = |day| dawn_ambient(night, day);
+                assert_eq!(at(-1.0), night);
+                assert_eq!(at(0.5), DAWN_PEACH.to_linear());
+                assert_eq!(at(2.0), DAWN_WHITE.to_linear());
+                assert!((luminance(at(0.0001)) - luminance(night)).abs() < 0.001);
+                let mut last = luminance(at(0.0));
+                for i in 1..=100 {
+                    let c = at(i as f32 / 100.0);
+                    assert!(luminance(c) > last);
+                    assert_eq!(c.alpha, 1.0);
+                    last = luminance(c);
+                }
+                assert!((luminance(at(0.4999)) - luminance(at(0.5001))).abs() < 0.001);
+            }
         }
-        assert!((luminance(dawn_ambient(0.4999)) - luminance(dawn_ambient(0.5001))).abs() < 0.001);
     }
 
     #[test]
@@ -79,6 +93,7 @@ mod tests {
         }
         let c = WARNING.to_srgba();
         assert!((c.red - c.blue) / c.red > 0.65);
-        assert!(luminance(NIGHT_AMBIENT.to_linear()) * TIDE_AMBIENT_GAIN < luminance(dawn_ambient(0.5)));
+        let night = NIGHT_AMBIENT.to_linear();
+        assert!(luminance(night) * TIDE_AMBIENT_GAIN < luminance(dawn_ambient(night, 0.5)));
     }
 }

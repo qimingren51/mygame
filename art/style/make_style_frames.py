@@ -48,9 +48,11 @@ def linear_mix(a, b, t):
 
 def ambient(tide, day):
     night, peach, white = (S.hex_to_linear(C[k]) for k in ("NIGHT_AMBIENT", "DAWN_PEACH", "DAWN_WHITE"))
+    # 与运行时相同：妖潮剩余压暗随夜色一起退去，天明起点不跳回未压暗的月夜。
+    night = tuple(v * (1 - (1 - P["TIDE_AMBIENT_GAIN"]) * tide) for v in night)
     if day > 0:
         return linear_mix(night, peach, day * 2) if day < 0.5 else linear_mix(peach, white, (day - 0.5) * 2)
-    return tuple(v * (1 - (1 - P["TIDE_AMBIENT_GAIN"]) * tide) for v in night)
+    return night
 
 
 def srgb(values):
