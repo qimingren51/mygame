@@ -164,6 +164,27 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
 格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
 
+重新生成时，panel_dark、overlay_vignette、pill、pip、pip_on、toast、toast_big、menu_hl 和仓库里的有细微差别（生成器早就有的漂移，master 上的脚本也一样）。
+只换改过的件时按名字拷，不要整个目录覆盖。
+
+### 黑漆描金：升级卡与状态栏（post/ui_lacquer.py）
+
+试玩第 1 轮选定，升级卡和状态栏整套用黑漆描金。`ui_skin.py` 从 `ui_lacquer.py` 取这些件，每件的显示尺寸写在 skin.json 的 note 里：
+
+- 卡框 `card_fan/ling/xuan/tian/yi/he`：600×920（显示 300×460），切片 64，中间和四边平铺，漆面按 64 像素的周期做成无缝；`card_focus`：624×944。
+- 卡上的字要用纸色或淡金（skin.json 的 `text` 是 `#ede4cf`），不能再用墨色。
+- 状态栏 `hud_portrait`：208²，中间直径 156 的窗口透明，主角胸像画在下面；`hud_ult_tick`、`hud_ult_tick_on`、`hud_ult_tick_full`：34×20，十二格绕头像章；
+  `hud_level_seal`：60²；`hud_hp_track`：256×60；`hud_xp_track`：128×20；`bar_fill_trail`：掉血残影。
+- 法器格 `slot_l*`：128²（显示 64）；心法格 `slot_s*`：88²（显示 44）。`bar_track`、`bar_fill_hp/xp/shield`、`chip_dark` 也换成了漆面。
+
+```bash
+art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
+art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats   # 有卡面插画后再加 art/out/assets@2x/ui_cards
+```
+
+数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
+帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
+
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
 ```bash

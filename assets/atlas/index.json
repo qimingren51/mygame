@@ -2,6 +2,7 @@
  "atlases": [
   "actors",
   "boss",
+  "cards",
   "ground",
   "lanterns",
   "ui",
@@ -27,6 +28,9 @@
   ],
   "lanterns": [
    "lanterns.json"
+  ],
+  "cards": [
+   "cards.json"
   ]
  }
 }
