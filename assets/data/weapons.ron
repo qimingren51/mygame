@@ -238,4 +238,30 @@
             level: (cooldown: 5.0, count: 8, radius: 64.0, damage: 160.0),
         )),
     ),
+    (
+        id: "wave", name: "沧浪", icon: "浪", element: Water,
+        desc: "朝面向推出一道浪（站着不动时朝最近的妖物），打伤、减速并推开碰到的妖物。", short: "推浪开路，减速妖物",
+        flavor: "沧浪之水，推得动船，也推得开妖。",
+        // 浪速 320，走 260 后散掉；最多推 140（精英一半，夜主不推）；减速 40%，1.5 秒；
+        // 数量加成多出来的浪左右轮流偏 25°
+        behavior: Wave(speed: 320.0, travel: 260.0, push: 140.0, slow: 0.4, slow_time: 1.5, spread: 0.4363),
+        levels: [
+            (cooldown: 3.2, count: 1, radius: 50.0, damage: 12.0),
+            (cooldown: 3.1, count: 1, radius: 52.0, damage: 15.0),
+            (cooldown: 3.0, count: 1, radius: 62.0, damage: 18.0),
+            (cooldown: 2.9, count: 1, radius: 64.0, damage: 21.0),
+            (cooldown: 2.8, count: 1, radius: 66.0, damage: 25.0),
+            (cooldown: 2.6, count: 1, radius: 76.0, damage: 28.0),
+            (cooldown: 2.5, count: 1, radius: 78.0, damage: 32.0),
+            (cooldown: 2.4, count: 1, radius: 80.0, damage: 36.0),
+        ],
+        evolution: Some((
+            name: "北冥潮", passive: "hanyi",
+            desc: "以自身为中心，一圈巨浪往外扩散，推开并冻结妖物。", short: "巨浪四散，推开冻结",
+            flavor: "北冥的潮水翻上来，卷走的妖都冻在浪里。",
+            // 一圈扩到 300（速度 400），往外推 160；冻结 1 秒（精英减半，夜主免疫）
+            behavior: Wave(speed: 400.0, travel: 0.0, push: 160.0, slow: 0.0, slow_time: 0.0, spread: 0.0, ring: true, freeze: 1.0),
+            level: (cooldown: 5.0, count: 1, radius: 300.0, damage: 40.0),
+        )),
+    ),
 ]

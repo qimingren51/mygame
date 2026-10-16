@@ -867,6 +867,22 @@ pub enum WeaponBehavior {
         retarget: f32,
         zone: FissureDef,
     },
+    /// 推浪（沧浪 / 北冥潮，docs/BALANCE.md 第 6.3 节）：朝面向（站着不动时朝最近的妖物）推出一道浪，
+    /// 宽 2 × radius，以 speed 走 travel 远后散掉；数量加成多一道，左右轮流再偏 spread（弧度）。
+    /// 浪碰到的妖物受一次伤害、减速，被浪推着走最多 push（精英一半，夜主不推）。
+    /// ring：以主角为圆心一圈往外扩，扩到 radius；这时 travel 不用，freeze 是命中冻结的秒数。
+    Wave {
+        speed: f32,
+        travel: f32,
+        push: f32,
+        slow: f32,
+        slow_time: f32,
+        spread: f32,
+        #[serde(default)]
+        ring: bool,
+        #[serde(default)]
+        freeze: f32,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点

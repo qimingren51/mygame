@@ -251,6 +251,7 @@ impl Checker<'_> {
                     | WeaponBehavior::Drop { .. }
                     | WeaponBehavior::Sweep { .. }
                     | WeaponBehavior::SkyLantern { .. }
+                    | WeaponBehavior::Wave { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -417,6 +418,22 @@ impl Checker<'_> {
                 )?;
                 self.non_negative(file, &[("SkyLantern.cluster", *cluster), ("SkyLantern.spread", *spread)])?;
                 self.fissure(file, zone)
+            }
+            WeaponBehavior::Wave { speed, travel, push, slow, slow_time, spread, ring, freeze } => {
+                self.positive(file, &[("Wave.speed", *speed)])?;
+                if !ring {
+                    self.positive(file, &[("Wave.travel", *travel)])?;
+                }
+                self.non_negative(
+                    file,
+                    &[
+                        ("Wave.push", *push),
+                        ("Wave.slow_time", *slow_time),
+                        ("Wave.spread", *spread),
+                        ("Wave.freeze", *freeze),
+                    ],
+                )?;
+                self.fraction(file, "Wave.slow", *slow)
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {

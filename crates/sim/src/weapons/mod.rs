@@ -6,6 +6,7 @@
 //! - [`drop`] 落印（山印 / 镇岳），以及进化后的地裂
 //! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
 //! - [`sky_lantern`] 孔明灯（孔明灯 / 万灯升）
+//! - [`wave`] 推浪（沧浪 / 北冥潮）
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -29,6 +30,7 @@ pub mod seeker;
 pub mod sky_lantern;
 pub mod sweep;
 pub mod volley;
+pub mod wave;
 
 pub(crate) const TAU: f32 = std::f32::consts::TAU;
 
@@ -239,13 +241,14 @@ impl Arsenal {
     }
 }
 
-/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、地裂）。
+/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、地裂）。
 /// 合成一个参数，免得 `update_weapons` 超过 Bevy 的参数个数上限。
 #[derive(SystemParam)]
 pub(crate) struct Props<'w> {
     shots: ResMut<'w, volley::Shots>,
     seals: ResMut<'w, drop::Seals>,
     lanterns: ResMut<'w, sky_lantern::SkyLanterns>,
+    waves: ResMut<'w, wave::Waves>,
     ground: ResMut<'w, drop::Fissures>,
 }
 
@@ -258,6 +261,8 @@ pub(crate) struct Ctx<'a> {
     pub player: Vec2,
     /// 主角面向（移动方向），朝向类法器没有目标时用
     pub facing: Vec2,
+    /// 这一步主角走动了（沧浪：站着不动时朝最近的妖物推浪）
+    pub moving: bool,
     pub secs: f32,
     pub rng: &'a mut lantern_core::Pcg32,
     pub hits: &'a mut HitQueue,
@@ -265,6 +270,7 @@ pub(crate) struct Ctx<'a> {
     pub shots: &'a mut volley::Shots,
     pub seals: &'a mut drop::Seals,
     pub lanterns: &'a mut sky_lantern::SkyLanterns,
+    pub waves: &'a mut wave::Waves,
     pub ground: &'a mut drop::Fissures,
     pub outbox: &'a mut SimOutbox,
     pub bamboo: &'a mut crate::bamboo::Bamboo,
@@ -305,6 +311,7 @@ pub(crate) fn update_weapons(
             en,
             player: pos.0,
             facing: hero.facing,
+            moving: hero.moved > 0.0,
             secs: t,
             rng: rng.0.get(lantern_core::Stream::Combat),
             hits: &mut hits,
@@ -312,6 +319,7 @@ pub(crate) fn update_weapons(
             shots: &mut props.shots,
             seals: &mut props.seals,
             lanterns: &mut props.lanterns,
+            waves: &mut props.waves,
             ground: &mut props.ground,
             outbox: &mut outbox,
             bamboo: &mut bamboo,
@@ -325,6 +333,7 @@ pub(crate) fn update_weapons(
             WeaponBehavior::Drop { .. } => drop::update(&mut ctx, slot),
             WeaponBehavior::Sweep { .. } => sweep::update(&mut ctx, slot),
             WeaponBehavior::SkyLantern { .. } => sky_lantern::update(&mut ctx, slot),
+            WeaponBehavior::Wave { .. } => wave::update(&mut ctx, slot),
         }
     }
 }

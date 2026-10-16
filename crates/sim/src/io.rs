@@ -285,6 +285,14 @@ pub enum SimEvent {
         radius: f32,
         evolved: bool,
     },
+    /// 推出一道浪（沧浪）：从 pos 朝 dir，半宽 radius；ring 是北冥潮的一圈，扩到 radius
+    Wave {
+        pos: Vec2,
+        dir: Vec2,
+        radius: f32,
+        ring: bool,
+        evolved: bool,
+    },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,
