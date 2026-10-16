@@ -134,6 +134,7 @@ mod tests {
         }
     }
 
+    // 报错里的路径经过 std::path::absolute（Windows 上 `/` 换成 `\\`），期望值也同样规范化。
     #[test]
     fn release_uses_assets_beside_executable_unless_told_otherwise() {
         let dir = TestDir::new();
@@ -143,7 +144,10 @@ mod tests {
         }
         let error = dir.resolve(false, None).unwrap_err();
         assert!(error.contains("已尝试的路径"), "{error}");
-        assert!(error.contains(&format!("{:?}", dir.0.join("安装目录/bin/assets"))), "{error}");
+        assert!(
+            error.contains(&format!("{:?}", std::path::absolute(dir.0.join("安装目录/bin/assets")).unwrap())),
+            "{error}"
+        );
         assert_eq!(error.lines().count(), 2, "{error}");
         // 明确指定的目录和 cargo run --release 可以用。
         let override_dir = dir.assets("覆盖目录");
@@ -187,7 +191,13 @@ mod tests {
         dir.assets("安装目录/bin/assets");
         dir.assets("仓库/assets");
         let error = dir.resolve(true, Some(Path::new("不存在的资源"))).unwrap_err();
-        assert!(error.contains(&format!("{:?}", dir.0.join("工作目录/不存在的资源"))), "{error}");
+        assert!(
+            error.contains(&format!(
+                "{:?}",
+                std::path::absolute(dir.0.join("工作目录/不存在的资源")).unwrap()
+            )),
+            "{error}"
+        );
         assert_eq!(error.lines().count(), 2, "{error}");
     }
 

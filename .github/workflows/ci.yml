@@ -91,7 +91,7 @@ jobs:
         run: cargo check --locked -p lantern
       - name: 平台层和游戏测试（含参数解析、窗口渲染和资源失败）
         if: github.event_name != 'pull_request'
-        run: cargo test --locked -p lantern_platform -p lantern -p lantern_audio -p lantern_view
+        run: cargo test --locked --no-fail-fast -p lantern_platform -p lantern -p lantern_audio -p lantern_view
       - name: 构建发布版
         if: github.event_name != 'pull_request'
         run: cargo build --release --locked -p lantern
