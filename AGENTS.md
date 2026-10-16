@@ -1,6 +1,7 @@
 # 提灯夜行 · 本轮协作
 
 - 用户指定的主分支为 `develop`。本轮只向 `develop` 集成；不推送、不合并到 `master`，不执行旧文档中的 `git pull --rebase origin master`。
+- 用户最新指示：将本轮已审查提交推送到远端 `develop` 后结束。不再自动分派或扩展新工作包；下方持续制作约定保留为本轮历史，后续工作以新指令为准。
 - 总协调会话管理 `/home/ming/mygame-worktrees/develop`。其余会话先阅读该目录下的 `docs/TEAM.md`，只在分配的独立 worktree 中修改。
 - 原目录 `/home/ming/mygame` 保留用户原分支，所有协作会话均不得在那里切分支或改游戏文件。
 - 技术架构、命名、确定性和必要检查沿用 `CLAUDE.md`。本文件仅替代旧的分工与集成分支约定。
