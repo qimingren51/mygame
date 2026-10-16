@@ -49,11 +49,20 @@ impl MusicMode {
             Self::Title => [0.48, 0.72, 0.18, 0.0, 0.0, 0.0],
             Self::Explore => [0.65, 0.86, 0.48, 0.0, 0.0, 0.0],
             Self::Siege => [0.72, 0.82, 0.58, 0.85, 0.52, 0.0],
-            Self::Boss => [0.82, 0.78, 0.78, 1.0, 1.0, 0.15],
+            Self::Boss => BOSS_PHASES[0],
             Self::Dawn => [0.75, 0.92, 1.0, 0.3, 0.3, 1.0],
         }
     }
 }
+
+/// 夜主三个阶段的配器（docs/FEEL.md 第 6 节）：一阶战鼓、行进留一点余地，二阶推满，
+/// 三阶箫拔高、晨钟层压上一层不祥的长音。分轨是预先合成的，不能加速，只能一层层加厚；
+/// 每层都不超过其它配器里这一层的最大音量，混音余量（score.rs 的测试）照旧成立。
+const BOSS_PHASES: [[f32; LAYERS]; 3] = [
+    [0.82, 0.8, 0.72, 0.85, 0.72, 0.0],
+    [0.82, 0.76, 0.8, 1.0, 0.92, 0.12],
+    [0.82, 0.72, 0.9, 1.0, 1.0, 0.3],
+];
 
 /// 振幅转分贝；六条分轨最终一起经过原音乐总线的音量、低通和混响发送。
 fn amp(v: f32) -> Decibels {
@@ -198,6 +207,8 @@ pub struct Music {
     clock: Option<ClockHandle>,
     conductor: Conductor,
     pub pressure: Pressure,
+    /// 夜主到了第几阶段（1–3）；每次夜主登场从 1 开始
+    boss_phase: u8,
 }
 
 impl Music {
@@ -233,6 +244,37 @@ impl Music {
             clock,
             conductor: Conductor::default(),
             pressure: Pressure::default(),
+            boss_phase: 1,
+        }
+    }
+
+    /// 这种配器下各层的音量；夜主按阶段加层。
+    fn levels(&self, mode: MusicMode) -> [f32; LAYERS] {
+        if mode == MusicMode::Boss {
+            BOSS_PHASES[usize::from(self.boss_phase.clamp(1, 3)) - 1]
+        } else {
+            mode.levels()
+        }
+    }
+
+    /// 夜主进入新阶段：在下一个小节线上加层（夜主的音乐正在放时；还在排队时，到时按新阶段进）。
+    pub fn boss_phase(&mut self, phase: u8, real_now: f64) {
+        self.boss_phase = phase.clamp(1, 3);
+        if self.conductor.mode != MusicMode::Boss
+            || self.conductor.pending.is_some()
+            || self.waiting.is_some()
+        {
+            return;
+        }
+        let now = self.now(real_now);
+        let origin = self.conductor.origin;
+        let at = origin + ((now + LEAD - origin) / BAR).ceil().max(0.0) * BAR;
+        let start = self.start_time(at);
+        let levels = self.levels(MusicMode::Boss);
+        for (track, level) in self.tracks.iter_mut().zip(levels) {
+            if let Some(t) = track {
+                t.set_volume(amp(level), fade(start, STEP * 2.0));
+            }
         }
     }
 
@@ -271,7 +313,8 @@ impl Music {
             return;
         };
         let start = self.start_time(at);
-        for (i, &level) in mode.levels().iter().enumerate() {
+        let levels = self.levels(mode);
+        for (i, &level) in levels.iter().enumerate() {
             if let Some(track) = &mut self.tracks[i] {
                 track.set_volume(amp(level), fade(StartTime::Immediate, 0.03));
                 self.voices[i] = track
@@ -340,6 +383,10 @@ impl Music {
     }
 
     pub fn request(&mut self, mode: MusicMode) {
+        // 夜主（再）登场：从一阶的配器开始
+        if mode == MusicMode::Boss && self.conductor.desired != MusicMode::Boss {
+            self.boss_phase = 1;
+        }
         self.conductor.request(mode);
     }
 
@@ -379,7 +426,8 @@ impl Music {
         }
         if let Some(Transition { mode, at }) = transition {
             let start = self.start_time(at);
-            for (track, level) in self.tracks.iter_mut().zip(mode.levels()) {
+            let levels = self.levels(mode);
+            for (track, level) in self.tracks.iter_mut().zip(levels) {
                 if let Some(t) = track {
                     t.set_volume(amp(level), fade(start, STEP * 2.0));
                 }
@@ -391,6 +439,22 @@ impl Music {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 夜主一阶段比一阶段厚，每层都不超过 1（混音余量由 score.rs 的测试连各阶段一起检查）。
+    #[test]
+    fn boss_phases_build_up() {
+        let sum = |p: [f32; LAYERS]| p.iter().sum::<f32>();
+        assert!(sum(BOSS_PHASES[0]) < sum(BOSS_PHASES[1]) && sum(BOSS_PHASES[1]) < sum(BOSS_PHASES[2]));
+        assert!(BOSS_PHASES.iter().flatten().all(|l| (0.0..=1.0).contains(l)));
+        let mut m = Music::new(None, None);
+        m.request(MusicMode::Boss);
+        m.boss_phase(3, 0.0);
+        assert_eq!(m.levels(MusicMode::Boss), BOSS_PHASES[2]);
+        // 夜主退去再来：从一阶开始
+        m.request(MusicMode::Explore);
+        m.request(MusicMode::Boss);
+        assert_eq!(m.levels(MusicMode::Boss), BOSS_PHASES[0]);
+    }
 
     #[test]
     fn pressure_uses_combat_smooths_spikes_and_has_hysteresis() {

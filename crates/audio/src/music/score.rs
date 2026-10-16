@@ -406,7 +406,13 @@ mod tests {
                         .iter()
                         .enumerate()
                         .map(|(layer, v)| {
-                            v.abs() * modes.iter().map(|m| m.levels()[layer]).fold(0.0, f32::max)
+                            // 夜主的二、三阶段也算在内（super::super::BOSS_PHASES）
+                            v.abs()
+                                * modes
+                                    .iter()
+                                    .map(|m| m.levels()[layer])
+                                    .chain(super::super::BOSS_PHASES.iter().map(|p| p[layer]))
+                                    .fold(0.0, f32::max)
                         })
                         .sum();
                     assert!(bound < 0.85, "交叉淡变的混音余量不足：{bound}");
