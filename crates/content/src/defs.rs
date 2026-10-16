@@ -840,6 +840,19 @@ pub enum WeaponBehavior {
         #[serde(default)]
         escort: Option<EscortDef>,
     },
+    /// 挥一道扇形剑气（铜钱剑 / 天罡，docs/BALANCE.md 第 6.3 节）。arc 是整个扇形的张角（弧度，
+    /// 一整圈就是一周）；方向朝 radius + aim 以内最近的妖物，没有就朝面向；扇形里按距离从近到远
+    /// 最多打 count 只（数量加成照加）。
+    Sweep {
+        arc: f32,
+        aim: f32,
+        knockback: f32,
+        /// 这把剑的命中额外加的暴击率
+        crit_bonus: f32,
+        /// 天罡：暴击的那一下对同一只再斩一次，伤害倍率（0 表示没有）；再斩不再触发
+        #[serde(default)]
+        echo: f32,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点

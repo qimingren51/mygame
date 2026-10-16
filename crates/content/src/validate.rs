@@ -246,7 +246,10 @@ impl Checker<'_> {
                 && lv.cooldown <= 0.0)
             || (matches!(
                 b,
-                WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
+                WeaponBehavior::Orbit { .. }
+                    | WeaponBehavior::Pulse { .. }
+                    | WeaponBehavior::Drop { .. }
+                    | WeaponBehavior::Sweep { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -386,6 +389,17 @@ impl Checker<'_> {
                 }
                 self.positive(file, &[("Seeker.range", *range), ("Seeker.steer", *steer)])?;
                 self.non_negative(file, &[("Seeker.rest", *rest)])
+            }
+            WeaponBehavior::Sweep { arc, aim, knockback, crit_bonus, echo } => {
+                self.positive(file, &[("Sweep.arc", *arc)])?;
+                if *arc > std::f32::consts::TAU + 1e-3 {
+                    return self.fail(file, format!("\"{id}\"：Sweep.arc 不能超过一整圈"));
+                }
+                self.non_negative(
+                    file,
+                    &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
+                )?;
+                self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {

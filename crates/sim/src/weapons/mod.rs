@@ -4,6 +4,7 @@
 //! - [`pulse`] 周期震波（霜铃 / 寒山钟）
 //! - [`seeker`] 扑击（纸鹤 / 千鹤引）
 //! - [`drop`] 落印（山印 / 镇岳），以及进化后的地裂
+//! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
 
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
@@ -23,6 +24,7 @@ pub mod drop;
 pub mod orbit;
 pub mod pulse;
 pub mod seeker;
+pub mod sweep;
 pub mod volley;
 
 pub(crate) const TAU: f32 = std::f32::consts::TAU;
@@ -241,6 +243,8 @@ pub(crate) struct Ctx<'a> {
     pub grid: &'a Grid,
     pub en: &'a Enemies,
     pub player: Vec2,
+    /// 主角面向（移动方向），朝向类法器没有目标时用
+    pub facing: Vec2,
     pub secs: f32,
     pub rng: &'a mut lantern_core::Pcg32,
     pub hits: &'a mut HitQueue,
@@ -257,7 +261,7 @@ pub(crate) fn update_weapons(
     content: Res<GameContent>,
     stats: Res<Stats>,
     tick: Res<Tick>,
-    player: Single<&Pos, With<Player>>,
+    player: Single<(&Pos, &Player)>,
     grid: Res<Grid>,
     mut en: ResMut<Enemies>,
     mut rng: ResMut<SimRng>,
@@ -274,10 +278,11 @@ pub(crate) fn update_weapons(
     let content = &content.0;
     let t = tick.secs();
     let en = &mut *en;
+    let (pos, hero) = *player;
     for slot in &mut arsenal.0 {
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
-            orbit::update(content, &stats, &grid, en, player.0, t, slot, &mut hits, &mut bamboo, &mut found);
+            orbit::update(content, &stats, &grid, en, pos.0, t, slot, &mut hits, &mut bamboo, &mut found);
             continue;
         }
         let mut ctx = Ctx {
@@ -285,7 +290,8 @@ pub(crate) fn update_weapons(
             stats: &stats,
             grid: &grid,
             en,
-            player: player.0,
+            player: pos.0,
+            facing: hero.facing,
             secs: t,
             rng: rng.0.get(lantern_core::Stream::Combat),
             hits: &mut hits,
@@ -303,6 +309,7 @@ pub(crate) fn update_weapons(
             WeaponBehavior::Pulse { .. } => pulse::update(&mut ctx, slot),
             WeaponBehavior::Seeker { .. } => seeker::update(&mut ctx, slot),
             WeaponBehavior::Drop { .. } => drop::update(&mut ctx, slot),
+            WeaponBehavior::Sweep { .. } => sweep::update(&mut ctx, slot),
         }
     }
 }

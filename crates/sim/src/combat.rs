@@ -105,6 +105,10 @@ pub struct Hit {
     pub element: Option<Element>,
     /// 直接点上几层灼烧（以这一击加成区之后的伤害为基数）
     pub ignite: f32,
+    /// 这一击额外加的暴击率（铜钱剑）
+    pub crit_bonus: f32,
+    /// 暴击时对同一只再斩一次的伤害倍率（天罡）；再斩的那一下是 0，不再触发
+    pub echo: f32,
 }
 
 impl Hit {
@@ -126,6 +130,8 @@ impl Hit {
             source,
             element: None,
             ignite: 0.0,
+            crit_bonus: 0.0,
+            echo: 0.0,
         }
     }
 
@@ -484,7 +490,11 @@ pub(crate) fn resolve_hits(
         let bonus = if dark > 0.0 && !reveal.covers(pos) { dmg_mult + dark } else { dmg_mult };
         let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * bonus };
         let crit = hit.flags & (HIT_NOCRIT | HIT_TRUE) == 0
-            && (rng.next_f32() < crit_chance || (en.stun[i] > 0.0 && stun_crit));
+            && (rng.next_f32() < crit_chance + hit.crit_bonus || (en.stun[i] > 0.0 && stun_crit));
+        // 天罡：暴击的那一下再斩一次，追加在队尾，本步一起结算
+        if crit && hit.echo > 0.0 {
+            list.push(Hit { damage: hit.damage * hit.echo, echo: 0.0, ..hit });
+        }
         let mut dmg = base;
         if hit.flags & HIT_TRUE == 0 {
             if crit {
@@ -911,6 +921,8 @@ pub(crate) fn process_strikes(
                 source: s.source,
                 element: s.element,
                 ignite: s.ignite,
+                crit_bonus: 0.0,
+                echo: 0.0,
             };
             // 燃灯对夜主：每次不超过它最大生命的一定比例
             if boss && s.boss_fraction > 0.0 {
