@@ -7,6 +7,7 @@
 //! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
 //! - [`sky_lantern`] 孔明灯（孔明灯 / 万灯升）
 //! - [`wave`] 推浪（沧浪 / 北冥潮）
+//! - [`vine`] 连藤（青藤 / 万木春）
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -29,6 +30,7 @@ pub mod pulse;
 pub mod seeker;
 pub mod sky_lantern;
 pub mod sweep;
+pub mod vine;
 pub mod volley;
 pub mod wave;
 
@@ -241,7 +243,7 @@ impl Arsenal {
     }
 }
 
-/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、地裂）。
+/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、藤、地裂）。
 /// 合成一个参数，免得 `update_weapons` 超过 Bevy 的参数个数上限。
 #[derive(SystemParam)]
 pub(crate) struct Props<'w> {
@@ -249,6 +251,7 @@ pub(crate) struct Props<'w> {
     seals: ResMut<'w, drop::Seals>,
     lanterns: ResMut<'w, sky_lantern::SkyLanterns>,
     waves: ResMut<'w, wave::Waves>,
+    vines: ResMut<'w, vine::Vines>,
     ground: ResMut<'w, drop::Fissures>,
 }
 
@@ -271,6 +274,9 @@ pub(crate) struct Ctx<'a> {
     pub seals: &'a mut drop::Seals,
     pub lanterns: &'a mut sky_lantern::SkyLanterns,
     pub waves: &'a mut wave::Waves,
+    pub vines: &'a mut vine::Vines,
+    /// 排到下一步执行的动作（青藤回血）
+    pub actions: &'a mut crate::combat::ActionQueue,
     pub ground: &'a mut drop::Fissures,
     pub outbox: &'a mut SimOutbox,
     pub bamboo: &'a mut crate::bamboo::Bamboo,
@@ -289,6 +295,7 @@ pub(crate) fn update_weapons(
     mut hits: ResMut<HitQueue>,
     mut strikes: ResMut<Strikes>,
     mut props: Props,
+    mut actions: ResMut<crate::combat::ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
     mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
@@ -298,6 +305,8 @@ pub(crate) fn update_weapons(
     let en = &mut *en;
     let (pos, hero) = *player;
     let props = &mut props;
+    // 法器没了（合璧用掉）就把它的藤收掉
+    props.vines.0.retain(|v| arsenal.0.iter().any(|w| w.def == v.def));
     for slot in &mut arsenal.0 {
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
@@ -320,6 +329,8 @@ pub(crate) fn update_weapons(
             seals: &mut props.seals,
             lanterns: &mut props.lanterns,
             waves: &mut props.waves,
+            vines: &mut props.vines,
+            actions: &mut actions,
             ground: &mut props.ground,
             outbox: &mut outbox,
             bamboo: &mut bamboo,
@@ -334,6 +345,7 @@ pub(crate) fn update_weapons(
             WeaponBehavior::Sweep { .. } => sweep::update(&mut ctx, slot),
             WeaponBehavior::SkyLantern { .. } => sky_lantern::update(&mut ctx, slot),
             WeaponBehavior::Wave { .. } => wave::update(&mut ctx, slot),
+            WeaponBehavior::Vine { .. } => vine::update(&mut ctx, slot),
         }
     }
 }

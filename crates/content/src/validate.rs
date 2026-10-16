@@ -252,6 +252,7 @@ impl Checker<'_> {
                     | WeaponBehavior::Sweep { .. }
                     | WeaponBehavior::SkyLantern { .. }
                     | WeaponBehavior::Wave { .. }
+                    | WeaponBehavior::Vine { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -434,6 +435,24 @@ impl Checker<'_> {
                     ],
                 )?;
                 self.fraction(file, "Wave.slow", *slow)
+            }
+            WeaponBehavior::Vine { leash, relink, lifesteal, heal_cap, heal_per_level, bind_every, bind } => {
+                self.non_negative(
+                    file,
+                    &[
+                        ("Vine.leash", *leash),
+                        ("Vine.relink", *relink),
+                        ("Vine.heal_cap", *heal_cap),
+                        ("Vine.heal_per_level", *heal_per_level),
+                        ("Vine.bind_every", *bind_every),
+                        ("Vine.bind", *bind),
+                    ],
+                )?;
+                if (*bind_every > 0.0) != (*bind > 0.0) {
+                    return self
+                        .fail(file, format!("\"{id}\"：Vine.bind_every 和 bind 要么都写，要么都不写"));
+                }
+                self.fraction(file, "Vine.lifesteal", *lifesteal)
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {

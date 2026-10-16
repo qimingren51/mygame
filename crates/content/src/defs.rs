@@ -883,6 +883,21 @@ pub enum WeaponBehavior {
         #[serde(default)]
         freeze: f32,
     },
+    /// 连藤（青藤 / 万木春，docs/BALANCE.md 第 6.3 节）：和 radius 以内最近的 count 只各连一根藤，
+    /// 每 cooldown 秒对连着的每只造成 damage；主角回复伤害的 lifesteal，每秒最多 heal_cap + heal_per_level × 等级。
+    /// 目标离开 radius + leash 或死了就断，relink 秒后接新目标。
+    /// bind_every 大于 0 时，每隔这么久把连着的妖物定身 bind 秒（精英减半，夜主免疫）。
+    Vine {
+        leash: f32,
+        relink: f32,
+        lifesteal: f32,
+        heal_cap: f32,
+        heal_per_level: f32,
+        #[serde(default)]
+        bind_every: f32,
+        #[serde(default)]
+        bind: f32,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点

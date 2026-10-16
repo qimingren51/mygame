@@ -264,4 +264,29 @@
             level: (cooldown: 5.0, count: 1, radius: 300.0, damage: 40.0),
         )),
     ),
+    (
+        id: "vine", name: "青藤", icon: "藤", element: Wood,
+        desc: "和附近最近的几只妖物各连一根青藤，持续造成伤害，回复伤害的 4%。", short: "藤连妖物，吸血续命",
+        flavor: "藤缠上去，就把它的力气吸给你。",
+        // 目标离开连线距离 + 40 或死了就断，0.3 秒后接新目标；每秒最多回复 0.5 + 0.125 × 等级
+        behavior: Vine(leash: 40.0, relink: 0.3, lifesteal: 0.04, heal_cap: 0.5, heal_per_level: 0.125),
+        levels: [
+            (cooldown: 0.5, count: 2, radius: 140.0, damage: 6.0),
+            (cooldown: 0.5, count: 2, radius: 145.0, damage: 7.5),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 9.0),
+            (cooldown: 0.5, count: 3, radius: 150.0, damage: 10.5),
+            (cooldown: 0.5, count: 3, radius: 155.0, damage: 12.0),
+            (cooldown: 0.5, count: 4, radius: 160.0, damage: 13.5),
+            (cooldown: 0.5, count: 4, radius: 165.0, damage: 15.5),
+            (cooldown: 0.5, count: 5, radius: 170.0, damage: 18.0),
+        ],
+        evolution: Some((
+            name: "万木春", passive: "huichun",
+            desc: "同时连八只妖物，每 4 秒把连着的妖物缠住 1 秒。", short: "八藤齐连，定时缠住",
+            flavor: "病树前头万木春。藤蔓一发，满地都是。",
+            // 缠住 1 秒（精英减半，夜主不缠）；回复照样 4%，每秒最多 2.5
+            behavior: Vine(leash: 40.0, relink: 0.3, lifesteal: 0.04, heal_cap: 2.5, heal_per_level: 0.0, bind_every: 4.0, bind: 1.0),
+            level: (cooldown: 0.5, count: 8, radius: 200.0, damage: 30.0),
+        )),
+    ),
 ]

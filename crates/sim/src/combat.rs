@@ -98,6 +98,8 @@ pub struct Hit {
     /// 命中后（目标还活着时）附加的击晕、减速；冰冻在结算伤害之前附加（夜主免疫）
     pub stun: f32,
     pub freeze: f32,
+    /// 定身（万木春的缠绕）；和击晕一样在命中后附加
+    pub root: f32,
     pub slow: f32,
     pub slow_time: f32,
     pub source: Source,
@@ -125,6 +127,7 @@ impl Hit {
             boss_cap: 0.0,
             stun: 0.0,
             freeze: 0.0,
+            root: 0.0,
             slow: 0.0,
             slow_time: 0.0,
             source,
@@ -610,6 +613,9 @@ pub(crate) fn resolve_hits(
             if hit.stun > 0.0 {
                 apply_hard(en, i, rank, Hard::Stun, hit.stun);
             }
+            if hit.root > 0.0 {
+                apply_hard(en, i, rank, Hard::Root, hit.root);
+            }
             if hit.slow > 0.0 {
                 apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
             }
@@ -916,6 +922,7 @@ pub(crate) fn process_strikes(
                 boss_cap: s.boss_cap,
                 stun: s.stun,
                 freeze: s.freeze,
+                root: 0.0,
                 slow: s.slow,
                 slow_time: s.slow_time,
                 source: s.source,

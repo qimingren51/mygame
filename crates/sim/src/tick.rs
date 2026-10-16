@@ -140,6 +140,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Seals::default());
     commands.insert_resource(crate::weapons::sky_lantern::SkyLanterns::default());
     commands.insert_resource(crate::weapons::wave::Waves::default());
+    commands.insert_resource(crate::weapons::vine::Vines::default());
     commands.insert_resource(Fissures::default());
     commands.insert_resource(Foes::default());
     commands.insert_resource(Pickups::default());
@@ -219,6 +220,7 @@ pub(crate) struct HashParams<'w, 's> {
     seals: Res<'w, Seals>,
     sky_lanterns: Res<'w, crate::weapons::sky_lantern::SkyLanterns>,
     waves: Res<'w, crate::weapons::wave::Waves>,
+    vines: Res<'w, crate::weapons::vine::Vines>,
     foes: Res<'w, Foes>,
     pickups: Res<'w, Pickups>,
     encounters: Res<'w, Encounters>,
@@ -290,6 +292,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.seals.hash_into(&mut h);
     p.sky_lanterns.hash_into(&mut h);
     p.waves.hash_into(&mut h);
+    p.vines.hash_into(&mut h);
     p.build.hash_banished(&mut h);
     p.foes.hash_into(&mut h);
     p.pickups.hash_into(&mut h);

@@ -293,6 +293,12 @@ pub enum SimEvent {
         ring: bool,
         evolved: bool,
     },
+    /// 青藤跳了一下：绿光从 pos（目标）沿藤流回主角；bind：这一跳顺带缠住（万木春）
+    VineDrain {
+        pos: Vec2,
+        bind: bool,
+        evolved: bool,
+    },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,
