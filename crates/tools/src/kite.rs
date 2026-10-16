@@ -353,6 +353,8 @@ struct Cfg<'a> {
     endless: bool,
     /// 主角无敌（看完整一局的画面用）
     god: bool,
+    /// 随机选卡（模拟不懂配对的新手）：有进化、异化、合璧就选，否则随便挑一张
+    random_pick: bool,
 }
 
 /// 每 30 秒一行（docs/BALANCE.md 第 11 节）。
@@ -529,7 +531,24 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
             SimPhase::Play => decide(&sim, &mut k, player_r),
             _ => (InputFrame::default(), Vec::new()),
         };
-        school::step(&mut sim, content, cfg.plan, input, &cmds);
+        if cfg.random_pick
+            && sim.phase() == SimPhase::LevelUp
+            && let Some(choice) = &sim.flow().choice
+        {
+            let offers = &choice.offers;
+            let form = offers.iter().position(|o| {
+                matches!(o, lantern_sim::Offer::Evolve(_) | lantern_sim::Offer::Mutate(_) | lantern_sim::Offer::Fuse { .. })
+            });
+            // 按种子和时刻散列，结果固定
+            let mut h = seed ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            h ^= h >> 33;
+            h = h.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+            h ^= h >> 33;
+            let i = form.unwrap_or((h % offers.len().max(1) as u64) as usize);
+            sim.step(InputFrame::default(), &[SimCommand::Choose(i as u8)]);
+        } else {
+            school::step(&mut sim, content, cfg.plan, input, &cmds);
+        }
         let t = sim.tick();
         let now = t as f32 / TICK_HZ as f32;
         for ev in sim.take_events() {
@@ -1060,6 +1079,7 @@ pub fn kite_cmd(args: &[OsString]) -> Result<(), String> {
         plan: None,
         endless,
         god,
+        random_pick: text("--picker")?.as_deref() == Some("random"),
     };
     let todo: Vec<Option<&Plan>> =
         if plans.is_empty() { vec![None] } else { plans.iter().map(Some).collect() };

@@ -240,7 +240,7 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
     let banned_w = |d: usize| build.is_banned(Banned::Weapon(d));
     let banned_p = |d: usize| build.is_banned(Banned::Passive(d));
     for (k, w) in arsenal.0.iter().enumerate() {
-        if w.can_evolve(content, build) && !banned_w(w.def) {
+        if secs >= ch.evolve_after && w.can_evolve(content, build) && !banned_w(w.def) {
             out.push((Offer::Evolve(k), ch.weight_evolve));
             if w.can_mutate(content, build, arsenal) {
                 out.push((Offer::Mutate(k), ch.weight_evolve));
@@ -279,6 +279,41 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
         for d in 0..content.passives.len() {
             if !build.passives.iter().any(|p| p.def == d) && !banned_p(d) {
                 out.push((Offer::NewPassive(d), ch.weight_new_passive));
+            }
+        }
+    }
+    // 按类别给总权重：每一类平均分，配对的再乘倍率（试玩第 1 轮第 9 项）
+    if let Some(b) = &ch.budget {
+        let key_of = |d: usize| {
+            content.weapons[d].evolution.as_ref().and_then(|e| content.passive_index(&e.passive))
+        };
+        let held_keys: Vec<usize> =
+            arsenal.0.iter().filter(|w| !w.transformed()).filter_map(|w| key_of(w.def)).collect();
+        let share = |o: &Offer| -> f32 {
+            match *o {
+                Offer::WeaponUp(k) => {
+                    let keyed = key_of(arsenal.0[k].def).is_some_and(|p| build.passive_level(p) > 0);
+                    if keyed { b.keyed_up } else { 1.0 }
+                }
+                Offer::NewPassive(d) if held_keys.contains(&d) => b.key_pair,
+                _ => 1.0,
+            }
+        };
+        let total = |o: &Offer| -> Option<f32> {
+            match o {
+                Offer::WeaponUp(_) => Some(b.weapon_up),
+                Offer::NewWeapon(_) => Some(if secs < ch.late_after { b.new_weapon } else { b.new_weapon_late }),
+                Offer::PassiveUp(_) => Some(b.passive_up),
+                Offer::NewPassive(_) => Some(b.new_passive),
+                _ => None,
+            }
+        };
+        let same = |a: &Offer, c: &Offer| std::mem::discriminant(a) == std::mem::discriminant(c);
+        let sums: Vec<f32> =
+            out.iter().map(|(o, _)| out.iter().filter(|(c, _)| same(o, c)).map(|(c, _)| share(c)).sum()).collect();
+        for ((o, w), sum) in out.iter_mut().zip(sums) {
+            if let Some(t) = total(o) {
+                *w = t * share(o) / sum.max(1e-6);
             }
         }
     }

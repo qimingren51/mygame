@@ -320,6 +320,12 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
+    /// 按类别给总权重（试玩第 1 轮第 9 项）：写了就用它代替上面四项每张卡的权重
+    #[serde(default)]
+    pub budget: Option<BudgetDef>,
+    /// 进化、异化卡最早什么时候出（秒）
+    #[serde(default)]
+    pub evolve_after: f32,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -331,6 +337,22 @@ pub struct ChoicesDef {
     pub charm_offers: u32,
     pub elite_charm: f32,
     pub charm_gold: u32,
+}
+
+/// 按类别给总权重：每一类的总权重固定，平均分给这一类里能出的卡（再乘配对和五行倍率），
+/// 内容再多也不会把升级卡稀释掉。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetDef {
+    pub weapon_up: f32,
+    pub new_weapon: f32,
+    pub new_weapon_late: f32,
+    pub passive_up: f32,
+    pub new_passive: f32,
+    /// 配对：手上法器的进化心法，在“新心法”里的份额乘它
+    pub key_pair: f32,
+    /// 配对：已经拿到进化心法的法器，在“法器升级”里的份额乘它
+    pub keyed_up: f32,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；
