@@ -200,6 +200,7 @@ fn gather(
         move_dir: movement,
         dash: pressed(Action::Dash),
         ult: pressed(Action::Ult),
+        interact: pressed(Action::Interact),
         confirm: !toggle_fullscreen && pressed(Action::Confirm),
         back: pressed(Action::Back) || keys.just_pressed(KeyCode::Escape),
         pause: pressed(Action::Pause) || keys.just_pressed(KeyCode::Escape),
@@ -391,6 +392,52 @@ mod tests {
         app.update();
         assert!(app.world().resource::<Actions>().dash);
         assert!(!app.world().resource::<Actions>().confirm);
+    }
+
+    /// 交互键（默认 G / 手柄 X）只在游戏进行中送进模拟；选择、暂停、结算时不能触发护火或留灯。
+    #[test]
+    fn interact_only_feeds_the_sim_during_play() {
+        use lantern_sim::{InputFrame, SimCommand, SimCommands};
+        let (mut app, pad) = input_app();
+        app.init_resource::<Time>()
+            .init_resource::<InputFrame>()
+            .init_resource::<SimCommands>()
+            .add_systems(Update, crate::feed_sim.after(gather));
+        for gamepad in [false, true] {
+            app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+            app.world_mut().get_mut::<Gamepad>(pad).unwrap().digital_mut().reset_all();
+            for (state, phase) in [
+                (RunState::Playing, SimPhase::Play),
+                (RunState::Playing, SimPhase::LevelUp),
+                (RunState::Playing, SimPhase::Charm),
+                (RunState::Playing, SimPhase::Shop),
+                (RunState::Paused, SimPhase::Play),
+                (RunState::Over, SimPhase::Over),
+            ] {
+                // 每轮重新按下，保证是“这一帧刚按下”。
+                app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+                app.world_mut().get_mut::<Gamepad>(pad).unwrap().digital_mut().reset_all();
+                if gamepad {
+                    app.world_mut().get_mut::<Gamepad>(pad).unwrap().digital_mut().press(GamepadButton::West);
+                } else {
+                    app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyG);
+                }
+                app.insert_resource(State::new(state)).insert_resource(phase);
+                app.world_mut().resource_mut::<SimCommands>().0.clear();
+                app.update();
+                let a = app.world().resource::<Actions>();
+                assert!(a.interact);
+                // 手柄 X 在菜单里仍是跳过、灯驿。
+                assert_eq!(a.skip, gamepad);
+                assert_eq!(a.meta, gamepad);
+                let cmds = &app.world().resource::<SimCommands>().0;
+                if state == RunState::Playing && phase == SimPhase::Play {
+                    assert_eq!(cmds, &[SimCommand::Interact]);
+                } else {
+                    assert!(cmds.is_empty(), "选择、暂停和结算不能把交互键送进护火、留灯");
+                }
+            }
+        }
     }
 
     #[test]

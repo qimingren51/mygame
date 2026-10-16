@@ -1,4 +1,4 @@
-//! 设置项（暂停界面和标题界面共用）：音乐音量、音效音量、全屏、震屏、顿帧、辉光、特效。
+//! 设置项（暂停界面和标题界面共用）：四类音量、全屏、震屏、顿帧、辉光、特效、按键。
 //! 左右键调整，改完立即生效并存盘。
 
 use bevy::prelude::*;
@@ -14,6 +14,8 @@ use crate::{Fonts, INK, INK_DIM, text};
 pub(crate) enum Item {
     Music,
     Sfx,
+    Ui,
+    Ambience,
     Fullscreen,
     Shake,
     Hitstop,
@@ -24,9 +26,11 @@ pub(crate) enum Item {
     DebugTools,
 }
 
-pub(crate) const ITEMS: [Item; 9] = [
+pub(crate) const ITEMS: [Item; 11] = [
     Item::Music,
     Item::Sfx,
+    Item::Ui,
+    Item::Ambience,
     Item::Fullscreen,
     Item::Shake,
     Item::Hitstop,
@@ -46,6 +50,8 @@ fn label(item: Item) -> &'static str {
     match item {
         Item::Music => "音乐",
         Item::Sfx => "音效",
+        Item::Ui => "界面",
+        Item::Ambience => "环境",
         Item::Fullscreen => "全屏",
         Item::Shake => "震屏",
         Item::Hitstop => "顿帧",
@@ -63,6 +69,8 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Keyboard | Item::Gamepad => "设置".into(),
         Item::Music => pct(s.music_volume),
         Item::Sfx => pct(s.sfx_volume),
+        Item::Ui => pct(s.ui_volume),
+        Item::Ambience => pct(s.ambience_volume),
         Item::Shake => pct(s.shake),
         Item::Fullscreen => on_off(s.fullscreen),
         Item::Hitstop => on_off(s.hitstop),
@@ -105,6 +113,15 @@ pub(crate) fn adjust(
         }
         Item::Sfx if step != 0.0 => {
             settings.sfx_volume = ((settings.sfx_volume + step) * 10.0).round().clamp(0.0, 10.0) / 10.0;
+            true
+        }
+        Item::Ui if step != 0.0 => {
+            settings.ui_volume = ((settings.ui_volume + step) * 10.0).round().clamp(0.0, 10.0) / 10.0;
+            true
+        }
+        Item::Ambience if step != 0.0 => {
+            settings.ambience_volume =
+                ((settings.ambience_volume + step) * 10.0).round().clamp(0.0, 10.0) / 10.0;
             true
         }
         Item::Shake if step != 0.0 => {

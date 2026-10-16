@@ -255,7 +255,6 @@ fn shrine_layout(seed: u64) -> Vec<ShrinePiece> {
     put("stone_fox/idle_S_00", -65.0, 40.0, 1.25, false, true);
     put("stone_fox/idle_S_00", 65.0, 40.0, 1.25, true, true);
     put("fox_lanterns/idle_S_00", -103.0, 5.0, 1.25, false, true);
-    put("stone_lantern_dark/idle_S_00", 98.0, 48.0, 1.2, false, true);
     put("rock_b/idle_S_00", 112.0, -20.0, 1.5, true, true);
     put("ground/bamboo_0", -123.0, -32.0, 1.6, false, true);
     put("ground/bamboo_1", 133.0, -42.0, 1.8, true, true);

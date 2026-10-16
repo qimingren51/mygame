@@ -36,6 +36,8 @@ impl InputFrame {
 /// 改变模拟的命令。回放会记录每条命令和它生效的步数。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SimCommand {
+    /// 狐村：主动护火或留灯。
+    Interact,
     Dash,
     /// 燃灯（充满时才生效）
     Ult,
@@ -88,6 +90,12 @@ pub struct SimCommands(pub Vec<SimCommand>);
 /// 画面、音频、界面据此播放效果；需要持续显示的状态（法器、弹幕、奇遇……）直接读资源。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SimEvent {
+    StoryBeat {
+        beat: lantern_content::StoryBeat,
+    },
+    JournalFound {
+        page: u8,
+    },
     Dash {
         pos: Vec2,
     },
@@ -272,7 +280,7 @@ pub enum SimEvent {
     },
     UltReady,
     Ult,
-    /// 尝试燃灯时灯火未满，只供界面和音频反馈
+    /// 尝试燃灯时燃灯未满，只供界面和音频反馈
     UltNotReady,
     /// 奇遇出现；kind 是 `events.ron` 里 kinds 的下标
     Encounter {

@@ -93,10 +93,25 @@ pub enum Stream {
     Choice,
     /// 宝箱
     Chest,
+    /// 叙事（手记掉落）。只在叙事启用时使用，状态也只在那时写进哈希。
+    Story,
 }
 
 impl Stream {
-    pub const ALL: [Stream; 8] = [
+    pub const ALL: [Stream; 9] = [
+        Stream::Omen,
+        Stream::Start,
+        Stream::Spawn,
+        Stream::Combat,
+        Stream::Drop,
+        Stream::Event,
+        Stream::Choice,
+        Stream::Chest,
+        Stream::Story,
+    ];
+    /// 总是写进状态哈希的流。后加的、按需启用的流（叙事）不在这里，由使用方启用时自己写，
+    /// 这样不用它的局哈希不变。
+    pub const HASHED: [Stream; 8] = [
         Stream::Omen,
         Stream::Start,
         Stream::Spawn,
@@ -154,13 +169,18 @@ impl Streams {
         }
     }
 
-    /// 按固定顺序把所有流的状态写进哈希。
+    /// 按固定顺序把 [`Stream::HASHED`] 各流的状态写进哈希。
     pub fn hash_into(&self, h: &mut crate::StateHasher) {
-        for rng in &self.rngs {
-            let (state, inc) = rng.raw_state();
-            h.write_u64(state);
-            h.write_u64(inc);
+        for s in Stream::HASHED {
+            self.hash_stream(s, h);
         }
+    }
+
+    /// 把一条流的状态写进哈希（按需启用的流由使用方调用）。
+    pub fn hash_stream(&self, stream: Stream, h: &mut crate::StateHasher) {
+        let (state, inc) = self.rngs[stream as usize].raw_state();
+        h.write_u64(state);
+        h.write_u64(inc);
     }
 }
 
@@ -199,6 +219,28 @@ mod tests {
         let cb: Vec<u32> = (0..5).map(|_| b.get(Stream::Combat).next_u32()).collect();
         assert_eq!(ca, cb);
         assert_ne!(a.get(Stream::Spawn).next_u32(), a.get(Stream::Combat).next_u32());
+    }
+
+    /// 叙事流加在末尾：前面各流的派生不变；不启用叙事时它不进状态哈希。
+    #[test]
+    fn story_stream_is_appended_and_hashed_only_on_request() {
+        let a = Streams::new(9);
+        let mut b = Streams::new(9);
+        for s in Stream::HASHED {
+            assert_eq!(a.rngs[s as usize], b.rngs[s as usize]);
+        }
+        assert_eq!(*Stream::ALL.last().unwrap(), Stream::Story);
+        b.get(Stream::Story).next_u32();
+        let hash = |s: &Streams, story: bool| {
+            let mut h = crate::StateHasher::new();
+            s.hash_into(&mut h);
+            if story {
+                s.hash_stream(Stream::Story, &mut h);
+            }
+            h.finish()
+        };
+        assert_eq!(hash(&a, false), hash(&b, false));
+        assert_ne!(hash(&a, true), hash(&b, true));
     }
 
     #[test]

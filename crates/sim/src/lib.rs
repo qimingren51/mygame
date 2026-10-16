@@ -40,6 +40,7 @@ pub mod run;
 pub mod spatial;
 pub mod spawn;
 pub mod stats;
+pub mod story;
 mod tick;
 pub mod weapons;
 
@@ -74,6 +75,9 @@ pub struct OmenPick {
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RunSetup {
     pub seed: u64,
+    /// 有存档的正常出发启用叙事；缺省保持旧回放和基准路径。
+    #[serde(default)]
+    pub story: Option<story::StorySeed>,
     pub mode: RunMode,
     #[serde(default)]
     pub omen: Option<OmenPick>,
@@ -111,6 +115,7 @@ impl RunSetup {
     pub fn new(seed: u64, mode: RunMode) -> Self {
         RunSetup {
             seed,
+            story: None,
             mode,
             omen: None,
             meta: BTreeMap::new(),
@@ -277,6 +282,7 @@ impl Plugin for SimPlugin {
                         gold::update_coins,
                         pickups::update_pickups,
                         lanterns::update_lanterns,
+                        story::update_story,
                         reactions::update_herbs,
                         encounters::update_encounters,
                         stats::refresh_stats,

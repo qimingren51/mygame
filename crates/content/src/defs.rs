@@ -1247,6 +1247,9 @@ pub struct BuffDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MetaDef {
+    /// 初程建议的节点与目标等级；只提示，不锁住其他选择。
+    #[serde(default)]
+    pub intro: Vec<(String, u32)>,
     /// 第 n 级（从 1 起）的花费 = round(base_cost × exp^(n−1) / round_to) × round_to
     pub cost_exp: f32,
     pub cost_round: f32,
@@ -1439,13 +1442,36 @@ pub struct HubPersonDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HubLineDef {
+    /// 只说一次的台词的稳定 ID（青丘追问、积累回应）：说出口就记进存档的 `hub_lines_seen`，以后不再说。
+    /// 空串表示可重复的台词。同一个人的几句可以共用一个 ID（同一问的几种说法）。
+    #[serde(default)]
+    pub once: String,
     pub when: HubWhen,
     pub text: String,
 }
 
-/// 台词的条件。几条同时满足时取排在最后的那条；都不满足时说“平时”的，几句轮着说。
+/// 台词的条件。挑哪句见 `Profile::hub_dialogue`：未听过的青丘追问 > 初见 > 未听过的积累回应 > 即时回应 > 平时；
+/// 同一档里几条同时满足时取排在最后的那条。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum HubWhen {
+    /// 亲历过这个故事事件（[`STORY_EVENTS`]）
+    Story(String),
+    /// 还没亲历过这个故事事件
+    WithoutStory(String),
+    /// 拾到的手记至少这么多页
+    JournalCount(u8),
+    /// 通关过这一更（持续的状态；`Cleared` 是刚通关）
+    HasCleared(u8),
+    /// 几条都满足
+    All(Vec<HubWhen>),
+    /// 已点心灯总级数达到门槛
+    MetaLevels(u32),
+    /// 某个心灯节点达到等级
+    MetaLevel(String, u32),
+    /// 累计归来局数
+    Runs(u32),
+    /// 累计天明次数
+    Wins(u32),
     /// 平时
     Idle,
     /// 第一次见到这个人物
@@ -1471,3 +1497,53 @@ pub enum HubWhen {
     /// 刚从无尽夜回来
     EndlessBack,
 }
+
+impl HubWhen {
+    /// 条件里有故事事件：带 once 时算青丘追问，排在初见前面。
+    pub fn is_story(&self) -> bool {
+        match self {
+            Self::Story(_) | Self::WithoutStory(_) => true,
+            Self::All(ws) => ws.iter().any(Self::is_story),
+            _ => false,
+        }
+    }
+
+    /// 积累里程碑（只增不减的门槛），必须带 once，不然一过门槛就天天说。
+    pub fn is_milestone(&self) -> bool {
+        match self {
+            Self::MetaLevels(_) | Self::MetaLevel(..) | Self::Runs(_) | Self::Wins(_) => true,
+            Self::All(ws) => ws.iter().any(Self::is_milestone),
+            _ => false,
+        }
+    }
+}
+
+/// 手记只存文字；页码决定卷次，门槛由叙事进度统一管理。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct JournalDef {
+    pub page: u8,
+    pub text: String,
+    #[serde(default)]
+    pub clue: String,
+}
+
+/// 可持久化的青丘节拍；界面和声音消费同一事件。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoryBeat {
+    GuardedFire,
+    LeftLantern,
+}
+
+impl StoryBeat {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::GuardedFire => "qingqiu_guarded_fire",
+            Self::LeftLantern => "qingqiu_left_lantern",
+        }
+    }
+}
+
+/// 模拟记下的故事事件（存档的 `events`）；灯驿条件 `Story` / `WithoutStory` 引用它，拼错 ID 时拒绝加载。
+/// 灯驿台词听没听过另记在 `hub_lines_seen`（台词的 once ID），不在这里。
+pub const STORY_EVENTS: &[&str] = &["qingqiu_entered", "qingqiu_guarded_fire", "qingqiu_left_lantern"];

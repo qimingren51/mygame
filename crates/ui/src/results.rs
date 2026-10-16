@@ -24,7 +24,7 @@ pub(crate) fn register(app: &mut App) {
 }
 
 #[derive(Resource, Default)]
-struct ResultsUi {
+pub(crate) struct ResultsUi {
     selected: usize,
     clicked: Option<usize>,
     hovered: Option<usize>,
@@ -39,7 +39,7 @@ struct ResultsHint;
 
 /// 进入结算时先记进存档；界面稍后才浮现：倒下时停一会儿，天明时等夜色褪完。
 #[derive(Resource)]
-struct Pending {
+pub(crate) struct Pending {
     recorded: Recorded,
     counts: bool,
     /// 还要等多久（现实秒）
@@ -48,7 +48,7 @@ struct Pending {
 
 /// 结算界面浮现的动画：底色淡入，纸卷从下面滑上来。
 #[derive(Component)]
-struct SlideIn {
+pub(crate) struct SlideIn {
     t: f32,
     /// 底色最后的不透明度：天明时浅一些，晨光还看得见
     alpha: f32,
@@ -205,6 +205,16 @@ fn spawn(
                         "{nav} 选择　{confirm} 确定　{back} 回灯驿",
                     ),
                 ));
+                // 手记：本局拾到的旧纸，回去前也能先翻一翻
+                root.spawn((
+                    Node { padding: UiRect::all(px(8)), ..default() },
+                    crate::prompts::hint(&fonts.body, 18.0, PAPER, "{hub} 翻看手记"),
+                ))
+                .observe(
+                    |_: On<PointerClick>, mut reader: ResMut<crate::journals::Reader>| {
+                        reader.open = true;
+                    },
+                );
             } else {
                 root.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} 回到标题"));
             }
@@ -275,6 +285,22 @@ fn results_body(
                 if r.won { "天明" } else { "夜未尽" },
             ));
             p.spawn(text(&fonts.body, 20.0, INK, sub));
+            let memory = if r.events.contains("qingqiu_left_lantern") {
+                "檐下多了一盏灯。青火仍在。"
+            } else if r.events.contains("qingqiu_guarded_fire") {
+                "那一阵风过去时，小狐没有再往后缩。"
+            } else if !r.journals.is_empty() {
+                "旧纸收进灯座。回去，慢慢读。"
+            } else {
+                ""
+            };
+            if !memory.is_empty() {
+                p.spawn(text(&fonts.body, 18.0, INK_DIM, memory));
+            }
+            if !r.journals.is_empty() {
+                let pages = r.journals.iter().map(u8::to_string).collect::<Vec<_>>().join("、");
+                p.spawn(text(&fonts.body, 16.0, INK_DIM, &format!("拾回手记 · {pages} 页")));
+            }
             if let Some(pick) = omen {
                 p.spawn(text(
                     &fonts.body,
@@ -437,13 +463,14 @@ fn results_body(
     }
 }
 
-fn input(
+pub(crate) fn input(
     actions: Res<Actions>,
     playback: Option<Res<ReplayPlayback>>,
     pending: Option<Res<Pending>>,
     slides: Query<&SlideIn>,
     mut ui: ResMut<ResultsUi>,
     mut transition: ResMut<InkTransition>,
+    mut reader: ResMut<crate::journals::Reader>,
 ) {
     let axis = if actions.move_dir.x.abs() >= actions.move_dir.y.abs() {
         actions.move_dir.x
@@ -454,9 +481,18 @@ fn input(
     let stick_pressed = stick != 0 && stick != ui.stick;
     ui.stick = stick;
     // 观看回放由回放界面处理；等纸卷落定才接输入，墨幕期间丢弃鼠标事件。
-    if playback.is_some() || pending.is_some() || transition.active() || !slides.iter().any(|s| s.t >= 0.6) {
+    if playback.is_some()
+        || pending.is_some()
+        || reader.open
+        || transition.active()
+        || !slides.iter().any(|s| s.t >= 0.6)
+    {
         ui.clicked = None;
         ui.hovered = None;
+        return;
+    }
+    if actions.meta {
+        reader.open = true;
         return;
     }
     if let Some(h) = ui.hovered.take()
@@ -505,6 +541,7 @@ mod tests {
         app.init_resource::<ResultsUi>()
             .init_resource::<Actions>()
             .init_resource::<InkTransition>()
+            .init_resource::<crate::journals::Reader>()
             .add_systems(Update, (input, highlight).chain());
         app.world_mut().spawn(SlideIn { t: 0.6, alpha: 0.8 });
         app

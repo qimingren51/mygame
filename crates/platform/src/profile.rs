@@ -114,8 +114,14 @@ pub struct Profile {
     pub last: LastPick,
     /// 灯驿里已经见过的人物（`hub.ron` 的 ID）
     pub met: BTreeSet<String>,
+    /// 灯驿里已经说出口的只说一次的台词（`hub.ron` 的 once ID：青丘追问、积累回应）
+    pub hub_lines_seen: BTreeSet<String>,
     /// 展开过的开场卷轴：地区 ID；天明版写成“ID_dawn”
     pub scrolls: BTreeSet<String>,
+    /// 已亲历的故事事件（模拟记下的，见 `lantern_content::STORY_EVENTS`）
+    pub events: BTreeSet<String>,
+    /// 已拾到的手记页码；未知卷的文字不进入界面。
+    pub journals: BTreeSet<u8>,
     pub best: Best,
     /// 无尽夜的最长存活（按更；以后加了地区再按地区分开）
     pub endless: BTreeMap<u8, EndlessBest>,
@@ -150,7 +156,10 @@ impl Default for Profile {
             reactions: 0,
             last: LastPick::default(),
             met: BTreeSet::new(),
+            hub_lines_seen: BTreeSet::new(),
             scrolls: BTreeSet::new(),
+            events: BTreeSet::new(),
+            journals: BTreeSet::new(),
             best: Best::default(),
             endless: BTreeMap::new(),
             totals: Totals::default(),
@@ -180,6 +189,10 @@ pub struct HubNews {
     pub lit: Vec<String>,
     /// 上一局第一次在这个地区迎来天明（地区 ID；灯驿长卷上那座山的晨光铺开用，播完清掉）
     pub dawn: Option<String>,
+    /// 这次归来新添的那盏路灯（从 0 起，第 n 次归来添第 n − 1 盏；灯驿长卷的点亮动画用，播完清掉）
+    pub road_lit: Option<usize>,
+    /// 这一趟回灯驿已经说出口的 once 台词：存档里记成听过了，但这一趟照样说，重画不换句
+    pub heard: Vec<String>,
 }
 
 impl HubNews {
@@ -206,6 +219,7 @@ impl HubNews {
             dawn: (before.cleared == 0 && now.cleared >= 1)
                 .then(|| content.regions.first().map(|r| r.id.clone()))
                 .flatten(),
+            road_lit: (now.road_lamps() > before.road_lamps()).then(|| now.road_lamps() as usize - 1),
             ..Default::default()
         }
     }
@@ -237,6 +251,9 @@ pub struct Recorded {
     pub record: Option<NewRecord>,
     pub achievements: Vec<usize>,
 }
+
+/// 灯驿门外的路灯：回来一回添一盏，最多这么多盏（docs/DESIGN.md 第 15 节 `road_lamps`）。
+pub const ROAD_LAMPS: u32 = 10;
 
 /// M2 心灯每级的花费：round(120 × n^1.6 ÷ 10) × 10。
 const M2_COSTS: [u32; 5] = [120, 360, 700, 1100, 1580];
@@ -293,6 +310,8 @@ impl Profile {
         if self.version < 3 && (self.runs > 0 || self.basics) {
             self.onboarding = OnboardingProgress::completed();
         }
+        // 第三版新加的 events、journals、hub_lines_seen 都有默认值（空）；旧通关不冒认亲历过护火或留灯，
+        // 旧存档也不补记听过哪句。
         self.version = SAVE_VERSION;
         true
     }
@@ -301,6 +320,16 @@ impl Profile {
 
     pub fn meta_level(&self, id: &str) -> u32 {
         self.meta.get(id).copied().unwrap_or(0)
+    }
+
+    /// 初程下一盏建议；自由选过的节点自动跳过。
+    pub fn next_meta_intro<'a>(&self, content: &'a Content) -> Option<&'a lantern_content::MetaNodeDef> {
+        content
+            .meta
+            .intro
+            .iter()
+            .find(|(id, lv)| self.meta_level(id) < *lv)
+            .and_then(|(id, _)| content.meta.node(id))
     }
 
     /// 点亮下一级要多少灯油；已经满级时返回 None。
@@ -403,6 +432,11 @@ impl Profile {
     /// 按存档和上次的选择拼出下一局的设置。灯、灯坠、更、悟不可用时退回默认。
     pub fn run_setup(&self, content: &Content, seed: u64) -> RunSetup {
         let mut s = RunSetup::new(seed, RunMode::Normal);
+        s.story = Some(lantern_sim::story::StorySeed {
+            events: self.events.clone(),
+            journals: self.journals.clone(),
+            chapter: self.journal_chapter(),
+        });
         s.meta = self.meta.clone();
         s.attributes = self.active_attributes(content);
         s.tier = self.last.tier.clamp(1, self.tier.max(1));
@@ -476,6 +510,16 @@ impl Profile {
     // ---- 一局结束 ----
 
     /// 记下一局的结果：货币、统计、最好成绩、成就。刷新的记录同时有几项时按 天明 > 击杀 > 存活 取一项。
+    /// 有效心灯总级数；不认识的旧节点和超出上限的等级不算。
+    pub fn meta_levels(&self, content: &Content) -> u32 {
+        content.meta.nodes.iter().map(|n| self.meta_level(&n.id).min(n.max_level)).sum()
+    }
+
+    /// 灯驿门外点着几盏路灯：回来几回点几盏，最多 [`ROAD_LAMPS`]。
+    pub fn road_lamps(&self) -> u32 {
+        self.runs.min(ROAD_LAMPS)
+    }
+
     /// 心灯全部点亮。
     pub fn meta_full(&self, content: &Content) -> bool {
         content.meta.nodes.iter().all(|n| self.meta_cost(content, &n.id).is_none())
@@ -486,12 +530,38 @@ impl Profile {
         content.attributes.list.iter().all(|a| self.attribute_price(content, &a.id).is_none())
     }
 
-    /// 灯驿第 who 个人物这次说哪句（docs/LORE-TEXT.md 第 1 节）。第一次见面总说 First；
-    /// 其余几条同时满足时取排在最后的那条；都不满足时说“平时”的，按回来的次数轮着说。
-    pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
-        let person = content.hub.get(who)?;
-        let first = !self.met.contains(&person.id);
-        let hit = |w: &HubWhen| match w {
+    /// 章节只在出发时开放；本局留灯可提前打开卷三，绝不越到卷五。
+    pub fn journal_chapter(&self) -> u8 {
+        let left = self.events.contains("qingqiu_left_lantern");
+        if self.cleared > 0
+            && self.runs >= 6
+            && self.journals.len() >= 18
+            && self.meta.values().sum::<u32>() >= 6
+            && self.endless.values().any(|e| e.seconds >= 900.0 && e.bosses > 0)
+        {
+            5
+        } else if self.cleared > 0 && self.runs >= 4 && self.journals.len() >= 12 {
+            4
+        } else if self.cleared > 0 || left {
+            3
+        } else if self.events.contains("qingqiu_entered") || self.runs > 0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn hub_when(&self, content: &Content, w: &HubWhen, news: &HubNews, first: bool) -> bool {
+        match w {
+            HubWhen::Story(id) => self.events.contains(id),
+            HubWhen::WithoutStory(id) => !self.events.contains(id),
+            HubWhen::JournalCount(n) => self.journals.len() >= usize::from(*n),
+            HubWhen::HasCleared(t) => self.cleared >= *t,
+            HubWhen::All(ws) => ws.iter().all(|w| self.hub_when(content, w, news, first)),
+            HubWhen::MetaLevels(n) => self.meta_levels(content) >= *n,
+            HubWhen::MetaLevel(id, lv) => self.meta_level(id) >= *lv,
+            HubWhen::Runs(n) => self.runs >= *n,
+            HubWhen::Wins(n) => self.wins >= *n,
             HubWhen::Idle => false,
             HubWhen::First => first,
             HubWhen::MetaLit => news.meta_lit,
@@ -504,16 +574,60 @@ impl Profile {
             HubWhen::Charm(id) => self.basics && self.last.charm.as_ref() == Some(id),
             HubWhen::Reaction => news.reaction,
             HubWhen::EndlessBack => news.endless_back,
-        };
-        let pick = |only_first: bool| {
-            person.lines.iter().rev().find(|l| hit(&l.when) && (!only_first || l.when == HubWhen::First))
-        };
-        if let Some(l) = pick(true).filter(|_| first).or_else(|| pick(false)) {
-            return Some(&l.text);
         }
-        let idle: Vec<&str> =
-            person.lines.iter().filter(|l| l.when == HubWhen::Idle).map(|l| l.text.as_str()).collect();
-        idle.get(self.runs as usize % idle.len().max(1)).copied()
+    }
+
+    /// 灯驿第 who 个人物这次说哪句（docs/LORE-TEXT.md 第 1 节）。按档挑，同一档里取满足的最后一条：
+    /// 1. 没听过的青丘追问（带 once、条件里有故事事件）——首通或倒下回来都不能被初见吞掉；
+    /// 2. 第一次见面（First）；
+    /// 3. 没听过的积累回应（带 once 的里程碑）；
+    /// 4. 即时回应、持续状态（不带 once 的）；
+    /// 5. 平时（Idle），按回来的次数轮着说。
+    ///
+    /// once 台词说出口就记成听过，以后不再说；但这一趟回灯驿里（`HubNews::heard`）照样算没听过，重画不换句。
+    pub fn hub_dialogue<'a>(
+        &self,
+        content: &'a Content,
+        who: usize,
+        news: &HubNews,
+    ) -> Option<&'a lantern_content::HubLineDef> {
+        let person = content.hub.get(who)?;
+        let first = !self.met.contains(&person.id);
+        let lines = &person.lines;
+        let hit = |l: &lantern_content::HubLineDef| self.hub_when(content, &l.when, news, first);
+        let fresh = |l: &lantern_content::HubLineDef| {
+            !l.once.is_empty() && (!self.hub_lines_seen.contains(&l.once) || news.heard.contains(&l.once))
+        };
+        let once =
+            |story: bool| lines.iter().rev().find(|l| fresh(l) && l.when.is_story() == story && hit(l));
+        once(true)
+            .or_else(|| lines.iter().find(|l| first && l.when == HubWhen::First))
+            .or_else(|| once(false))
+            .or_else(|| lines.iter().rev().find(|l| l.once.is_empty() && hit(l)))
+            .or_else(|| {
+                let idle: Vec<_> = lines.iter().filter(|l| l.when == HubWhen::Idle).collect();
+                idle.get(self.runs as usize % idle.len().max(1)).copied()
+            })
+    }
+
+    pub fn hub_line<'a>(&self, content: &'a Content, who: usize, news: &HubNews) -> Option<&'a str> {
+        self.hub_dialogue(content, who, news).map(|l| l.text.as_str())
+    }
+
+    /// 灯驿里选中的那位说出这句以后调用：只确认这一位这一句，被更高一档盖住的、别人的留到真正说出来。
+    /// 查看纯数据或回放不推进。不重置 `HubNews` 的其他内容。返回存档有没有变（变了才需要写盘）。
+    pub fn saw_hub(&mut self, content: &Content, who: usize, news: &mut HubNews) -> bool {
+        let Some(person) = content.hub.get(who) else { return false };
+        let Some(line) = self.hub_dialogue(content, who, news).filter(|l| !l.once.is_empty()) else {
+            return false;
+        };
+        if !news.heard.contains(&line.once) {
+            news.heard.push(line.once.clone());
+        }
+        let mut changed = self.hub_lines_seen.insert(line.once.clone());
+        // 已经说过追问，就确实见过这个人：以后不再倒回初见那句。
+        changed |= self.met.insert(person.id.clone());
+        changed
     }
 
     /// 这次出发要不要先展开某个地区的开场卷轴：第一次来展开长夜版（false），拿回烛火以后再来展开一次
@@ -571,6 +685,8 @@ impl Profile {
         if r.won {
             self.cleared = self.cleared.max(rec.tier);
         }
+        self.events.extend(r.events.iter().cloned());
+        self.journals.extend(r.journals.iter().copied().filter(|p| (1..=30).contains(p)));
         self.reactions |= r.feats.reactions;
         let t = &mut self.totals;
         t.kills += u64::from(r.kills);
@@ -600,6 +716,8 @@ mod tests {
 
     fn result(won: bool, seconds: f32, kills: u32, oil: u32, gold: u32) -> RunResult {
         RunResult {
+            events: BTreeSet::new(),
+            journals: BTreeSet::new(),
             won,
             seconds,
             kills,
@@ -726,9 +844,9 @@ mod tests {
         assert_eq!(p.oil, 1760);
         assert_eq!(p.gold, 50 + 650 + 500);
 
-        // 心灯：祈福第 1 级 300
+        // 心灯：祈福第 1 级 200
         assert!(p.buy_meta(&c, "luck"));
-        assert_eq!((p.meta_level("luck"), p.oil), (1, 1460));
+        assert_eq!((p.meta_level("luck"), p.oil), (1, 1560));
         // 属性：伤害 60，第二次买涨价 2%：生命 40 → 80 × 1.02 ≈ 80
         assert!(p.buy_attribute(&c, "damage"));
         assert_eq!(p.attribute_price(&c, "health"), Some(40));
@@ -793,10 +911,273 @@ mod tests {
         assert!(old.upgrade(&content()));
         assert!(old.onboarding.complete());
         assert_eq!(old.oil, 125);
+        // 第三版的叙事集合（events、journals）和听过的台词（hub_lines_seen）都有默认值，旧存档迁移时不补写。
+        assert!(old.events.is_empty() && old.journals.is_empty() && old.hub_lines_seen.is_empty());
         let mut first = Profile { version: 2, ..Default::default() };
         first.upgrade(&content());
         assert!(!first.onboarding.complete());
+        // 只有引导进度的第三版存档照常读出，叙事集合为空。
+        std::fs::write(dir.join("save.ron"), "(version: 3, onboarding: (dash: true))").unwrap();
+        let v3 = Profile::load(&dir);
+        assert!(v3.onboarding.dash && v3.events.is_empty() && v3.journals.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn additive_story_save_loads_old_versions_and_roundtrips_new_progress() {
+        for version in [1, 2] {
+            let mut p: Profile = ron::from_str(&format!("(version: {version}, runs: 3)")).unwrap();
+            assert!(p.events.is_empty() && p.journals.is_empty());
+            assert!(p.upgrade(&content()));
+            assert_eq!(p.version, SAVE_VERSION);
+            assert!(p.events.is_empty() && p.journals.is_empty());
+            assert!(!p.upgrade(&content()), "不能重复迁移或补写未做过的故事");
+        }
+        let c = content();
+        let dir = temp("story");
+        let mut p = Profile::load(&dir);
+        let mut r = result(false, 100.0, 1, 0, 0);
+        r.events.extend(["qingqiu_entered", "qingqiu_guarded_fire"].map(String::from));
+        r.journals.insert(1);
+        p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        p.save().unwrap();
+        let q = Profile::load(&dir);
+        assert_eq!(p, q);
+        let seed = q.run_setup(&c, 1).story.unwrap();
+        assert!(seed.events.contains("qingqiu_guarded_fire"));
+        assert_eq!(seed.journals, BTreeSet::from([1]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn chapters_need_progress_even_if_the_first_night_is_cleared() {
+        let mut p = Profile::default();
+        assert_eq!(p.journal_chapter(), 1);
+        p.events.insert("qingqiu_entered".into());
+        assert_eq!(p.journal_chapter(), 2);
+        p.events.insert("qingqiu_left_lantern".into());
+        assert_eq!(p.journal_chapter(), 3);
+        p.cleared = 1;
+        p.runs = 1;
+        p.meta.insert("luck".into(), 6);
+        p.journals.extend(1..=24);
+        assert_eq!(p.journal_chapter(), 3, "首通也不能揭露卷五");
+        p.runs = 4;
+        assert_eq!(p.journal_chapter(), 4);
+        p.runs = 6;
+        assert_eq!(p.journal_chapter(), 4, "没从深处回来不能开卷五");
+        p.endless.insert(1, EndlessBest { seconds: 900.0, bosses: 1, kills: 1 });
+        assert_eq!(p.journal_chapter(), 5);
+        p.meta.clear();
+        assert_eq!(p.journal_chapter(), 4);
+    }
+
+    /// 没听过的追问先说；说出口就记进存档，这一趟里照样说（重画不换句），下一趟不再说。
+    #[test]
+    fn childs_question_is_heard_once_and_stays_for_this_visit() {
+        let c = content();
+        let mut p = Profile { cleared: 1, ..Default::default() };
+        let mut news = HubNews::default();
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("回头看"), "追问优先于初见");
+        assert!(p.hub_lines_seen.is_empty(), "查询不会记录听过");
+        // 选中的是别人时，灯童的追问还没说出口，不能记成听过。
+        for who in [0, 1, 3] {
+            p.saw_hub(&c, who, &mut news);
+        }
+        assert!(!p.hub_lines_seen.contains("qingqiu_asked_dark") && !p.met.contains("child"));
+        assert!(p.saw_hub(&c, 2, &mut news));
+        assert!(p.hub_lines_seen.contains("qingqiu_asked_dark") && p.met.contains("child"));
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("回头看"), "这一趟里重画不换句");
+        assert!(!p.saw_hub(&c, 2, &mut news), "重画不重复写盘");
+        // 下一趟：问过了不再问，也不倒回初见
+        let line = p.hub_line(&c, 2, &HubNews::default()).unwrap();
+        assert!(!line.contains("回头看") && !line.contains("你就是守灯人"), "{line}");
+        // 护过火换一问，留了灯再换一问
+        p.events.insert("qingqiu_guarded_fire".into());
+        let mut news = HubNews::default();
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("你走了以后"));
+        assert!(p.saw_hub(&c, 2, &mut news));
+        p.events.insert("qingqiu_left_lantern".into());
+        let mut news = HubNews::default();
+        assert!(p.hub_line(&c, 2, &news).unwrap().contains("替它们记"));
+        assert!(p.saw_hub(&c, 2, &mut news));
+        let q: Profile = ron::from_str(&ron::to_string(&p).unwrap()).unwrap();
+        assert_eq!(q.hub_lines_seen.len(), 3);
+        assert_eq!(p.hub_lines_seen, q.hub_lines_seen);
+    }
+
+    #[test]
+    fn failed_nights_get_the_childs_response_before_any_clear_or_first_meeting() {
+        let c = content();
+        let news = HubNews::default();
+        let mut fresh = Profile::default();
+        assert!(fresh.hub_line(&c, 2, &news).unwrap().contains("你就是守灯人"));
+        // 第一夜没走到狐村也先接住回来的人，不假称他已经见过小狐。
+        let mut r = result(false, 1.0, 0, 0, 0);
+        r.events.insert("qingqiu_entered".into());
+        fresh.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        assert!(fresh.hub_line(&c, 2, &news).unwrap().contains("那边有没有灯"));
+        for (beat, expected) in [
+            (None, "qingqiu_asked_dark"),
+            (Some("qingqiu_guarded_fire"), "qingqiu_asked_guarded"),
+            (Some("qingqiu_left_lantern"), "qingqiu_asked_lit"),
+        ] {
+            if let Some(beat) = beat {
+                r.events.insert(beat.into());
+            }
+            if beat == Some("qingqiu_left_lantern") {
+                r.journals.insert(13);
+            }
+            // 每种经历都覆盖：结束后还没进灯驿就退出，重开仍要听到正确追问。
+            let dir = temp(expected);
+            let mut p = Profile::load(&dir);
+            p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+            p.save().unwrap();
+            let mut p = Profile::load(&dir);
+            assert_eq!(p.cleared, 0);
+            assert!(!p.met.contains("child"));
+            assert!(!p.hub_lines_seen.contains(expected));
+            // 追问应盖过初见、成就和挂着长命锁的台词。
+            p.last.charm = Some("longevity".into());
+            let mut news = HubNews { achievement: true, ..Default::default() };
+            assert_eq!(p.hub_dialogue(&c, 2, &news).unwrap().once, expected);
+            assert!(p.saw_hub(&c, 2, &mut news));
+            p.save().unwrap();
+            let mut p = Profile::load(&dir);
+            assert!(p.hub_lines_seen.contains(expected));
+            assert!(p.met.contains("child"));
+            // 重开是新的一趟：问过的不再问，也不倒回较早的追问或初见
+            let mut news = HubNews { achievement: true, ..Default::default() };
+            let line = p.hub_dialogue(&c, 2, &news).unwrap();
+            assert!(line.once.is_empty() && line.when != HubWhen::First, "{}", line.text);
+            assert!(!p.saw_hub(&c, 2, &mut news));
+            if beat == Some("qingqiu_left_lantern") {
+                assert!(p.journals.contains(&13));
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn guarded_question_never_falls_back_to_unseen_dark_question_after_a_clear() {
+        let c = content();
+        let mut p = Profile { cleared: 1, ..Default::default() };
+        p.events.insert("qingqiu_guarded_fire".into());
+        assert!(p.saw_hub(&c, 2, &mut HubNews::default()));
+        assert!(p.hub_lines_seen.contains("qingqiu_asked_guarded"));
+        assert!(!p.hub_lines_seen.contains("qingqiu_asked_dark"));
+        assert!(!p.saw_hub(&c, 2, &mut HubNews::default()), "下一趟也不补问没护火时那一问");
+    }
+
+    /// docs/BALANCE.md 10.4.1：前十局的点亮时间表（cost_exp 2.0）。
+    #[test]
+    fn first_ten_runs_have_meaningful_lights_without_victory_rewards() {
+        let c = content();
+        let route = [
+            (1, "luck"),
+            (2, "seal"),
+            (3, "ember"),
+            (4, "wu_fire"),
+            (5, "afterglow"),
+            (6, "wick"),
+            (7, "wu_wood"),
+            (8, "seal"),
+            (10, "slot"),
+        ];
+        let minimum = [1, 2, 3, 4, 5, 6, 7, 8, 8, 9];
+        // 第 8 局封印 2 级 600，第 10 局灯坠栏 1600
+        let balances = [30, 230, 330, 430, 330, 630, 730, 630, 1130, 30];
+        let mut p = Profile::default();
+        for run in 1..=10 {
+            // 灯油来自实际结算入口；不依赖通关、香火加成或成就赠油。
+            let r = result(false, 180.0, 0, if run == 1 { 230 } else { 500 }, 0);
+            p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+            for &(_, id) in route.iter().filter(|(at, _)| *at == run) {
+                assert_eq!(p.next_meta_intro(&c).unwrap().id, id, "界面指引与节奏表一致");
+                assert!(p.buy_meta(&c, id), "第 {run} 局应能点亮 {id}");
+            }
+            assert_eq!(p.meta_levels(&c), minimum[run - 1]);
+            assert_eq!(p.oil, balances[run - 1]);
+        }
+        assert!(p.next_meta_intro(&c).is_none());
+        assert_eq!(p.meta.len(), 8, "九级心灯覆盖八个不同节点");
+        // 即便一直在约三分钟倒下，选廉价新功能也不必连续攒三局。
+        let route = [(1, "luck"), (2, "wick"), (4, "seal"), (5, "ember"), (7, "wu_fire"), (9, "wu_wood")];
+        let mut p = Profile::default();
+        for run in 1..=10 {
+            p.oil += 230;
+            for &(_, id) in route.iter().filter(|(at, _)| *at == run) {
+                assert!(p.buy_meta(&c, id));
+            }
+        }
+        assert_eq!(p.meta_levels(&c), 6);
+    }
+
+    #[test]
+    fn hub_seen_lines_survive_v2_migration_and_roundtrip() {
+        let c = content();
+        let old = r#"(version: 2, oil: 321, runs: 3, wins: 1, cleared: 1, meta: {"luck": 2})"#;
+        let mut p: Profile = ron::from_str(old).unwrap();
+        assert!(p.hub_lines_seen.is_empty());
+        assert!(p.upgrade(&c));
+        assert_eq!((p.oil, p.meta_level("luck"), p.runs, p.wins), (321, 2, 3, 1));
+        assert!(p.hub_lines_seen.is_empty(), "旧存档不补记听过的台词");
+        assert!(!p.upgrade(&c));
+        let mut news = HubNews::default();
+        p.met.insert("teller".into());
+        assert!(p.saw_hub(&c, 3, &mut news));
+        assert!(p.hub_lines_seen.contains("teller_first_dawn"));
+        let restored: Profile = ron::from_str(&ron::to_string(&p).unwrap()).unwrap();
+        assert_eq!(restored, p);
+    }
+
+    #[test]
+    fn hub_milestones_queue_once_and_survive_text_and_order_changes() {
+        let mut c = content();
+        let mut p = Profile { runs: 10, wins: 1, ..Default::default() };
+        p.meta.insert("luck".into(), 1);
+        let mut news = HubNews { meta_lit: true, ..Default::default() };
+        assert_eq!(p.hub_dialogue(&c, 0, &news).unwrap().when, HubWhen::First);
+        assert!(!p.saw_hub(&c, 0, &mut news));
+        assert!(p.hub_lines_seen.is_empty(), "初见遮住的里程碑不能被确认");
+        p.met.extend(["smith", "peddler", "child", "teller"].map(String::from));
+        assert_eq!(p.hub_dialogue(&c, 0, &news).unwrap().once, "smith_first_light");
+        assert_eq!(p.hub_dialogue(&c, 2, &news).unwrap().once, "child_ten_returns");
+        assert_eq!(p.hub_dialogue(&c, 3, &news).unwrap().once, "teller_first_dawn");
+        for who in 0..c.hub.len() {
+            p.saw_hub(&c, who, &mut news);
+        }
+        // 下一趟：听过的不再说，排着的下一句接上
+        let mut news = HubNews { meta_lit: true, ..Default::default() };
+        assert_eq!(p.hub_dialogue(&c, 2, &news).unwrap().once, "child_three_returns");
+        let saved = ron::to_string(&p).unwrap();
+        let mut p: Profile = ron::from_str(&saved).unwrap();
+        // 改文字、调顺序都不影响听过的记录
+        let line = c.hub[0].lines.iter_mut().find(|l| l.once == "smith_first_light").unwrap();
+        line.text = "新稿".into();
+        c.hub[0].lines.reverse();
+        assert_eq!(p.hub_dialogue(&c, 0, &news).unwrap().when, HubWhen::MetaLit);
+        p.saw_hub(&c, 2, &mut news);
+        assert!(p.hub_dialogue(&c, 2, &HubNews::default()).unwrap().once.is_empty());
+        assert!(!p.hub_lines_seen.contains("smith_ember"));
+        p.meta.insert("ember".into(), 1);
+        assert_eq!(p.hub_dialogue(&c, 0, &news).unwrap().once, "smith_ember");
+    }
+
+    /// 路灯：回来一回添一盏，最多十盏；这次归来新添的那盏记在 HubNews 里，给长卷演点亮。
+    #[test]
+    fn each_return_lights_one_more_road_lamp() {
+        let c = content();
+        let mut p = Profile::default();
+        assert_eq!(p.road_lamps(), 0);
+        let r = result(false, 60.0, 0, 0, 0);
+        for run in 1..=12u32 {
+            let before = p.clone();
+            let got = p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+            let news = HubNews::after_run(&c, &before, &p, &r, &got);
+            assert_eq!(p.road_lamps(), run.min(ROAD_LAMPS));
+            assert_eq!(news.road_lit, (run <= ROAD_LAMPS).then(|| run as usize - 1));
+        }
     }
 
     /// docs/BALANCE.md 第 10.6 节：M2 存档迁移。

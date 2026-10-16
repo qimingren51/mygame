@@ -1,40 +1,61 @@
-//! 音频层（docs/DESIGN.md 第 10 节）。只读模拟状态和事件，不影响模拟。
+//! 音频层（docs/DESIGN.md 第 10 节）。只读模拟状态和事件、界面的 [`UiCue`] 与 [`MenuSoundscape`]，
+//! 不影响模拟。
 //!
 //! - 用代码合成全部乐器和音效（[`synth`]、[`sfx`]），音乐采样库后台生成，不用音频文件。
-//! - 音效和音乐各走一条轨道，音量来自设置；音乐轨道带低通滤波，升级选择、暂停时变闷。
+//! - 四类总线（[`mixer`]）：音乐、音效、界面、环境各有音量；音效下再分战斗、前景、预警三路，
+//!   预警和高光有自己的声部，不被成片的命中挤掉。
 //! - 背景音乐（[`music`]）：青丘角调主题与三分钟长曲式，战斗压力驱动分轨，按乐句换配器，天明完整再现。
-//! - 同类声音有最短间隔，几百次命中也不会炸耳朵；音效轨再挂一个压缩器兜底。
-//! - 空间感（docs/FEEL.md 第 6 节）：音效和音乐都送一点到混响轨；有位置的音效按相对主角的
-//!   左右做声像、按远近衰减。濒死时有心跳；夜主倒下时全场静半拍，接着是天明的编钟和晨鸟。
+//!   六条分轨挂在音乐总线下，音量、闪避、变闷和场景混响都作用于它们。
+//! - 场所（[`space`]）：标题、灯驿、夜战、夜主各有一种混响，插在各总线上；环境底层（[`ambience`]）
+//!   跟着场所交叉淡化。有位置的音效按相对主角的左右做声像、按远近衰减。
+//! - 高光闪避（[`duck`]）：燃灯、进化、夜主登场时压低战斗声、音乐和环境；夜主倒下全场静半拍，
+//!   接着是一声低锣，天明时编钟和晨鸟。
+//! - 命中声（[`impact`]）：按法器分组洗牌轮换纹理，用音频自己的随机流。
+//! - 同类声音有最短间隔，几百次命中也不会炸耳朵；战斗和前景再过一个压缩器兜底。濒死时有心跳。
 
 use std::time::Duration;
 
 use bevy::prelude::*;
 use kira::clock::ClockSpeed;
-use kira::effect::compressor::CompressorBuilder;
-use kira::effect::filter::{FilterBuilder, FilterHandle};
-use kira::effect::reverb::ReverbBuilder;
 use kira::sound::static_sound::StaticSoundData;
-use kira::track::{SendTrackBuilder, SendTrackHandle, TrackBuilder, TrackHandle};
-use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Mix, Panning, StartTime, Tween};
+use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning, StartTime};
 
 use lantern_content::WeaponIdentity;
-use lantern_core::step::TICK_HZ;
-use lantern_platform::{Settings, UiCue};
+use lantern_core::{Pcg32, step::TICK_HZ};
+use lantern_platform::{MenuSoundscape, Settings, UiCue};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::enemies::Enemies;
 use lantern_sim::pickups::PickupKind;
 use lantern_sim::{
-    AppState, Director, GameContent, Health, Player, Pos, RunState, SimEvent, SimOutbox, SimPhase, Tick,
+    AppState, Director, GameContent, Health, Player, Pos, RunSetup, RunState, SimEvent, SimOutbox, SimPhase,
+    Tick,
 };
 
+mod ambience;
+mod duck;
+mod impact;
+mod mixer;
 mod music;
 mod sfx;
+mod space;
 mod synth;
 
+use ambience::Ambience;
+use duck::{Ducking, Focus};
+use impact::ImpactPicker;
+use mixer::{Lane, Mixer, tween};
 use music::{Music, MusicMode, PressureInput};
 use sfx::Sfx;
+use space::Scene;
 use synth::pent;
+
+/// 音频的系统都在这里，排在 `PostUpdate`：界面在 `Update` 里写好场所和界面音，模拟事件在
+/// `Last` 清空之前读到。
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AudioSystems;
+
+/// 音频私有随机流的序号（命中轮换另用一条）。
+const AUDIO_STREAM: u64 = 0x0053_4658;
 
 pub struct AudioPlugin;
 
@@ -42,90 +63,49 @@ impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_audio)
             .add_systems(OnEnter(AppState::Title), |time: Res<Time<Real>>, mut a: NonSendMut<Audio>| {
-                a.muffle(false);
-                a.last_phase = None;
+                a.reset();
                 a.music.title(time.elapsed_secs_f64());
             })
             .add_systems(OnEnter(AppState::Run), start_run)
             .add_systems(
-                Update,
+                PostUpdate,
                 (
                     update_audio_time,
                     apply_settings,
+                    sync_scene,
                     play_ui_cues,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
                     run_music_mode.run_if(in_state(AppState::Run)),
                     tick_music,
+                    update_mix,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(AudioSystems),
             );
     }
-}
-
-/// 界面上的演出（开场卷轴、灯驿）出声。
-fn play_ui_cues(mut cues: MessageReader<UiCue>, mut audio: NonSendMut<Audio>) {
-    let a = &mut *audio;
-    for cue in cues.read() {
-        match *cue {
-            UiCue::ScrollUnroll => {
-                let s = a.sfx.scroll_unroll.clone();
-                a.play(&s);
-            }
-            // 旁白一行一个音，按配乐的 E 角调往上走（E、G、A、C、D、E）
-            UiCue::ScrollLine(k) => {
-                const STEPS: [f64; 6] = [0.0, 3.0, 5.0, 8.0, 10.0, 12.0];
-                let step = STEPS[usize::from(k).min(STEPS.len() - 1)];
-                let s = a.sfx.scroll_line.clone();
-                a.play_with(&s, 2f64.powf(step / 12.0), -2.0);
-            }
-            UiCue::LampLit => {
-                let s = a.sfx.lamp_lit.clone();
-                a.play(&s);
-            }
-            UiCue::DawnSpread => {
-                let s = a.sfx.dawn_spread.clone();
-                a.play(&s);
-            }
-        }
-    }
-}
-
-/// 线性音量（0–1）换成分贝。
-fn db(v: f32) -> Decibels {
-    if v <= 0.001 { Decibels::SILENCE } else { Decibels(20.0 * v.log10()) }
-}
-
-/// 音效按网页版的增益合成，整体偏轻；音效轨道再提 7 分贝。
-fn sfx_db(v: f32) -> Decibels {
-    let d = db(v);
-    if d == Decibels::SILENCE { d } else { Decibels(d.0 + 7.0) }
 }
 
 /// kira 的后端在部分平台上不能跨线程传递，所以作为 NonSend 资源放在主线程。
 pub struct Audio {
     /// 管理器被丢掉时声音就停了，一直留着
     _manager: Option<AudioManager>,
-    sfx_track: Option<TrackHandle>,
-    /// 干声预警轨：不经过打击压缩与长混响，繁忙战斗中仍有清楚的起音。
-    warning_track: Option<TrackHandle>,
-    music_track: Option<TrackHandle>,
-    /// 混响发送轨（一直留着，否则发送就断了）
-    _reverb: Option<SendTrackHandle>,
-    /// 设置里的音量（静半拍之后恢复用）
-    sfx_vol: f32,
-    music_vol: f32,
-    /// 静半拍：到这个时刻（秒）恢复音量
-    duck_until: Option<f64>,
+    mixer: Option<Mixer>,
+    ducking: Ducking,
+    /// 夜主倒下的静半拍：到这个时刻（秒）前景声才回来
+    death_silence_until: f64,
+    impacts: ImpactPicker,
+    /// 音高抖动等用的私有随机流，不碰模拟的随机数
+    rng: Pcg32,
+    ambience: Ambience,
+    scene: Scene,
     /// 下一次心跳的时刻
     next_heart: f64,
-    music_filter: Option<FilterHandle>,
     sfx: Sfx,
     music: Music,
     /// 各种音效上次播放的时刻（秒），用于限制间隔
     last: Vec<(&'static str, f64)>,
     now: f64,
-    impact_variant: [[usize; 2]; 5],
     /// 拾取魂火的连拾次数；停顿一会儿回到起点
     gem_chain: i32,
     gem_last: f64,
@@ -151,66 +131,88 @@ impl Audio {
         }
     }
 
-    fn play_on(track: Option<&mut TrackHandle>, sound: StaticSoundData) {
-        if let Some(track) = track
-            && let Err(e) = track.play(sound)
-        {
-            warn!("播放失败：{e}");
+    fn play_on(&mut self, lane: Lane, sound: StaticSoundData) {
+        if let Some(mixer) = &mut self.mixer {
+            mixer.play(lane, sound);
         }
     }
 
+    /// 普通战斗声：高光时会被压低。
     fn play(&mut self, sound: &StaticSoundData) {
-        Self::play_on(self.sfx_track.as_mut(), sound.clone());
+        self.play_on(Lane::Combat, sound.clone());
+    }
+
+    /// 高光与重要提示：不被闪避压低，只让位给夜主倒下的静半拍。
+    fn foreground(&mut self, sound: &StaticSoundData) {
+        self.foreground_with(sound.clone());
+    }
+
+    fn foreground_with(&mut self, sound: StaticSoundData) {
+        if self.now >= self.death_silence_until {
+            self.play_on(Lane::Foreground, sound);
+        }
+    }
+
+    /// 危险预警：干声，不过压缩器。
+    fn warning(&mut self, sound: StaticSoundData) {
+        self.play_on(Lane::Warning, sound);
+    }
+
+    /// 界面反馈：近、干、居中，走界面音量。
+    fn interface(&mut self, sound: StaticSoundData) {
+        self.play_on(Lane::Ui, sound);
     }
 
     fn play_with(&mut self, sound: &StaticSoundData, rate: f64, volume: f32) {
-        Self::play_on(self.sfx_track.as_mut(), sound.playback_rate(rate).volume(Decibels(volume)));
+        self.play_on(Lane::Combat, sound.playback_rate(rate).volume(Decibels(volume)));
     }
 
     /// 有位置的音效：按左右做声像，远处轻一点。
     fn play_at(&mut self, sound: &StaticSoundData, rate: f64, volume: f32, (pan, far): (f32, f32)) {
         let s = sound.playback_rate(rate).volume(Decibels(volume - far)).panning(Panning(pan));
-        Self::play_on(self.sfx_track.as_mut(), s);
+        self.play_on(Lane::Combat, s);
     }
 
-    /// 过 delay 秒再响。
+    /// 过 delay 秒再响。延迟的仪式声走前景，不会被自己触发的闪避压掉起音。
     fn play_later(&mut self, sound: &StaticSoundData, delay: f64) {
         let s = sound.start_time(StartTime::Delayed(Duration::from_secs_f64(delay)));
-        Self::play_on(self.sfx_track.as_mut(), s);
+        self.play_on(Lane::Foreground, s);
     }
 
-    /// 战斗声与音乐静 secs 秒；危险预警干声保留，混响的余音仍在回荡。
-    fn duck(&mut self, secs: f64) {
-        let tween = Tween { duration: Duration::from_millis(60), ..default() };
-        if let Some(t) = &mut self.sfx_track {
-            t.set_volume(Decibels::SILENCE, tween);
-        }
-        if let Some(t) = &mut self.music_track {
-            t.set_volume(Decibels::SILENCE, tween);
-        }
-        self.duck_until = Some(self.now + secs);
+    /// lo 到 hi 倍之间随机的音高。
+    fn rate(&mut self, lo: f32, hi: f32) -> f64 {
+        f64::from(self.rng.range_f32(lo, hi))
     }
 
-    /// 静完半拍后很快回来，紧接着那一声低锣要有完整的起音。
-    fn restore_volume(&mut self) {
-        let tween = Tween { duration: Duration::from_millis(80), ..default() };
-        let (sfx, music) = (sfx_db(self.sfx_vol), db(self.music_vol));
-        if let Some(t) = &mut self.sfx_track {
-            t.set_volume(sfx, tween);
-        }
-        if let Some(t) = &mut self.music_track {
-            t.set_volume(music, tween);
+    /// 夜主倒下：战斗声、音乐、环境静半拍，已经响着的高光立刻收掉；预警和界面不受影响。
+    fn boss_silence(&mut self) {
+        self.ducking.trigger(Focus::BossDeath, self.now);
+        self.death_silence_until = self.now + 0.55;
+        if let Some(mixer) = &mut self.mixer {
+            mixer.clear_foreground();
         }
     }
 
-    fn dawn(&mut self) {
-        if self.music.dawn(self.now) {
-            self.duck(0.55);
-            let s = self.sfx.boss_down.clone();
-            self.play_later(&s, 0.6);
-            let s = self.sfx.dawn.clone();
-            self.play_later(&s, 1.6);
+    /// 返回标题或开局：清掉上一处的声音（包括还没响的低锣和晨鸟）、闪避和节流。
+    fn reset(&mut self) {
+        self.ducking = Ducking::default();
+        self.death_silence_until = 0.0;
+        self.last.clear();
+        self.last_phase = None;
+        self.gem_chain = 0;
+        self.next_heart = self.now;
+        self.muffle(false);
+        if let Some(mixer) = &mut self.mixer {
+            mixer.clear_sounds();
         }
+    }
+
+    fn set_scene(&mut self, scene: Scene) {
+        self.scene = scene;
+        if let Some(mixer) = &mut self.mixer {
+            mixer.set_scene(scene);
+        }
+        self.ambience.set_scene(scene, self.mixer.as_mut().map(|m| &mut m.ambience));
     }
 
     fn muffle(&mut self, on: bool) {
@@ -218,9 +220,8 @@ impl Audio {
             return;
         }
         self.muffled = on;
-        if let Some(f) = &mut self.music_filter {
-            let tween = Tween { duration: Duration::from_millis(150), ..default() };
-            f.set_cutoff(if on { 650.0 } else { 18_000.0 }, tween);
+        if let Some(mixer) = &mut self.mixer {
+            mixer.muffle(on);
         }
     }
 }
@@ -234,53 +235,31 @@ fn init_audio(world: &mut World) {
             None
         }
     };
-    let (mut sfx_track, mut warning_track, mut music_track, mut music_filter, mut reverb) =
-        (None, None, None, None, None);
-    if let Some(m) = &mut manager {
-        // 一个大殿般的混响：余音长、高频收一点
-        reverb = m
-            .add_send_track(SendTrackBuilder::new().with_effect(
-                ReverbBuilder::new().feedback(0.84).damping(0.55).stereo_width(1.0).mix(Mix::WET),
-            ))
-            .ok();
-        let send = reverb.as_ref().map(SendTrackHandle::id);
-        let mut sfx = TrackBuilder::new().volume(sfx_db(settings.sfx_volume)).with_effect(
-            CompressorBuilder::new()
-                .threshold(-10.0)
-                .ratio(3.0)
-                .attack_duration(Duration::from_millis(4))
-                .release_duration(Duration::from_millis(120)),
-        );
-        let mut music = TrackBuilder::new().volume(db(settings.music_volume));
-        music_filter = Some(music.add_effect(FilterBuilder::new().cutoff(18_000.0)));
-        if let Some(id) = send {
-            sfx = sfx.with_send(id, Decibels(-11.0));
-            music = music.with_send(id, Decibels(-9.0));
+    let mut mixer = manager.as_mut().and_then(|m| match Mixer::new(m, &settings) {
+        Ok(mixer) => Some(mixer),
+        Err(e) => {
+            warn!("无法建立音频总线，静音运行：{e}");
+            None
         }
-        sfx_track = m.add_sub_track(sfx).ok();
-        warning_track = m.add_sub_track(TrackBuilder::new().volume(sfx_db(settings.sfx_volume))).ok();
-        music_track = m.add_sub_track(music).ok();
-    }
+    });
     let clock = manager.as_mut().and_then(|m| m.add_clock(ClockSpeed::TicksPerSecond(1.0)).ok());
-    // 音乐在后台合成；时钟先走，采样就绪时再确定第一拍的起点。
-    let mut music = Music::new(clock, music_track.as_mut());
+    // 音乐在后台合成，分轨挂在音乐总线下；时钟先走，采样就绪时再确定第一拍的起点。
+    let mut music = Music::new(clock, mixer.as_mut().map(|m| &mut m.music));
     music.start_clock();
     world.insert_non_send(Audio {
         _manager: manager,
-        sfx_track,
-        warning_track,
-        music_track,
-        _reverb: reverb,
-        sfx_vol: settings.sfx_volume,
-        music_vol: settings.music_volume,
-        duck_until: None,
+        mixer,
+        ducking: Ducking::default(),
+        death_silence_until: 0.0,
+        impacts: ImpactPicker::new(1),
+        rng: Pcg32::new(1, AUDIO_STREAM),
+        ambience: Ambience::new(),
+        scene: Scene::Title,
         next_heart: 0.0,
-        music_filter,
         sfx: Sfx::new(),
         music,
         last: Vec::new(),
         now: 0.0,
-        impact_variant: [[0; 2]; 5],
         gem_chain: 0,
         gem_last: 0.0,
         muffled: false,
@@ -288,35 +267,81 @@ fn init_audio(world: &mut World) {
     });
 }
 
-/// 设置里的音量变了就跟着改。
+fn update_audio_time(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
+    audio.now = time.elapsed_secs_f64();
+}
+
+/// 设置里的音量变了就跟着改（在 [`update_mix`] 里和闪避一起生效）。
 fn apply_settings(settings: Option<Res<Settings>>, mut audio: NonSendMut<Audio>) {
-    let Some(s) = settings else { return };
-    if !s.is_changed() {
-        return;
-    }
-    audio.sfx_vol = s.sfx_volume;
-    audio.music_vol = s.music_volume;
-    if let Some(t) = &mut audio.warning_track {
-        t.set_volume(sfx_db(s.sfx_volume), Tween { duration: Duration::from_millis(100), ..default() });
-    }
-    if audio.duck_until.is_some() {
-        return;
-    }
-    let tween = Tween { duration: Duration::from_millis(100), ..default() };
-    if let Some(t) = &mut audio.sfx_track {
-        t.set_volume(sfx_db(s.sfx_volume), tween);
-    }
-    if let Some(t) = &mut audio.music_track {
-        t.set_volume(db(s.music_volume), tween);
+    if let Some(s) = settings
+        && s.is_changed()
+        && let Some(mixer) = &mut audio.mixer
+    {
+        mixer.settings(&s);
     }
 }
 
-fn start_run(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
-    audio.gem_chain = 0;
-    audio.duck_until = None;
-    audio.restore_volume();
-    audio.muffle(false);
+fn start_run(time: Res<Time<Real>>, setup: Option<Res<RunSetup>>, mut audio: NonSendMut<Audio>) {
+    let seed = setup.map_or(1, |s| s.seed);
+    audio.reset();
+    audio.impacts = ImpactPicker::new(seed);
+    audio.rng = Pcg32::new(seed, AUDIO_STREAM);
     audio.music.start_run(time.elapsed_secs_f64());
+}
+
+/// 场所由状态决定；标题界面里是标题还是灯驿，由界面写在 [`MenuSoundscape`] 里。
+fn sync_scene(
+    state: Res<State<AppState>>,
+    menu: Option<Res<MenuSoundscape>>,
+    director: Option<Res<Director>>,
+    mut audio: NonSendMut<Audio>,
+) {
+    let scene = match state.get() {
+        AppState::Boot => return,
+        AppState::Title if menu.as_deref() == Some(&MenuSoundscape::Hub) => Scene::Hub,
+        AppState::Title | AppState::Results => Scene::Title,
+        AppState::Run if director.is_some_and(|d| d.boss.is_some()) => Scene::Boss,
+        AppState::Run => Scene::Night,
+    };
+    // 混响和环境声都只在场所变了时才动
+    audio.set_scene(scene);
+}
+
+/// 界面上的事出声：菜单操作、开场卷轴、灯驿。都走界面总线。
+fn play_ui_cues(mut cues: MessageReader<UiCue>, mut audio: NonSendMut<Audio>) {
+    let a = &mut *audio;
+    let mut menu = None;
+    for &cue in cues.read() {
+        let sound = match cue {
+            // 菜单音一帧只响最后一个，见下
+            UiCue::Move | UiCue::Confirm | UiCue::Back => {
+                menu = Some(cue);
+                continue;
+            }
+            UiCue::ScrollUnroll => a.sfx.scroll_unroll.clone(),
+            // 旁白一行一个音，按配乐的 E 角调往上走（E、G、A、C、D、E）
+            UiCue::ScrollLine(k) => {
+                const STEPS: [f64; 6] = [0.0, 3.0, 5.0, 8.0, 10.0, 12.0];
+                let step = STEPS[usize::from(k).min(STEPS.len() - 1)];
+                a.sfx.scroll_line.playback_rate(2f64.powf(step / 12.0)).volume(Decibels(-2.0))
+            }
+            UiCue::LampLit => a.sfx.lamp_lit.clone(),
+            UiCue::DawnSpread => a.sfx.dawn_spread.clone(),
+        };
+        // 演出声同一帧来几个就响几个（心灯点亮和晨光铺开可能同时）
+        a.interface(sound);
+    }
+    if let Some(cue) = menu
+        && a.can("ui", 0.045)
+    {
+        let s = match cue {
+            UiCue::Move => &a.sfx.ui_move,
+            UiCue::Confirm => &a.sfx.ui_confirm,
+            _ => &a.sfx.ui_back,
+        }
+        .clone();
+        a.interface(s);
+    }
 }
 
 /// 每 0.2 秒只读一次妖物池，不分配临时列表；压力记忆属于音频，不写回模拟。
@@ -368,22 +393,25 @@ fn run_music_mode(
     let now = phase.as_deref().copied();
     if audio.last_phase == Some(SimPhase::LevelUp) && now != Some(SimPhase::LevelUp) {
         let s = audio.sfx.select.clone();
-        audio.play(&s);
+        audio.interface(s);
     }
     audio.last_phase = now;
 }
 
-fn update_audio_time(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {
-    audio.now = time.elapsed_secs_f64();
-}
-
 fn tick_music(mut audio: NonSendMut<Audio>) {
     let now = audio.now;
-    if audio.duck_until.is_some_and(|t| now >= t) {
-        audio.duck_until = None;
-        audio.restore_volume();
-    }
     audio.music.tick(now);
+}
+
+/// 闪避包络和静半拍换成各总线的音量。
+fn update_mix(mut audio: NonSendMut<Audio>) {
+    let now = audio.now;
+    let duck = audio.ducking.gains(now);
+    let silence = now < audio.death_silence_until;
+    if let Some(mixer) = &mut audio.mixer {
+        mixer.update(duck, tween(25));
+        mixer.silence_foreground(silence);
+    }
 }
 
 /// 濒死的心跳：生命低于三成时越来越急（和画面的暗角同一个节奏公式）。
@@ -411,20 +439,44 @@ fn heartbeat(
 }
 
 fn play_sim_events(
-    content: Res<lantern_sim::GameContent>,
+    content: Res<GameContent>,
     outbox: Res<SimOutbox>,
     hero: Option<Single<&Pos, With<Player>>>,
     mut audio: NonSendMut<Audio>,
 ) {
     let hero = hero.map_or(bevy::math::Vec2::ZERO, |p| p.0);
-    // 相对主角的左右声像和远近衰减（分贝）
-    let place = |p: bevy::math::Vec2| {
-        let d = p - hero;
-        ((d.x / 340.0).clamp(-0.75, 0.75), (d.length() / 420.0 * 6.0).min(9.0))
-    };
+    let space = audio.scene.space();
+    // 相对主角的左右声像和远近衰减（分贝），按场所的空间大小
+    let place = |p: bevy::math::Vec2| space.place(p - hero);
     let a = &mut *audio;
     if a.now - a.gem_last > 0.6 {
         a.gem_chain = 0;
+    }
+    // 先汇总整帧的高光再排声音，事件先后不改变闪避结果。天明的仪式只有一次。
+    let (mut boss_down, mut dawn) = (false, false);
+    for ev in &outbox.0 {
+        if let Some(focus) = Focus::for_event(ev) {
+            a.ducking.trigger(focus, a.now);
+        }
+        match *ev {
+            SimEvent::BossDefeated { dawn: false, .. } => boss_down = true,
+            SimEvent::BossDefeated { dawn: true, .. } | SimEvent::RunOver { won: true } => {
+                dawn |= a.music.dawn(a.now);
+            }
+            _ => {}
+        }
+    }
+    // 夜主倒下：全场静半拍，一声低锣；天明时编钟和晨鸟（无尽夜不天明）
+    if boss_down || dawn {
+        a.boss_silence();
+        let s = a.sfx.boss_down.clone();
+        a.play_later(&s, 0.6);
+    }
+    if dawn {
+        let s = a.sfx.dawn.clone();
+        a.play_later(&s, 1.6);
+    } else if boss_down {
+        a.music.request(MusicMode::Explore);
     }
     let mut impact_voices = 0;
     let critical = |e: &&SimEvent| matches!(e, SimEvent::Hit { crit: true, .. });
@@ -434,6 +486,7 @@ fn play_sim_events(
                 if matches!(kind, lantern_sim::HitKind::Dot | lantern_sim::HitKind::Reaction) {
                     continue;
                 }
+                // 法器命中用各自的三种纹理洗牌轮换；没有法器的（燃灯、爆炸等）用通用命中声
                 if let Some(identity) = WeaponIdentity::resolve(&content.0, weapon) {
                     if impact_voices >= 8 {
                         continue;
@@ -441,25 +494,17 @@ fn play_sim_events(
                     let (i, key, gap) = sfx::impact_group(identity, crit);
                     if a.can(key, gap) {
                         impact_voices += 1;
-                        let c = usize::from(crit);
-                        let v = a.impact_variant[i][c];
-                        a.impact_variant[i][c] = (v + 1) % 3;
-                        let sound = a.sfx.impacts[i][c][v].clone();
-                        let rate = 0.96 + (a.now * 3571.0 + i as f64 * 0.17).fract() * 0.08;
-                        a.play_at(&sound, rate, 0.0, place(impact_pos));
+                        let pick = a.impacts.weapon(i, crit);
+                        let sound = a.sfx.impacts[i][usize::from(crit)][pick.variant].clone();
+                        a.play_at(&sound, pick.rate, pick.volume, place(impact_pos));
                     }
                     continue;
                 }
-                if crit {
-                    if a.can("crit", 0.06) {
-                        let rate = 0.94 + (a.now * 3571.0).fract() * 0.12;
-                        let s = a.sfx.crit.clone();
-                        a.play_at(&s, rate, 0.0, place(pos));
-                    }
-                } else if a.can("hit", 0.045) {
-                    let rate = 0.8 + (a.now * 7919.0).fract() * 0.5;
-                    let s = a.sfx.hit.clone();
-                    a.play_at(&s, rate, 0.0, place(pos));
+                let (name, gap) = if crit { ("crit", 0.06) } else { ("hit", 0.045) };
+                if a.can(name, gap) {
+                    let pick = a.impacts.generic(crit);
+                    let s = if crit { a.sfx.crit.clone() } else { a.sfx.hit.clone() };
+                    a.play_at(&s, pick.rate, pick.volume, place(pos));
                 }
             }
             SimEvent::Kill { rank: lantern_content::Rank::Elite, pos, .. } => {
@@ -467,20 +512,9 @@ fn play_sim_events(
                 a.play_at(&s, 1.0, 0.0, place(pos));
             }
             SimEvent::Kill { pos, .. } if a.can("kill", 0.04) => {
-                let rate = 0.85 + (a.now * 104_729.0).fract() * 0.3;
+                let rate = a.rate(0.85, 1.15);
                 let s = a.sfx.kill.clone();
                 a.play_at(&s, rate, 0.0, place(pos));
-            }
-            // 夜主倒下：全场静半拍，一声低锣；天明时编钟和晨鸟（无尽夜不天明）
-            SimEvent::BossDefeated { dawn, .. } => {
-                if dawn {
-                    a.dawn();
-                } else {
-                    a.duck(0.55);
-                    let s = a.sfx.boss_down.clone();
-                    a.play_later(&s, 0.6);
-                    a.music.request(MusicMode::Explore);
-                }
             }
             SimEvent::GemPicked { .. } if a.can("gem", 0.05) => {
                 a.gem_last = a.now;
@@ -498,12 +532,12 @@ fn play_sim_events(
                 a.music.pressure.hurt();
                 if a.can("hurt", 0.2) {
                     let s = a.sfx.hurt.clone();
-                    a.play(&s);
+                    a.foreground(&s);
                 }
             }
             SimEvent::LevelUp { .. } if a.can("level", 0.3) => {
                 let s = a.sfx.level_up.clone();
-                a.play(&s);
+                a.interface(s);
             }
             SimEvent::ChestOpened { count, .. } => {
                 let i = if count >= 5 {
@@ -514,84 +548,90 @@ fn play_sim_events(
                     0
                 };
                 let s = a.sfx.chest[i].clone();
-                a.play(&s);
+                a.interface(s);
             }
             SimEvent::Evolve { form, .. } => {
                 // 锣声随异化压低、合璧抬高
                 let s = a.sfx.evolution.clone();
                 match form {
-                    lantern_sim::weapons::Form::Mutated => a.play_with(&s, 0.88, 0.0),
-                    lantern_sim::weapons::Form::Fused(_) => a.play_with(&s, 1.12, 0.0),
-                    _ => a.play(&s),
+                    lantern_sim::weapons::Form::Mutated => a.foreground_with(s.playback_rate(0.88)),
+                    lantern_sim::weapons::Form::Fused(_) => a.foreground_with(s.playback_rate(1.12)),
+                    _ => a.foreground(&s),
                 }
             }
             // 共鸣跨阶：盖章的闷响 + 钟
             SimEvent::Resonance { .. } if a.can("res", 0.3) => {
                 let s = a.sfx.stamp.clone();
-                a.play(&s);
+                a.foreground(&s);
                 let s = a.sfx.resonance.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::Sheng { .. } | SimEvent::Taiji | SimEvent::Buff { .. } if a.can("res", 0.3) => {
                 let s = a.sfx.resonance.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::Ult => {
                 let s = a.sfx.ult.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::UltNotReady if a.can("ult_not_ready", 0.6) => {
                 // 复用轻一些、短一些的提示鼓点，连续按键时限制间隔。
-                let s = a.sfx.warn.clone();
-                a.play_with(&s, 1.4, -10.0);
+                let s = a.sfx.warn.playback_rate(1.4).volume(Decibels(-10.0));
+                a.foreground_with(s);
             }
             SimEvent::CoinPicked { .. } if a.can("coin", 0.08) => {
                 let s = a.sfx.coins.clone();
                 a.play_with(&s, 1.0, -8.0);
             }
+            SimEvent::StoryBeat { .. } => {
+                // 檐下一声轻响，不盖住正在靠近的妖物。
+                let s = a.sfx.event.clone();
+                a.play_with(&s, 0.85, -10.0);
+            }
             SimEvent::LanternLit { .. } => {
                 let s = a.sfx.event.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::EncircleWarn { .. } => {
                 let s = a.sfx.warn_big.clone();
-                a.play(&s);
+                a.warning(s);
             }
             SimEvent::VolleyWarn { illusion, .. } if a.can(if illusion { "iwarn" } else { "vwarn" }, 0.1) => {
-                let s = a.sfx.volley_warn.clone().volume(Decibels(if illusion { -5.0 } else { 0.0 }));
-                Audio::play_on(a.warning_track.as_mut(), s);
+                let s = a.sfx.volley_warn.volume(Decibels(if illusion { -5.0 } else { 0.0 }));
+                a.warning(s);
             }
             SimEvent::SweepWarn { .. } if a.can("swarn", 0.1) => {
                 let s = a.sfx.sweep_warn.clone();
-                Audio::play_on(a.warning_track.as_mut(), s);
+                a.warning(s);
             }
             SimEvent::RainWarn { .. } if a.can("rwarn", 0.1) => {
                 let s = a.sfx.rain_warn.clone();
-                Audio::play_on(a.warning_track.as_mut(), s);
+                a.warning(s);
             }
             SimEvent::LastStand { .. } | SimEvent::Revived { .. } => {
                 let s = a.sfx.big_bell.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::CharmTaken { .. } => {
                 let s = a.sfx.resonance.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
+            // 夜主换阶段：太鼓、低锣、一声狐啸
             SimEvent::BossPhase { .. } => {
                 let s = a.sfx.boss_phase.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::BossEnraged => {
                 let s = a.sfx.big_bell.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             // 五行反应：第一次发生用盖章的声音，之后每种反应换一个音高
             SimEvent::Reaction { kind, first, pos, .. } => {
                 if first {
                     let s = a.sfx.stamp.clone();
-                    a.play(&s);
+                    a.foreground(&s);
                     let s = a.sfx.resonance.clone();
-                    a.play(&s);
+                    a.foreground(&s);
                 } else if a.can("react", 0.12) {
                     let rate = f64::from(pent(8 + i32::from(kind) % 7) / pent(8));
                     let s = a.sfx.bell_pulse.clone();
@@ -600,7 +640,7 @@ fn play_sim_events(
             }
             SimEvent::UltReady => {
                 let s = a.sfx.ult_ready.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::SwordFired { .. } if a.can("sword", 0.1) => {
                 let s = a.sfx.sword.clone();
@@ -627,18 +667,18 @@ fn play_sim_events(
             }
             SimEvent::Elite { .. } => {
                 let s = a.sfx.warn.clone();
-                a.play(&s);
+                a.warning(s);
             }
             SimEvent::BossArrived { .. } | SimEvent::Surge => {
                 if matches!(ev, SimEvent::BossArrived { .. }) {
                     a.music.request(MusicMode::Boss);
                 }
                 let s = a.sfx.warn_big.clone();
-                a.play(&s);
+                a.warning(s);
             }
             // 竹丛打碎：一刀砍倒一片时不要连成一串
             SimEvent::BambooBroken { pos } if a.can("bamboo", 0.07) => {
-                let rate = 0.9 + (a.now * 6007.0).fract() * 0.25;
+                let rate = a.rate(0.9, 1.15);
                 let s = a.sfx.bamboo.clone();
                 a.play_at(&s, rate, -3.0, place(pos));
             }
@@ -666,24 +706,21 @@ fn play_sim_events(
             }
             SimEvent::Combo { .. } => {
                 let s = a.sfx.combo.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::Encounter { .. } => {
                 let s = a.sfx.event.clone();
-                a.play(&s);
+                a.foreground(&s);
             }
             SimEvent::CritterLooted { .. } => {
                 let s = a.sfx.coins.clone();
                 a.play(&s);
             }
-            SimEvent::RunOver { won } => {
-                if won {
-                    a.dawn();
-                } else {
-                    a.music.stop();
-                    let s = a.sfx.defeat.clone();
-                    a.play(&s);
-                }
+            // 赢了的天明在上面统一安排
+            SimEvent::RunOver { won: false } => {
+                a.music.stop();
+                let s = a.sfx.defeat.clone();
+                a.foreground(&s);
             }
             _ => {}
         }

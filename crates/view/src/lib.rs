@@ -23,6 +23,8 @@ mod hero_feedback;
 mod impact;
 pub mod lighting;
 mod mist;
+/// 统一色板（和美术 style.py 的 RUNTIME_COLORS 对齐，docs/STYLE_GUIDE.md）；质感会话接入后逐步替换各处写死的颜色
+mod palette;
 mod particles;
 mod stats;
 mod telegraphs;

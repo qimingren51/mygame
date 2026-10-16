@@ -1,0 +1,49 @@
+{
+  "说明": "程序生成色板与构图示意，不是实机截图；Y 为环境底光线性亮度，非最终屏幕亮度。",
+  "colors": {
+    "INK": "#17140F",
+    "GOLD": "#E2B23A",
+    "DUST": "#6A645A",
+    "NIGHT_AMBIENT": "#161B2C",
+    "LANTERN_LIGHT": "#FFC27A",
+    "FLAME_LIGHT": "#FF9A4D",
+    "SOUL_LIGHT": "#BFEFFF",
+    "WOOD_GLOW": "#82A489",
+    "WATER_GLOW": "#6B8EAB",
+    "EARTH_GLOW": "#BE884E",
+    "WARNING": "#EA7841",
+    "DAWN_PEACH": "#FFD1A8",
+    "DAWN_WHITE": "#FFFAF0"
+  },
+  "levels": {
+    "IGNITE_LEN": 1.4,
+    "DAWN_LEN": 3.0,
+    "DAWN_DELAY": 0.8,
+    "TIDE_AMBIENT_GAIN": 0.9,
+    "TIDE_PARTICLE_GAIN": 0.35,
+    "TIDE_DECOR_GAIN": 0.45,
+    "WARNING_ALPHA_MIN": 0.85,
+    "DAWN_LANTERN_GAIN": 0.35,
+    "DAWN_PARTICLE_GAIN": 0.2
+  },
+  "frames": {
+    "01_night": {
+      "tide": 0.0,
+      "dawn": 0.0,
+      "ambient_srgb": "#161B2C",
+      "ambient_linear_y": 0.011363
+    },
+    "02_tide": {
+      "tide": 1.0,
+      "dawn": 0.0,
+      "ambient_srgb": "#14192A",
+      "ambient_linear_y": 0.010227
+    },
+    "03_dawn": {
+      "tide": 0.0,
+      "dawn": 0.5,
+      "ambient_srgb": "#FFD1A8",
+      "ambient_linear_y": 0.696881
+    }
+  }
+}
