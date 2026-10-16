@@ -8,6 +8,8 @@
 
 第二轮画面提交 `9c96c13`，构筑改进提交 `3b0a345`。后续成果插画来自 `r3-reward-presentation`，赤面狐正式素材来自 `r3-fox-art`；构筑与成果页由另一名子代理独立审查。当前直接通信覆盖本会话的三个子代理；原独立终端使用下面的共享文件交接方式，A9/A10 的既有审查报告已收到。
 
+第四轮分工：`r4-chest` 负责宝箱界面与青藤圆章；`r4-golem-art` 负责石妖造型/负重步态；`r4-boss-presentation`、`r4-vine-view`、`r4-boss-ui` 负责夜主、青藤表现及反应提示退让。总协调负责青藤模拟、卡画、公共接口、集中测试与实机集成；各实现交付后再交叉审图，当前阶段检查结果见 PRODUCTION。
+
 ## 开始工作
 
 这份文件的实时版本位于 `/home/ming/mygame-worktrees/develop/docs/TEAM.md`。各 worktree 中的副本可能较旧，任务状态以实时版本和共享消息为准。

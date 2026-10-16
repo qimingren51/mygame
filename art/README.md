@@ -349,6 +349,8 @@ art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自
 | `render/hero_review.py` | 主角独立审图：八方向、关键动作、五种动作动图、头像旧新对照 |
 | `render/fox_style.py` | 赤面狐正式出图与样张共用的材质和细线，只作用赤面狐 |
 | `render/fox_sample.py` `fox_review.py` | 赤面狐四姿态对比与完整动作日夜审图、动图 |
+| `render/golem_sample.py` | 石妖少量姿态或完整八帧的原生/月夜对比与负重步态动图 |
+| `post/ui_vine_icons.py` | 青藤和万木春两个原生 HUD 圆章，沿用既有宣纸/墨圈画法 |
 | `render/qingqiu_review.py` | 青丘妖物的样张、审图和动图 |
 | `render/lantern_review.py` | 灯笼拆层的样张和审图（合成、旧帧对比热图、道具）；`full` 出正式素材的 8 向动图、三灯夜景、全帧对比 |
 | `render/lamp_icons.py` | 灯的界面图标 `ui/icon_lamp_<灯>`（灯笼头单独渲染，装进图标圆框） |
@@ -419,3 +421,10 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lamp_icons.py   # → out/
 - `.blender/` 用来放官方 Blender 压缩包（如果以后要用）
 
 提交模型、渲染与处理脚本、风格配置和卡画提示词（`models/`、`render/`、`post/`、`style/`、`cards/`），以及依赖与使用说明。运行时打包图集提交到 `assets/atlas/`，原始出图与审图中间文件留在 `out/`。
+
+青藤圆章独立出图后，使用现有打包器追加 `weapon_icons` 组，不重新生成整套 UI 或覆盖头像：
+
+```bash
+art/.venv/bin/python art/post/ui_vine_icons.py
+art/.venv/bin/python art/post/pack_atlas.py --name weapon_icons --out assets/atlas --no-trim art/out/assets@2x/ui_vine
+```
