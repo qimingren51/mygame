@@ -81,6 +81,8 @@ pub(crate) struct FxFrames {
     stone: Option<(FrameId, Option<FrameId>)>,
     /// 熄灭的石灯笼（和点亮的同尺寸、同锚点，直接换帧）
     stone_dark: Option<FrameId>,
+    /// 狐村的留灯：没点、点着、点着的自发光（同画布、同锚点，挂钩在锚点）
+    eave_lamp: Option<(FrameId, FrameId, Option<FrameId>)>,
     merchant: Option<(FrameId, Option<FrameId>)>,
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
@@ -138,6 +140,10 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         altar: prop("blood_altar"),
         stone: prop("stone_lantern"),
         stone_dark: db.find("stone_lantern_dark/idle_S_00"),
+        eave_lamp: db
+            .find("fox_eave_lamp/idle_S_00")
+            .zip(prop("fox_eave_lamp_lit"))
+            .map(|(u, (l, e))| (u, l, e)),
         merchant: prop("merchant"),
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
@@ -730,19 +736,20 @@ pub(crate) fn collect_fx(
         let fire = (p + Vec2::new(sway * 1.5, 30.0)).extend(layer::EMISSIVE);
         glow.add(f.spark, fire, Vec2::new(px(f.spark, 15.0), px(f.spark, 25.0)), sway * 0.08, rgb(0x8de4b9));
         glow.add(f.glow, fire, Vec2::splat(px(f.glow, 28.0)), 0.0, rgb(0x81cdb2).with_alpha(0.55));
-        if let Some((stone, emit)) = f.stone {
+        // 留灯挂在祠的左檐下（和石灯阵的石灯笼形制不同，不会被当成要点的灯）。
+        if let Some((dark, lit_frame, emit)) = f.eave_lamp {
             let lit = v.stage == VillageStage::Lit;
-            let at = p + Vec2::new(35.0, -20.0);
-            let frame = if lit { stone } else { f.stone_dark.unwrap_or(stone) };
+            let hook = p + Vec2::new(-12.0, 24.0 + 18.0);
+            let z = sort_z(layer::ACTORS, v.pos.y - 24.0) + 0.001;
             pools.fx.push(Draw {
-                scale: Vec2::splat(0.7),
-                ..Draw::new(frame, at.extend(sort_z(layer::ACTORS, v.pos.y + 20.0)))
+                scale: Vec2::splat(0.8),
+                ..Draw::new(if lit { lit_frame } else { dark }, hook.extend(z))
             });
             if lit {
                 if let Some(emit) = emit {
-                    glow.add(emit, at.extend(layer::EMISSIVE), Vec2::splat(0.7), 0.0, Color::WHITE);
+                    glow.add(emit, hook.extend(layer::EMISSIVE), Vec2::splat(0.8), 0.0, Color::WHITE);
                 }
-                glow.light(&frames, &db, at + Vec2::new(0.0, 20.0), (rgb(0xffcf8e).with_alpha(0.85), 125.0));
+                glow.light(&frames, &db, hook - Vec2::new(0.0, 7.0), (rgb(0xff9a4a).with_alpha(0.85), 70.0));
             }
         }
         if let Some(fox) = db.find("fox/move_E_00") {

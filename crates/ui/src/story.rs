@@ -72,7 +72,8 @@ fn update(
     outbox: Res<SimOutbox>,
     player: Query<&Pos, With<Player>>,
     mut echo: ResMut<Echo>,
-    roots: Query<&Children, With<Whisper>>,
+    guide: Option<Res<crate::onboarding::Onboarding>>,
+    mut roots: Query<(&Children, &mut Node), With<Whisper>>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let playing = playing(&run_state, phase.as_deref());
@@ -120,7 +121,12 @@ fn update(
         prompt.to_string()
     };
     let words = crate::prompts::render(&template, &active, &settings);
-    for children in &roots {
+    // 首夜引导条亮着时，这行字挪到引导条上方，不叠在一起。
+    let bottom = px(if guide.is_some_and(|g| g.in_play()) { 172.0 } else { 118.0 });
+    for (children, mut node) in &mut roots {
+        if node.bottom != bottom {
+            node.bottom = bottom;
+        }
         for child in children.iter() {
             if let Ok((mut t, mut color)) = texts.get_mut(child) {
                 if t.0 != words {

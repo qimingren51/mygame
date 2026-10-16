@@ -235,6 +235,16 @@ fn shrine_center(seed: u64) -> Vec2 {
     Vec2::new(side * rng.range_f32(210.0, 235.0), rng.range_f32(-105.0, -75.0))
 }
 
+/// 庭院正殿；檐下挂留灯（docs/DESIGN.md 第 15 节“挂着的道具”）。
+const SHRINE: &str = "fox_shrine_grand/idle_S_00";
+const EAVE_LAMP: [&str; 2] = ["fox_eave_lamp", "fox_eave_lamp_lit"];
+
+/// 正殿檐下的留灯。主角在狐村留过灯（存档或本局）就点着。
+#[derive(Component)]
+pub(crate) struct EaveLamp {
+    lit: bool,
+}
+
 #[derive(Debug, PartialEq)]
 struct ShrinePiece {
     asset: &'static str,
@@ -244,14 +254,16 @@ struct ShrinePiece {
     upright: bool,
 }
 
-/// 成对石狐守住入口，弯曲的落石/爪印带把视线引向祠顶；中轴只留纸面。
+/// 正殿（大狐仙祠，按原尺寸画，不放大）坐北，石牌坊立在中轴前方，成对石狐守住入口，
+/// 弯曲的落石/爪印带把视线引向祠顶；中轴只留纸面。
 fn shrine_layout(seed: u64) -> Vec<ShrinePiece> {
     let center = shrine_center(seed);
     let mut pieces = Vec::new();
     let mut put = |asset, x, y, scale, flip, upright| {
         pieces.push(ShrinePiece { asset, pos: center + Vec2::new(x, y), scale, flip, upright })
     };
-    put("fox_shrine/idle_S_00", 0.0, 0.0, 2.5, false, true);
+    put(SHRINE, 0.0, 0.0, 1.0, false, true);
+    put("fox_gate/idle_S_00", 0.0, 95.0, 1.0, false, true);
     put("stone_fox/idle_S_00", -65.0, 40.0, 1.25, false, true);
     put("stone_fox/idle_S_00", 65.0, 40.0, 1.25, true, true);
     put("fox_lanterns/idle_S_00", -103.0, 5.0, 1.25, false, true);
@@ -291,6 +303,9 @@ fn foot_radius(db: &AtlasDb, frame: FrameId) -> f32 {
 pub(crate) fn spawn_shrine(mut commands: Commands, setup: Res<RunSetup>, db: Res<AtlasDb>) {
     for p in shrine_layout(setup.seed) {
         let Some(frame) = db.find(p.asset) else { continue };
+        if p.asset == SHRINE {
+            spawn_eave_lamp(&mut commands, &db, &p);
+        }
         let (mut sprite, anchor) = db.sprite(frame);
         sprite.flip_x = p.flip;
         if !p.upright {
@@ -303,7 +318,8 @@ pub(crate) fn spawn_shrine(mut commands: Commands, setup: Res<RunSetup>, db: Res
             Transform::from_xyz(p.pos.x, -p.pos.y, z).with_scale(Vec3::new(p.scale, p.scale, 1.0)),
             DespawnOnExit(AppState::Run),
         ));
-        if p.upright {
+        // 牌坊是两根柱子，中间是过道，不在中点压一团影子。
+        if p.upright && !p.asset.starts_with("fox_gate/") {
             e.insert(GroundFoot(foot_radius(&db, frame) * p.scale));
         }
         if let Some(asset) = p.asset.split('/').next()
@@ -312,6 +328,61 @@ pub(crate) fn spawn_shrine(mut commands: Commands, setup: Res<RunSetup>, db: Res
         {
             e.insert(light);
         }
+    }
+}
+
+/// 留灯挂在宿主的 eave_lamp 挂点：同一排序深度、画在宿主之上、缩放跟宿主一致，不落地、没有影子。
+fn spawn_eave_lamp(commands: &mut Commands, db: &AtlasDb, host: &ShrinePiece) {
+    let (Some(hook), Some(frame)) =
+        (socket(db, "fox_shrine_grand", "eave_lamp"), db.find(&format!("{}/idle_S_00", EAVE_LAMP[0])))
+    else {
+        return;
+    };
+    let (sprite, anchor) = db.sprite(frame);
+    let at = Vec2::new(host.pos.x, -host.pos.y) + hook * host.scale;
+    commands.spawn((
+        EaveLamp { lit: false },
+        sprite,
+        anchor,
+        Transform::from_xyz(at.x, at.y, sort_z(layer::ACTORS, host.pos.y) + 0.001)
+            .with_scale(Vec3::new(host.scale, host.scale, 1.0)),
+        DespawnOnExit(AppState::Run),
+    ));
+}
+
+/// 灯火放在点着那张的 flame 挂点，光色、光半径取 meta。
+fn eave_lamp_light(db: &AtlasDb) -> Option<PropLight> {
+    let asset = EAVE_LAMP[1];
+    let meta = db.assets.get(asset)?;
+    Some(PropLight {
+        offset: socket(db, asset, "flame").unwrap_or(Vec2::new(0.0, -8.0)),
+        color: crate::fx::hex(meta.light_color.as_deref()?).with_alpha(0.85),
+        radius: meta.light_radius_units.unwrap_or(50.0),
+        emit: db.find(&format!("{asset}/idle_S_00_emit")),
+    })
+}
+
+/// 留过灯就换成点着的那张（同画布、同锚点，直接换图）。
+pub(crate) fn update_eave_lamp(
+    mut commands: Commands,
+    db: Res<AtlasDb>,
+    story: Option<Res<lantern_sim::story::Story>>,
+    mut q: Query<(Entity, &mut EaveLamp, &mut Sprite)>,
+) {
+    let lit = story.is_some_and(|s| s.has(lantern_content::StoryBeat::LeftLantern));
+    for (e, mut lamp, mut sprite) in &mut q {
+        if lamp.lit == lit {
+            continue;
+        }
+        let Some(frame) = db.find(&format!("{}/idle_S_00", EAVE_LAMP[usize::from(lit)])) else { continue };
+        lamp.lit = lit;
+        let flip = sprite.flip_x;
+        *sprite = db.sprite(frame).0;
+        sprite.flip_x = flip;
+        match eave_lamp_light(&db).filter(|_| lit) {
+            Some(light) => commands.entity(e).insert(light),
+            None => commands.entity(e).remove::<PropLight>(),
+        };
     }
 }
 
@@ -352,7 +423,8 @@ mod tests {
         for seed in [0, 1, 3, u64::MAX] {
             let a = shrine_layout(seed);
             assert_eq!(a, shrine_layout(seed));
-            assert_eq!(a.iter().filter(|p| p.asset.starts_with("fox_shrine/")).count(), 1);
+            assert_eq!(a.iter().filter(|p| p.asset.starts_with("fox_shrine")).count(), 1);
+            assert_eq!(a.iter().filter(|p| p.asset == SHRINE).count(), 1);
             assert!(a.iter().filter(|p| p.upright).all(|p| p.pos.length() > 100.0));
             let center = shrine_center(seed);
             assert_eq!(decor_density(center, seed), 0.0);

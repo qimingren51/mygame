@@ -21,7 +21,7 @@ enum Lesson {
 }
 
 #[derive(Resource, Default)]
-struct Onboarding {
+pub(crate) struct Onboarding {
     active: bool,
     last_pos: Option<Vec2>,
     distance: f32,
@@ -30,6 +30,13 @@ struct Onboarding {
     shown: Option<Lesson>,
     age: f32,
     alpha: f32,
+}
+
+impl Onboarding {
+    /// 战斗中的引导条正亮着（占住血条上方那一段，其他提示要让开）。
+    pub(crate) fn in_play(&self) -> bool {
+        self.alpha > 0.01 && self.shown.is_some_and(|l| l != Lesson::Upgrade)
+    }
 }
 
 #[derive(Component)]

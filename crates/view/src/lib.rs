@@ -189,6 +189,7 @@ impl Plugin for ViewPlugin {
                         (
                             ground::scroll_paper,
                             ground::update_decor,
+                            ground::update_eave_lamp,
                             ground::ground_shadows,
                             foreground::update_foreground,
                             actors::apply_pools,
