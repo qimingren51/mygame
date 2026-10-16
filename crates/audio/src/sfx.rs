@@ -5,7 +5,7 @@ use kira::sound::static_sound::StaticSoundData;
 use lantern_content::WeaponIdentity;
 
 use crate::impact::VARIANTS;
-use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, jiao, pent, render, render_seeded};
+use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, jiao, render, render_seeded};
 
 /// 渲染好的全部音效。
 pub struct Sfx {
@@ -19,7 +19,7 @@ pub struct Sfx {
     pub ui_confirm: StaticSoundData,
     pub ui_back: StaticSoundData,
     pub kill: StaticSoundData,
-    /// 拾取魂火：基准音 pent(10)，播放时按连拾次数升调
+    /// 拾取魂火：基准音 jiao(10)（E5），播放时按连拾次数升调
     pub gem: StaticSoundData,
     pub level_up: StaticSoundData,
     pub select: StaticSoundData,
@@ -183,7 +183,7 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
             }
             Bell => {
                 b.noise(0.0, 0.023 + v * 0.004, 0.07 * gain, noise(FilterKind::High, 5500.0 + v * 200.0));
-                b.bell(pent(20), 0.0, 0.045 * gain, 0.17 + v * 0.015);
+                b.bell(jiao(20), 0.0, 0.045 * gain, 0.17 + v * 0.015);
                 b.sine(7040.0, 0.003, 0.05, 0.014 * gain);
             }
             Crane => {
@@ -285,38 +285,38 @@ impl Sfx {
                 b.wood(0.0, 0.05, 1500.0);
             }),
             ui_move: render(0.12, |b| b.wood(0.0, 0.055, 760.0)),
-            ui_confirm: render(0.32, |b| b.pluck(pent(12), 0.0, 0.10, 0.28)),
-            ui_back: render(0.22, |b| b.pluck(pent(8), 0.0, 0.075, 0.18)),
+            ui_confirm: render(0.32, |b| b.pluck(jiao(12), 0.0, 0.10, 0.28)),
+            ui_back: render(0.22, |b| b.pluck(jiao(8), 0.0, 0.075, 0.18)),
             kill: render(0.2, |b| b.osc(Wave::Sine, 285.0, 0.0, 0.12, 0.1, Some((85.0, 0.12)), 0.004)),
             gem: render(0.25, |b| {
-                let f = pent(10);
+                let f = jiao(10);
                 b.sine(f, 0.0, 0.18, 0.06);
                 b.osc(Wave::Triangle, f * 2.0, 0.0, 0.08, 0.025, None, 0.004);
             }),
             level_up: render(2.2, |b| {
                 for (i, d) in [10, 12, 13, 15, 17].into_iter().enumerate() {
-                    b.pluck(pent(d), i as f32 * 0.06, 0.16, 0.9);
+                    b.pluck(jiao(d), i as f32 * 0.06, 0.16, 0.9);
                 }
-                b.bell(pent(20), 0.32, 0.08, 1.6);
+                b.bell(jiao(20), 0.32, 0.08, 1.6);
             }),
             select: render(1.0, |b| {
-                b.pluck(pent(12), 0.0, 0.18, 0.8);
-                b.pluck(pent(15), 0.05, 0.14, 0.8);
+                b.pluck(jiao(12), 0.0, 0.18, 0.8);
+                b.pluck(jiao(15), 0.05, 0.14, 0.8);
             }),
             chest: [chest(1), chest(3), chest(5)],
             evolution: render(4.0, |b| {
                 b.gong(73.4, 0.0, 0.32);
                 b.drum(0.0, 0.6, 90.0);
                 for (i, d) in [5, 7, 10, 12, 15, 17, 20].into_iter().enumerate() {
-                    b.pluck(pent(d), 0.1 + i as f32 * 0.07, 0.15, 1.0);
+                    b.pluck(jiao(d), 0.1 + i as f32 * 0.07, 0.15, 1.0);
                 }
-                b.bell(pent(22), 0.7, 0.12, 2.5);
+                b.bell(jiao(22), 0.7, 0.12, 2.5);
             }),
             resonance: render(2.0, |b| {
                 for (i, d) in [12, 15, 17].into_iter().enumerate() {
-                    b.pluck(pent(d), i as f32 * 0.08, 0.13, 1.0);
+                    b.pluck(jiao(d), i as f32 * 0.08, 0.13, 1.0);
                 }
-                b.bell(pent(19), 0.24, 0.07, 1.5);
+                b.bell(jiao(19), 0.24, 0.07, 1.5);
             }),
             ult: render(4.0, |b| {
                 // 燃灯结算时立刻出重音，噪声起音和鼓、锣、低频对齐。
@@ -365,8 +365,8 @@ impl Sfx {
                 }
             }),
             ult_ready: render(1.6, |b| {
-                b.bell(pent(15), 0.0, 0.08, 1.2);
-                b.bell(pent(20), 0.1, 0.07, 1.4);
+                b.bell(jiao(15), 0.0, 0.08, 1.2);
+                b.bell(jiao(20), 0.1, 0.07, 1.4);
             }),
             dash: render(0.3, |b| {
                 b.noise(
@@ -393,10 +393,10 @@ impl Sfx {
                     },
                 )
             }),
-            bell_pulse: render(1.4, |b| b.bell(pent(15), 0.0, 0.06, 1.1)),
+            bell_pulse: render(1.4, |b| b.bell(jiao(15), 0.0, 0.06, 1.1)),
             big_bell: render(3.2, |b| {
-                b.bell(pent(5), 0.0, 0.22, 3.0);
-                b.bell(pent(10), 0.02, 0.12, 2.5);
+                b.bell(jiao(5), 0.0, 0.22, 3.0);
+                b.bell(jiao(10), 0.02, 0.12, 2.5);
             }),
             seal: render(0.6, |b| b.drum(0.0, 0.22, 95.0)),
             blast: render(0.3, |b| {
@@ -450,32 +450,32 @@ impl Sfx {
             }),
             soul_bell: render(1.4, |b| {
                 for i in 0..8 {
-                    b.bell(pent(12 + i), i as f32 * 0.045, 0.06, 0.9);
+                    b.bell(jiao(12 + i), i as f32 * 0.045, 0.06, 0.9);
                 }
             }),
             heal: render(1.4, |b| {
-                b.bell(pent(14), 0.0, 0.1, 1.2);
-                b.bell(pent(17), 0.08, 0.08, 1.2);
+                b.bell(jiao(14), 0.0, 0.1, 1.2);
+                b.bell(jiao(17), 0.08, 0.08, 1.2);
             }),
             // 连斩：鼓点 + 钟
             combo: render(1.8, |b| {
                 b.drum(0.0, 0.5, 92.0);
                 b.drum(0.14, 0.42, 92.0);
                 b.drum(0.3, 0.65, 70.0);
-                b.bell(pent(17), 0.3, 0.1, 1.0);
-                b.bell(pent(20), 0.36, 0.08, 1.2);
+                b.bell(jiao(17), 0.3, 0.1, 1.0);
+                b.bell(jiao(20), 0.36, 0.08, 1.2);
             }),
             event: render(2.2, |b| {
-                b.bell(pent(13), 0.0, 0.12, 1.6);
-                b.bell(pent(16), 0.18, 0.1, 1.8);
+                b.bell(jiao(13), 0.0, 0.12, 1.6);
+                b.bell(jiao(16), 0.18, 0.1, 1.8);
             }),
             coins: render(0.6, |b| {
                 for i in 0..10 {
-                    b.sine(pent(15 + (i % 5)) * 2.0, i as f32 * 0.035, 0.12, 0.05);
+                    b.sine(jiao(15 + (i % 5)) * 2.0, i as f32 * 0.035, 0.12, 0.05);
                 }
             }),
             shield: render(0.8, |b| {
-                b.bell(pent(8), 0.0, 0.06, 0.6);
+                b.bell(jiao(8), 0.0, 0.06, 0.6);
                 b.noise(0.0, 0.2, 0.05, noise(FilterKind::Band, 1500.0));
             }),
             stamp: render(0.9, |b| {
@@ -639,7 +639,7 @@ impl Sfx {
             defeat: render(4.0, |b| {
                 let notes = [(14, 0.0), (12, 0.45), (11, 0.9), (9, 1.35), (5, 1.9)];
                 for (d, at) in notes {
-                    b.pluck(pent(d), 0.1 + at, 0.16, 1.8);
+                    b.pluck(jiao(d), 0.1 + at, 0.16, 1.8);
                 }
                 b.drum(2.0, 0.3, 70.0);
             }),

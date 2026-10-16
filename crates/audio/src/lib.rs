@@ -47,7 +47,7 @@ use mixer::{Lane, Mixer, tween};
 use music::{Music, MusicMode, PressureInput};
 use sfx::Sfx;
 use space::Scene;
-use synth::pent;
+use synth::jiao;
 
 /// 音频的系统都在这里，排在 `PostUpdate`：界面在 `Update` 里写好场所和界面音，模拟事件在
 /// `Last` 清空之前读到。
@@ -520,7 +520,7 @@ fn play_sim_events(
             SimEvent::GemPicked { .. } if a.can("gem", 0.05) => {
                 a.gem_last = a.now;
                 // 连续拾取时音高一路爬升
-                let rate = f64::from(pent(10 + a.gem_chain % 12) / pent(10));
+                let rate = f64::from(jiao(10 + a.gem_chain % 12) / jiao(10));
                 a.gem_chain += 1;
                 let s = a.sfx.gem.clone();
                 a.play_with(&s, rate, 0.0);
@@ -629,7 +629,7 @@ fn play_sim_events(
                     let s = a.sfx.resonance.clone();
                     a.foreground(&s);
                 } else if a.can("react", 0.12) {
-                    let rate = f64::from(pent(8 + i32::from(kind) % 7) / pent(8));
+                    let rate = f64::from(jiao(8 + i32::from(kind) % 7) / jiao(8));
                     let s = a.sfx.bell_pulse.clone();
                     a.play_at(&s, rate, -6.0, place(pos));
                 }

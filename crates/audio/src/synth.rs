@@ -10,15 +10,6 @@ use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 pub const SAMPLE_RATE: u32 = 48_000;
 const SR: f32 = SAMPLE_RATE as f32;
 
-/// D 羽调五声音阶（D F G A C），pent(0) 是 D3。
-pub fn pent(i: i32) -> f32 {
-    const STEPS: [f32; 5] = [0.0, 3.0, 5.0, 7.0, 10.0];
-    const ROOT: f32 = 146.83;
-    let o = i.div_euclid(5);
-    let s = STEPS[i.rem_euclid(5) as usize];
-    ROOT * 2f32.powf(o as f32 + s / 12.0)
-}
-
 /// 青丘 E 角调式（E G A C D）：主音为角，不能把 D 羽调仅改名。
 pub fn jiao(i: i32) -> f32 {
     const STEPS: [i32; 5] = [0, 3, 5, 8, 10];
