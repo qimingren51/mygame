@@ -205,7 +205,16 @@ Points(2), Favor,                                                 // 夜签“�
 - **升级选项**：权重同网页版，已到一阶的五行 ×1.5；灵光一闪的概率是属性 `Inspiration`。保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上缺进化心法时，每次升级 25% 把那门心法放进选项（`run.ron` 的 `pity`）。封印（`SimCommand::Banish`）把选中的一项永久移出本局卡池，换一个新选项，次数来自属性 `Banishes`。
 - 新增一种动作 = 给枚举加一个变体，再在 `lantern_sim::combat` 里写处理分支。之后任何法器、共鸣、夜签、心法都能用它。M2.5 的五行反应、灯坠按这个方式加（docs/GAMEPLAY.md 第 16 节）。
 
-**法器** = 行为 + 每级数值表 + 五行 + 进化（进化后换一套同类行为的参数和数值）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）。用已有行为做新法器，只需要写数据。
+**法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）。用已有行为做新法器，只需要写数据。
+
+**异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false，数据里也写着 false。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧，默认局和没有这套内容时一样（黄金哈希不变）。要打开：`lantern-tools kite --transformations`（`--fusion` 自动打开），测试里调 `Content::enable_transformations()`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
+
+- **形态**：`WeaponSlot.form` 是互斥的 `Form::Base | Evolved | Mutated | Fused(fusion_id)`。`behavior()`、`stats()`、`name()`、`desc()`、`flavor()` 都按形态读取；`transformed()` 只表示已质变，不代表有合璧资格。`can_mutate` 要求开关打开、能正统进化，另持有克制本系的任意满级法器。进化或异化后不能改选，进化不重置法器的计时和纸鹤。异化本系计四点。
+- **合璧**：`fusions.ron` 定义三种合璧，`FusionDef { id, name, desc, flavor, weapons: [String; 2], behavior, level }`，RON 里写成 `weapons: ("crane", "lamp")`。加载时校验：材料存在、不同、各有正统进化和异化（正统与异化二选一是合璧的代价）、五行相生、行为和第一件材料同一种，以及行为数值和未知字段。`can_fuse` 在抽卡和应用时都核验两件 `Form::Evolved`、两系至少二阶和封印。合璧用一个槽替换两件，挂在第一件材料上；材料仍视为持有，不能重新抽回；两系各计四点。`occupied_slots` 统一容量判断：通常一格；挂着限制法器件数的灯坠（`max_weapons`，断剑）时两格，抽灯坠也按材料数判断。
+- **选项**：`Offer` 增加 `Mutate(k)`、`Fuse { a, b, fusion_id }`，权重和进化一样是 `weight_evolve`（1000）。质变卡保底（`build.rs` 的 `arrange_forms`，只在开关打开时）：合璧每次升级、重抽必展示；有分岔时同屏保证正统与异化成对，优先最先持有的一件；没有分岔时保一张正统进化。保底放进来的新法器、心法钥匙也一定留住，卡多时多展示几张。封印某件法器会移除它的进化和异化；封印合璧只移除这一个合璧（`Banned::Fusion`）。质变牌封印后重抽整组，免得另一张失效卡残留。宝箱不替玩家选：有异化分岔的进化和合璧不进宝箱。
+- **行为扩展**（都是可选字段，数值全在 RON 里，加载时校验）：`Orbit.ice_fire: IceFireDef { freeze, ignite }` 冰焰、火焰交替；`Volley.molten: MoltenDef { vulnerability, duration, split: Option<SplitDef { count, ratio, range, speed, life, turn, hit_radius, knockback }> }` 熔金与击杀分剑；`Pulse.permafrost: PermafrostDef { shatter_radius, shatter_ratio, shatter_budget }` 常驻冻土与碎裂，`Pulse.ice_rain` 钟鸣剑雨；`Seeker.feather: FeatherDef { pierce, speed, life, ratio }` 铁羽（伤害 = 扑击 × ratio），`execute` 斩杀，`count_cap` 固定只数，`on_hit: ImpactDef` 余爆和凤火，`escort: EscortDef { radius, every, ratio, spin, size }` 绕身巨凤。
+- **地面区域**：`FissureDef.kind: GroundKind` 区分地裂、凤火、竹墙、剑林，`FissureDef.wall: Option<f32>` 是竹墙的移速倍率。它们共用 `Fissures` 区域池，全场至多 `run.ron` 的 `ground_cap`（64）块，满了替换最早的一块。区域跳伤害时同类对同一只妖物只算每秒伤害最高的一块（相同取最早），也和范围打击一样打竹丛；不打印记、不引起命中连锁。竹墙：普通妖物降到墙的倍率（0.12，是墙不是减速，不受减速上限）；精英按一般减速算，最多减 70%（`combat::SLOW_CAP`）；夜主和奇遇小动物不受影响；和地图竹丛不连乘，取更慢的一个；冲锋不减。移动阶段每步把竹墙收集一次再逐只查。
+- **其他**：分剑随 `Hit.molten` 带着熔金参数，分出的剑 `split = None` 不再分裂，找目标复用缓冲，飞剑总量仍受 512 上限；冻土碎裂每步至多 `shatter_budget` 次，`HIT_SHATTER` 阻断碎裂连锁；精英和夜主不被碎裂或斩杀。开关打开时，状态哈希另外记法器内部计时和纸鹤状态（`Arsenal::hash_detail`）、飞行物的寿命伤害和效果（`Shots::hash_detail`）、区域池和待落石印、封印明细。
 
 **妖物** = 数值 + 移动方式（追击、逃跑）+ 精灵 + 等级（普通、精英、夜主、奇遇小动物）。夜主的招式参数写在 `enemies.ron` 的 `boss` 里（弹幕、召唤），逻辑在 `sim/boss.rs`；M2.5 起每个夜主一个状态机。
 
@@ -228,10 +237,13 @@ Points(2), Favor,                                                 // 夜签“�
 - 这些数据只写到临时伤害 / 死亡记录与事件里，不参与伤害、击退、控制、随机流或状态哈希。事件仍为 `Copy`，不含堆分配。`Enemies.flash` 的原模拟值保持原样；画面改由事件驱动自己的计时。
 - `content::WeaponIdentity` 按字符串 ID 给 view / audio 提供相同归属，未知 ID 使用通用表现。`view::impact` 保存句柄对应的受击曲线与最后可见姿态；精灵池在变换传播之后、可见性检查之前应用纯渲染仿射矩阵。每帧从原始 `Transform` 重建，暂停时不叠乘形变。死亡残留使用 `fx` 一次性池的低优先级槽位，不修改模拟资源。
 
+质变沿用 `SimPhase::Evolve` 和两秒水墨演出，`SimEvent::Evolve { weapon, form }` 区分正统、异化、合璧。界面用不同印文和角标（开关关着时信息栏照旧画星），音频按形态调锣声；合璧转场同时显示两枚材料图标。`StrikeFx::Bamboo / SwordGrove` 区分巨竹上冲和群剑落地的镜头、粒子、音色。
+
 ### 6.8 导演（单局节奏）
 
 `assets/data/run.ron` 描述一局的全部节奏：总时长、刷怪速率曲线（再乘过渡系数，P0 是 0.7）、杂兵和精英各自的血量曲线、升级所需经验曲线、妖物配比、成群涌来的妖物、时间表、掉落、铜钱、点灯、升级选项权重、连斩、灯油。曲线用二次多项式系数表示。奇遇在 `events.ron`（间隔 40–65 秒）。夜签和“更”通过和属性一样的修正机制改这些参数（`SpawnRate`、`EnemyHp`、`EnemyDamage`、`BossHp`、`Affixes`……）。音乐配器由音频层只读妖物数量、近身威胁、生命、受伤事件、时间进度和夜主状态决定，平滑和滞回后按乐句切换（`FEEL.md` 第 6 节）。
 
+- **3／6／9 分钟验收**（异化与合璧打开时）：共鸣仍是三点一阶、七点二阶；Lv7 缺心法每次升级 25% 提示不变，`choices.pity.key_guarantee_after = 300` 后满级缺钥匙必展示（需心法空格，受封印约束）；五分钟小头目宝箱的每项优先补最接近进化的法器，没有可升的给灯油。这三条目前跟着 `transformations` 开关，关着时照旧。没有自动满级、自动送心法或时间硬锁。`lantern-tools kite --fusion phoenix|sword_grove|frost_rain|all --assert-build-pace` 跑真实刷怪并检查窗口：一阶中位不晚于三分钟，首次进化／异化中位四至七分钟，定向路线至少半数合璧且中位不晚于九分半。不开局外成长、开启无敌只为观察完整局的样本口径，不能当作玩家胜率。
 - **上限**：常规刷怪按分钟分段停刷（300 / 600 / 1000 只）；妖群、合围、妖潮不受常规上限限制；任何刷怪都不超过硬上限 2000（`spawn_enemy` 里检查）。
 - **时间表**（P0 青丘，docs/BALANCE.md 第 4.6 节）：精英、合围（预警 1 秒，画面上屏幕四边起墨雾；之后在视野外围成一圈，2.2 倍速合拢，进入 200 以内恢复原速）、5:00 小头目青面鬼（不带词缀，宝箱至少三连并优先升级最接近进化的法器）、精英、合围、8:00 妖潮、9:30 夜主（之后常规刷怪 ×0.4，并以主角为中心生成半径 600 的结界，主角出不去）。
 - **更**（`difficulty.ron`）：每一更是一组修正效果，作为一个修正来源计入属性；三更的“夜主多一招”是规则开关 `Rule(BossExtra)`。`RunSetup.tier` 记在回放文件头里。
@@ -288,14 +300,15 @@ assets/data/
   player.ron       主角：体型、受伤无敌、闪避、燃灯、照见圈与灯焰带
   stats.ron        属性的基础值与上下限（第 6.6 节）
   elements.ron     五行、共鸣四阶与计点、相生、太极、印记与十种反应
-  weapons.ron      法器：行为、五行、每级数值表、进化
+  weapons.ron      法器：行为、五行、每级数值表、正统进化、异化
+  fusions.ron      合璧（EA，run.ron 的 transformations 打开才出现）：两件正统进化材料、合璧后的行为与数值
   passives.ron     心法
   enemies.ron      妖物、精英、夜主招式（阶段、幻身、扫击、狐火雨）、奇遇小动物的奖励
   affixes.ron      精英词缀
   difficulty.ron   更（难度）
   omens.ron        夜签
   events.ron       奇遇与古灯增益
-  run.ron          单局节奏与曲线、时间表、铜钱、点灯、竹丛（第 6.8 节）
+  run.ron          单局节奏与曲线、时间表、铜钱、点灯、竹丛、区域池上限、异化与合璧开关（第 6.6、6.8 节）
   meta.ron         心灯：用灯油点亮的功能节点（第 n 级花费 = 基础 × 1.6^(n−1)）
   attributes.ron   局外属性：用铜钱买（每级价格 = 基础 × 级 × (1 + 2% × 已买总级数)）
   lamps.ron        灯：起手法器、本命五行、灯性与代价、光色、一句话描述

@@ -3,7 +3,7 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Element, Stat, WeaponBehavior};
+use lantern_content::{Element, MoltenDef, Stat, WeaponBehavior};
 use lantern_core::StateHasher;
 use lantern_core::step::DT;
 
@@ -20,6 +20,15 @@ const TAU: f32 = std::f32::consts::TAU;
 pub const SHOT_CAP: usize = 512;
 /// 每把剑记住最近命中过的几只妖物（穿透时不重复命中）
 const HIT_MEMORY: usize = 16;
+
+/// 飞行物随身保存的命中效果（熔金、斩杀、冻结、对夜主封顶）；合璧后已射出的剑仍按原形态结算。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShotEffects {
+    pub molten: Option<MoltenDef>,
+    pub execute: f32,
+    pub freeze: f32,
+    pub boss_cap: f32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shot {
@@ -41,6 +50,7 @@ pub struct Shot {
     pub flags: u8,
     pub element: Option<Element>,
     pub source: Source,
+    pub effects: ShotEffects,
     hits: [Option<EnemyHandle>; HIT_MEMORY],
     hit_n: u8,
 }
@@ -76,6 +86,7 @@ pub struct ShotSpec {
     pub flags: u8,
     pub element: Option<Element>,
     pub source: Source,
+    pub effects: ShotEffects,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -105,6 +116,7 @@ impl Shots {
             flags: s.flags,
             element: s.element,
             source: s.source,
+            effects: s.effects,
             hits,
             hit_n: u8::from(s.skip.is_some()),
         });
@@ -118,11 +130,25 @@ impl Shots {
             h.write_u32(s.pierce);
         }
     }
+
+    /// 飞行物的寿命、伤害和随身的命中效果。
+    pub fn hash_detail(&self, h: &mut StateHasher) {
+        for s in &self.0 {
+            for v in [s.life, s.damage, s.effects.execute, s.effects.freeze, s.effects.boss_cap] {
+                h.write_f32(v);
+            }
+            if let Some(m) = s.effects.molten {
+                h.write_f32(m.vulnerability);
+                h.write_f32(m.duration);
+                h.write_u32(u32::from(m.split.is_some()));
+            }
+        }
+    }
 }
 
 /// 冷却到了就朝最近的妖物齐射，扇形展开。
 pub(crate) fn fire(ctx: &mut Ctx, slot: &mut WeaponSlot) {
-    let WeaponBehavior::Volley { range, speed, life, turn, hit_radius, knockback, spread, retry } =
+    let WeaponBehavior::Volley { range, speed, life, turn, hit_radius, knockback, spread, retry, molten } =
         *slot.behavior(ctx.content)
     else {
         return;
@@ -158,11 +184,12 @@ pub(crate) fn fire(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             pierce: lv.pierce,
             target: Some(ctx.en.handle(t)),
             skip: None,
-            big: slot.evolved,
+            big: slot.transformed(),
             bonus: false,
             flags: 0,
             element,
             source: Source::Weapon(slot.def as u16),
+            effects: ShotEffects { molten, ..Default::default() },
         });
     }
     ctx.outbox.0.push(SimEvent::SwordFired { weapon: slot.def as u16 });
@@ -226,13 +253,16 @@ pub(crate) fn update_shots(
             if s.target == Some(h) {
                 s.target = None;
             }
-            hits.0.push(
-                Hit::new(h, s.damage, s.source)
-                    .knock(s.knockback, s.pos)
-                    .incoming(s.vel)
-                    .flags(s.flags)
-                    .element(s.element),
-            );
+            let mut hit = Hit::new(h, s.damage, s.source)
+                .knock(s.knockback, s.pos)
+                .incoming(s.vel)
+                .flags(s.flags)
+                .element(s.element);
+            hit.molten = s.effects.molten;
+            hit.execute = s.effects.execute;
+            hit.freeze = s.effects.freeze;
+            hit.boss_cap = s.effects.boss_cap;
+            hits.0.push(hit);
             s.pierce = s.pierce.saturating_sub(1);
             if s.pierce == 0 {
                 alive = false;

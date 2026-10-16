@@ -156,7 +156,11 @@ fn bot_full_run_defeats_the_boss() {
         .0
         .iter()
         .map(|w| {
-            format!("{}{}", c.weapons[w.def].id, if w.evolved { "★".into() } else { w.level.to_string() })
+            format!(
+                "{}{}",
+                c.weapons[w.def].id,
+                if w.transformed() { "★".into() } else { w.level.to_string() }
+            )
         })
         .collect();
     let passives: Vec<String> =

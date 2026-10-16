@@ -13,7 +13,9 @@
 use bevy_ecs::prelude::*;
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Action, AffixKind, BlastKind, Cond, Content, Element, Rank, Stat};
+use lantern_content::{
+    Action, AffixKind, BlastKind, Cond, Content, Element, MoltenDef, Rank, SplitDef, Stat,
+};
 use lantern_core::step::DT;
 use lantern_core::{Pcg32, Stream};
 
@@ -28,7 +30,7 @@ use crate::reveal::{Reveal, Vuln};
 use crate::run::{Director, Progress, SimView};
 use crate::spatial::Grid;
 use crate::stats::{ActiveTrigger, Effects, Stats};
-use crate::weapons::volley::Shots;
+use crate::weapons::volley::{ShotEffects, ShotSpec, Shots};
 use crate::{GameContent, Health, HitKind, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 const TAU: f32 = std::f32::consts::TAU;
@@ -47,6 +49,8 @@ pub const HIT_RAW: u8 = 16;
 pub const HIT_TRUE: u8 = 32;
 /// 冰爆：这样冻住的妖物再死不触发冰爆
 pub const HIT_BLAST: u8 = 64;
+/// 冻土碎裂的伤害不再引起冻土碎裂。
+pub const HIT_SHATTER: u8 = 128;
 
 /// 灼烧：每层每秒 = 命中伤害（暴击前）× 20%，持续 3 秒（docs/BALANCE.md 第 3.3 节）。
 /// 冰爆、火·极境的爆炸直接点上灼烧时用。
@@ -76,6 +80,10 @@ pub enum Source {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Hit {
+    /// 赤霄：命中熔金，击杀分剑
+    pub molten: Option<MoltenDef>,
+    /// 铁鹤：普通妖物血量不高于最大生命的这个比例时直接斩杀
+    pub execute: f32,
     pub target: EnemyHandle,
     /// 基础伤害，结算时乘以伤害倍率
     pub damage: f32,
@@ -102,6 +110,8 @@ pub struct Hit {
 impl Hit {
     pub fn new(target: EnemyHandle, damage: f32, source: Source) -> Self {
         Hit {
+            molten: None,
+            execute: 0.0,
             target,
             damage,
             knockback: 0.0,
@@ -193,6 +203,9 @@ pub enum StrikeFx {
     Seal {
         evolved: bool,
     },
+    /// 巨竹破土、剑林落地，复用既有绘制素材但保留打击身份。
+    Bamboo,
+    SwordGrove,
     Blast(BlastKind),
     Quake,
     Taiji,
@@ -260,6 +273,8 @@ pub struct ActionQueue(pub Vec<Deferred>);
 #[derive(Clone, Copy, Debug)]
 pub struct Death {
     pub hit: KillingHit,
+    /// 冻土碎裂击杀的妖物不再碎裂
+    pub shatter: bool,
     pub handle: EnemyHandle,
     pub pos: Vec2,
     pub kind: u16,
@@ -364,8 +379,11 @@ pub(crate) fn apply_confuse(en: &mut Enemies, i: usize, rank: Rank, duration: f3
 }
 
 /// 减速：效果加上 [`Stat::SlowPower`]、最多 70%，时长乘 [`Stat::SlowTime`]；夜主减半。同类取最大，不叠加。
+/// 减速的上限：同类减速取最强的一个，最多减 70%。
+pub(crate) const SLOW_CAP: f32 = 0.7;
+
 pub(crate) fn apply_slow(en: &mut Enemies, i: usize, rank: Rank, stats: &Stats, amount: f32, duration: f32) {
-    let mut a = (amount + stats.get(Stat::SlowPower)).clamp(0.0, 0.7);
+    let mut a = (amount + stats.get(Stat::SlowPower)).clamp(0.0, SLOW_CAP);
     if rank == Rank::Boss {
         a *= 0.5;
     }
@@ -494,6 +512,9 @@ pub(crate) fn resolve_hits(
         if boss && hit.boss_cap > 0.0 {
             dmg = dmg.min(hit.boss_cap);
         }
+        if rank == Rank::Normal && hit.execute > 0.0 && en.hp[i] <= en.max_hp[i] * hit.execute {
+            dmg = en.hp[i];
+        }
         // 统计只计实际打掉的血（溢出的不算）
         log.add(hit.source, dmg.min(en.hp[i].max(0.0)));
         en.hp[i] -= dmg;
@@ -562,6 +583,10 @@ pub(crate) fn resolve_hits(
                 en.ky[i] += d.y / len * f;
             }
         }
+        if let Some(m) = hit.molten {
+            en.melt[i] = if en.melt_t[i] > 0.0 { en.melt[i].max(m.vulnerability) } else { m.vulnerability };
+            en.melt_t[i] = en.melt_t[i].max(m.duration);
+        }
         if hit.ignite > 0.0 {
             ignite(en, i, &stats, base, BURN_RATIO, hit.ignite, BURN_TIME);
         }
@@ -588,10 +613,52 @@ pub(crate) fn resolve_hits(
                 &mut deaths,
                 &mut outbox,
             );
+            if hit.flags & HIT_SHATTER != 0
+                && let Some(d) = deaths.0.last_mut()
+            {
+                d.shatter = false;
+            }
+            if let Some(m) = hit.molten
+                && let Some(split) = m.split
+            {
+                split_swords(&mut ctx, en, &hit, pos, m, split);
+            }
         }
     }
     list.clear();
     hits.0 = list;
+}
+
+/// 赤霄击杀分剑：朝 range 内最近的几只各飞一剑；分出的剑只带易伤，不再分裂。飞剑池另有全场上限。
+fn split_swords(ctx: &mut ReactCtx, en: &Enemies, hit: &Hit, pos: Vec2, m: MoltenDef, split: SplitDef) {
+    let (shots, grid, targets) = ctx.split_parts();
+    let n = split.count as usize;
+    grid.nearest_k(en, pos.x, pos.y, split.range, n, targets);
+    for k in 0..n {
+        let near = targets.get(k).map(|&j| j as usize);
+        let angle = near.map_or(k as f32 * std::f32::consts::TAU / n as f32, |j| {
+            ops::atan2(en.y[j] - pos.y, en.x[j] - pos.x)
+        });
+        shots.fire(ShotSpec {
+            pos,
+            angle,
+            speed: split.speed,
+            life: split.life,
+            turn: split.turn,
+            hit_radius: split.hit_radius,
+            knockback: split.knockback,
+            damage: hit.damage * split.ratio,
+            pierce: 1,
+            target: near.map(|j| en.handle(j)),
+            skip: Some(hit.target),
+            big: true,
+            bonus: false,
+            flags: 0,
+            element: hit.element,
+            source: hit.source,
+            effects: ShotEffects { molten: Some(MoltenDef { split: None, ..m }), ..Default::default() },
+        });
+    }
 }
 
 /// 余印：带印记的妖物死时，印记传给附近还没有印记的妖物（docs/GAMEPLAY.md 第 6.2 节）。
@@ -640,6 +707,7 @@ pub(crate) fn kill(
     let kind = en.kind[i];
     deaths.0.push(Death {
         hit,
+        shatter: true,
         handle: en.handle(i),
         pos,
         kind,
@@ -742,6 +810,7 @@ pub(crate) fn run_actions(
                     flags: HIT_BONUS,
                     element: Some(Element::Metal),
                     source: Source::BonusSword,
+                    effects: Default::default(),
                 });
             }
             Action::DropChest { distance } => {
@@ -826,6 +895,8 @@ pub(crate) fn process_strikes(
             let i = i as usize;
             let boss = content.enemies[en.kind[i] as usize].rank == Rank::Boss;
             let mut hit = Hit {
+                molten: None,
+                execute: 0.0,
                 target: en.handle(i),
                 damage: s.damage,
                 knockback: s.knockback,

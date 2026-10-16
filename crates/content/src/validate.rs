@@ -1,5 +1,6 @@
 //! 加载后的整体校验：数值范围、ID 唯一、引用存在。
 
+use crate::{FissureDef, WeaponLevel};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -210,10 +211,41 @@ impl Checker<'_> {
         }
     }
 
+    fn fissure(&self, file: &str, f: &FissureDef) -> Res {
+        self.positive(file, &[("区域半径", f.radius_scale), ("区域寿命", f.life), ("区域间隔", f.tick)])?;
+        self.non_negative(file, &[("区域伤害", f.damage_scale), ("区域减速时长", f.slow_time)])?;
+        self.fraction(file, "区域减速", f.slow)?;
+        if let Some(w) = f.wall {
+            self.positive(file, &[("竹墙移速倍率", w)])?;
+            self.fraction(file, "竹墙移速倍率", w)?;
+        }
+        Ok(())
+    }
+
+    fn weapon_level(&self, file: &str, id: &str, b: &WeaponBehavior, lv: &WeaponLevel) -> Res {
+        self.positive(file, &[("伤害", lv.damage)])?;
+        self.non_negative(file, &[("半径", lv.radius), ("冷却", lv.cooldown)])?;
+        if (!matches!(b, WeaponBehavior::Pulse { .. }) && lv.count == 0)
+            || (!matches!(b, WeaponBehavior::Orbit { .. } | WeaponBehavior::Seeker { .. })
+                && lv.cooldown <= 0.0)
+            || (matches!(
+                b,
+                WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
+            ) && lv.radius <= 0.0)
+            || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
+        {
+            return self.fail(file, format!("{id}：数值缺少行为所需字段"));
+        }
+        Ok(())
+    }
+
     fn behavior(&self, file: &str, id: &str, b: &WeaponBehavior) -> Res {
         match b {
-            WeaponBehavior::Orbit { hit_cooldown, size, inner, .. } => {
+            WeaponBehavior::Orbit { hit_cooldown, size, inner, ice_fire, .. } => {
                 self.positive(file, &[("Orbit.hit_cooldown", *hit_cooldown), ("Orbit.size", *size)])?;
+                if let Some(f) = ice_fire {
+                    self.non_negative(file, &[("ice_fire.freeze", f.freeze), ("ice_fire.ignite", f.ignite)])?;
+                }
                 if let Some(f) = inner {
                     self.positive(
                         file,
@@ -222,17 +254,67 @@ impl Checker<'_> {
                 }
                 Ok(())
             }
-            WeaponBehavior::Volley { range, speed, life, hit_radius, retry, .. } => self.positive(
-                file,
-                &[
-                    ("Volley.range", *range),
-                    ("Volley.speed", *speed),
-                    ("Volley.life", *life),
-                    ("Volley.hit_radius", *hit_radius),
-                    ("Volley.retry", *retry),
-                ],
-            ),
-            WeaponBehavior::Pulse { slow, slow_time, toll, .. } => {
+            WeaponBehavior::Volley { range, speed, life, hit_radius, retry, molten, .. } => {
+                if let Some(m) = molten {
+                    self.fraction(file, "molten.vulnerability", m.vulnerability)?;
+                    self.positive(file, &[("molten.duration", m.duration)])?;
+                    if let Some(s) = &m.split {
+                        if s.count == 0 || s.count > 8 {
+                            return self.fail(file, format!("\"{id}\"：molten.split.count 要在 1 到 8 之间"));
+                        }
+                        self.fraction(file, "molten.split.ratio", s.ratio)?;
+                        self.positive(
+                            file,
+                            &[
+                                ("molten.split.ratio", s.ratio),
+                                ("molten.split.range", s.range),
+                                ("molten.split.speed", s.speed),
+                                ("molten.split.life", s.life),
+                                ("molten.split.hit_radius", s.hit_radius),
+                            ],
+                        )?;
+                        self.non_negative(
+                            file,
+                            &[("molten.split.turn", s.turn), ("molten.split.knockback", s.knockback)],
+                        )?;
+                    }
+                }
+                self.positive(
+                    file,
+                    &[
+                        ("Volley.range", *range),
+                        ("Volley.speed", *speed),
+                        ("Volley.life", *life),
+                        ("Volley.hit_radius", *hit_radius),
+                        ("Volley.retry", *retry),
+                    ],
+                )
+            }
+            WeaponBehavior::Pulse { slow, slow_time, toll, permafrost, ice_rain, .. } => {
+                if let Some(p) = permafrost {
+                    self.positive(file, &[("碎裂半径", p.shatter_radius), ("碎裂倍率", p.shatter_ratio)])?;
+                    if p.shatter_budget == 0 {
+                        return self.fail(file, "冻土每步碎裂次数至少为 1".into());
+                    }
+                    if toll.is_some() || ice_rain.is_some() {
+                        return self.fail(file, "冻土不可同时带钟鸣".into());
+                    }
+                }
+                if let Some(r) = ice_rain {
+                    if r.count == 0 || r.count > 64 || toll.is_none() {
+                        return self.fail(file, "冰剑雨需钟鸣且数量为 1–64".into());
+                    }
+                    self.positive(
+                        file,
+                        &[
+                            ("冰剑速度", r.speed),
+                            ("冰剑寿命", r.life),
+                            ("冰剑伤害", r.damage),
+                            ("冰剑夜主封顶", r.boss_cap),
+                        ],
+                    )?;
+                    self.non_negative(file, &[("冰剑冻结", r.freeze)])?;
+                }
                 self.fraction(file, "Pulse.slow", *slow)?;
                 self.non_negative(file, &[("Pulse.slow_time", *slow_time)])?;
                 if let Some(t) = toll {
@@ -240,7 +322,48 @@ impl Checker<'_> {
                 }
                 Ok(())
             }
-            WeaponBehavior::Seeker { range, pick, rest, steer, .. } => {
+            WeaponBehavior::Seeker {
+                range,
+                pick,
+                rest,
+                steer,
+                count_cap,
+                feather,
+                execute,
+                on_hit,
+                escort,
+                ..
+            } => {
+                if *count_cap == Some(0) {
+                    return self.fail(file, "召唤上限至少为一".into());
+                }
+                self.fraction(file, "斩杀阈值", *execute)?;
+                if let Some(f) = feather {
+                    if f.pierce == 0 {
+                        return self.fail(file, "铁羽穿透至少为 1".into());
+                    }
+                    self.positive(
+                        file,
+                        &[("铁羽速度", f.speed), ("铁羽寿命", f.life), ("铁羽倍率", f.ratio)],
+                    )?;
+                    self.fraction(file, "铁羽倍率", f.ratio)?;
+                }
+                if let Some(i) = on_hit {
+                    self.positive(file, &[("扑击爆炸半径", i.radius), ("扑击爆炸倍率", i.ratio)])?;
+                    self.fissure(file, &i.zone)?;
+                }
+                if let Some(e) = escort {
+                    self.positive(
+                        file,
+                        &[
+                            ("巨凤环绕半径", e.radius),
+                            ("巨凤命中间隔", e.every),
+                            ("巨凤倍率", e.ratio),
+                            ("巨凤转速", e.spin),
+                            ("巨凤判定半径", e.size),
+                        ],
+                    )?;
+                }
                 if *pick == 0 {
                     return self.fail(file, format!("\"{id}\"：Seeker.pick 至少为 1"));
                 }
@@ -254,8 +377,7 @@ impl Checker<'_> {
                 self.positive(file, &[("Drop.range", *range)])?;
                 self.non_negative(file, &[("Drop.delay", *delay), ("Drop.stagger", *stagger)])?;
                 if let Some(f) = fissure {
-                    self.positive(file, &[("fissure.life", f.life), ("fissure.tick", f.tick)])?;
-                    self.fraction(file, "fissure.slow", f.slow)?;
+                    self.fissure(file, f)?;
                 }
                 Ok(())
             }
@@ -659,6 +781,14 @@ impl Content {
             }
         }
 
+        c.non_negative(
+            "run.ron",
+            &[("choices.pity.key_guarantee_after", self.run.choices.pity.key_guarantee_after)],
+        )?;
+        if self.run.ground_cap == 0 || self.run.ground_cap > 256 {
+            return c
+                .fail("run.ron", format!("ground_cap 要在 1 到 256 之间，现在是 {}", self.run.ground_cap));
+        }
         // ---- weapons.ron ----
         c.unique("weapons.ron", "法器", self.weapons.iter().map(|w| w.id.as_str()))?;
         for w in &self.weapons {
@@ -680,27 +810,46 @@ impl Content {
                 }
                 all.push(&evo.level);
             }
-            for (i, lv) in all.into_iter().enumerate() {
-                let needs_count = !matches!(w.behavior, WeaponBehavior::Pulse { .. });
-                let needs_cd =
-                    !matches!(w.behavior, WeaponBehavior::Orbit { .. } | WeaponBehavior::Seeker { .. });
-                let needs_radius = matches!(
-                    w.behavior,
-                    WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
-                );
-                let needs_pierce = matches!(w.behavior, WeaponBehavior::Volley { .. });
-                if lv.damage <= 0.0
-                    || (needs_count && lv.count == 0)
-                    || (needs_cd && lv.cooldown <= 0.0)
-                    || (needs_radius && lv.radius <= 0.0)
-                    || (needs_pierce && lv.pierce == 0)
-                {
-                    return c.fail(
-                        "weapons.ron",
-                        format!("\"{}\" 第 {} 组数值缺少这种行为需要的字段（或不是正数）", w.id, i + 1),
-                    );
+            if let Some(m) = &w.mutation {
+                if w.evolution.is_none() {
+                    return c.fail("weapons.ron", format!("{} 异化缺正统心法钥匙", w.id));
+                }
+                if std::mem::discriminant(&m.behavior) != std::mem::discriminant(&w.behavior) {
+                    return c.fail("weapons.ron", format!("\"{}\" 异化后的行为必须和异化前是同一种", w.id));
+                }
+                c.behavior("weapons.ron", &w.id, &m.behavior)?;
+                c.weapon_level("weapons.ron", &w.id, &m.behavior, &m.level)?;
+            }
+            for lv in all {
+                c.weapon_level("weapons.ron", &w.id, &w.behavior, lv)?;
+            }
+        }
+        c.unique("fusions.ron", "合璧", self.fusions.iter().map(|f| f.id.as_str()))?;
+        for f in &self.fusions {
+            let a = self.weapon_index(&f.weapons[0]);
+            let b = self.weapon_index(&f.weapons[1]);
+            let (Some(a), Some(b)) = (a, b) else {
+                return c.fail("fusions.ron", format!("{} 材料不存在", f.id));
+            };
+            if a == b || self.weapons[a].evolution.is_none() || self.weapons[b].evolution.is_none() {
+                return c.fail("fusions.ron", format!("{} 需要两件不同的正统进化", f.id));
+            }
+            // 正统与异化二选一是合璧的代价：合璧材料都要有异化分岔
+            for &k in &[a, b] {
+                if self.weapons[k].mutation.is_none() {
+                    return c.fail("weapons.ron", format!("合璧材料 {} 缺少异化", self.weapons[k].id));
                 }
             }
+            // 合璧后的法器挂在第一件材料上，行为要和它同一种
+            if std::mem::discriminant(&f.behavior) != std::mem::discriminant(&self.weapons[a].behavior) {
+                return c.fail("fusions.ron", format!("{} 的行为必须和第一件材料同一种", f.id));
+            }
+            let (a, b) = (self.weapons[a].element, self.weapons[b].element);
+            if !self.elements.sheng.iter().any(|s| (s.from, s.to) == (a, b) || (s.from, s.to) == (b, a)) {
+                return c.fail("fusions.ron", format!("{} 材料五行不相生", f.id));
+            }
+            c.behavior("fusions.ron", &f.id, &f.behavior)?;
+            c.weapon_level("fusions.ron", &f.id, &f.behavior, &f.level)?;
         }
 
         // ---- passives.ron ----

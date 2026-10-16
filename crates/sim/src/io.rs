@@ -225,6 +225,7 @@ pub enum SimEvent {
     /// 进化演出开始
     Evolve {
         weapon: u16,
+        form: crate::weapons::Form,
     },
     ChestOpened {
         count: u8,

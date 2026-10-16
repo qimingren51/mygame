@@ -4,7 +4,7 @@
 //! 其他选择交给 `bot::respond`。P0 只有五件法器、三盏灯、八枚灯坠，流派里缺的关键件先空着。
 
 use lantern_content::{Content, Element};
-use lantern_sim::build::weapon_slots;
+use lantern_sim::build::{occupied_slots, weapon_slots};
 use lantern_sim::{Offer, RunSetup, SimCommand, SimHarness, SimPhase, bot};
 
 /// 一种选卡偏好。
@@ -72,6 +72,31 @@ impl Plan {
         })
     }
 
+    /// 合璧路线：优先拿两件材料和两门心法钥匙，其余新法器照常补满法器栏；升级仍来自正常卡池。
+    pub fn fusion(content: &Content, id: &str) -> Option<Plan> {
+        let f = content.fusions.iter().find(|f| f.id == id || f.name == id)?;
+        let defs: Vec<_> = f
+            .weapons
+            .iter()
+            .map(|id| &content.weapons[content.weapon_index(id).expect("合璧材料")])
+            .collect();
+        Some(Plan {
+            name: format!("合璧·{}", f.name),
+            lamp: if f.weapons.contains(&"bell".into()) {
+                Some("frost")
+            } else if f.weapons.contains(&"sword".into()) {
+                Some("mirror")
+            } else {
+                Some("red")
+            },
+            weapons: f.weapons.to_vec(),
+            passives: defs.iter().map(|d| d.evolution.as_ref().expect("正统进化").passive.clone()).collect(),
+            charms: Vec::new(),
+            elements: defs.iter().map(|d| d.element).collect(),
+            even: false,
+        })
+    }
+
     /// 出发前：换成流派的灯，出发灯坠换成流派的（灯坠池里有的话）。
     pub fn apply(&self, content: &Content, setup: &mut RunSetup) {
         if let Some(l) = self.lamp
@@ -95,7 +120,9 @@ impl Plan {
         // 太极、组合：还没到一阶的那一系加分
         let bonus = |e: Element| if self.even && build.tiers[e.index()] == 0 { 40 } else { 0 };
         match offer {
+            Offer::Fuse { .. } => 1200,
             Offer::Evolve(_) => 1000,
+            Offer::Mutate(_) => 950,
             Offer::WeaponUp(k) => {
                 let def = &content.weapons[arsenal[k].def];
                 if self.weapons.contains(&def.id) {
@@ -108,11 +135,14 @@ impl Plan {
             }
             Offer::NewWeapon(d) => {
                 let def = &content.weapons[d];
-                let room = (arsenal.len() as u32) < weapon_slots(content, build);
+                let room = occupied_slots(content, sim.arsenal(), build) < weapon_slots(content, build);
                 if !room {
                     5
                 } else if self.weapons.contains(&def.id) {
                     110 + bonus(def.element)
+                } else if self.name.starts_with("合璧·") {
+                    // 合璧路线也补满四件法器，材料优先
+                    60
                 } else if self.elements.contains(&def.element) {
                     95 + bonus(def.element)
                 } else {
@@ -130,7 +160,7 @@ impl Plan {
         let build = sim.build();
         // 手上某件法器进化要的心法，先拿到
         let evo = sim.arsenal().0.iter().any(|w| {
-            !w.evolved && content.weapons[w.def].evolution.as_ref().is_some_and(|e| e.passive == def.id)
+            !w.transformed() && content.weapons[w.def].evolution.as_ref().is_some_and(|e| e.passive == def.id)
         });
         if evo && !up {
             return 105;

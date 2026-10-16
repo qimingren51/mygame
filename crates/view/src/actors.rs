@@ -39,6 +39,9 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     )
 }
 const FLAME_LIGHT: (Color, f32) = (Color::srgba(1.0, 0.66, 0.376, 0.75), 64.0);
+/// 冰火两重天的冰焰和它的光
+const ICE_FLAME: Color = Color::srgb(0.35, 0.8, 1.0);
+const ICE_FLAME_LIGHT: Color = Color::srgba(0.3, 0.7, 1.0, 0.75);
 const GEM_LIGHT: Color = Color::srgba(0.75, 0.94, 1.0, 0.5);
 const GEM_COLOR: Color = Color::srgb(0.75, 0.94, 1.0);
 const FROZEN_TINT: Color = Color::srgb(0.62, 0.82, 1.0);
@@ -989,6 +992,15 @@ pub(crate) fn collect_draws(
         if slot.count == 0 || slot.size <= 0.0 {
             continue;
         }
+        // 巨凤由特效层复用鹤的帧绘制；这里只画灯火
+        if !matches!(slot.behavior(&moves.content.0), lantern_content::WeaponBehavior::Orbit { .. }) {
+            continue;
+        }
+        // 冰火两重天：偶数盏是冰焰
+        let ice = matches!(
+            slot.behavior(&moves.content.0),
+            lantern_content::WeaponBehavior::Orbit { ice_fire: Some(_), .. }
+        );
         let angle = slot.prev_angle + (slot.angle - slot.prev_angle) * a;
         for k in 0..slot.count {
             let p = player_now + slot.orbit_offset(angle, k);
@@ -996,15 +1008,12 @@ pub(crate) fn collect_draws(
             let fk = ((t * 10.0) as usize + k as usize) % frames.flames.len();
             pools.fx.push(Draw {
                 scale: Vec2::splat(slot.size / 10.0),
-                color: Color::WHITE.with_alpha(readability.gain),
+                color: (if ice && k % 2 == 0 { ICE_FLAME } else { Color::WHITE })
+                    .with_alpha(readability.gain),
                 ..Draw::new(frames.flames[fk], s.extend(sort_z(layer::WEAPONS, p.y)))
             });
-            glow.light(
-                &frames,
-                &db,
-                s,
-                (FLAME_LIGHT.0.with_alpha(FLAME_LIGHT.0.alpha() * readability.gain), FLAME_LIGHT.1),
-            );
+            let light = if ice && k % 2 == 0 { ICE_FLAME_LIGHT } else { FLAME_LIGHT.0 };
+            glow.light(&frames, &db, s, (light.with_alpha(light.alpha() * readability.gain), FLAME_LIGHT.1));
         }
     }
 

@@ -8,12 +8,13 @@ use lantern_core::Stream;
 use lantern_core::step::DT;
 
 use crate::charms::Survival;
-use crate::combat::{ActionQueue, Hard, HurtCtx, apply_hard, hurt_player};
+use crate::combat::{ActionQueue, Hard, HurtCtx, SLOW_CAP, apply_hard, hurt_player};
 use crate::enemies::{CHARGE_DASH, CHARGE_IDLE, CHARGE_RECOVER, CHARGE_WINDUP, Enemies};
 use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{Effects, Stats};
+use crate::weapons::drop::{Fissures, Wall};
 use crate::{GameContent, Health, HurtBy, Player, Pos, SimOutbox, SimRng, Tick};
 
 /// 以玩家为中心重建空间网格（妖物移动、互推之后，docs/DESIGN.md 第 6.3 节）。
@@ -25,6 +26,23 @@ pub(crate) fn build_grid(
 ) {
     let r = view.radius * 1.8;
     grid.build(&en, player.0.x, player.0.y, r, r);
+}
+
+/// 地形移速倍率：地图竹丛和竹印的竹墙不连乘，取更慢的一个。
+/// 竹墙挡普通妖物（降到墙的倍率，是墙不是减速，不受减速上限）；精英按一般减速算，最多减 70%；
+/// 夜主和奇遇小动物不受竹墙影响。
+fn terrain_speed(bamboo: &crate::bamboo::Bamboo, walls: &[Wall], rank: Rank, at: Vec2) -> f32 {
+    let map = bamboo.speed_at(at);
+    if walls.is_empty() {
+        return map;
+    }
+    let wall = Fissures::wall_speed(walls, at);
+    match rank {
+        _ if wall >= 1.0 => map,
+        Rank::Normal => map.min(wall),
+        Rank::Elite => map.min(wall).max(1.0 - SLOW_CAP),
+        Rank::Boss | Rank::Critter => map,
+    }
 }
 
 /// 追击（或逃跑）、击退衰减、离得太远的普通妖物绕到玩家前方、接触伤害。
@@ -43,10 +61,13 @@ pub(crate) fn update_enemies(
     mut queue: ResMut<ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
     mut survival: ResMut<Survival>,
-    bamboo: Res<crate::bamboo::Bamboo>,
+    terrain: (Res<crate::bamboo::Bamboo>, Res<Fissures>, Local<Vec<Wall>>),
     player: Single<(&Pos, &mut Player, &mut Health)>,
 ) {
     let content = &content.0;
+    let (bamboo, ground, mut walls) = terrain;
+    // 竹墙每步收集一次，没有墙时不用逐只查
+    ground.collect_walls(&mut walls);
     let (pos, mut player, mut health) = player.into_inner();
     // 照夜珠：照见圈外的妖物更快；霜瓷灯：受击时冻住攻击者
     let dark_speed = stats.get(Stat::DarkSpeed);
@@ -165,7 +186,7 @@ pub(crate) fn update_enemies(
             };
             // 竹丛里减速，冲锋不减
             if charge_step.is_none() {
-                sp *= bamboo.speed_at(Vec2::new(x, y));
+                sp *= terrain_speed(&bamboo, &walls, def.rank, Vec2::new(x, y));
             }
             if let Some(step) = charge_step {
                 x += step.x * DT;
@@ -286,5 +307,22 @@ fn charge(
             en.charge_t[i] = en.charge_t[i].max(0.0);
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bamboo::Bamboo;
+
+    #[test]
+    fn walls_block_normals_cap_elites_and_ignore_bosses() {
+        let open = Bamboo::new(None);
+        let walls = [Wall { pos: Vec2::ZERO, r2: 100.0, speed: 0.12 }];
+        assert_eq!(terrain_speed(&open, &walls, Rank::Normal, Vec2::ZERO), 0.12, "普通妖物撞墙");
+        assert_eq!(terrain_speed(&open, &walls, Rank::Elite, Vec2::ZERO), 1.0 - SLOW_CAP, "精英最多减 70%");
+        assert_eq!(terrain_speed(&open, &walls, Rank::Boss, Vec2::ZERO), 1.0, "夜主不受竹墙影响");
+        assert_eq!(terrain_speed(&open, &walls, Rank::Normal, Vec2::splat(50.0)), 1.0, "墙外照常");
+        assert_eq!(terrain_speed(&open, &[], Rank::Normal, Vec2::ZERO), 1.0);
     }
 }

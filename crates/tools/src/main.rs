@@ -170,10 +170,7 @@ fn play_one(content: &Content, seed: u64, god: bool) -> RunStats {
         .iter()
         .map(|w| {
             let def = &c.weapons[w.def];
-            match (&def.evolution, w.evolved) {
-                (Some(e), true) => e.name.clone(),
-                _ => format!("{}{}", def.name, w.level),
-            }
+            if w.transformed() { w.name(c).to_string() } else { format!("{}{}", def.name, w.level) }
         })
         .collect();
     build.extend(sim.build().passives.iter().map(|p| format!("{}{}", c.passives[p.def].name, p.level)));

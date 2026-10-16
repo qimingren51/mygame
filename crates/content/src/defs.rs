@@ -130,6 +130,12 @@ pub struct RunDef {
     /// 竹丛（青丘的软障碍）；不写时地图上没有
     #[serde(default)]
     pub bamboo: Option<BambooDef>,
+    /// 法器留在地上的区域（地裂、凤火、竹墙、剑林）共用一个池，全场至多这么多块；满了替换最早的一块
+    pub ground_cap: u32,
+    /// 异化与合璧（docs/GAMEPLAY.md 第 6.5、6.6 节，EA 内容）的开关，不写时关闭。
+    /// 关闭时不出异化、合璧卡，玩法与没有这套内容时一致
+    #[serde(default)]
+    pub transformations: bool,
 }
 
 impl RunDef {
@@ -336,6 +342,8 @@ pub struct PityDef {
     pub early_new_weapons: u32,
     pub key_level: u32,
     pub key_chance: f32,
+    /// 这个时刻（秒）以后，法器满级仍缺进化心法时，每次升级必定展示那门心法（仍要玩家自己选、要有心法空格）
+    pub key_guarantee_after: f32,
 }
 
 /// 连斩：两次击杀间隔不超过 window 秒时连续计数。
@@ -693,6 +701,7 @@ impl ElementsDef {
 /// 法器的行为。新增行为 = 加一个变体，再在 `lantern_sim` 的 weapons 模块里实现。
 /// 进化后的法器用同一种行为，参数可以不同。
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum WeaponBehavior {
     /// 环绕周身（灯火）。spin 是转速（弧度/秒，x 为等级）；同一只妖物 hit_cooldown 秒内只吃一次。
     /// inner 是不夜城的内环火海。
@@ -703,6 +712,9 @@ pub enum WeaponBehavior {
         size: f32,
         #[serde(default)]
         inner: Option<InnerFireDef>,
+        /// 冰火两重天：偶数盏冻结、奇数盏点燃，数量不吃数量加成
+        #[serde(default)]
+        ice_fire: Option<IceFireDef>,
     },
     /// 朝最近的妖物齐射追踪飞行物（符剑）。
     Volley {
@@ -718,6 +730,8 @@ pub enum WeaponBehavior {
         spread: f32,
         /// 没有目标时多久再找一次
         retry: f32,
+        #[serde(default)]
+        molten: Option<MoltenDef>,
     },
     /// 以主角为中心周期震出一圈（霜铃）；toll 是进化后的全屏钟鸣。
     Pulse {
@@ -726,6 +740,10 @@ pub enum WeaponBehavior {
         slow_time: f32,
         #[serde(default)]
         toll: Option<TollDef>,
+        #[serde(default)]
+        permafrost: Option<PermafrostDef>,
+        #[serde(default)]
+        ice_rain: Option<IceRainDef>,
     },
     /// 平时绕身，随机扑向附近的妖物，撞到后折返（纸鹤）。速度 speed 的 x 为等级。
     Seeker {
@@ -741,6 +759,21 @@ pub enum WeaponBehavior {
         steer: f32,
         /// 撞击判定：目标半径 + reach
         reach: f32,
+        /// 扑击后射出的贯穿铁羽（铁鹤）
+        #[serde(default)]
+        feather: Option<FeatherDef>,
+        /// 斩杀：普通妖物血量不高于最大生命的这个比例时直接击杀（0 表示没有）
+        #[serde(default)]
+        execute: f32,
+        /// 召唤数量上限；写了就不吃数量加成和木·极境倍率
+        #[serde(default)]
+        count_cap: Option<u32>,
+        /// 扑击余爆和留下的火海（百鸟朝凤）
+        #[serde(default)]
+        on_hit: Option<ImpactDef>,
+        /// 绕身巨凤，沿环路接敌；不受召唤数量加成
+        #[serde(default)]
+        escort: Option<EscortDef>,
     },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
@@ -780,16 +813,113 @@ pub struct TollDef {
     pub boss_cap: f32,
 }
 
-/// 地裂：持续伤害并减速。
+/// 地裂：持续伤害并减速。异化、合璧也用它表示凤火、竹墙、剑林（`kind` 区分）。
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FissureDef {
+    #[serde(default)]
+    pub kind: GroundKind,
     pub radius_scale: f32,
     pub life: f32,
     pub tick: f32,
     pub damage_scale: f32,
     pub slow: f32,
     pub slow_time: f32,
+    /// 软墙（竹印）：普通妖物在区域里的移速倍率，和地图竹丛取更慢的一个；夜主、精英不受影响
+    #[serde(default)]
+    pub wall: Option<f32>,
+}
+
+/// 持续区域的身份；同类重叠取最强，全场受统一预算限制。
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+pub enum GroundKind {
+    #[default]
+    Fissure,
+    Fire,
+    Bamboo,
+    Sword,
+}
+
+/// 赤霄：命中熔金（易伤），击杀时分剑。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MoltenDef {
+    pub vulnerability: f32,
+    pub duration: f32,
+    /// 击杀时分出的剑；分出的剑不再分裂
+    #[serde(default)]
+    pub split: Option<SplitDef>,
+}
+
+/// 击杀分剑：朝 range 内最近的 count 只飞去，伤害 = 这一击 × ratio，穿透 1。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SplitDef {
+    pub count: u32,
+    pub ratio: f32,
+    pub range: f32,
+    pub speed: f32,
+    pub life: f32,
+    pub turn: f32,
+    pub hit_radius: f32,
+    pub knockback: f32,
+}
+
+/// 冰火两重天：冰焰命中冻结 freeze 秒，火焰命中点燃 ignite 层。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IceFireDef {
+    pub freeze: f32,
+    pub ignite: f32,
+}
+
+/// 铁鹤的铁羽：伤害 = 扑击伤害 × ratio。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FeatherDef {
+    pub pierce: u32,
+    pub speed: f32,
+    pub life: f32,
+    pub ratio: f32,
+}
+
+/// 绕身巨凤：半径 radius、转速 spin（弧度/秒）、判定半径 size，每 every 秒造成“当前伤害 × ratio”并点燃。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EscortDef {
+    pub radius: f32,
+    pub every: f32,
+    pub ratio: f32,
+    pub spin: f32,
+    pub size: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PermafrostDef {
+    pub shatter_radius: f32,
+    pub shatter_ratio: f32,
+    /// 每步至多碎裂几次
+    pub shatter_budget: u32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IceRainDef {
+    pub count: u32,
+    pub speed: f32,
+    pub life: f32,
+    pub damage: f32,
+    pub freeze: f32,
+    pub boss_cap: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ImpactDef {
+    pub radius: f32,
+    pub ratio: f32,
+    pub zone: FissureDef,
 }
 
 /// 每一级的数值；没用到的字段省略。
@@ -820,6 +950,8 @@ pub struct WeaponDef {
     /// 第 1 级到满级
     pub levels: Vec<WeaponLevel>,
     pub evolution: Option<EvolutionDef>,
+    #[serde(default)]
+    pub mutation: Option<MutationDef>,
 }
 
 /// 进化：满级并持有对应心法后，下次升级必出。进化后换成另一套行为参数和数值。
@@ -833,6 +965,34 @@ pub struct EvolutionDef {
     pub flavor: String,
     /// 需要的心法 ID
     pub passive: String,
+    pub behavior: WeaponBehavior,
+    pub level: WeaponLevel,
+}
+
+/// 异化与正统共用心法钥匙；额外需要克制本系的满级法器。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MutationDef {
+    pub name: String,
+    pub desc: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 5.3 节），卡片详情里的一行小字
+    #[serde(default)]
+    pub flavor: String,
+    pub behavior: WeaponBehavior,
+    pub level: WeaponLevel,
+}
+
+/// 合璧：两件正统进化合成一件。材料按 ID 引用，两系共鸣都需达到二阶。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FusionDef {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    /// 一句话描述（docs/LORE-TEXT.md 第 5.4 节），卡片详情里的一行小字
+    #[serde(default)]
+    pub flavor: String,
+    pub weapons: [String; 2],
     pub behavior: WeaponBehavior,
     pub level: WeaponLevel,
 }

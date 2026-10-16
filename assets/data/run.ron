@@ -124,8 +124,8 @@
         lamp_mult: 1.2,
         insight_mult: 1.15,
         // 保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上但缺进化心法时，
-        // 每次升级 25% 把那门心法放进选项（docs/GAMEPLAY.md 第 5.8 节）
-        pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25),
+        // 每次升级 25% 把那门心法放进选项（docs/GAMEPLAY.md 第 5.8 节）；5 分钟后满级仍缺心法时必展示
+        pity: (early_levels: 5, early_new_weapons: 2, key_level: 7, key_chance: 0.25, key_guarantee_after: 300.0),
         heal: 0.3,
         oil: 20,
         skip_oil: 10,
@@ -199,4 +199,9 @@
         regrow_clear: 200.0,
         coin_chance: 0.05,
     )),
+
+    // 法器留在地上的区域（地裂、凤火、竹墙、剑林）共用一个池，全场至多 64 块，满了替换最早的一块
+    ground_cap: 64,
+    // 异化与合璧（docs/GAMEPLAY.md 第 6.5、6.6 节）属于 EA 内容，默认关闭：不出异化、合璧卡
+    transformations: false,
 )
