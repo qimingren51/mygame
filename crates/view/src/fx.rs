@@ -76,6 +76,10 @@ pub(crate) struct FxFrames {
     lotus: FrameId,
     glow: FrameId,
     spark: FrameId,
+    /// 九尾的狐火弹（美术的 `weapons/foxfire_0..2`，三帧火苗，头朝 +X）
+    foxfire: Vec<FrameId>,
+    /// 火爆的一团焰球（美术的 `weapons/blast`）
+    blast: Option<FrameId>,
     spring: Option<FrameId>,
     rift: Option<FrameId>,
     rift_glow: Option<FrameId>,
@@ -138,6 +142,8 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         lotus: need("weapons/lotus"),
         glow: need("vfx/glow"),
         spark: need("vfx/spark"),
+        foxfire: (0..3).filter_map(|i| db.find(&format!("weapons/foxfire_{i}"))).collect(),
+        blast: db.find("weapons/blast"),
         spring: db.find("ground/spring"),
         rift: db.find("ground/rift"),
         rift_glow: db.find("ground/rift_glow"),
@@ -486,6 +492,13 @@ pub(crate) fn read_fx_events(
 }
 
 /// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
+/// 把颜色在线性空间里提亮 k 倍：叠在自发光层上，峰值越过辉光阈值 1.0 才晕得开
+/// （试玩第 1 轮：钟鸣原来 0.55 × 1.5 ≈ 0.83，不发光）。
+fn hdr(c: Color, k: f32) -> Color {
+    let l = c.to_linear();
+    Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
+}
+
 pub(crate) fn collect_fx(
     // 三种时间：虚拟（随顿帧）、现实（燃灯节拍）、定步长（插值）
     (time, real, fixed): (Res<Time>, Res<Time<Real>>, Res<Time<Fixed>>),
@@ -1215,7 +1228,7 @@ pub(crate) fn collect_fx(
                         at.extend(layer::EMISSIVE),
                         Vec2::new(k, k * 0.22),
                         (d.y * FLAT).atan2(d.x),
-                        rgb(0xa8d4ff).with_alpha((1.0 - u) * 0.75),
+                        hdr(rgb(0xa8d4ff), 1.4).with_alpha((1.0 - u) * 0.75),
                     );
                 }
             }
@@ -1232,7 +1245,7 @@ pub(crate) fn collect_fx(
                         l.pos.extend(layer::EMISSIVE - 1.0),
                         Vec2::new(k, k * FLAT),
                         0.0,
-                        rgb(0xa8d4ff).with_alpha((1.0 - wave) * 0.55),
+                        hdr(rgb(0xa8d4ff), 1.6).with_alpha((1.0 - wave) * 0.6),
                     );
                 }
             }
@@ -1312,7 +1325,7 @@ pub(crate) fn collect_fx(
                         l.pos.extend(layer::EMISSIVE),
                         Vec2::new(k, k * 0.5),
                         angle,
-                        color.with_alpha((1.0 - u) * 0.6),
+                        hdr(color, 1.4).with_alpha((1.0 - u) * 0.6),
                     );
                 }
             }
@@ -1328,10 +1341,21 @@ pub(crate) fn collect_fx(
                             at.extend(layer::EMISSIVE),
                             Vec2::new(k, k * 0.3),
                             angle,
-                            color.with_alpha((1.0 - u) * 0.8),
+                            hdr(color, 1.5).with_alpha((1.0 - u) * 0.8),
                         );
                     }
                 } else {
+                    // 先一团焰球猛地胀开、很快收淡（美术的 weapons/blast），焰舌再往上卷
+                    if let Some(b) = f.blast {
+                        let k = px(b, l.r * 2.0 * (0.55 + 0.6 * (1.0 - (1.0 - u).powi(3))));
+                        glow.add(
+                            b,
+                            l.pos.extend(layer::EMISSIVE + 0.5),
+                            Vec2::new(k, k * (0.75 + 0.25 * FLAT)),
+                            l.rot,
+                            hdr(color, 1.6).with_alpha((1.0 - u).powf(1.5) * 0.9),
+                        );
+                    }
                     for i in -1..=1 {
                         let at = l.pos + Vec2::new(i as f32 * l.r * 0.32, l.r * u * 0.65);
                         let k = px(f.slash, l.r * (0.8 + u * 0.4));
@@ -1340,7 +1364,7 @@ pub(crate) fn collect_fx(
                             at.extend(layer::EMISSIVE),
                             Vec2::new(k, k * 0.7),
                             TAU * 0.25 + i as f32 * 0.3,
-                            color.with_alpha((1.0 - u) * 0.65),
+                            hdr(color, 1.5).with_alpha((1.0 - u) * 0.65),
                         );
                     }
                 }
@@ -1363,7 +1387,7 @@ pub(crate) fn collect_fx(
                         at.extend(layer::EMISSIVE),
                         Vec2::new(k, k * 0.6),
                         angle,
-                        rgb(0xffd98a).with_alpha((1.0 - u) * 0.65),
+                        hdr(rgb(0xffd98a), 1.4).with_alpha((1.0 - u) * 0.65),
                     );
                 }
             }
@@ -1562,7 +1586,7 @@ pub(crate) fn collect_fx(
 
     // ---- 夜主弹幕（狐火）：判定在地面，火球画在腰部高度，地上留影子——擦过脚下算中，看着也是打在身上
     if let Some(foes) = &res.foes {
-        for fo in &foes.0 {
+        for (i, fo) in foes.0.iter().enumerate() {
             let ground = lerp(fo.prev, fo.pos);
             pools.fx.push(Draw {
                 scale: Vec2::splat(fo.radius * 2.2 / db.frame(frames.shadow).size.x),
@@ -1587,7 +1611,36 @@ pub(crate) fn collect_fx(
                 0.0,
                 rgb(0xff6b5a).with_alpha(0.9),
             );
-            glow.add(f.spark, p.extend(layer::EMISSIVE + 0.1), Vec2::splat(1.2), now * 3.0, rgb(0xffe0c0));
+            if f.foxfire.is_empty() {
+                glow.add(
+                    f.spark,
+                    p.extend(layer::EMISSIVE + 0.1),
+                    Vec2::splat(1.2),
+                    now * 3.0,
+                    rgb(0xffe0c0),
+                );
+            } else {
+                // 美术画的狐火弹：三帧火苗轮着放，火头朝飞行方向，尾巴拖在后面（试玩第 1 轮：原来是通用光点）。
+                // 外焰染狐火红、推过辉光阈值，里面再叠一层小一圈的橙芯——不能发白，白的像魂火
+                let frame = f.foxfire[((now * 14.0) as usize + i) % f.foxfire.len()];
+                let d = to_screen(fo.vel);
+                let k = px(frame, fo.radius.max(6.0) * 3.2);
+                let rot = d.y.atan2(d.x);
+                glow.add(
+                    frame,
+                    p.extend(layer::EMISSIVE + 0.1),
+                    Vec2::splat(k),
+                    rot,
+                    hdr(rgb(0xff6b5a), 2.0),
+                );
+                glow.add(
+                    frame,
+                    p.extend(layer::EMISSIVE + 0.15),
+                    Vec2::splat(k * 0.55),
+                    rot,
+                    hdr(rgb(0xffb070), 1.2),
+                );
+            }
             glow.light(&frames, &db, p, (rgb(0xff6b5a).with_alpha(0.45), 30.0));
         }
     }

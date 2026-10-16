@@ -223,6 +223,8 @@ pub(crate) struct ActorFrames {
     pub(crate) ring: FrameId,
     /// 竹丛：立着的、打碎的、影子缩放
     bamboo: Option<(FrameId, FrameId, f32)>,
+    /// 黑里的一对妖眼（“无月”时照见圈外的妖物只画这个）
+    eyes: Option<FrameId>,
 }
 
 impl ActorFrames {
@@ -328,6 +330,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
             .find("bamboo_clump/idle_S_00")
             .zip(db.find("bamboo_clump_broken/idle_S_00"))
             .map(|(a, b)| (a, b, shadow_scale(&db, "bamboo_clump", shadow))),
+        eyes: db.find("vfx/eyes"),
     });
 }
 
@@ -942,6 +945,18 @@ pub(crate) fn collect_draws(
             && let Some(reveal) = &sight.reveal
             && !reveal.covers(Vec2::new(en.x[i], en.y[i]))
         {
+            // 照见圈外看不见身子，只有一对妖眼在黑里忽明忽暗（美术的 vfx/eyes）
+            if let Some(eyes) = frames.eyes {
+                let blink = 0.55 + 0.45 * (t * 1.3 + en.wob[i] * 3.0).sin().max(0.0);
+                let head = s + Vec2::Y * (moves.content.0.enemies[en.kind[i] as usize].radius * 1.1);
+                glow.add(
+                    eyes,
+                    head.extend(layer::EMISSIVE - 0.5),
+                    Vec2::splat(0.5),
+                    0.0,
+                    Color::srgb(1.0, 0.45, 0.3).with_alpha(0.45 * blink),
+                );
+            }
             continue;
         }
         let f = &frames.enemies[en.kind[i] as usize];
@@ -1012,6 +1027,18 @@ pub(crate) fn collect_draws(
             scale: size,
             ..Draw::new(frame, body.extend(sort_z(layer::ACTORS, p.y)))
         });
+        // 命中闪白：再叠一层叠加的白影，画在暗层之上——暗处也看得见、亮得起来（试玩第 1 轮）
+        if flashing && let Some(h) = response {
+            let k = h.flash_strength();
+            glow.add_flipped(
+                frame,
+                body.extend(layer::EMISSIVE - 0.2),
+                Vec2::ONE,
+                0.0,
+                Color::srgb(1.15, 1.1, 1.0).with_alpha(0.4 * k * fade),
+                flip,
+            );
+        }
         let radius = db.frame(frames.shadow).size.x * f.shadow_scale * 0.5;
         let source = if def.boss.is_some() { lights.dominant(s) } else { lights.sources[0] };
         let (offset, stretch) = contact_shadow(s, source, radius);
