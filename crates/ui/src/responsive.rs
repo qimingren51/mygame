@@ -9,9 +9,12 @@ use bevy::window::PrimaryWindow;
 const DESIGN_SIZE: Vec2 = Vec2::new(1280.0, 720.0);
 
 pub(crate) const PANEL_WIDTH_PERCENT: f32 = 90.0;
-/// 升级卡的宽度（choice.rs 的卡片按它排）
-pub(crate) const CARD_WIDTH: f32 = 256.0;
-pub(crate) const CARD_GAP: f32 = 22.0;
+/// 升级卡的尺寸（choice.rs 的卡片按它排，docs/PLAYTEST.md 第 3 项定的 300×460）
+pub(crate) const CARD_WIDTH: f32 = 300.0;
+pub(crate) const CARD_HEIGHT: f32 = 460.0;
+pub(crate) const CARD_GAP: f32 = 20.0;
+/// 升级页除卡片以外的高度：页头、聚焦说明、操作提示、按钮
+const UPGRADE_CHROME: f32 = 250.0;
 
 #[derive(Component)]
 pub(crate) enum FitViewport {
@@ -66,9 +69,11 @@ fn upgrade_canvas(logical_size: Vec2, cards: usize) -> Vec2 {
     for columns in 1..=cards {
         let rows = cards.div_ceil(columns) as f32;
         let width = CARD_WIDTH * columns as f32 + CARD_GAP * (columns - 1) as f32;
-        // 每张卡为名称、说明和共鸣/进化提示留足高度；另留页头、操作提示及焦点框空间。
-        let size =
-            Vec2::new(width / (PANEL_WIDTH_PERCENT / 100.0), 280.0 + rows * 440.0 + (rows - 1.0) * CARD_GAP);
+        // 卡片定高；另留页头、聚焦说明、操作提示、按钮和焦点框的空间。
+        let size = Vec2::new(
+            width / (PANEL_WIDTH_PERCENT / 100.0),
+            UPGRADE_CHROME + rows * CARD_HEIGHT + (rows - 1.0) * CARD_GAP,
+        );
         let scale = panel_scale(logical_size, size);
         if scale >= best_scale {
             best_size = size;
