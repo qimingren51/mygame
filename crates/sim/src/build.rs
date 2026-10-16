@@ -434,7 +434,8 @@ pub fn roll_choices(
             }
         }
     }
-    // 保底二：法器练到 key_level 以上却缺进化心法时，按概率把那门心法放进选项
+    // 保底二：法器练到 key_level 以上却缺进化心法时，按概率把那门心法放进选项；
+    // key_guarantee_after 秒以后满级仍缺心法时必放（不再掷骰）
     for w in &arsenal.0 {
         let Some(evo) = &content.weapons[w.def].evolution else { continue };
         let Some(pd) = content.passive_index(&evo.passive) else { continue };
@@ -444,8 +445,7 @@ pub fn roll_choices(
             continue;
         }
         if !picks.contains(&offer)
-            && ((content.run.transformations && secs >= pity.key_guarantee_after && w.is_max_level(content))
-                || rng.chance(pity.key_chance))
+            && ((secs >= pity.key_guarantee_after && w.is_max_level(content)) || rng.chance(pity.key_chance))
         {
             force(&mut picks, offer, &mut forced);
         }

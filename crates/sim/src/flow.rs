@@ -372,9 +372,7 @@ impl FlowParams<'_, '_> {
         let gold = self.rng.0.get(Stream::Chest).range_f32(lo as f32, hi as f32 + 0.999).floor();
         self.progress.gold += gold * self.stats.get(Stat::GoldGain);
         let mut items = Vec::with_capacity(n as usize);
-        // 宝箱节奏的新规则（每一项都优先补最接近进化的法器、没有可升的给灯油）暂时跟着异化与合璧的开关
-        let pacing = c.run.transformations;
-        for k in 0..n {
+        for _ in 0..n {
             // 宝箱只给升级和进化；异化分岔和合璧留给玩家在升级卡上亲自选
             let all = offers(c, &self.arsenal, &self.build, self.secs());
             let ups: Vec<_> = all
@@ -386,10 +384,10 @@ impl FlowParams<'_, '_> {
                             if self.arsenal.0[*k].can_mutate(c, &self.build, &self.arsenal))
                 })
                 .collect();
-            // 都满了才放开新法器、新心法
-            let pool = if ups.is_empty() && !pacing { &all } else { &ups };
-            // 小头目的宝箱：第一项优先升级最接近进化的法器
-            let priority = if source == ChestSource::MiniBoss && (pacing || k == 0) {
+            // 没有可升的就给灯油（不放开新法器、新心法）
+            let pool = &ups;
+            // 小头目的宝箱：每一项都优先升级最接近进化的法器
+            let priority = if source == ChestSource::MiniBoss {
                 closest_to_evolution(&self.arsenal, pool)
             } else {
                 None

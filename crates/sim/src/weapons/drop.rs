@@ -180,8 +180,7 @@ pub(crate) fn update_seals(
     mut fissures: ResMut<Fissures>,
     mut strikes: ResMut<Strikes>,
 ) {
-    let pooled = content.0.run.transformations;
-    let cap = if pooled { content.0.run.ground_cap as usize } else { usize::MAX };
+    let cap = content.0.run.ground_cap as usize;
     let mut k = 0;
     while k < seals.0.len() {
         let s = &mut seals.0[k];
@@ -210,35 +209,11 @@ pub(crate) fn update_seals(
             fissures.add(s.pos, s.radius, s.damage, s.source, f, cap);
         }
     }
-    if pooled {
-        return;
-    }
-    // 关闭异化与合璧时，地裂照旧逐块跳伤害（可以叠加）
-    let mut k = 0;
-    while k < fissures.0.len() {
-        let f = &mut fissures.0[k];
-        f.life -= DT;
-        f.tick -= DT;
-        if f.tick <= 0.0 {
-            f.tick = f.every;
-            let mut s = Strike::new(f.pos, Area::Circle(f.radius), f.damage, f.source, StrikeFx::None);
-            s.flags = HIT_DOT | HIT_NOCRIT;
-            s.slow = f.slow;
-            s.slow_time = f.slow_time;
-            strikes.0.push(s);
-        }
-        if f.life <= 0.0 {
-            fissures.0.remove(k);
-        } else {
-            k += 1;
-        }
-    }
 }
 
-/// 区域跳伤害：同类区域覆盖同一只妖物时只算每秒伤害最高的一块（相同取最早的），避免剑林、凤火叠加。
+/// 区域跳伤害：同类区域覆盖同一只妖物时只算每秒伤害最高的一块（相同取最早的），地裂、剑林、凤火都不叠加。
 /// 跳伤害时也打竹丛，和范围打击一样。
 pub(crate) fn update_ground(
-    content: Res<GameContent>,
     mut fissures: ResMut<Fissures>,
     grid: Res<crate::spatial::Grid>,
     en: Res<crate::enemies::Enemies>,
@@ -246,9 +221,6 @@ pub(crate) fn update_ground(
     mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
 ) {
-    if !content.0.run.transformations {
-        return;
-    }
     for f in &mut fissures.0 {
         f.life -= DT;
         f.tick -= DT;
