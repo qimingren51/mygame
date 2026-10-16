@@ -101,6 +101,16 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 
 名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
 
+**月夜（第 1 轮试玩，只在 2 倍；1 倍网页版的产物冻结、逐字节不变）**：`vfx/` 追加 `light_pool`（主角灯笼专用的光照池：0.4R 内平的 1.0，
+外圈半个余弦收到 0；其余光源仍用 `light`）；2 倍的 `ground/paper` 换成月夜版宣纸（亮度标准差 0.040，均值同第一版）；
+`grass_0..3`、`leaves_0..1`、`pebbles_0..1`、`qq_bamboo_leaves_0..2`、`qq_moss_0..1`、`qq_fox_tracks` 在生成处调浓一次（对纸面的 L* 反差目标 +12%）。
+候选和对比图（另两种灯光、另一种纸、1920×1080 模拟画面）：
+
+```bash
+art/.venv/bin/python art/post/moon_textures.py        # → out/moon/、review@2x/moon_compare.png、moon_light_curves.png
+art/.venv/bin/python art/post/test_moon_textures.py   # 管线产物 = 候选、只调浓一次、图集里也是这些
+```
+
 ## 法器、法术特效与拾取物贴图（post/weapon_textures.py）
 
 同样只用 Pillow + numpy，笔刷、噪声、直通 alpha 输出等工具直接复用 `vfx_textures.py`（只 import，不改它的产物）。
