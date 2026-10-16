@@ -64,7 +64,7 @@ class _Folder:
 def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_extra: dict | None = None,
                  pose=None, sockets_wanted=(), flash: bool = False, anchor=None, tmp_dir: Path | None = None,
                  timings: dict | None = None, merge: bool = False, scope=None, variants=(), grain: str | None = None,
-                 palette_extra=()) -> Path:
+                 palette_extra=(), palette_after_grain: bool = False) -> Path:
     """jobs: [(动画, 朝向, 姿态帧号, 该动画总帧数)]，按顺序渲染。
     文件帧号 = 该动画该朝向里第几张（通常与姿态帧号相同）。
     写出 <out_root>/<name>/：<动画>_<朝向>_<NN>.png、_emit.png（有发光部件或 layers 里声明时）、
@@ -73,15 +73,18 @@ def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_ext
     variants：同一姿态再渲的几层，每项 {"name", "scope": f(parts)→上下文管理器, "meta_extra", "palette_extra"}；
       写到 <out_root>/<variant name>/，帧名、anims 与本素材相同，挂点不写（sockets 为空），总写 _emit。
     grain：纸纹偏移用哪个名字（默认 name；变体总用本素材的，叠在一起纸纹对得上）。
-    palette_extra：调色板外的颜色（后期吸附用；也会写进 meta）。"""
+    palette_extra：调色板外的颜色（后期吸附用；也会写进 meta）。
+    palette_after_grain：为当前素材启用混线、纸纹后的有限校色；变体可单独指定。"""
     meta_extra = dict(meta_extra or {})
     anchor = tuple(anchor or S.ANCHOR)
     redo = {j[0] for j in jobs}
     grain = grain or name
     passes = [{"name": name, "scope": scope, "palette_extra": list(palette_extra),
+               "palette_after_grain": palette_after_grain,
                "emit_always": "emit" in meta_extra.get("layers", []), "flash": flash, "base": True}]
     for v in variants:
         passes.append({"name": v["name"], "scope": v.get("scope"), "palette_extra": list(v.get("palette_extra", ())),
+                       "palette_after_grain": v.get("palette_after_grain", False),
                        "emit_always": True, "flash": False, "base": False, "meta_extra": dict(v.get("meta_extra", {}))})
     for ps in passes:
         ps["folder"] = _Folder(out_root, ps["name"], merge, redo)
@@ -113,7 +116,8 @@ def render_asset(name: str, frame_px: int, build, jobs, out_root: Path, meta_ext
                 with ctx:
                     L = B.render_layers(tmp_dir / f"{ps['name']}_{base}")
                 tp = time.perf_counter()
-                R = P.process_layers(L, ps["name"], extra_palette=ps["pal"], grain_name=grain)
+                R = P.process_layers(L, ps["name"], extra_palette=ps["pal"], grain_name=grain,
+                                     palette_after_grain=ps["palette_after_grain"])
                 out = ps["folder"].out
                 P.save_png(R["rgba"], out / f"{base}.png")
                 if R["stats"]["emit_px"] > 0 or ps["emit_always"]:

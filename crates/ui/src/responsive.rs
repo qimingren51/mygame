@@ -14,7 +14,7 @@ pub(crate) const CARD_WIDTH: f32 = 300.0;
 pub(crate) const CARD_HEIGHT: f32 = 460.0;
 pub(crate) const CARD_GAP: f32 = 20.0;
 /// 升级页除卡片以外的高度：页头、聚焦说明、操作提示、按钮
-const UPGRADE_CHROME: f32 = 280.0;
+const UPGRADE_CHROME: f32 = 292.0;
 
 #[derive(Component)]
 pub(crate) enum FitViewport {
@@ -82,8 +82,8 @@ fn upgrade_layout(logical_size: Vec2, cards: usize) -> (Vec2, usize) {
         // 否则单卡仍按宽屏的页脚高度缩放，整页居中时标题会被推到窗口上方。
         let chrome = UPGRADE_CHROME
             + match columns {
-                1 => 140.0,
-                2 => 60.0,
+                1 => 156.0,
+                2 => 76.0,
                 _ => 0.0,
             };
         let size = Vec2::new(

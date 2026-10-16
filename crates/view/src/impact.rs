@@ -67,6 +67,7 @@ pub(crate) struct Pose {
     pub flash: FrameId,
     pub pos: Vec2,
     pub flip: bool,
+    pub scale: Vec2,
 }
 
 struct Dying {
@@ -129,6 +130,7 @@ pub(crate) fn read_events(
                         flash: f,
                         pos: to_screen(pos),
                         flip: false,
+                        scale: Vec2::ONE,
                     })
                 });
                 if let Some(pose) = pose {
@@ -179,7 +181,7 @@ pub(crate) fn draw_deaths(state: Res<Impacts>, mut pools: ResMut<Pools>) {
             flip: d.pose.flip,
             color,
             deform,
-            scale: Vec2::splat(1.0 + 0.08 * (1.0 - fade)),
+            scale: d.pose.scale * (1.0 + 0.08 * (1.0 - fade)),
             ..Draw::new(
                 if confirm { d.pose.flash } else { d.pose.frame },
                 (d.pose.pos + offset + Vec2::Y * (d.age * 8.0)).extend(layer::ACTORS + 1.1),
@@ -207,6 +209,46 @@ pub(crate) fn apply_deform(mut sprites: Query<(&SpriteDeform, &Transform, &mut G
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn death_draw_keeps_the_live_size_through_confirmation_and_dissolve() {
+        let mut app = App::new();
+        app.init_resource::<Impacts>().init_resource::<Pools>().add_systems(Update, draw_deaths);
+        for age in [0.0, 0.02, 0.10, 0.22] {
+            app.world_mut().resource_mut::<Pools>().fx.clear();
+            app.world_mut().resource_mut::<Impacts>().dying = [0.55, 1.0]
+                .into_iter()
+                .map(|scale| Dying {
+                    pose: Pose {
+                        frame: FrameId(1),
+                        flash: FrameId(2),
+                        pos: Vec2::new(80.0, 40.0),
+                        flip: true,
+                        scale: Vec2::splat(scale),
+                    },
+                    response: Some(Response { age: 0.0, dir: Vec2::X, identity: None, crit: true }),
+                    age,
+                    life: 0.45,
+                    priority: 1,
+                })
+                .collect();
+            app.update();
+            let draws = &app.world().resource::<Pools>().fx;
+            assert_eq!(draws.len(), 2);
+            let (small, full) = (&draws[0], &draws[1]);
+            assert!(small.scale.x < 0.6, "分裂小妖从确认闪到化墨都不突然恢复原尺寸");
+            assert!((small.scale - full.scale * 0.55).length() < 1e-6);
+            assert_eq!(small.deform, full.deform, "尺寸不改变致死命中的方向形变");
+            assert!(small.flip && full.flip);
+            if age == 0.0 {
+                assert_eq!(small.scale, Vec2::splat(0.55));
+                assert_eq!(full.scale, Vec2::ONE);
+                assert_eq!(small.frame, FrameId(2));
+            } else if age >= 0.03 {
+                assert_eq!(small.frame, FrameId(1));
+            }
+        }
+    }
 
     #[test]
     fn squeeze_and_rebound_follow_the_incoming_axis() {

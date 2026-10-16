@@ -153,6 +153,25 @@ art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规�
 
 格式约定见 `docs/DESIGN.md` 第 15 节。界面图集要加 `--no-trim`（不裁边）。灯笼叠层单独打成 `lanterns`，不要放进 actors。
 
+### 正式升级卡插画（post/card_illustrations.py）
+
+```bash
+art/.venv/bin/python art/post/card_illustrations.py --source art/out/cards/source --out assets/atlas
+```
+
+每次提供全部 39 张 `card_<id>.png`（准确文件名和对应卡名见脚本的 `CARD_NAMES`）。原图必须为 4:3、至少 768×576；导入只用 Lanczos 缩小到 768×576，不裁切、补画或调色。正统进化为 `card_<id>_evo`，异化为 `card_<id>_mut`；合璧直接用 `card_phoenix`、`card_sword_grove`、`card_frost_rain`，没有 `fusion_` 前缀。
+
+脚本复用 `pack_atlas.py`，以素材名 `ui`、密度 4、不裁边生成独立 `cards` 图集组；更新 `index.json` 时保留其他组及原有 `ui` 图集。源图保留在忽略提交的 `art/out/cards/source/`，临时缩小图自动清除，只提交最终 `cards*.png/json` 与索引。更新一张卡时也从完整源图目录重新打包。
+
+### 只替换主角或灯笼素材（post/replace_atlas_assets.py）
+
+```bash
+art/.venv/bin/python art/post/replace_atlas_assets.py --group actors art/out/assets@2x/hero
+art/.venv/bin/python art/post/replace_atlas_assets.py --group lanterns art/out/assets@2x/lantern_{red,mirror,frost}
+```
+
+用于其他演员只有打包图集、没有原始渲染目录时。`--atlas` 默认 `assets/atlas`，按指定目录 `meta.json` 的素材名替换现有 `actors` / `lanterns` 组；新渲染必须完整并声明密度 4。其余素材从现有页恢复原画布，沿用原动画、帧属性、挂点和附属层元数据，再调用原打包器装箱；不会添加覆盖同名帧的第二组。打包成功后更新本组索引并清除本组过期分页，其他图集不动；恢复 PNG 只存在于临时目录。
+
 ## 界面九宫格皮肤（post/ui_skin.py）
 
 ```bash
@@ -326,6 +345,8 @@ art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/hero  # 单独自
 | `models/rock.py` `stone_lantern.py` `event_props.py` | 山石 a/b/c、石灯笼（亮 / 未点亮 `stone_lantern_dark`）、古灯、血祭坛、货郎担 `merchant` |
 | `render/pipeline.py` | 渲一个素材的全部帧并按输出约定写文件夹（出图脚本共用）；可以每个姿态连渲几层（variants） |
 | `render/produce.py` | 正式出图 + 自检 + 审图 |
+| `render/hero_style.py` | 主角、头像和样张共用的材质与细线；灯笼叠层临时恢复原线宽 |
+| `render/hero_review.py` | 主角独立审图：八方向、关键动作、五种动作动图、头像旧新对照 |
 | `render/qingqiu_review.py` | 青丘妖物的样张、审图和动图 |
 | `render/lantern_review.py` | 灯笼拆层的样张和审图（合成、旧帧对比热图、道具）；`full` 出正式素材的 8 向动图、三灯夜景、全帧对比 |
 | `render/lamp_icons.py` | 灯的界面图标 `ui/icon_lamp_<灯>`（灯笼头单独渲染，装进图标圆框） |
@@ -339,6 +360,13 @@ thin 细长彩色部件（只有 1.1px，不进粗外轮廓，灯杖、符纸）
 meta 里的 `vertical_motion`（整个素材或单个动画）表示动画本身大幅上下（金蟾跳、主角死亡倒地），自检只查水平配准。
 
 **主角和灯笼分层**（灯可以换，docs/GAMEPLAY.md 11.4 节）：主角出两种文件夹，每个姿态在同一个 Blender 会话里连渲 4 遍——
+
+主角正式渲染、头像与 `hero_material_sample.py` 共用 `hero_style.apply_hero_style`。
+较细的内部墨线只作用主角底图，灯笼叠层由 `lamp_ink` 恢复原线宽。
+红纸灯叠层单独启用 `palette_after_grain`，在混线与纸纹之后收回轻微填色色差，保留灯芯与明显墨线；其他素材默认关闭，检查容差不变。
+头像五官投影读取 `hero.face_surface`，跟随正式模型的鼻梁与下颌。
+完整主角与头像生成后，可运行 `LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/hero_review.py`，在 `art/out/review@2x/hero-r2/` 查看八方向与关键动作，不必重渲敌人或场景。
+
 - `hero/`：不带灯笼头的底图（灯杖、杖头留着），没有 `_emit`；`lantern` 挂点照旧（灯芯中心，放光源用），`overlays` 列出叠层；
 - `lantern_<灯>/`：这盏灯的叠层，画布、锚点、帧名、`anims` 和底图完全相同，`_emit` 是灯芯。渲的时候只显示这盏灯，
   主角身体（含灯杖）换成 Holdout 材质当遮挡物：被身体挡住的灯笼像素是透明的，墨线也被挡住（身体仍在 Freestyle 视图图里），
@@ -386,4 +414,4 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lamp_icons.py   # → out/
 - `out/` 是渲染产物
 - `.blender/` 用来放官方 Blender 压缩包（如果以后要用）
 
-需要提交的只有 `render/`、`post/`、`style/`、`requirements.txt`、`README.md` 和 `.gitignore`。
+提交模型、渲染与处理脚本、风格配置和卡画提示词（`models/`、`render/`、`post/`、`style/`、`cards/`），以及依赖与使用说明。运行时打包图集提交到 `assets/atlas/`，原始出图与审图中间文件留在 `out/`。

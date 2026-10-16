@@ -11,6 +11,7 @@
      偏差压到 SNAP_KEEP 以内（保留一点点晕染起伏，但不会跑出调色板）；发光部件不吸附
   3. 墨线叠在填色上，带墨晕（INK_BLEED_PX 高斯半径的淡淡外晕）
   4. 纸纹：均值为 1 的正片叠底（PAPER_OVERLAY），每个素材一个固定偏移，同一素材的各帧不闪
+     红纸灯叠层可单独启用有限的填色校正，收回这两步造成的轻微色板残差，不改灯芯与明显墨线
   5. 清掉极小的 alpha，往透明区域扩展颜色 ALPHA_BLEED_PX 像素（避免游戏里缩放出黑边/白边）
 另外生成：发光层（只含发光部件，夜里叠加用）和受击闪白剪影。
 
@@ -208,9 +209,11 @@ def to_rgba8(rgb: np.ndarray, a: np.ndarray) -> np.ndarray:
 
 # ================================================================ 总流程
 def process_layers(layers: dict, name: str, scale: int = S.RENDER_SCALE,
-                   extra_palette: tuple[str, ...] = tuple(LIGHT_COLORS), grain_name: str | None = None) -> dict:
+                   extra_palette: tuple[str, ...] = tuple(LIGHT_COLORS), grain_name: str | None = None,
+                   palette_after_grain: bool = False) -> dict:
     """渲染三层 → 最终贴图。返回 uint8 数组：rgba / emit / flash（都是 (h,w,4)），以及 stats。
-    grain_name：纸纹偏移按哪个名字取（默认 name）。叠层（灯笼叠在主角上）要用底图的名字，叠起来纸纹才对得上。"""
+    grain_name：纸纹偏移按哪个名字取（默认 name）。叠层（灯笼叠在主角上）要用底图的名字，叠起来纸纹才对得上。
+    palette_after_grain：仅为明确启用的叠层，收回混线和纸纹后轻微越界的填色；灯芯和明显墨线不动。"""
     fill = box_downscale(layers["fill"], scale)
     lines = box_downscale(layers["lines"], scale)
     emit_hi = layers["emit"] * np.clip(layers["fill"][..., 3], 0, 1)
@@ -230,6 +233,14 @@ def process_layers(layers: dict, name: str, scale: int = S.RENDER_SCALE,
 
     h, w = out_a.shape
     out_rgb = np.clip(out_rgb * paper_grain(h, w, grain_name or name)[..., None], 0, 255)
+    if palette_after_grain:
+        # 原来的色板吸附发生在墨线、纸纹之前；红灯的朱砂和藤黄会被这两步推到色阶间隙。
+        # 只改距原色板 18–28 的不透明填色，保留有效色阶内的纸纹以及灯窗的真实覆盖混色。
+        near, distance = nearest_palette(out_rgb, pal)
+        fix = ((out_a >= 250 / 255) & (emit < 0.3) & (la < 0.2)
+               & (distance > S.PALETTE_TOLERANCE) & (distance <= 28.0))
+        gain = (SNAP_KEEP / np.maximum(distance[fix], 1e-6))[:, None]
+        out_rgb[fix] = near[fix] + (out_rgb[fix] - near[fix]) * gain
 
     out_a = np.where(out_a < ALPHA_FLOOR, 0.0, out_a)
     out_rgb = alpha_bleed(out_rgb, out_a)

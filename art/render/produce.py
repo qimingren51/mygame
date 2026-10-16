@@ -104,11 +104,23 @@ def hero_jobs(only_anims=None) -> list:
 
 
 def render_hero(jobs, out_root: Path = ASSETS, merge: bool = False, timings: dict | None = None,
-                lamps=HERO_LAMPS) -> None:
-    """主角底图 hero/ + 每盏灯一份叠层 lantern_<灯>/：每个姿态在同一个 Blender 会话里连渲 1 + len(lamps) 遍。"""
+                lamps=HERO_LAMPS, overlays_only: bool = False) -> None:
+    """主角底图与灯笼叠层。overlays_only 只更新灯笼叠层，保留已完成的主角底图。"""
+    import contextlib
     import functools
     import hero as HERO
     import lanterns as LAN
+    from hero_style import apply_hero_style, lamp_ink
+
+    def build():
+        root, parts, sockets = HERO.build_hero(lamps=lamps)
+        apply_hero_style(parts)
+        return root, parts, sockets
+
+    @contextlib.contextmanager
+    def lamp_scope(parts, lamp):
+        with lamp_ink(parts), HERO.lamp_scope(parts, lamp):
+            yield
 
     info = LAN.lamp_data()
     hero_h = S.HERO_HEIGHT_M * S.PX_PER_M * math.cos(math.radians(S.CAMERA_PITCH_DEG))
@@ -117,17 +129,24 @@ def render_hero(jobs, out_root: Path = ASSETS, merge: bool = False, timings: dic
     variants = []
     for lid in lamps:
         pe = LAN.palette_extra(lid)
-        variants.append({"name": f"lantern_{lid}", "scope": functools.partial(HERO.lamp_scope, lamp=lid),
-                         "palette_extra": pe,
+        variants.append({"name": f"lantern_{lid}", "scope": functools.partial(lamp_scope, lamp=lid),
+                         "palette_extra": pe, "palette_after_grain": lid == "red",
                          "meta_extra": {"category": "overlay", "base": "hero", "lamp": lid, "lamp_name": info[lid]["name"],
                                         "light_color": info[lid]["color"], "layers": ["emit"],
                                         **({"palette_extra": pe} if pe else {})}})
-    render_asset("hero", S.FRAME["hero"], functools.partial(HERO.build_hero, lamps=lamps), jobs, out_root,
-                 pose=HERO.pose_hero, sockets_wanted=("lantern",), timings=timings, merge=merge,
-                 scope=HERO.base_scope, variants=variants,
-                 meta_extra={"category": "hero", "height_px": round(hero_h, 2), "layers": [],
-                             "overlays": [f"lantern_{lid}" for lid in lamps],
-                             "required_sockets": ["lantern"], "shadow_radius_px": round(13 * D), "anim_extra": anim_extra})
+    base = {"name": "hero", "scope": HERO.base_scope, "palette_extra": [],
+            "meta_extra": {"category": "hero", "height_px": round(hero_h, 2), "layers": [],
+                           "overlays": [f"lantern_{lid}" for lid in lamps],
+                           "required_sockets": ["lantern"], "shadow_radius_px": round(13 * D)}}
+    if overlays_only:
+        if not variants:
+            raise ValueError("只渲灯笼叠层时至少需要一盏灯")
+        base = variants.pop(0)
+    render_asset(base["name"], S.FRAME["hero"], build, jobs, out_root,
+                 pose=HERO.pose_hero, sockets_wanted=() if overlays_only else ("lantern",),
+                 timings=timings, merge=merge, scope=base["scope"], variants=variants, grain="hero",
+                 palette_extra=base["palette_extra"], palette_after_grain=base.get("palette_after_grain", False),
+                 meta_extra={**base["meta_extra"], "anim_extra": anim_extra})
 
 
 def _split_only(name: str):

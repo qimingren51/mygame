@@ -1,7 +1,7 @@
 """白衣墨氅剑仙：主角模型（程序化部件 + 两段式腿 IK）。
 
 造型（约 6.5 头身，宽肩、窄腰、长腿，挺拔）：
-  - 内袍宣纸白（亮面纸色，暗面清墨/淡墨），广袖，袖口浓墨镶边，袖尾随风飘；白交领在胸前交成尖 V
+  - 内袍宣纸白（亮面纸色，暗面清墨/淡墨），浅墨广袖，袖口浓墨镶边，袖尾随风飘；白交领在胸前交成尖 V
   - 外披焦墨/浓墨大氅：无袖（只有短肩），前襟敞开露出白袍和双腿；腰下分成四片长摆（前左、前右、后左、后右），
     跑动时向后飘
   - 浓墨长裤、焦墨长靴；浓墨宽腰带，左前挂石绿玉佩和朱砂穗
@@ -9,7 +9,7 @@
   - 背上斜背长剑：剑柄在左肩上方，S/SE 向也能露出来；藤黄剑格，朱砂剑穗
   - 右手（世界 -X）持赭石灯杖，向前外侧伸出，杖头挂灯笼。灯笼头在 models/lanterns.py（红纸灯、铜镜灯、霜瓷灯可换），
     build_hero(lamps=...) 可以同时挂几盏（同一位置、同样摆动），出图时每次只显示一盏（见 base_scope / lamp_scope）
-  - 脸：肤色，下巴收尖，墨点眼、细眉
+  - 脸：肤色，连贯的鼻梁与下颌侧形，细长眼睑与剑眉；两束额发分开露出眉眼
 
 约定：脚底在原点，面朝 -Y，右手在 -X；总高 HERO_HEIGHT_M（脚底到冠顶）。
 动画（pose_hero）：
@@ -54,7 +54,7 @@ WAIST_Z = 1.27
 SHOULDER_Z = 1.68
 NECK_Z = 1.76
 HEAD_C = Vector((0.0, -0.012, 1.985))
-HEAD_R = (0.096, 0.112, 0.150)
+HEAD_R = (0.106, 0.112, 0.150)
 CROWN_TOP = H
 TORSO_SY = 0.66
 TORSO_PROFILE = [(0.150, 1.02), (0.145, 1.13), (0.130, 1.23), (0.126, WAIST_Z), (0.152, 1.39), (0.198, 1.50),
@@ -95,11 +95,11 @@ DASH_COAT_SPLIT = (0.20, 0.36)  # 冲刺时长摆尾端向两侧拖开（正对�
 DASH_COAT_FLY = 0.35  # 正对镜头冲刺：长摆少往后上方飘（身后的东西画面上本来就往上，飘高了像一对翅膀）
 DASH_COAT_UPRIGHT = 0.7  # 正对镜头冲刺：长摆绕腰线往回转前倾角的这么多，垂在腿后而不是跟着上身平伸出去
 DASH_RIBBON_SPREAD = 1.1  # 冲刺时发带向两侧
-# 大氅分层晕染：fade 0 是原来的浓墨三档，往上依次淡一档（都是调色板里的颜色）
+# 大氅分层晕染：受光面、褶面与暗内层分开，往下摆依次淡一档（都是调色板里的颜色）。
 _DAN = S.shade_ramp(S.INK["dan"])  # 淡墨三档：亮、中、暗
-COAT_BANDS = [(0.0, [S.INK["zhong"], S.INK["nong"], S.INK["nong"]]),
-              (0.40, [_DAN[2], S.INK["zhong"], S.INK["nong"]]),
-              (0.72, [_DAN[1], _DAN[2], S.INK["zhong"]])]
+COAT_BANDS = [(0.0, [S.INK["dan"], S.INK["zhong"], S.INK["nong"]]),
+              (0.40, [S.INK["dan"], _DAN[1], S.INK["zhong"]]),
+              (0.72, [S.INK["qing"], S.INK["dan"], S.INK["zhong"]])]
 
 
 def walk_stride_units() -> float:
@@ -136,14 +136,16 @@ def _materials():
     T = B.toon_material
     m = {
         "white": T("RobeWhite", ramp=[S.PAPER, I["qing"], I["dan"]], seed=1.0, edge=0.45),
-        # 大氅暗面用浓墨而不是焦墨：和焦墨外线拉开一点，墨色占比也不至于过半。
-        # 按顶点属性 fade 分层晕染（没写 fade 的网格就是 0，即原来的浓墨三档）
+        "sleeve": T("SleeveCloth", ramp=[I["qing"], I["dan"], I["zhong"]], wash=0.12, edge=0.2, seed=1.0),
+        "collar": T("CollarLinen", ramp=[S.PAPER, S.PAPER_SHADOW, I["qing"]], wash=0.08, edge=0.12, seed=1.0),
+        "lining": T("RobeLining", ramp=[I["qing"], I["dan"], I["zhong"]], seed=1.0, edge=0.3),
+        # 大氅按顶点属性 fade 分层晕染；受光面仍能辨出褶皱，外线保留焦墨。
         "coat": K.banded_toon_material("CoatInk", COAT_BANDS, noise_amt=0.16, seed=2.0, edge=0.35),
         "trousers": T("Trousers", I["nong"], seed=3.0),
         "boot": T("Boot", I["jiao"], seed=4.0),
         "belt": T("Belt", I["nong"], seed=5.0),
-        "skin": T("Skin", S.SKIN, wash=0.08, edge=0.3, seed=6.0),
-        "hair": T("Hair", I["jiao"], seed=7.0),
+        "skin": T("Skin", S.SKIN, wash=0.05, edge=0.12, seed=6.0),
+        "hair": T("Hair", ramp=[I["zhong"], I["nong"], I["jiao"]], wash=0.08, edge=0.18, seed=7.0),
         "silver": T("Silver", I["qing"], seed=8.0),
         "jade": T("Jade", A["shilv"], seed=9.0),
         "ribbon": T("Ribbon", A["zhusha"], edge=0.35, seed=10.0),
@@ -171,6 +173,27 @@ def _torso_point(theta_deg, z, off=0.0):
     th = math.radians(theta_deg)
     r = _torso_r(z)
     return Vector(((r + off) * math.cos(th), (r * TORSO_SY + off) * math.sin(th), z))
+
+
+def _face_xyz(x, y, z):
+    """从单位头形塑出颧骨、下颌与连贯鼻梁，侧面不再是一颗光滑的椭球。"""
+    jaw = 1.0 - 0.24 * max(-z, 0.0) ** 1.3
+    px = x * HEAD_R[0] * jaw
+    py = y * HEAD_R[1]
+    front = max(-y, 0.0) ** 3
+    nose = 0.030 * math.exp(-(px / 0.024) ** 2 - ((z + 0.10) / 0.45) ** 2)
+    brow = 0.006 * math.exp(-((z - 0.17) / 0.16) ** 2)
+    chin = 0.008 * math.exp(-((z + 0.73) / 0.20) ** 2)
+    py -= front * (nose + brow + chin)
+    return Vector((px, py, z * HEAD_R[2]))
+
+
+def face_surface(x, z):
+    """头心坐标中的脸面点；五官贴在同一表面上，近景取点也可复用。"""
+    zn = z / HEAD_R[2]
+    xn = x / (HEAD_R[0] * (1.0 - 0.24 * max(-zn, 0.0) ** 1.3))
+    yn = -math.sqrt(max(0.0, 1.0 - xn * xn - zn * zn))
+    return _face_xyz(xn, yn, zn)
 
 
 def _strip_build(pts, width, thick, twist=0.0, taper=(1.0, 0.6), side_hint=Vector((1, 0, 0))):
@@ -247,7 +270,8 @@ def _coat_upper_build(segs=36, fades=None):
         for z in zs:
             r = _torso_r(min(z, NECK_Z)) + COAT_OFF + (0.012 if z > 1.70 else 0.0)
             if 1.58 < z < 1.70:
-                r += 0.035  # 短肩外张，肩线更宽更利落
+                # 布顺着肩斜落下，去掉原来突出的硬壳肩垫，躯干比例与肩枢轴不变。
+                r += 0.012 * math.sin(math.pi * (z - 1.58) / 0.12)
             if z > NECK_Z:
                 r = 0.085  # 立领
             ring = []
@@ -284,7 +308,7 @@ def _panel_fade(th_deg, t, front):
     return (0.20 + 0.75 * t ** 1.1) * (0.6 + 0.4 * seam)
 
 
-def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=6, nv=12, split=0.0, sway=0.0, fly=1.0, pitch=0.0,
+def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=12, nv=12, split=0.0, sway=0.0, fly=1.0, pitch=0.0,
                      fades=None):
     """一片长摆的点阵：从腰带下沿垂下、略外张、尾端收窄成燕尾；随风（wind）向后上方飘，并有行进的波。
     split：尾端向身体两侧分开（米，左片往 +X、右片往 -X）；sway：尾端整体横摆（米，+X 为正）；
@@ -307,10 +331,13 @@ def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=6, nv=12, split=0.
             out = Vector((math.cos(th), math.sin(th) * 0.85, 0)).normalized()
             L = length * (1 - 0.10 * abs(u - 0.5) * 2 * t)  # 尾端中间长、两边短
             p = Vector((rx * math.cos(th), ry * math.sin(th), COAT_TOP)) + out * (0.17 * t ** 1.2) + Vector((0, 0, -L * t))
+            # 腰线固定，宽褶向下展开；褶峰随布片走，不用逐帧随机噪声制造碎皱。
+            pleat = math.sin(math.pi * u) ** 0.7 * (1.0 - math.exp(-5.0 * t))
+            p += out * (0.024 * pleat * math.sin(math.tau * (1.6 * u - 0.12 * t) + (0.3 if front else 1.0)))
             if pitch:  # 绕这片顶边的腰线（y = yc，z = COAT_TOP）往前转：+Y 往 -Y
                 dy_, dz_ = p.y - yc, p.z - COAT_TOP
                 p = Vector((p.x, yc + dy_ * cp + dz_ * sp, COAT_TOP - dy_ * sp + dz_ * cp))
-            s = wind * (t ** 1.35) * L
+            s = wind * (0.65 + 0.35 * min(wind, 1.0)) * (t ** 1.35) * L
             p += Vector((0, 0.85 * s * fly, 0.36 * s * t * fly))  # 向后上方飘
             if front:
                 p += out * (0.10 * s) + Vector((0, 0.15 * s, 0))  # 前片从腿两侧往后飘（不往外张成裙子）
@@ -325,9 +352,9 @@ def _coat_panel_rows(th0, th1, length, front, phase, wind, nu=6, nv=12, split=0.
 
 
 # ---------------------------------------------------------------- 广袖
-def _sleeve_build(A, Bp, radii, droop, phase=0.0, wind=0.0, segs=18, border=0.12, swing_back=0.0):
+def _sleeve_build(A, Bp, radii, droop, phase=0.0, wind=0.0, segs=28, border=0.12, swing_back=0.0):
     """广袖：从肩 A 到袖口 B 的喇叭管，下侧随长度下垂成袖兜；袖兜尾端随相位飘动并被风往后带。
-    最后一段是浓墨镶边（材质 1），袖口封一个凹进去的面（材质 2，内袍白的暗面）。顶点相对 A。"""
+    最后一段是浓墨镶边（材质 1），袖口封一个凹进去的暗内衬（材质 2）。顶点相对 A。"""
     A, Bp = Vector(A), Vector(Bp)
     d = (Bp - A).normalized()
     down = Vector((0, 0, -1))
@@ -336,7 +363,7 @@ def _sleeve_build(A, Bp, radii, droop, phase=0.0, wind=0.0, segs=18, border=0.12
         u = Vector((0, 1, 0))
     u.normalize()
     v = d.cross(u).normalized()
-    ts = [0.0, 0.12, 0.3, 0.5, 0.7, 0.86, 1.0 - border * 0.5, 1.0]
+    ts = [0.0, 0.12, 0.25, 0.4, 0.55, 0.7, 0.86, 1.0 - border * 0.5, 1.0]
     flutter = 1 + (0.06 + 0.12 * wind) * math.sin(phase)
 
     def build(bm):
@@ -351,7 +378,11 @@ def _sleeve_build(A, Bp, radii, droop, phase=0.0, wind=0.0, segs=18, border=0.12
                 bag = max(0.0, math.cos(th)) ** 1.3
                 sag = droop * flutter * (t ** 1.6) * bag
                 back = (swing_back + 0.10 * wind * math.sin(phase - 1.0 + t)) * (t ** 2) * bag
-                ring.append(bm.verts.new(c + dirv * r + u * sag + Vector((0, back, 0))))
+                # 肩与袖口两端收束，中段由肘腕牵出三道宽褶；下侧袖兜仍由原动画控制。
+                tension = math.sin(math.pi * t) ** 0.7
+                fold = 0.030 * tension * (0.72 * math.sin(3.0 * th + 0.9 * t)
+                                          + 0.28 * math.sin(5.0 * th - 0.6 * t))
+                ring.append(bm.verts.new(c + dirv * (r + fold) + u * sag + Vector((0, back, 0))))
             rings.append(ring)
         for j in range(len(rings) - 1):
             a, b = rings[j], rings[j + 1]
@@ -374,8 +405,8 @@ SH_L = Vector((0.225, 0.008, 1.655))
 SH_R = Vector((-0.225, 0.008, 1.655))
 CUFF_L = Vector((0.325, 0.03, 1.16))
 CUFF_R = HAND_R + Vector((0.035, 0.055, 0.03))
-SLEEVE_RADII = [(0.0, 0.070), (0.35, 0.088), (0.75, 0.118), (1.0, 0.132)]
-SLEEVE_DROOP = (0.24, 0.30)  # 左、右袖兜下垂
+SLEEVE_RADII = [(0.0, 0.055), (0.35, 0.074), (0.75, 0.112), (1.0, 0.132)]
+SLEEVE_DROOP = (0.18, 0.22)  # 肩臂收紧，余量垂在袖口；不改变握杖手与袖枢轴
 
 
 # ---------------------------------------------------------------- 头发与发带
@@ -392,6 +423,11 @@ def _ponytail_points(phase, wind, n=12):
         y += 0.03 * t * math.cos(2 * math.pi * 1.1 * t - phase) * (0.5 + wind)
         pts.append(Vector((x, y, z)))
     return pts
+
+
+def _ponytail_build(phase, wind):
+    return K.tube_build(_ponytail_points(phase, wind),
+                        lambda t: 0.044 * (1.0 - t) ** 0.7, segs=12, flat=0.65)
 
 
 def _ribbon_points(length, phase, wind, side, n=16, spread=0.0):
@@ -418,12 +454,12 @@ def _ribbon_points(length, phase, wind, side, n=16, spread=0.0):
 
 def _sidelock_points(sx, phase, wind):
     """鬓发：从太阳穴垂到下颌下，略向外弯（相对头枢轴）。"""
-    top = Vector((0.083 * sx, -0.068, 0.045))
+    top = Vector((0.099 * sx, -0.043, 0.050))
     pts = []
     for i in range(7):
         t = i / 6
-        pts.append(top + Vector((0.018 * sx * math.sin(t * 2.2) + 0.006 * sx * math.sin(phase + t * 3) * (0.5 + wind),
-                                  -0.015 * t + 0.03 * wind * t * t, -0.24 * t)))
+        pts.append(top + Vector((0.012 * sx * math.sin(t * 2.2) + 0.006 * sx * math.sin(phase + t * 3) * (0.5 + wind),
+                                  0.012 * t + 0.03 * wind * t * t, -0.20 * t)))
     return pts
 
 
@@ -477,9 +513,9 @@ def build_hero(lamps=("red",)):
     long_path = [(95, 1.77, 0.010), (40, 1.765, 0.012), (-30, 1.745, 0.010), (-62, 1.69, 0.006),
                  (-90, 1.58, 0.006), (-118, 1.49, 0.006), (-142, 1.43, 0.006)]
     short_path = [(150, 1.77, 0.010), (215, 1.745, 0.008), (243, 1.68, 0.004), (262, 1.62, 0.003)]
-    obj("CollarL", B.sweep([rel(_torso_point(t, z, o)) for t, z, o in long_path], 0.040, 0.014), M["white"],
+    obj("CollarL", B.sweep([rel(_torso_point(t, z, o)) for t, z, o in long_path], 0.062, 0.006), M["collar"],
         "inner", chest)
-    obj("CollarR", B.sweep([rel(_torso_point(t, z, o)) for t, z, o in short_path], 0.036, 0.012), M["white"],
+    obj("CollarR", B.sweep([rel(_torso_point(t, z, o)) for t, z, o in short_path], 0.048, 0.005), M["collar"],
         "inner", chest)
 
     # 大氅：上身壳 + 四片长摆
@@ -506,7 +542,7 @@ def build_hero(lamps=("red",)):
     parts["pendant"] = pend
 
     # 广袖
-    sleeve_mats = [M["white"], M["belt"], M["white"]]
+    sleeve_mats = [M["sleeve"], M["belt"], M["lining"]]
     sL = B.empty("SleevePivotL", chest, loc=rel(SH_L))
     slv_l = obj("SleeveL", _sleeve_build(SH_L, CUFF_L, SLEEVE_RADII, SLEEVE_DROOP[0]), sleeve_mats, "outer", sL,
                 sharp_deg=0)
@@ -538,24 +574,19 @@ def build_hero(lamps=("red",)):
     hc = HEAD_C - Vector((0, 0, 1.84))
 
     def face_build(bm):
-        bmesh.ops.create_uvsphere(bm, u_segments=24, v_segments=16, radius=1.0)
+        bmesh.ops.create_uvsphere(bm, u_segments=40, v_segments=28, radius=1.0)
         for v in bm.verts:
-            x, y, z = v.co
-            if z < 0:  # 下半张脸收窄成尖下巴
-                k = 1 - 0.42 * (-z) ** 1.3
-                x *= k
-                y = y * (1 - 0.18 * (-z)) - 0.05 * (-z) ** 2 * (1 if y < 0 else 0)
-            v.co = Vector((x * HEAD_R[0], y * HEAD_R[1], z * HEAD_R[2]))
+            v.co = _face_xyz(*v.co)
 
     obj("Head", face_build, M["skin"], "outer", head, loc=hc)
 
     def hair_cap(bm):
-        bmesh.ops.create_uvsphere(bm, u_segments=28, v_segments=16, radius=1.0)
+        bmesh.ops.create_uvsphere(bm, u_segments=40, v_segments=28, radius=1.0)
         kill = []
         for f in bm.faces:
             c = f.calc_center_median()
             front = c.y < -0.12
-            if front and c.z < 0.50 - 0.20 * abs(c.x) and not (abs(c.x) > 0.84 and c.z > -0.10):
+            if front and c.z < 0.58 - 0.38 * abs(c.x) and not (abs(c.x) > 0.88 and c.z > -0.08):
                 kill.append(f)
             elif c.z < -0.28 and c.y < 0.45:
                 kill.append(f)
@@ -563,6 +594,17 @@ def build_hero(lamps=("red",)):
         bmesh.ops.scale(bm, vec=(HEAD_R[0] * 1.08, HEAD_R[1] * 1.07, HEAD_R[2] * 1.05), verts=bm.verts)
 
     obj("HairCap", hair_cap, M["hair"], "outer", head, loc=hc + Vector((0, 0.006, 0.008)))
+    # 两束大形沿额头分开，露出眉眼；不用逐根发丝把游戏尺寸变成碎线。
+    for sx, width in ((-1, 0.038), (1, 0.028)):
+        points = []
+        for i in range(9):
+            t = i / 8
+            x = sx * (0.012 + 0.090 * math.sin(t * math.pi / 2))
+            z = 0.130 - (0.115 if sx < 0 else 0.095) * t
+            points.append(face_surface(x, z) + Vector((0, -0.008, 0.004)))
+        obj(f"Forelock{sx:+d}", _strip_build(points, width, 0.012, taper=(0.8, 0.08),
+                                             side_hint=Vector((0.8, 0, 0.5))),
+            M["hair"], "none", head, loc=hc)
     crown_z = CROWN_TOP - 0.075 - 1.84
     obj("TopKnot", B.uv_sphere(1.0, 14, 8, scale=(0.040, 0.046, 0.040)), M["hair"], "outer", head,
         loc=(0, 0.035, crown_z + 0.025))
@@ -571,22 +613,20 @@ def build_hero(lamps=("red",)):
     obj("CrownJade", B.uv_sphere(0.017, 10, 6), M["jade"], "none", head, loc=(0, -0.012, crown_z + 0.04))
     pin = obj("Hairpin", B.cylinder(0.006, 0.006, 0.17, 6), M["silver"], "inner", head)
     B.aim(pin, Vector((-0.085, 0.035, crown_z + 0.045)), Vector((0.085, 0.028, crown_z + 0.045)))
-    # 眼与眉（眼约 1.5px）
+    # 眼与眉贴着新的颧骨表面，眼用细长的上睑形，不再是凸起的黑色球珠。
     for sx in (-1, 1):
-        x, ez = 0.040 * sx, HEAD_C.z - 0.005
-        ey = HEAD_C.y - HEAD_R[1] * math.sqrt(max(0.0, 1 - (x / HEAD_R[0]) ** 2 - ((ez - HEAD_C.z) / HEAD_R[2]) ** 2))
-        obj(f"Eye{sx:+d}", B.uv_sphere(1.0, 10, 6, scale=(0.019, 0.006, 0.0085)), M["eye"], "none", head,
-            loc=(x, ey + 0.004, ez - 1.84), rot=(0, math.radians(-8 * sx), 0))
-        brow = obj(f"Brow{sx:+d}", B.cylinder(0.0045, 0.003, 0.045, 6), M["eye"], "none", head)
-        bz = ez + 0.034
-        by = HEAD_C.y - HEAD_R[1] * math.sqrt(max(0.0, 1 - (x / HEAD_R[0]) ** 2 - ((bz - HEAD_C.z) / HEAD_R[2]) ** 2))
-        B.aim(brow, Vector((x - 0.022 * sx, by + 0.004, bz - 0.006 - 1.84)),
-              Vector((x + 0.022 * sx, by + 0.006, bz + 0.006 - 1.84)))  # 剑眉：外端上挑
-    locks = [obj(f"SideLock{sx:+d}", _strip_build(_sidelock_points(sx, 0, 0), 0.026, 0.012, taper=(1.0, 0.4)),
+        x = 0.042 * sx
+        eye_at = hc + face_surface(x, -0.004) + Vector((0, -0.002, 0))
+        obj(f"Eye{sx:+d}", B.uv_sphere(1.0, 12, 6, scale=(0.017, 0.003, 0.0045)), M["eye"], "none", head,
+            loc=eye_at, rot=(0, math.radians(-8 * sx), 0))
+        brow = obj(f"Brow{sx:+d}", B.cylinder(0.0035, 0.0015, 0.045, 8), M["eye"], "none", head)
+        B.aim(brow, hc + face_surface(x - 0.020 * sx, 0.025) + Vector((0, -0.002, 0)),
+              hc + face_surface(x + 0.020 * sx, 0.031) + Vector((0, -0.002, 0)))
+    locks = [obj(f"SideLock{sx:+d}", _strip_build(_sidelock_points(sx, 0, 0), 0.020, 0.009, taper=(1.0, 0.1)),
                  M["hair"], "none", head, loc=hc) for sx in (-1, 1)]
     parts["sidelocks"] = locks
     root_tail = Vector((0, 0.07, crown_z + 0.02))
-    tail = obj("Ponytail", _strip_build(_ponytail_points(0, 0), 0.10, 0.05, taper=(1.0, 0.3), side_hint=Vector((1, 0, 0))),
+    tail = obj("Ponytail", _ponytail_build(0, 0),
                M["hair"], "inner", head, loc=root_tail)
     rib_root = Vector((0, 0.05, crown_z + 0.035))
     rib_a = obj("RibbonA", _strip_build(_ribbon_points(0.95, 0, 0, 1.0), 0.066, 0.008, twist=2.4, taper=(0.8, 1.0)),
@@ -630,7 +670,7 @@ def build_hero(lamps=("red",)):
     return root, parts, sockets
 
 
-def _tunic_rows(thc, width_deg, phase, wind, nu=5, nv=7, length=0.48):
+def _tunic_rows(thc, width_deg, phase, wind, nu=12, nv=10, length=0.58):
     """内袍下摆的一片（前或后），从腰下垂到大腿中部，随风略飘。"""
     rows = []
     z0 = 1.22
@@ -641,6 +681,7 @@ def _tunic_rows(thc, width_deg, phase, wind, nu=5, nv=7, length=0.48):
             u = i / nu
             th = math.radians(thc + (u - 0.5) * width_deg * (1 - 0.15 * t))
             r = _torso_r(z0 - 0.0) + 0.012 + 0.05 * t
+            r += 0.018 * t * math.sin(math.pi * u) ** 0.7 * math.sin(math.tau * (1.5 * u + 0.1 * t))
             p = Vector((r * math.cos(th), (r * TORSO_SY + 0.012 + 0.03 * t) * math.sin(th), z0 - length * t))
             s = wind * t * t * length
             p += Vector((0, 0.35 * s, 0.10 * s)) + Vector((0, 0.01 * math.sin(phase + u * 2) * t * (0.5 + wind), 0))
@@ -798,14 +839,14 @@ def pose_hero(parts: dict, anim: str, frame: int, n_frames: int):
         B.set_point_attr(ob, "fade", fades)
     for ob, thc, w in parts["tunic"]:
         _replace_mesh(ob, _grid_build(_tunic_rows(thc, w, rib_phase, wind * 0.5)))
-    _replace_mesh(parts["ponytail"], _strip_build(_ponytail_points(rib_phase, wind_hair), 0.10, 0.05, taper=(1.0, 0.3)))
+    _replace_mesh(parts["ponytail"], _ponytail_build(rib_phase, wind_hair))
     rib_a, rib_b = parts["ribbon"]
     _replace_mesh(rib_a, _strip_build(_ribbon_points(0.95, rib_phase, wind_hair, 1.0, spread=rib_spread), 0.066, 0.008,
                                       twist=2.4, taper=(0.8, 1.0)))
     _replace_mesh(rib_b, _strip_build(_ribbon_points(0.80, rib_phase + 1.3, wind_hair, -0.6, spread=rib_spread), 0.060,
                                       0.008, twist=-2.0, taper=(0.8, 1.0)))
     for sx, ob in zip((-1, 1), parts["sidelocks"]):
-        _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind_hair), 0.026, 0.012, taper=(1.0, 0.4)))
+        _replace_mesh(ob, _strip_build(_sidelock_points(sx, rib_phase, wind_hair), 0.020, 0.009, taper=(1.0, 0.1)))
     for h in parts["lamps"].values():  # 其余几盏灯的枢轴跟着第一盏；挂件（符纸、剑坠、穗子）随风
         if h.pivot is not lp:
             h.pivot.location = lp.location

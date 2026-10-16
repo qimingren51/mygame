@@ -11,11 +11,11 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use lantern_content::Stat;
+use lantern_content::{ChargeDef, Stat};
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::boss::BossState;
 use lantern_sim::enemies::{
-    CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, EnemyHandle, SPAWN_GRACE, TAG_REVEALED,
+    CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, EnemyHandle, SPAWN_GRACE, TAG_REVEALED, UNMASK_GRACE,
 };
 use lantern_sim::{
     AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox,
@@ -133,6 +133,8 @@ struct EnemyAnim {
     windup: usize,
     /// 播完后从这一帧起循环（loop_from）
     loop_from: Option<usize>,
+    /// 已绘制的落地帧留给真实收势段，不在仍然冲锋时提前落地。
+    landing: Option<usize>,
 }
 
 impl EnemyAnim {
@@ -142,6 +144,8 @@ impl EnemyAnim {
         };
         let normal = seq("");
         let same_len = |v: Vec<FrameId>| if v.len() == normal.len() { v } else { Vec::new() };
+        // 赤面狐 pounce 最后一帧是落地；狐火尾帧仍在扑出，青面鬼则是跑步循环。
+        let landing = (asset == "fox" && name == "pounce").then(|| normal.len().saturating_sub(1));
         EnemyAnim {
             flash: same_len(seq("_flash")),
             emit: same_len(seq("_emit")),
@@ -149,6 +153,7 @@ impl EnemyAnim {
             fps: meta.fps,
             windup: meta.windup_frames,
             loop_from: meta.loop_from,
+            landing,
         }
     }
 
@@ -160,6 +165,23 @@ impl EnemyAnim {
     /// 出手以后 t 秒（going：这一招还没结束）。
     fn strike_frame(&self, t: f32, going: bool) -> Option<usize> {
         strike_frame(self.normal.len(), self.windup, self.loop_from, self.fps, t, going)
+    }
+
+    fn charge_frame(&self, charge: &ChargeDef, phase: u8, remaining: f32) -> Option<usize> {
+        match phase {
+            CHARGE_WINDUP => Some(self.windup_frame(charge.windup - remaining)),
+            CHARGE_DASH => {
+                if let Some(landing) = self.landing.filter(|&k| k > self.windup) {
+                    let progress = 1.0 - remaining / charge.duration.max(f32::EPSILON);
+                    return Some(self.windup + progress_frame(landing - self.windup, progress));
+                }
+                self.strike_frame(charge.duration - remaining, true)
+            }
+            CHARGE_RECOVER => self
+                .landing
+                .or_else(|| self.strike_frame(charge.duration + charge.recover - remaining, false)),
+            _ => None,
+        }
     }
 }
 
@@ -200,14 +222,34 @@ struct EnemyFrames {
     base: EnemyAnim,
     /// 冲锋（赤面狐 pounce、青面鬼 charge）
     charge: Option<EnemyAnim>,
-    /// 远程蓄力、出手与收势；现形后的移动。
+    /// 远程蓄力、出手与收势。
     shoot: Option<EnemyAnim>,
+    /// 甩掉伪装；现形后的移动。
+    reveal: Option<EnemyAnim>,
     revealed: Option<EnemyAnim>,
     /// 九尾扫、召唤（召唤和狐火雨时播）
     sweep: Option<EnemyAnim>,
     summon: Option<EnemyAnim>,
     floating: bool,
     shadow_scale: f32,
+}
+
+impl EnemyFrames {
+    fn revealed_pose(&self, en: &Enemies, i: usize, now: f32) -> Option<(&EnemyAnim, usize)> {
+        if en.tags[i] & TAG_REVEALED == 0 {
+            return None;
+        }
+        // 模拟给现形留了完整保护窗口；直接读该个体的剩余时间，暂停或跳播都不会补播旧动作。
+        if let Some(a) = &self.reveal
+            && en.grace[i] > 0.0
+        {
+            return Some((a, progress_frame(a.normal.len(), 1.0 - en.grace[i] / UNMASK_GRACE)));
+        }
+        let a = self.revealed.as_ref()?;
+        let n = a.normal.len();
+        let phase = en.wob[i] / TAU * n as f32;
+        Some((a, ((now * a.fps + phase) as usize) % n))
+    }
 }
 
 #[derive(Resource)]
@@ -307,6 +349,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
                 base: EnemyAnim::load(&db, asset, anim, am),
                 charge: e.charge.as_ref().and_then(|_| named(&["pounce", "charge"])),
                 shoot: e.shot.as_ref().and_then(|_| named(&["shoot"])),
+                reveal: e.disguise.as_ref().and_then(|_| named(&["reveal"])),
                 revealed: e.disguise.as_ref().and_then(|_| named(&["move"])),
                 sweep: e.boss.as_ref().and_then(|_| named(&["sweep"])),
                 summon: e.boss.as_ref().and_then(|_| named(&["summon"])),
@@ -875,23 +918,14 @@ impl Moves<'_, '_> {
                 return Some((a, k, Some(flip)));
             }
         }
-        if let Some(a) = &f.revealed
-            && en.tags[i] & TAG_REVEALED != 0
-        {
-            let n = a.normal.len();
-            let phase = en.wob[i] / TAU * n as f32;
-            return Some((a, ((now * a.fps + phase) as usize) % n, None));
+        if let Some((a, k)) = f.revealed_pose(en, i, now) {
+            return Some((a, k, None));
         }
-        // 冲锋：蓄力时停在最后一个蓄力帧，冲出去接着播，停下来以后播完剩下的
+        // 冲锋：蓄力等预警，腾空覆盖实际扑击，落地帧留到收势；循环冲撞沿用原节奏。
         if let Some(a) = &f.charge
             && let Some(ch) = &self.content.0.enemies[en.kind[i] as usize].charge
         {
-            let k = match en.charge[i] {
-                CHARGE_WINDUP => Some(a.windup_frame(ch.windup - en.charge_t[i])),
-                CHARGE_DASH => a.strike_frame(ch.duration - en.charge_t[i], true),
-                CHARGE_RECOVER => a.strike_frame(ch.duration + ch.recover - en.charge_t[i], false),
-                _ => None,
-            };
+            let k = a.charge_frame(ch, en.charge[i], en.charge_t[i]);
             return k.map(|k| (a, k, Some(en.charge_dx[i] < 0.0)));
         }
         let left = |dir: f32| Some(dir.cos() < 0.0);
@@ -1003,6 +1037,8 @@ pub(crate) fn collect_draws(
         let flip = face.unwrap_or(player_now.x < p.x);
         let (deform, offset) = response.map_or((Mat2::IDENTITY, Vec2::ZERO), |h| h.sample());
         let body = Vec2::new(s.x, s.y + bob) + offset;
+        // 分裂出来的小号按实际碰撞半径画小，死亡演出沿用同一个尺寸。
+        let size = Vec2::splat(en.r[i] / def.radius);
         impacts.poses.insert(
             en.handle(i),
             crate::impact::Pose {
@@ -1010,6 +1046,7 @@ pub(crate) fn collect_draws(
                 flash: anim.flash.get(k).copied().unwrap_or(anim.normal[k]),
                 pos: Vec2::new(s.x, s.y + bob),
                 flip,
+                scale: size,
             },
         );
         // 冰冻发蓝，灼烧发红
@@ -1032,8 +1069,7 @@ pub(crate) fn collect_draws(
         if fade <= 0.01 {
             continue;
         }
-        // 分裂出来的小号按实际碰撞半径画小；刚刷出来的从墨里浮现（这段时间不伤人）
-        let size = Vec2::splat(en.r[i] / def.radius);
+        // 刚刷出来的从墨里浮现（这段时间不伤人）。
         // 现形保护也使用 grace；此时妖物已经在场，不能重复出生淡入而藏起威胁。
         let born = if def.disguise.is_some() && en.tags[i] & TAG_REVEALED != 0 {
             1.0
@@ -1356,6 +1392,52 @@ mod tests {
     }
 
     #[test]
+    fn fox_reveal_follows_its_own_protection_window_then_stays_revealed() {
+        let anim = |start, count| EnemyAnim {
+            normal: (start..start + count).map(FrameId).collect(),
+            flash: Vec::new(),
+            emit: Vec::new(),
+            fps: 8.0,
+            windup: 0,
+            loop_from: None,
+            landing: None,
+        };
+        let frames = EnemyFrames {
+            base: anim(0, 6),
+            charge: None,
+            shoot: None,
+            reveal: Some(anim(10, 4)),
+            revealed: Some(anim(20, 6)),
+            sweep: None,
+            summon: None,
+            floating: false,
+            shadow_scale: 1.0,
+        };
+        let mut en = Enemies::default();
+        let first = en.alloc().unwrap();
+        let second = en.alloc().unwrap();
+        assert!(frames.revealed_pose(&en, first, 30.0).is_none(), "出生保护不会误播现形");
+        en.tags[first] |= TAG_REVEALED;
+        for (remaining, frame) in [(0.5, 10), (0.38, 10), (0.375, 11), (0.25, 12), (0.125, 13), (0.01, 13)] {
+            en.grace[first] = remaining;
+            for now in [30.0, 30.0, 120.0] {
+                let (a, k) = frames.revealed_pose(&en, first, now).unwrap();
+                assert_eq!(a.normal[k], FrameId(frame), "动作只跟随自己的保护时间");
+            }
+            assert!(frames.revealed_pose(&en, second, 30.0).is_none(), "同类路人不跟着现形");
+        }
+        en.grace[first] = 0.0;
+        for now in [30.5, 60.0, 120.0] {
+            let (a, k) = frames.revealed_pose(&en, first, now).unwrap();
+            assert!(a.normal[k].0 >= 20, "保护结束后直接追击，不循环或补播现形");
+        }
+        en.kill(first);
+        let replacement = en.alloc().unwrap();
+        assert_eq!(replacement, first);
+        assert!(frames.revealed_pose(&en, replacement, 120.0).is_none(), "槽位复用后恢复路人伪装");
+    }
+
+    #[test]
     fn ranged_animation_waits_for_shot_and_belongs_to_one_enemy_generation() {
         let anim = || EnemyAnim {
             normal: (0..5).map(FrameId).collect(),
@@ -1364,11 +1446,13 @@ mod tests {
             fps: 10.0,
             windup: 2,
             loop_from: None,
+            landing: None,
         };
         let frames = vec![EnemyFrames {
             base: anim(),
             charge: None,
             shoot: Some(anim()),
+            reveal: None,
             revealed: None,
             sweep: None,
             summon: None,
@@ -1473,6 +1557,39 @@ mod tests {
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.4, true), Some(2));
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.55, true), Some(3));
         assert_eq!(strike_frame(6, 2, Some(2), 10.0, 0.7, false), None);
+    }
+
+    #[test]
+    fn fox_lands_only_after_the_actual_pounce_and_keeps_its_recovery_pose() {
+        let content = lantern_content::Content::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"),
+        )
+        .unwrap();
+        let charge = content.enemies.iter().find(|e| e.id == "fox").unwrap().charge.as_ref().unwrap();
+        let anim = EnemyAnim {
+            normal: (0..6).map(FrameId).collect(),
+            flash: Vec::new(),
+            emit: Vec::new(),
+            fps: 12.0,
+            windup: 2,
+            loop_from: None,
+            landing: Some(5),
+        };
+        for fps in [30, 60] {
+            for step in 0..=(charge.duration * fps as f32) as usize {
+                let remaining = (charge.duration - step as f32 / fps as f32).max(0.0);
+                let frame = anim.charge_frame(charge, CHARGE_DASH, remaining).unwrap();
+                assert!((2..=4).contains(&frame), "还在冲锋时只能腾空，不能提前落地");
+            }
+            for step in 0..=(charge.recover * fps as f32) as usize {
+                let remaining = (charge.recover - step as f32 / fps as f32).max(0.0);
+                assert_eq!(anim.charge_frame(charge, CHARGE_RECOVER, remaining), Some(5));
+            }
+        }
+        assert_eq!(anim.charge_frame(charge, CHARGE_DASH, charge.duration), Some(2));
+        assert_eq!(anim.charge_frame(charge, CHARGE_DASH, charge.duration * 0.5), Some(3));
+        assert_eq!(anim.charge_frame(charge, CHARGE_DASH, 0.01), Some(4));
+        assert_eq!(anim.charge_frame(charge, lantern_sim::enemies::CHARGE_IDLE, charge.every), None);
     }
 
     fn charging_boss(rain: bool) -> BossState {

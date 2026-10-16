@@ -3,7 +3,7 @@
 用正式主角模型（models/hero.py）、同一套假卡通墨色材质、Freestyle 墨线和后期（post/postprocess.py），
 只是相机拉近：胸像、四分之三侧脸、微微看向画面左边；灯杖从画框左下方斜伸进来，灯笼挂在脸的左下方，
 暖光照亮脸的左侧（后期按灯笼位置染暖光、背灯一侧压一层淡夜色）。近景专用的改动：精灵尺度的墨点眼和眉
-换成后期按投影位置画的五官，鬓发换成细的发缕并加两缕额发，脸的暗面改染淡赭，灯笼缩小、灯杖变细。
+换成后期按投影位置画的五官，发束与脸面沿用正式主角模型，脸的暗面改染淡赭，灯笼缩小、灯杖变细。
 再装进界面图标同一套圆框（post/ui_icons.py 的 frame_back / frame_front：宣纸圆底 + 一笔墨圈），
 墨圈内侧是一道藤黄偏火色的暖弧。
 
@@ -172,36 +172,6 @@ def soften_skin(parts: dict) -> None:
             e.color = B.hex_lin(mid)
 
 
-def restyle_hair(parts: dict) -> None:
-    """近景的鬓发：原来的两条扁带在胸像里像两根竖直的黑条，换成更细、带 S 形起伏、收尖的发缕；
-    再从额顶分出两缕短发斜扫到鬓角，让发际线不是一条直线（都挂在头枢轴下，坐标相对头心）。"""
-    from mathutils import Vector
-    from style import bstyle as B
-    import hero as HERO
-
-    head = parts["head"]
-    hc = HERO.HEAD_C - Vector((0, 0, 1.84))
-    hair = parts["mats"]["hair"]
-    for sx, ob in zip((-1, 1), parts["sidelocks"]):
-        pts = []
-        for i in range(9):
-            t = i / 8
-            pts.append(Vector((sx * (0.086 + 0.016 * math.sin(t * 2.6) - 0.010 * t), -0.062 - 0.012 * t + 0.010 * t * t,
-                               0.050 - 0.255 * t)))
-        HERO._replace_mesh(ob, HERO._strip_build(pts, 0.022, 0.010, taper=(1.0, 0.25)))
-    for sx in (-1, 1):
-        pts = []
-        for i in range(8):
-            t = i / 7
-            x = sx * (0.012 + 0.074 * math.sin(t * math.pi / 2))
-            z = 0.098 - 0.080 * t ** 1.3
-            k = 1 - (x / (HERO.HEAD_R[0] * 1.06)) ** 2 - (z / (HERO.HEAD_R[2] * 1.04)) ** 2
-            y = -HERO.HEAD_R[1] * 1.06 * math.sqrt(max(0.02, k)) - 0.004
-            pts.append(Vector((x, y, z)))
-        B.mesh_object(f"Bang{sx:+d}", HERO._strip_build(pts, 0.030, 0.012, taper=(1.0, 0.2), side_hint=Vector((0, 0, 1))),
-                      hair, "inner", head, loc=hc)
-
-
 # 五官的特征点（头心坐标，米）：眼内外角、眉头眉尾、鼻梁与鼻尖、嘴角。后期投影到画面上用墨笔画。
 FACE_FEATURES = {
     "eye_in": (0.019, -0.006), "eye_out": (0.064, 0.000), "eye_mid": (0.041, 0.004),
@@ -220,25 +190,19 @@ def face_points(parts: dict, px: int) -> dict:
 
     head = parts["head"]
     hc = HERO.HEAD_C - Vector((0, 0, 1.84))
-    rx, ry, rz = HERO.HEAD_R
     cam = bpy.context.scene.camera
     view = (cam.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
     out = {}
     for key, (x0, z) in FACE_FEATURES.items():
         for side, sx in (("L", 1), ("R", -1)):
             x = x0 * sx
-            zn = z / rz
-            k = 1 - (x / rx) ** 2 - zn ** 2
-            yn = -math.sqrt(max(0.0, k))
-            xs = x
-            if zn < 0:  # 与 face_build 一样：下半张脸收窄、下巴前收
-                xs = x * (1 - 0.42 * (-zn) ** 1.3)
-                yn = yn * (1 - 0.18 * (-zn)) - 0.05 * zn * zn
-            y = yn * ry
-            if key.startswith("nose"):
-                y -= 0.010 if key != "nose_top" else 0.003
-            local = hc + Vector((xs, y, z))
-            nrm = Vector((xs / rx ** 2, y / ry ** 2, z / rz ** 2)).normalized()
+            surface = HERO.face_surface(x, z)
+            local = hc + surface
+            # 鼻梁与下颌已由正式模型塑形；法线也从同一表面求，避免远侧五官穿到脸外。
+            eps = 0.0005
+            dx = HERO.face_surface(x + eps, z) - HERO.face_surface(x - eps, z)
+            dz = HERO.face_surface(x, z + eps) - HERO.face_surface(x, z - eps)
+            nrm = dx.cross(dz).normalized()
             w = head.matrix_world
             pw = w @ local
             nw = (w.to_3x3() @ nrm).normalized()
@@ -252,7 +216,10 @@ def build_bust():
     import bpy
     import hero as HERO
 
+    from hero_style import apply_hero_style
+
     root, parts, sockets = HERO.build_hero()
+    apply_hero_style(parts)
     parts["dir"] = "S"
     root.rotation_mode = "XYZ"
     root.rotation_euler.z = math.radians(BUST_YAW_DEG)
@@ -262,7 +229,6 @@ def build_bust():
     for sx in (-1, 1):  # 精灵尺度的墨点眼和眉在近景里像两颗黑豆，改由后期按投影位置画（见 face_points）
         for nm in (f"Eye{sx:+d}", f"Brow{sx:+d}"):
             bpy.data.objects[nm].hide_render = True
-    restyle_hair(parts)
     soften_skin(parts)
     bpy.context.view_layer.update()
     place_lantern(parts, LANTERN_AT, LANTERN_SCALE, STAFF_FROM, STAFF_K)

@@ -2,6 +2,10 @@
 
 本轮总协调：终端 `pts/2`；集成分支：`develop`。
 
+## 当前状态：持续制作
+
+用户已授权持续优化、不再询问，当前进度见 [PRODUCTION.md](PRODUCTION.md)。下文的八终端分工和“首轮结束”记录保留为历史，不表示制作目标完成。新的工作包使用可直接通信的子代理和独立工作树：`r2-ui`（插画/界面与导入工具）、`r2-scene`（场景构图和遮挡）、`r2-combat-review`（动作与正式主角制作）；初期构筑改进继续在 `r3-build-rhythm` 推进。总协调审查后只向 `develop` 集成。
+
 ## 开始工作
 
 这份文件的实时版本位于 `/home/ming/mygame-worktrees/develop/docs/TEAM.md`。各 worktree 中的副本可能较旧，任务状态以实时版本和共享消息为准。

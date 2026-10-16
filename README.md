@@ -8,7 +8,7 @@
 
 - **下载**：[GitHub Releases](https://github.com/qimingren51/mygame/releases)（发布第一个版本后提供）。开发中的测试包在 Actions 的 Release 工作流里手动运行生成。
 - **架构设计**：[docs/DESIGN.md](docs/DESIGN.md)
-- **进度**：`develop` 正在打磨青丘首轮体验：清晰月夜、升级卡与状态栏、铜钱剑、三种青丘妖物，以及暂停内的属性与构筑查询。当前分工与集成状态见 [docs/TEAM.md](docs/TEAM.md)，历史里程碑见设计文档第 17 节。
+- **进度**：`develop` 持续打磨青丘体验：39 张升级插画、主角与灯笼动画、月夜场景、铜钱剑、三种青丘妖物，以及局内属性与构筑查询。实际进展与尚待制作的内容见 [docs/PRODUCTION.md](docs/PRODUCTION.md)，实机画面见 [docs/PLAYTEST.md](docs/PLAYTEST.md)，协作分工见 [docs/TEAM.md](docs/TEAM.md)。
 
 ### 下载校验与 Windows SmartScreen
 

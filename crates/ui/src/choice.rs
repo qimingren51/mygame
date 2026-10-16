@@ -78,7 +78,7 @@ const CARD_GAIN_SIZE: f32 = 22.0;
 const CARD_NOTE_SIZE: f32 = 15.0;
 const CARD_LABEL_SIZE: f32 = 14.0;
 const CARD_CAPTION_SIZE: f32 = 17.0;
-/// 插画区贴着卡框内沿，4:3（美术原图 480×360）
+/// 插画区贴着卡框内沿，正式插画保持完整的 4:3 构图。
 const ART_PAD: f32 = 16.0;
 const ART_HEIGHT: f32 = (CARD_WIDTH - 2.0 * ART_PAD) * 0.75;
 /// 没有插画时放大的图标
@@ -212,8 +212,10 @@ fn input(
             let enabled = [flow.rerolls > 0, flow.banishes > 0, true];
             if let Some(h) = ui.hovered.take()
                 && actions.pointer_moved
+                && h < n + enabled.len()
+                && (h < n || enabled[h - n])
             {
-                ui.selected = h.min(n + 2);
+                ui.selected = h;
             }
             if actions.nav.y != 0 {
                 ui.selected = if ui.selected < n {
@@ -348,16 +350,27 @@ fn input(
     }
 }
 
-/// 选中的卡片叠一层泥金焦点框。
+/// 焦点用泥金标出；移到页脚时，目标卡留下较淡的金边，说明与封印对象仍然明确。
 fn highlight(
     ui: Res<ChoiceUi>,
     flow: Res<Flow>,
-    mut focus: Query<(&CardFocus, &mut Visibility)>,
+    mut focus: Query<(&CardFocus, &mut Visibility, Option<&mut ImageNode>)>,
     mut reroll: Query<&mut crate::prompts::Prompt, (With<RerollLabel>, Without<BanishLabel>)>,
     mut banish: Query<&mut crate::prompts::Prompt, (With<BanishLabel>, Without<RerollLabel>)>,
 ) {
-    for (f, mut v) in &mut focus {
-        v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
+    for (f, mut v, image) in &mut focus {
+        let (index, retained) = match *f {
+            CardFocus::Selected(index) => (index, false),
+            CardFocus::Target(index) => (index, index == ui.card_target),
+        };
+        let selected = index == ui.selected;
+        v.set_if_neq(if selected || retained { Visibility::Inherited } else { Visibility::Hidden });
+        if let Some(mut image) = image {
+            let color = Color::WHITE.with_alpha(if selected { 1.0 } else { 0.42 });
+            if image.color != color {
+                image.color = color;
+            }
+        }
     }
     if flow.is_changed() {
         for mut t in &mut reroll {
@@ -370,7 +383,10 @@ fn highlight(
 }
 
 #[derive(Component)]
-pub(crate) struct CardFocus(usize);
+pub(crate) enum CardFocus {
+    Selected(usize),
+    Target(usize),
+}
 
 fn show_details(ui: Res<ChoiceUi>, mut details: Query<(&CardDetail, &mut Visibility)>) {
     for (detail, mut visibility) in &mut details {
@@ -492,18 +508,20 @@ fn card(
             ..default()
         },
         skin.image(card_skin(info.rarity)),
+        BoxShadow::new(Color::BLACK.with_alpha(0.32), px(0), px(8), px(0), px(18)),
     ));
     card.with_children(|card| {
-        // 焦点框：和卡片一样大，叠在上面
+        // 金边贴住原卡框，避免套出另一张厚框抢过插画。
         card.spawn((
-            CardFocus(i),
+            CardFocus::Target(i),
             Visibility::Hidden,
+            Pickable::IGNORE,
             Node {
                 position_type: PositionType::Absolute,
-                left: px(-6),
-                right: px(-6),
-                top: px(-6),
-                bottom: px(-6),
+                left: px(-2),
+                right: px(-2),
+                top: px(-2),
+                bottom: px(-2),
                 ..default()
             },
             skin.image("card_focus"),
@@ -532,6 +550,19 @@ fn card(
                 }
                 None => spawn_icon(art, db, fonts, info.icon.as_deref(), &info.glyph, info.color, ART_ICON),
             }
+            // 独立叠框不挤占画面，正式插画不会因边线改变 4:3 的比例。
+            art.spawn((
+                Pickable::IGNORE,
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100),
+                    height: percent(100),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(6)),
+                    ..default()
+                },
+                BorderColor::all(INK.with_alpha(0.35)),
+            ));
             // 五行印压在左上角
             if let Some(e) = info.element {
                 art.spawn(Node {
@@ -564,6 +595,17 @@ fn card(
                 info.rarity.name(),
             ));
         });
+        card.spawn((
+            Pickable::IGNORE,
+            Node {
+                width: percent(100),
+                height: px(12),
+                flex_shrink: 0.0,
+                margin: UiRect::top(px(4)),
+                ..default()
+            },
+            skin.image("divider"),
+        ));
         // 卡名、收益、等级点、提示在插画和页脚之间居中
         let mut body = card.spawn(Node {
             width: percent(100),
@@ -577,11 +619,8 @@ fn card(
             card.spawn(text(&fonts.title, CARD_NAME_SIZE, INK, &info.name));
             card.spawn((
                 Text::new(&info.gain),
-                // 毛笔字体缺少箭头、百分号等字形，用正文补齐
-                TextFont {
-                    font: bevy::text::FontSource::list([fonts.title.clone(), fonts.body.clone()]),
-                    ..TextFont::from_font_size(CARD_GAIN_SIZE)
-                },
+                // 名字保留笔意；收益里的数字、百分号统一用正文字体。
+                TextFont::from(fonts.body.clone()).with_font_size(CARD_GAIN_SIZE),
                 TextColor(on_paper(info.color).mix(&INK, 0.25)),
                 TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
                 Node { width: percent(100), margin: UiRect::top(px(4)), ..default() },
@@ -730,6 +769,7 @@ pub(super) fn spawn_level_up(
                         CardDetail(i),
                         Visibility::Hidden,
                         text(&fonts.body, CARD_CAPTION_SIZE, PAPER, &caption(c, arsenal, build, o)),
+                        TextShadow { offset: Vec2::new(0.0, 2.0), color: Color::BLACK.with_alpha(0.8) },
                         TextLayout::justify(Justify::Center),
                         Node {
                             grid_row: GridPlacement::start(1),
@@ -778,17 +818,27 @@ pub(super) fn spawn_level_up(
                     let mut button = foot.spawn((
                         Node {
                             min_width: px(240),
+                            min_height: px(52),
                             padding: UiRect::axes(px(20), px(12)),
+                            align_items: AlignItems::Center,
                             justify_content: JustifyContent::Center,
                             ..default()
                         },
                         skin.image(if enabled { "btn" } else { "btn_disabled" }),
                     ));
-                    button.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
-                    button.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
+                    if enabled {
+                        button.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| {
+                            ui.clicked = Some(i);
+                        });
+                        button.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| {
+                            ui.hovered = Some(i);
+                        });
+                    }
                     button.with_children(|b| {
                         b.spawn((
-                            CardFocus(i),
+                            CardFocus::Selected(i),
+                            Visibility::Hidden,
+                            Pickable::IGNORE,
                             Node {
                                 position_type: PositionType::Absolute,
                                 left: px(0),
@@ -797,13 +847,16 @@ pub(super) fn spawn_level_up(
                                 bottom: px(0),
                                 ..default()
                             },
-                            skin.image("focus_ring"),
+                            skin.image("btn_focus"),
                         ));
-                        let mut label = b.spawn(crate::prompts::hint(
-                            &fonts.body,
-                            16.0,
-                            if enabled { INK } else { INK_DIM },
-                            label,
+                        let mut label = b.spawn((
+                            Pickable::IGNORE,
+                            crate::prompts::hint(
+                                &fonts.body,
+                                17.0,
+                                if enabled { PAPER } else { hex("#B5AB98") },
+                                label,
+                            ),
                         ));
                         if k == 0 {
                             label.insert(RerollLabel);
@@ -849,7 +902,7 @@ fn plain_card(
     ));
     card.with_children(|card| {
         card.spawn((
-            CardFocus(i),
+            CardFocus::Selected(i),
             Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
@@ -1627,7 +1680,7 @@ mod card_tests {
         .init_resource::<SimCommands>()
         .add_systems(Update, (input, highlight, show_details).chain());
         for i in 0..4 {
-            app.world_mut().spawn((CardFocus(i), Visibility::Hidden));
+            app.world_mut().spawn((CardFocus::Target(i), Visibility::Hidden, ImageNode::default()));
             app.world_mut().spawn((CardDetail(i), Visibility::Hidden));
         }
         app
@@ -1638,6 +1691,14 @@ mod card_tests {
         let world = app.world_mut();
         for (detail, visibility) in world.query::<(&CardDetail, &Visibility)>().iter(world) {
             assert_eq!(*visibility != Visibility::Hidden, detail.0 == selected);
+        }
+        let footer_focused = world.resource::<ChoiceUi>().selected >= 4;
+        for (focus, visibility, image) in world.query::<(&CardFocus, &Visibility, &ImageNode)>().iter(world) {
+            let CardFocus::Target(index) = *focus else { continue };
+            assert_eq!(*visibility != Visibility::Hidden, index == selected);
+            if index == selected {
+                assert_eq!(image.color.alpha(), if footer_focused { 0.42 } else { 1.0 });
+            }
         }
     }
 
@@ -1662,6 +1723,13 @@ mod card_tests {
         app.update();
         assert_expanded(&mut app, 2);
         assert!(app.world().resource::<SimCommands>().0.is_empty());
+
+        // 没有次数的页脚按钮不接走鼠标焦点，否则下一次回车会落在无效操作上。
+        app.world_mut().resource_mut::<ChoiceUi>().hovered = Some(4);
+        app.insert_resource(Actions { pointer_moved: true, ..default() });
+        app.update();
+        assert_eq!(app.world().resource::<ChoiceUi>().selected, 2);
+        assert_expanded(&mut app, 2);
 
         // 移到页脚仍显示将被操作的目标卡；返回后确认也不会换卡。
         app.insert_resource(Actions { nav: IVec2::Y, ..default() });
