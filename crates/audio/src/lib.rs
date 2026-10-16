@@ -73,6 +73,7 @@ impl Plugin for AudioPlugin {
                     update_audio_time,
                     apply_settings,
                     sync_scene,
+                    ambience::update_ambience,
                     play_ui_cues,
                     play_sim_events.run_if(in_state(AppState::Run)),
                     heartbeat.run_if(in_state(AppState::Run)),
