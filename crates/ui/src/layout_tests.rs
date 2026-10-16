@@ -190,3 +190,22 @@ fn stats_panel_with_every_stat_fits_after_resize() {
         .unwrap();
     assert_fits_after_resize(&mut app);
 }
+
+#[test]
+fn hud_shows_the_omen_and_element_icons_from_the_atlas() {
+    let mut app = setup();
+    let mut run = lantern_sim::RunSetup::new(1, lantern_sim::RunMode::Normal);
+    run.omen = Some(lantern_sim::OmenPick { id: "bloodmoon".into(), element: None });
+    app.insert_resource(run);
+    app.world_mut().run_system_once(crate::hud::spawn_hud).unwrap();
+    app.update();
+    let world = app.world_mut();
+    let atlas_images = world.query::<&ImageNode>().iter(world).filter(|i| i.texture_atlas.is_some()).count();
+    // 夜签一个、五行五个
+    assert!(atlas_images >= 6, "{atlas_images}");
+    let name = lantern_sim::omens::omen_name(
+        &world.resource::<lantern_sim::GameContent>().0,
+        &lantern_sim::OmenPick { id: "bloodmoon".into(), element: None },
+    );
+    assert!(world.query::<&Text>().iter(world).any(|t| t.0 == name));
+}

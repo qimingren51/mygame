@@ -50,6 +50,15 @@ pub(crate) struct Slots;
 #[derive(Component)]
 pub(crate) struct ElementChip(Element);
 
+/// 五行计数前面的图标（`ui/icon_el_*`），和点数一起变淡变亮。
+#[derive(Component)]
+pub(crate) struct ElementIcon(Element);
+
+/// 五行图标的帧名后缀，按 `Element::index` 排
+const ELEMENT_ICONS: [&str; 5] = ["metal", "wood", "water", "fire", "earth"];
+/// 共鸣阶数的记号：一阶到三阶、极境
+const TIER_MARKS: [&str; 5] = ["", "·一", "·二", "·三", "·极"];
+
 #[derive(Component)]
 pub(crate) struct BossBar;
 
@@ -107,8 +116,10 @@ pub(crate) fn spawn_hud(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     setup: Res<RunSetup>,
+    db: Option<Res<AtlasDb>>,
 ) {
     let c = &content.0;
+    let db = db.as_deref();
     let run = DespawnOnExit(AppState::Run);
     // 顶端经验条
     commands.spawn((
@@ -128,21 +139,29 @@ pub(crate) fn spawn_hud(
             skin.image("bar_fill_xp")
         )],
     ));
-    // 左上：用时、击杀、夜签；种子号收进性能面板。
-    let omen = setup
-        .omen
-        .as_ref()
-        .map_or(String::new(), |o| format!("夜签 · {}", lantern_sim::omens::omen_name(c, o)));
-    commands.spawn((
-        run.clone(),
-        Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
-        children![
-            (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
-            (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
-            text(&fonts.body, 14.0, DIM, &omen),
-            (BuffLabel, text(&fonts.body, 16.0, GOLD, "")),
-        ],
-    ));
+    // 左上：用时、击杀、夜签（图标加名字）；种子号收进性能面板。
+    commands
+        .spawn((
+            run.clone(),
+            Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
+            children![
+                (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
+                (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
+            ],
+        ))
+        .with_children(|p| {
+            if let Some(o) = &setup.omen {
+                p.spawn(Node { align_items: AlignItems::Center, column_gap: px(6), ..default() })
+                    .with_children(|row| {
+                        if let Some(db) = db {
+                            let icon = format!("ui/icon_omen_{}", o.id);
+                            spawn_icon(row, db, &fonts, Some(&icon), "签", DIM, 26.0);
+                        }
+                        row.spawn(text(&fonts.body, 15.0, DIM, &lantern_sim::omens::omen_name(c, o)));
+                    });
+            }
+            p.spawn((BuffLabel, text(&fonts.body, 16.0, GOLD, "")));
+        });
     // 右上：等级、法器与心法、五行共鸣
     commands
         .spawn((
@@ -165,21 +184,36 @@ pub(crate) fn spawn_hud(
                     ..default()
                 },
             ));
+            // 五行：图标加点数（图集里没有图标时写字）
             p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
                 for e in Element::ALL {
+                    let icon = db.and_then(|db| {
+                        db.find(&format!("ui/icon_el_{}", ELEMENT_ICONS[e.index()])).map(|f| db.ui_image(f))
+                    });
+                    let label =
+                        if icon.is_some() { "0".to_string() } else { format!("{} 0", c.element(e).name) };
                     row.spawn((
-                        Node { padding: UiRect::axes(px(10), px(3)), ..default() },
+                        Node {
+                            padding: UiRect::new(px(6), px(10), px(2), px(2)),
+                            align_items: AlignItems::Center,
+                            column_gap: px(4),
+                            ..default()
+                        },
                         skin.image("chip_dark"),
                     ))
-                    .with_child((
-                        ElementChip(e),
-                        text(
-                            &fonts.body,
-                            15.0,
-                            element_color(c, e).with_alpha(0.35),
-                            &format!("{} 0", c.element(e).name),
-                        ),
-                    ));
+                    .with_children(|chip| {
+                        if let Some(img) = icon {
+                            chip.spawn((
+                                ElementIcon(e),
+                                Node { width: px(22), height: px(22), ..default() },
+                                img.with_color(Color::WHITE.with_alpha(0.35)),
+                            ));
+                        }
+                        chip.spawn((
+                            ElementChip(e),
+                            text(&fonts.body, 15.0, element_color(c, e).with_alpha(0.35), &label),
+                        ));
+                    });
                 }
             });
         });
@@ -462,31 +496,43 @@ pub(crate) fn update_hud(
     }
 }
 
-/// 五行共鸣的点数和阶数。
+/// 五行共鸣的点数和阶数：没有点数的淡，有点数没到一阶的半亮，到了一阶全亮。
 pub(crate) fn update_chips(
     content: Res<GameContent>,
     build: Option<Res<Build>>,
     mut chips: Query<(&ElementChip, &mut Text, &mut TextColor)>,
+    mut icons: Query<(&ElementIcon, &mut ImageNode)>,
 ) {
     let Some(build) = build else { return };
     if !build.is_changed() {
         return;
     }
     let c = &content.0;
-    for (chip, mut t, mut color) in &mut chips {
-        let i = chip.0.index();
-        let pts = build.points[i];
-        let tier = build.tiers[i];
-        let name = &c.element(chip.0).name;
-        let stars = ["", "·一", "·二", "·三"][tier as usize];
-        t.0 = format!("{name} {pts}{stars}");
-        color.0 = element_color(c, chip.0).with_alpha(if pts == 0 {
+    let alpha = |e: Element| {
+        let (pts, tier) = (build.points[e.index()], build.tiers[e.index()]);
+        if pts == 0 {
             0.35
         } else if tier == 0 {
             0.7
         } else {
             1.0
-        });
+        }
+    };
+    let iconed: Vec<Element> = icons.iter().map(|(i, _)| i.0).collect();
+    for (chip, mut t, mut color) in &mut chips {
+        let i = chip.0.index();
+        let marks = TIER_MARKS[(build.tiers[i] as usize).min(TIER_MARKS.len() - 1)];
+        let pts = build.points[i];
+        // 有图标的只写点数
+        t.0 = if iconed.contains(&chip.0) {
+            format!("{pts}{marks}")
+        } else {
+            format!("{} {pts}{marks}", c.element(chip.0).name)
+        };
+        color.0 = element_color(c, chip.0).with_alpha(alpha(chip.0));
+    }
+    for (icon, mut img) in &mut icons {
+        img.color = Color::WHITE.with_alpha(alpha(icon.0));
     }
 }
 
@@ -635,5 +681,32 @@ mod hint_tests {
         app.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: 250 }));
         app.update();
         assert!(!shown(&app));
+    }
+}
+
+#[cfg(test)]
+mod chip_tests {
+    use super::*;
+
+    /// 五行计数：有图标的只写点数，极境不越界，图标跟着点数变淡变亮。
+    #[test]
+    fn element_chips_show_points_and_every_tier_including_the_peak() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+        let content = lantern_content::Content::load(&path).unwrap();
+        let mut app = App::new();
+        app.insert_resource(GameContent(content.into()))
+            .insert_resource(Build { points: [12, 3, 0, 0, 0], tiers: [4, 0, 0, 0, 0], ..default() })
+            .add_systems(Update, update_chips);
+        let metal =
+            app.world_mut().spawn((ElementChip(Element::Metal), Text::default(), TextColor::default())).id();
+        app.world_mut().spawn((ElementIcon(Element::Metal), ImageNode::default()));
+        let wood =
+            app.world_mut().spawn((ElementChip(Element::Wood), Text::default(), TextColor::default())).id();
+        let water = app.world_mut().spawn((ElementIcon(Element::Water), ImageNode::default())).id();
+        app.update();
+        assert_eq!(app.world().get::<Text>(metal).unwrap().0, "12·极");
+        // 没有图标的照旧写字
+        assert!(app.world().get::<Text>(wood).unwrap().0.ends_with(" 3"));
+        assert_eq!(app.world().get::<ImageNode>(water).unwrap().color.alpha(), 0.35);
     }
 }
