@@ -26,6 +26,7 @@ mod mist;
 /// 统一色板（和美术 style.py 的 RUNTIME_COLORS 对齐，docs/STYLE_GUIDE.md）；质感会话接入后逐步替换各处写死的颜色
 mod palette;
 mod particles;
+pub mod smoke;
 mod stats;
 mod telegraphs;
 
@@ -66,8 +67,9 @@ pub struct ViewPlugin {
     pub asset_root: PathBuf,
 }
 
+/// 启动时确定的绝对资源根目录，供图集和界面皮肤共用。
 #[derive(Resource)]
-struct AssetRoot(PathBuf);
+pub struct AssetRoot(pub PathBuf);
 
 /// 局内单独使用的贴图，在标题期间保留并预载。
 #[derive(Resource)]
@@ -101,14 +103,15 @@ impl Plugin for ViewPlugin {
                 (
                     setup_camera,
                     load_atlas,
-                    particles::setup_particles,
+                    particles::setup_particles.run_if(resource_exists::<AtlasDb>),
                     (
                         actors::build_frames,
                         fx::build_fx_frames,
                         ground::build_decor,
                         effects::setup_effects,
                         lighting::setup_lighting,
-                    ),
+                    )
+                        .run_if(resource_exists::<AtlasDb>),
                 )
                     .chain(),
             )
@@ -249,20 +252,19 @@ fn setup_camera(mut commands: Commands, content: Res<GameContent>) {
     ));
 }
 
-/// 读图集。失败时没法画任何东西，直接报错退出。
+/// 读图集。失败时交给主程序的 panic hook 记录日志并提示玩家，停止后续初始化。
 fn load_atlas(
     mut commands: Commands,
     root: Res<AssetRoot>,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    mut exit: MessageWriter<AppExit>,
 ) {
     commands.insert_resource(SceneAssets { paper: assets.load("atlas/paper.png") });
     match AtlasDb::load(&root.0, &assets, &mut layouts) {
         Ok(db) => commands.insert_resource(db),
         Err(e) => {
-            error!("图集加载失败：{e}");
-            exit.write(AppExit::error());
+            // AppExit 要到帧末才生效，继续运行会让依赖图集的系统因缺少资源而再次出错。
+            panic!("图集加载失败（{}）：{e}", root.0.display());
         }
     }
 }
@@ -279,5 +281,59 @@ fn interpolate(fixed: Res<Time<Fixed>>, mut q: Query<(&Pos, &PrevPos, &mut Trans
         let p = prev.0.lerp(pos.0, a);
         let s = to_screen(p);
         tf.translation = Vec3::new(s.x, s.y, actors::sort_z(layer::ACTORS, p.y));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn atlas_failure_stops_startup_with_the_path() {
+        #[derive(Resource, Default)]
+        struct AfterAtlas(bool);
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("提灯 图集测试-{}-{now}", std::process::id()));
+        std::fs::create_dir_all(root.join("atlas")).unwrap();
+
+        // 缺清单、坏清单、缺页、坏页都必须提供原始错误并停止初始化链。
+        for (index, page, expected) in [
+            (None, None, "读取 atlas/index.json 失败"),
+            (Some("{"), None, "atlas/index.json 格式错误"),
+            (Some(r#"{"pages":{"actors":["actors.json"]}}"#), None, "读取 atlas/actors.json 失败"),
+            (Some(r#"{"pages":{"actors":["actors.json"]}}"#), Some("{"), "atlas/actors.json 格式错误"),
+        ] {
+            if let Some(index) = index {
+                std::fs::write(root.join("atlas/index.json"), index).unwrap();
+            }
+            if let Some(page) = page {
+                std::fs::write(root.join("atlas/actors.json"), page).unwrap();
+            }
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+                .init_asset::<Image>()
+                .init_resource::<Assets<TextureAtlasLayout>>()
+                .init_resource::<AfterAtlas>()
+                .insert_resource(AssetRoot(root.clone()))
+                .add_systems(
+                    Startup,
+                    (
+                        load_atlas,
+                        (|_: Res<AtlasDb>, mut after: ResMut<AfterAtlas>| after.0 = true)
+                            .run_if(resource_exists::<AtlasDb>),
+                    )
+                        .chain(),
+                );
+            let panic = catch_unwind(AssertUnwindSafe(|| app.update())).unwrap_err();
+            let message = panic.downcast::<String>().unwrap();
+            assert!(!app.world().contains_resource::<AtlasDb>());
+            assert!(!app.world().resource::<AfterAtlas>().0);
+            assert!(message.contains(expected), "{message}");
+            assert!(message.contains(root.to_str().unwrap()));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

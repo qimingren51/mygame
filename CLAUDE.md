@@ -32,6 +32,7 @@ packaging/           安装包附带的说明
 
 ```bash
 cargo run                                      # 运行游戏（参数：--seed <数字>、--windowed）
+cargo run -- --smoke-test --windowed            # 初始化并渲染 120 帧，成功返回 0
 cargo run --features dev                       # 开发模式（Bevy 调试工具、资源热重载）
 cargo test --workspace                         # 全部测试
 cargo clippy --workspace --all-targets -- -D warnings
@@ -75,7 +76,11 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
 
 - `.github/workflows/ci.yml`：桌面版相关文件有改动时运行。
   - Linux：格式、clippy、测试、跑分。
-  - Windows：确定性测试，以及检查能否编译。
+  - Windows：确定性测试。PR 上另外只检查能否编译；推送到 master 和手动运行时再跑平台层、游戏、音频与画面层测试，构建发布版，检查 PE 资源与 DLL 依赖，从中文空格路径解压包中运行窗口渲染冒烟测试，失败保留日志。打 `v*` 标签前先确认 master 上这些是绿的。
+- Windows 本地构建使用 MSVC 工具链（Visual Studio C++ 桌面开发工具），运行 `cargo build --release -p lantern`。`.cargo/config.toml` 对 `x86_64-pc-windows-msvc` 启用 `+crt-static`；CI 用 `dumpbin /dependents` 检查：只许依赖 System32 里的系统 DLL，并拦下 Visual C++ 运行库。
+- 发布版必须将 `assets/` 整个目录放到 `lantern.exe` 旁边，再运行 `lantern.exe --smoke-test --windowed`。它使用正式插件创建窗口，等待图集、字体、贴图上传和渲染管线就绪，提交 120 帧并等待设备完成后返回 0；资源、渲染错误、提前关闭或超时返回非 0。不会因错误弹窗阻塞自动化；无声卡沿用静音降级。
+- 无 GPU 的 Windows CI 设置 `WGPU_BACKEND=dx12`、`WGPU_FORCE_FALLBACK_ADAPTER=1`，使用 WARP；本地有 GPU 时可不设置。程序内超时为 120 秒，CI 另有 180 秒进程超时（覆盖初始化卡住）和 5 分钟步骤超时。日志在 `%APPDATA%\lantern\logs`。
+- Linux 无显示环境的常规测试跳过窗口集成测试；有 Xvfb 和 Mesa lavapipe 时可运行 `WGPU_BACKEND=vulkan WGPU_FORCE_FALLBACK_ADAPTER=1 xvfb-run -a cargo test -p lantern --test smoke_test -- --ignored`，覆盖真实渲染成功、贴图缺失或损坏、字体损坏。Windows CI 自动运行这些集成测试。
 - `.github/workflows/release.yml`：
   - 推送 `v*` 标签时，打包 Linux 和 Windows 版本，发布到 GitHub Releases。
   - 手动运行时只打包，产物在这次运行的 Artifacts 里。

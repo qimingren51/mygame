@@ -449,6 +449,7 @@ const MENU: [(&str, &str); 4] = [("出发", "{confirm}"), ("灯驿", "{hub}"), (
 pub(crate) fn panel() -> impl Bundle {
     (
         TitlePanel,
+        crate::responsive::FitViewport::default(),
         DespawnOnExit(AppState::Title),
         Node {
             position_type: PositionType::Absolute,
@@ -537,6 +538,8 @@ fn redraw(
         TitleMode::Scroll { dawn, .. } => {
             if let Some(region) = c.regions.iter().find(|r| r.id == crate::scroll::REGION) {
                 let mut root = commands.spawn(panel());
+                // 卷轴已经使用视口百分比和自适应字号，不再套固定画布。
+                root.remove::<crate::responsive::FitViewport>();
                 clickable(&mut root, 0);
                 let root = root.id();
                 crate::scroll::spawn(&mut commands, root, &art, &fonts, region, *dawn, window.width());
@@ -591,21 +594,17 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
             if best.won { "　·　已迎来天明" } else { "" }
         )
     };
-    commands
-        .spawn((
-            TitlePanel,
-            DespawnOnExit(AppState::Title),
-            Node {
-                position_type: PositionType::Absolute,
-                left: percent(7),
-                top: percent(12),
-                bottom: percent(8),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Start,
-                row_gap: px(10),
-                ..default()
-            },
-        ))
+    commands.spawn(panel()).with_children(|root| {
+        root.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: percent(7),
+            top: percent(12),
+            bottom: percent(8),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Start,
+            row_gap: px(10),
+            ..default()
+        })
         .with_children(|p| {
             p.spawn((
                 Node { width: px(520), height: px(172), ..default() },
@@ -646,6 +645,7 @@ fn main_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, profile: &Pro
                 concat!("桌面版 · 开发预览 v", env!("CARGO_PKG_VERSION"), "　　{fullscreen}"),
             ));
         });
+    });
 }
 
 pub(crate) fn dim_layer() -> impl Bundle {
@@ -718,7 +718,7 @@ fn omen_panel(
     });
 }
 
-fn meta_panel(
+pub(super) fn meta_panel(
     commands: &mut Commands,
     c: &Content,
     fonts: &Fonts,
@@ -727,11 +727,15 @@ fn meta_panel(
     profile: &Profile,
 ) {
     let m = &c.meta;
-    commands.spawn(panel()).with_children(|p| {
+    let mut root = commands.spawn(panel());
+    root.insert(crate::responsive::FitViewport::for_meta(m.nodes.len()));
+    root.with_children(|p| {
         p.spawn(dim_layer());
         p.spawn((
             Node {
-                width: px(1120),
+                width: percent(crate::responsive::PANEL_WIDTH_PERCENT),
+                max_width: px(1120),
+                flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 padding: UiRect::axes(px(56), px(36)),
@@ -771,6 +775,7 @@ fn meta_panel(
                     };
                     let mut row = g.spawn(Node {
                         width: percent(100.0 / META_COLUMNS as f32),
+                        min_width: px(0),
                         align_items: AlignItems::Center,
                         column_gap: px(12),
                         padding: UiRect::axes(px(12), px(6)),
@@ -788,26 +793,32 @@ fn meta_panel(
                             flex_direction: FlexDirection::Column,
                             flex_grow: 1.0,
                             flex_shrink: 1.0,
+                            min_width: px(0),
                             row_gap: px(2),
                             ..default()
                         })
                         .with_children(|t| {
-                            t.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() })
-                                .with_children(|h| {
-                                    h.spawn(text(&fonts.title, 26.0, INK, &node.name));
-                                    for k in 0..node.max_level {
-                                        h.spawn((
-                                            Node { width: px(14), height: px(14), ..default() },
-                                            skin.image(if k < lv { "pip_on" } else { "pip" }),
-                                        ));
-                                    }
-                                    h.spawn(text(
-                                        &fonts.body,
-                                        14.0,
-                                        if can { on_paper(hex("#FFD98A")) } else { INK_DIM },
-                                        &price,
+                            t.spawn(Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: px(8),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|h| {
+                                h.spawn(text(&fonts.title, 26.0, INK, &node.name));
+                                for k in 0..node.max_level {
+                                    h.spawn((
+                                        Node { width: px(14), height: px(14), ..default() },
+                                        skin.image(if k < lv { "pip_on" } else { "pip" }),
                                     ));
-                                });
+                                }
+                                h.spawn(text(
+                                    &fonts.body,
+                                    14.0,
+                                    if can { on_paper(hex("#FFD98A")) } else { INK_DIM },
+                                    &price,
+                                ));
+                            });
                             t.spawn(text(&fonts.body, 13.0, INK_DIM, &node.desc));
                         });
                     });

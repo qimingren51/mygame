@@ -12,17 +12,22 @@
 //!   接着是一声低锣，天明时编钟和晨鸟。
 //! - 命中声（[`impact`]）：按法器分组洗牌轮换纹理，用音频自己的随机流。
 //! - 同类声音有最短间隔，几百次命中也不会炸耳朵；战斗和前景再过一个压缩器兜底。濒死时有心跳。
+//! - 没有输出设备时静音运行，按真实时间重试（[`retry`]），期间界面显示 [`AudioUnavailable`]。
 
 use std::time::Duration;
 
 use bevy::prelude::*;
+#[cfg(not(test))]
+use kira::DefaultBackend;
 use kira::clock::ClockSpeed;
 use kira::sound::static_sound::StaticSoundData;
-use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning, StartTime};
+use kira::{AudioManager, AudioManagerSettings, Decibels, Panning, StartTime};
+#[cfg(test)]
+use tests::TestBackend as DefaultBackend;
 
 use lantern_content::WeaponIdentity;
 use lantern_core::{Pcg32, step::TICK_HZ};
-use lantern_platform::{MenuSoundscape, Settings, UiCue};
+use lantern_platform::{AudioUnavailable, MenuSoundscape, Settings, UiCue};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::enemies::Enemies;
 use lantern_sim::pickups::PickupKind;
@@ -36,15 +41,19 @@ mod duck;
 mod impact;
 mod mixer;
 mod music;
+mod retry;
 mod sfx;
 mod space;
 mod synth;
+#[cfg(test)]
+mod tests;
 
 use ambience::Ambience;
 use duck::{Ducking, Focus};
 use impact::ImpactPicker;
 use mixer::{Lane, Mixer, tween};
 use music::{Music, MusicMode, PressureInput};
+use retry::AudioRetry;
 use sfx::Sfx;
 use space::Scene;
 use synth::pent;
@@ -71,6 +80,7 @@ impl Plugin for AudioPlugin {
                 PostUpdate,
                 (
                     update_audio_time,
+                    retry_audio,
                     apply_settings,
                     sync_scene,
                     ambience::update_ambience,
@@ -90,7 +100,9 @@ impl Plugin for AudioPlugin {
 /// kira 的后端在部分平台上不能跨线程传递，所以作为 NonSend 资源放在主线程。
 pub struct Audio {
     /// 管理器被丢掉时声音就停了，一直留着
-    _manager: Option<AudioManager>,
+    _manager: Option<AudioManager<DefaultBackend>>,
+    /// 没有输出时下次重试的时刻
+    retry: AudioRetry,
     mixer: Option<Mixer>,
     ducking: Ducking,
     /// 夜主倒下的静半拍：到这个时刻（秒）前景声才回来
@@ -227,29 +239,50 @@ impl Audio {
     }
 }
 
+/// 建立输出：管理器、四类总线、音乐时钟和分轨。任何一步失败都不留半套，下次重试从头来。
+fn open_output(settings: &Settings) -> Result<(AudioManager<DefaultBackend>, Mixer, Music), String> {
+    let mut manager =
+        AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()).map_err(|e| e.to_string())?;
+    let mut mixer = Mixer::new(&mut manager, settings).map_err(|e| format!("无法建立音频总线：{e}"))?;
+    let clock = manager.add_clock(ClockSpeed::TicksPerSecond(1.0)).ok();
+    // 音乐在后台合成，分轨挂在音乐总线下；时钟先走，采样就绪时再确定第一拍的起点。
+    let mut music = Music::new(clock, Some(&mut mixer.music));
+    music.start_clock();
+    Ok((manager, mixer, music))
+}
+
+impl Audio {
+    /// 试着打开输出；成功返回 true。只在第一次失败时警告，之后的重试安静进行。
+    fn try_open(&mut self, settings: &Settings, now: Duration) -> bool {
+        let first = self.retry.attempts() == 0;
+        let ok = match open_output(settings) {
+            Ok((manager, mixer, music)) => {
+                self._manager = Some(manager);
+                self.mixer = Some(mixer);
+                self.music = music;
+                true
+            }
+            Err(e) if first => {
+                warn!("没有可用的音频输出，静音运行，稍后重试：{e}");
+                false
+            }
+            Err(e) => {
+                debug!("音频输出仍不可用：{e}");
+                false
+            }
+        };
+        self.retry.finish(now, ok);
+        ok
+    }
+}
+
 fn init_audio(world: &mut World) {
     let settings = world.get_resource::<Settings>().cloned().unwrap_or_default();
-    let mut manager = match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            warn!("没有可用的音频输出，静音运行：{e}");
-            None
-        }
-    };
-    let mut mixer = manager.as_mut().and_then(|m| match Mixer::new(m, &settings) {
-        Ok(mixer) => Some(mixer),
-        Err(e) => {
-            warn!("无法建立音频总线，静音运行：{e}");
-            None
-        }
-    });
-    let clock = manager.as_mut().and_then(|m| m.add_clock(ClockSpeed::TicksPerSecond(1.0)).ok());
-    // 音乐在后台合成，分轨挂在音乐总线下；时钟先走，采样就绪时再确定第一拍的起点。
-    let mut music = Music::new(clock, mixer.as_mut().map(|m| &mut m.music));
-    music.start_clock();
-    world.insert_non_send(Audio {
-        _manager: manager,
-        mixer,
+    let now = world.get_resource::<Time<Real>>().map_or(Duration::ZERO, Time::elapsed);
+    let mut audio = Audio {
+        _manager: None,
+        retry: AudioRetry::default(),
+        mixer: None,
         ducking: Ducking::default(),
         death_silence_until: 0.0,
         impacts: ImpactPicker::new(1),
@@ -258,14 +291,47 @@ fn init_audio(world: &mut World) {
         scene: Scene::Title,
         next_heart: 0.0,
         sfx: Sfx::new(),
-        music,
+        music: Music::new(None, None),
         last: Vec::new(),
         now: 0.0,
         gem_chain: 0,
         gem_last: 0.0,
         muffled: false,
         last_phase: None,
-    });
+    };
+    if !audio.try_open(&settings, now) {
+        world.insert_resource(AudioUnavailable);
+    }
+    world.insert_non_send(audio);
+}
+
+/// 启动时没有输出就按真实时间重试（暂停、升级选择时也试）。恢复后新总线从标题场所开始，
+/// 环境声重建，音乐从当前状态重新进入；静音期间的音效不补放。
+fn retry_audio(
+    time: Res<Time<Real>>,
+    settings: Option<Res<Settings>>,
+    state: Res<State<AppState>>,
+    mut audio: NonSendMut<Audio>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed();
+    if !audio.retry.is_due(now) {
+        return;
+    }
+    let settings = settings.map(|s| s.clone()).unwrap_or_default();
+    if !audio.try_open(&settings, now) {
+        return;
+    }
+    let a = &mut *audio;
+    a.ambience = Ambience::new();
+    a.muffled = false;
+    match state.get() {
+        AppState::Title => a.music.title(now.as_secs_f64()),
+        AppState::Run => a.music.start_run(now.as_secs_f64()),
+        AppState::Boot | AppState::Results => {}
+    }
+    commands.remove_resource::<AudioUnavailable>();
+    info!("音频输出已恢复");
 }
 
 fn update_audio_time(time: Res<Time<Real>>, mut audio: NonSendMut<Audio>) {

@@ -21,6 +21,10 @@ lantern_ui.workspace = true
 lantern_platform.workspace = true
 bevy.workspace = true
 
+[build-dependencies]
+# 依赖在宿主机编译；build.rs 仅对 Windows 目标调用资源编译器。
+winresource.workspace = true
+
 [features]
 # 开发模式：Bevy 的调试工具与资源热重载。调试面板（egui）在 M1 加入。
 dev = ["bevy/dev", "lantern_platform/dev"]

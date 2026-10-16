@@ -1,6 +1,7 @@
 # 打包桌面版。
 # - 推送 v* 标签（例如 v0.1.0）：打包 Linux 和 Windows 版本，发布到 GitHub Releases（标记为预发布）。
 # - 在 Actions 页面手动运行：只打包，安装包在这次运行的 Artifacts 里下载，适合测试。
+# - Windows 签名需要同时配置 WINDOWS_CERT_PFX_BASE64 和 WINDOWS_CERT_PASSWORD 两个仓库 secrets。
 name: Release
 
 on:
@@ -43,6 +44,31 @@ jobs:
           key: release
       - name: 构建
         run: cargo build --release --locked -p lantern
+      - name: Windows Authenticode 签名（可选）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:WINDOWS_CERT_PFX_BASE64 -or -not $env:WINDOWS_CERT_PASSWORD) {
+            Write-Host '未同时配置 WINDOWS_CERT_PFX_BASE64 和 WINDOWS_CERT_PASSWORD，跳过 Authenticode 签名。'
+            exit 0
+          }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw '找不到 Windows SDK 的 signtool.exe' }
+          $pfx = Join-Path $env:RUNNER_TEMP "lantern-signing-$([guid]::NewGuid()).pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 target/release/lantern.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode 签名或 RFC3161 时间戳失败' }
+            & $signtool.FullName verify /pa /all /tw /v target/release/lantern.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode 签名或时间戳验证失败' }
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+          }
       - name: 打包
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::7}"; fi
@@ -54,12 +80,21 @@ jobs:
           cd dist
           if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
           ls -la
+      - name: 生成发布包 SHA-256 校验文件
+        id: checksums
+        working-directory: dist
+        run: |
+          shopt -s nullglob
+          archives=(*.zip *.tar.gz)
+          if (( ${#archives[@]} == 0 )); then echo '没有找到发布包，无法生成校验文件。' >&2; exit 1; fi
+          sha256sum -- "${archives[@]}" > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: lantern-${{ matrix.platform }}
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/SHA256SUMS.txt
           if-no-files-found: error
 
   publish:
@@ -72,12 +107,23 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          merge-multiple: true
+      # 保留各平台目录，避免同名 SHA256SUMS.txt 在下载时互相覆盖。
+      - name: 汇总并验证发布包 SHA-256 校验文件
+        id: checksums
+        working-directory: dist
+        run: |
+          : > SHA256SUMS.txt
+          for artifact in lantern-*; do
+            (cd "$artifact" && sha256sum --check SHA256SUMS.txt)
+            cat "$artifact/SHA256SUMS.txt" >> SHA256SUMS.txt
+          done
+          mv -- lantern-*/*.zip lantern-*/*.tar.gz .
+          sha256sum --check SHA256SUMS.txt
       - name: 发布到 GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --title "提灯夜行 $GITHUB_REF_NAME" \
             --generate-notes \

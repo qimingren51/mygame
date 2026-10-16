@@ -11,6 +11,7 @@
 //!       [--record <文件>]（把第一局存成回放并打印关键时刻，可以用 `lantern --replay <文件> --from <秒>` 在游戏里看）
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -958,32 +959,37 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
     Ok(())
 }
 
-pub fn kite_cmd(args: &[String]) -> Result<(), String> {
+pub fn kite_cmd(args: &[OsString]) -> Result<(), String> {
     let runs = flag(args, "--runs", 40)? as usize;
     let seed0 = flag(args, "--seed", 1)?;
     let tier = flag(args, "--tier", 1)? as u8;
     let jobs =
         flag(args, "--jobs", std::thread::available_parallelism().map_or(1, |n| n.get()) as u64)? as usize;
-    let text = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-    let meta = text("--meta").unwrap_or_else(|| "none".into());
+    let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let text = |name: &str| {
+        value(name)
+            .map(|v| v.into_string().map_err(|v| format!("{name} 后面必须是有效的 UTF-8 文字：{v:?}")))
+            .transpose()
+    };
+    let meta = text("--meta")?.unwrap_or_else(|| "none".into());
     if !["none", "half", "full"].contains(&meta.as_str()) {
         return Err("--meta 只能是 none、half、full".into());
     }
-    let lamp = text("--lamp");
-    let record = text("--record").map(std::path::PathBuf::from);
-    let skill_name = text("--skill").unwrap_or_else(|| "expert".into());
+    let lamp = text("--lamp")?;
+    let record = value("--record").map(std::path::PathBuf::from);
+    let skill_name = text("--skill")?.unwrap_or_else(|| "expert".into());
     let skill = Skill::by_name(&skill_name).ok_or("--skill 只能是 novice、regular、expert、circle")?;
     let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
     // 要跑的机器人：不带选卡偏好的一组，或者流派、组合（all 表示全部）
     let mut plans: Vec<Plan> = Vec::new();
-    if let Some(name) = text("--school") {
+    if let Some(name) = text("--school")? {
         if name == "all" {
             plans.extend(SCHOOL_NAMES.split('、').filter_map(Plan::school));
         } else {
             plans.push(Plan::school(&name).ok_or(format!("--school 只能是 {SCHOOL_NAMES} 或 all"))?);
         }
     }
-    if let Some(name) = text("--combo") {
+    if let Some(name) = text("--combo")? {
         if name == "all" {
             plans.extend(content.elements.reactions.iter().filter_map(|r| Plan::combo(&content, &r.id)));
         } else {
@@ -1032,7 +1038,7 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
         }
     }
     println!("用时 {:.1} 秒", start.elapsed().as_secs_f64());
-    if let Some(dir) = text("--csv") {
+    if let Some(dir) = value("--csv") {
         write_csv(&content, Path::new(&dir), &groups)?;
     }
     Ok(())

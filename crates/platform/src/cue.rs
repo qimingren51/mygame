@@ -28,6 +28,11 @@ impl UiCue {
     }
 }
 
+/// 音频输出不可用（没有声卡、设备被占用）时音频插入这个资源，恢复后移除；界面据此在角落提示。
+/// 玩家把音量调成零不算不可用。
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioUnavailable;
+
 /// 标题界面此刻在哪：音频按它换环境声和混响。界面写，音频读。
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MenuSoundscape {

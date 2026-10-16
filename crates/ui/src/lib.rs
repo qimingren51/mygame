@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use lantern_platform::Actions;
 use lantern_sim::{AppState, RunState};
 
+mod audio_status;
 mod bench;
 mod choice;
 mod controls;
@@ -27,6 +28,7 @@ mod pause;
 mod perf;
 mod prompts;
 mod replay_ui;
+mod responsive;
 mod results;
 mod scroll;
 mod settings_ui;
@@ -36,6 +38,9 @@ mod title;
 mod title_fx;
 mod toasts;
 mod transition;
+
+#[cfg(test)]
+mod layout_tests;
 
 pub use perf::SimTiming;
 pub use replay_ui::ReplaySeek;
@@ -99,8 +104,10 @@ impl Plugin for UiPlugin {
                         .run_if(resource_exists::<bench::BenchRun>),
                 ),
             );
+        audio_status::register(app);
         perf::register(app);
         replay_ui::register(app);
+        responsive::register(app);
         title::register(app);
         title_fx::register(app);
         transition::register(app);
