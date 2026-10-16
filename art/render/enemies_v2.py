@@ -48,9 +48,27 @@ V2 = {
               "anims": [("float", 8, 8, {})], "radius": 13, "eye": "#FFC46B", "glow": "#F7D58A",
               "lines": (1.6, 1.0, 0.8), "sockets": ("eyes",), "shadow_units": 8,
               "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
+    # 疾影：一缕被风扯长的薄墨烟（独立造型，不是小号影妖）；帧 224²（原 160²），锚点同影妖
+    "wisp": {"module": "wisp_v2", "build": "build_wisp", "pose": "pose_wisp", "size_1x": 112, "anchor": S.ANCHOR,
+             "anims": [("float", 6, 10, {})], "radius": 10, "eye": "#9FE3FF", "glow": "#8CC8E8",
+             "lines": (1.2, 0.8, 0.6), "sockets": ("eyes",), "shadow_units": 6,
+             "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
+    # 石妖：青灰山石垒成的矮胖身子；帧 224²、锚点 (0.5, 0.8)
+    "golem": {"module": "golem_v2", "build": "build_golem", "pose": "pose_golem", "size_1x": 112,
+              "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 8, {})], "radius": 19, "eye": "#FFB46B",
+              "glow": "#FFB46B", "lines": (2.0, 1.15, 0.8), "sockets": ("eyes",), "shadow_units": 15,
+              # 锚点正上方是驼背的斜坡（不是头顶），石头前后一点头那里就上下变：自检只查 x 配准
+              "meta": {"category": "enemy", "anchor_kind": "big_enemy", "default_anim": "move", "register_x_only": True}},
+    # 狐火：一团青绿冷火拖成狐尾；帧 224²（原 160²），悬浮；扑击 2 帧蓄力
+    "fox_wisp": {"module": "fox_wisp_v2", "build": "build_fox_wisp", "pose": "pose_fox_wisp", "size_1x": 112,
+                 "anchor": S.ANCHOR,
+                 "anims": [("float", 8, 10, {}),
+                           ("pounce", 4, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
+                 "radius": 10, "eye": "#F2FFFC", "glow": "#8FE3C8", "lines": (1.0, 0.7, 0.6), "sockets": ("eyes",),
+                 "shadow_units": 6, "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
     # 赤面狐：精英，帧 320²、锚点 (0.5, 0.8)；扑击 2 帧蓄力
     "fox": {"module": "fox_v2", "build": "build_fox", "pose": "pose_fox", "size_1x": 160, "anchor": S.BIG_ENEMY_ANCHOR,
-            "anims": [("move", 8, 12, {}),
+            "anims": [("move", 8, 12, {"vertical_motion": True}),  # 小跑一步一起伏 1.7 单位（自检不查逐帧身高）
                       ("pounce", 6, 12, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
             "radius": 24, "eye": "#FF6B5A", "glow": "#E2553C", "lines": (2.0, 1.15, 0.8), "sockets": ("eyes",),
             "shadow_units": 19.2, "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move",
