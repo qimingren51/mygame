@@ -174,7 +174,7 @@ fn sync(
                 spawn_chest(&mut commands, c, &fonts, &db, &skin, &arsenal, &build, chest)
             }
         }
-        Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, k),
+        Shown::Evolve(k) => spawn_evolve(&mut commands, c, &fonts, &db, &skin, &arsenal, &build, k),
         Shown::Lamp(rewards) => spawn_lamp(&mut commands, c, &fonts, &db, &skin, &rewards),
         Shown::Shop(chest, charm, charms) => {
             let gold = progress.gold.floor() as u32;
@@ -1317,19 +1317,94 @@ pub(crate) fn animate_rise(
     }
 }
 
-/// 进化演出的各部分（docs/FEEL.md 第 5 节）：旧法器化墨淡去，新形态从大到小画出来，
-/// 最后盖上“化”字印，名字和说明淡入。整段在 2 秒内（模拟的进化阶段 2.1 秒后自动关闭）。
+/// 进化演出的各部分（docs/FEEL.md 第 5 节）：旧法器化墨淡去，新形态完整显现，
+/// 最后盖章，名字和收益淡入。沿用 2.1 秒后自动确认，也允许玩家提前确认。
 #[derive(Component, Clone, Copy)]
 pub(crate) enum EvoPart {
     Old,
-    New(Color),
+    New,
     Seal,
-    Text,
+    Text(f32),
 }
 
 /// 进化演出的计时（现实秒）。
 #[derive(Component, Default)]
 pub(crate) struct EvoClock(f32);
+
+const EVOLVE_ART_SIZE: Vec2 = Vec2::new(400.0, 300.0);
+
+/// 演出发生在质变生效之后；合璧材料从内容中还原，仅供既有卡片描述读取。
+/// 图片、名字、收益都和选择时那张卡一致，不再把异化或合璧画成正统进化图标。
+fn evolution_info(c: &Content, arsenal: &Arsenal, build: &Build, k: usize) -> (OfferInfo, Vec<OfferInfo>) {
+    use lantern_sim::weapons::{Form, WeaponSlot};
+    let w = &arsenal.0[k];
+    if let Form::Fused(fusion_id) = w.form {
+        let materials = Arsenal(
+            c.fusions[fusion_id]
+                .weapons
+                .iter()
+                .map(|id| WeaponSlot::new(c.weapon_index(id).expect("合璧材料")))
+                .collect(),
+        );
+        let result = offer_info(c, &materials, build, Offer::Fuse { a: 0, b: 1, fusion_id });
+        let origins =
+            (0..materials.0.len()).map(|i| offer_info(c, &materials, build, Offer::Evolve(i))).collect();
+        (result, origins)
+    } else {
+        let offer = match w.form {
+            Form::Evolved => Offer::Evolve(k),
+            Form::Mutated => Offer::Mutate(k),
+            _ => Offer::NewWeapon(w.def),
+        };
+        (offer_info(c, arsenal, build, offer), vec![offer_info(c, arsenal, build, Offer::NewWeapon(w.def))])
+    }
+}
+
+/// 插画保留 4:3 全幅；缺图时的图标或字形也挂同一演出部件，不能提前常亮。
+fn evolution_visual(
+    parent: &mut ChildSpawnerCommands,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    info: &OfferInfo,
+    part: EvoPart,
+    size: Vec2,
+) {
+    let alpha = if matches!(part, EvoPart::Old) { 1.0 } else { 0.0 };
+    parent
+        .spawn(Node {
+            width: px(size.x),
+            height: px(size.y),
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|layer| {
+            let image = db.find(&info.art).map(|frame| (frame, size)).or_else(|| {
+                info.icon
+                    .as_deref()
+                    .and_then(|name| db.find(name))
+                    .map(|frame| (frame, Vec2::splat((size.y * 0.7).min(144.0))))
+            });
+            match image {
+                Some((frame, size)) => {
+                    layer.spawn((
+                        part,
+                        UiTransform::default(),
+                        Node { width: px(size.x), height: px(size.y), ..default() },
+                        db.ui_image(frame).with_color(Color::WHITE.with_alpha(alpha)),
+                    ));
+                }
+                None => {
+                    layer.spawn((
+                        part,
+                        UiTransform::default(),
+                        text(&fonts.title, (size.y * 0.55).min(96.0), PAPER.with_alpha(alpha), &info.glyph),
+                    ));
+                }
+            }
+        });
+}
 
 fn spawn_evolve(
     commands: &mut Commands,
@@ -1338,118 +1413,99 @@ fn spawn_evolve(
     db: &AtlasDb,
     skin: &Skin,
     arsenal: &Arsenal,
+    build: &Build,
     k: usize,
 ) {
     let w = &arsenal.0[k];
-    let def = &c.weapons[w.def];
-    let (stamp, color) = match w.form {
-        lantern_sim::weapons::Form::Mutated => ("异", hex("#CF8CDB")),
-        lantern_sim::weapons::Form::Fused(_) => ("合", hex("#FFD98A")),
-        _ => ("进化", element_color(c, def.element)),
+    let (info, origins) = evolution_info(c, arsenal, build, k);
+    let stamp = match w.form {
+        lantern_sim::weapons::Form::Mutated => "异化",
+        lantern_sim::weapons::Form::Fused(_) => "合璧",
+        _ => "进化",
     };
-    let origin = if let lantern_sim::weapons::Form::Fused(f) = w.form {
-        c.fusions[f]
-            .weapons
-            .iter()
-            .map(|id| {
-                c.weapons[c.weapon_index(id).expect("合璧材料")]
-                    .evolution
-                    .as_ref()
-                    .expect("正统进化")
-                    .name
-                    .as_str()
-            })
-            .collect::<Vec<_>>()
-            .join(" + ")
-    } else {
-        def.name.clone()
-    };
-    let icon_name = format!("ui/icon_{}_evo", def.id);
-    let old_icon = db.find(&format!(
-        "ui/icon_{}{}",
-        def.id,
-        if matches!(w.form, lantern_sim::weapons::Form::Fused(_)) { "_evo" } else { "" }
-    ));
-    let new_icon = db.find(&icon_name);
-    let size = 168.0;
+    let origin = origins.iter().map(|info| info.name.as_str()).collect::<Vec<_>>().join(" + ");
+    let words = || Node { width: percent(90), max_width: px(700), flex_shrink: 0.0, ..default() };
     commands
-        .spawn((overlay(skin), EvoClock::default()))
+        .spawn((overlay_with_gap(skin, 10.0), EvoClock::default()))
+        // 单幅成果页无需沿用三张升级卡的最小宽度，竖窗里也能保留可读字号。
+        .insert(FitViewport::Fixed(Vec2::new(800.0, 640.0)))
         .with_children(|root| {
-            // “进化”竖印（96×160），垫一张宣纸方笺才看得清
-            if stamp != "进化" {
-                root.spawn((
+            root.spawn((
+                EvoPart::Text(0.7),
+                words(),
+                TextLayout::justify(Justify::Center),
+                text(&fonts.body, 17.0, PAPER.with_alpha(0.0), &format!("{origin} → {}", info.name)),
+            ));
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    flex_shrink: 0.0,
+                    padding: UiRect::all(px(12)),
+                    row_gap: px(8),
+                    ..default()
+                },
+                skin.image(card_skin(info.rarity)),
+                BoxShadow::new(Color::BLACK.with_alpha(0.35), px(0), px(8), px(0), px(20)),
+            ))
+            .with_children(|frame| {
+                frame.spawn((
                     EvoPart::Seal,
-                    Node {
-                        padding: UiRect::all(px(12)),
-                        border_radius: BorderRadius::all(px(6)),
-                        ..default()
-                    },
-                    BackgroundColor(PAPER.with_alpha(0.0)),
-                    UiTransform::from_scale(Vec2::splat(2.4)),
-                    text(&fonts.title, 70.0, color.with_alpha(0.0), stamp),
+                    UiTransform::default(),
+                    text(&fonts.title, 28.0, on_paper(info.color).with_alpha(0.0), stamp),
                 ));
-            } else if let Some(seal) = db.find("ui/seal_evo") {
-                root.spawn((
-                    EvoPart::Seal,
-                    Node {
-                        width: px(54.0 + 16.0),
-                        height: px(90.0 + 16.0),
-                        padding: UiRect::all(px(8)),
-                        border_radius: BorderRadius::all(px(6)),
-                        ..default()
-                    },
-                    BackgroundColor(PAPER.with_alpha(0.0)),
-                    UiTransform::from_scale(Vec2::splat(2.4)),
-                    db.ui_image(seal).with_color(Color::WHITE.with_alpha(0.0)),
-                ));
-            }
-            match (old_icon, new_icon) {
-                (Some(old), Some(new)) => {
-                    root.spawn(Node { width: px(size), height: px(size), ..default() }).with_children(|b| {
-                        let full = Node {
+                frame
+                    .spawn((
+                        Node {
+                            width: px(EVOLVE_ART_SIZE.x),
+                            height: px(EVOLVE_ART_SIZE.y),
+                            flex_shrink: 0.0,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(art_ground(info.color)),
+                    ))
+                    .with_children(|art| {
+                        let layer = || Node {
                             position_type: PositionType::Absolute,
                             width: percent(100),
                             height: percent(100),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            column_gap: px(12),
                             ..default()
                         };
-                        b.spawn((
-                            EvoPart::New(if stamp == "异" { color } else { Color::WHITE }),
-                            full.clone(),
-                            UiTransform::from_scale(Vec2::splat(1.35)),
-                            db.ui_image(new).with_color(Color::WHITE.with_alpha(0.0)),
-                        ));
-                        b.spawn((EvoPart::Old, full, UiTransform::default(), db.ui_image(old)));
-                        if let lantern_sim::weapons::Form::Fused(f) = w.form {
-                            let other = &c.fusions[f].weapons[1];
-                            if let Some(icon) = db.find(&format!("ui/icon_{other}_evo")) {
-                                b.spawn((
+                        art.spawn(layer()).with_children(|new| {
+                            evolution_visual(new, fonts, db, &info, EvoPart::New, EVOLVE_ART_SIZE);
+                        });
+                        art.spawn(layer()).with_children(|old| {
+                            let width = (EVOLVE_ART_SIZE.x - 12.0 * (origins.len() - 1) as f32)
+                                / origins.len() as f32;
+                            for origin in &origins {
+                                evolution_visual(
+                                    old,
+                                    fonts,
+                                    db,
+                                    origin,
                                     EvoPart::Old,
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left: px(size * 0.7),
-                                        top: px(size * 0.25),
-                                        width: px(size * 0.7),
-                                        height: px(size * 0.7),
-                                        ..default()
-                                    },
-                                    UiTransform::default(),
-                                    db.ui_image(icon),
-                                ));
+                                    Vec2::new(width, width * 0.75),
+                                );
                             }
-                        }
+                        });
                     });
-                }
-                _ => spawn_icon(root, db, fonts, Some(&icon_name), &def.icon, color, size),
-            }
-            root.spawn((EvoPart::Text, text(&fonts.title, 88.0, color.with_alpha(0.0), w.name(c))));
+            });
             root.spawn((
-                EvoPart::Text,
-                text(&fonts.body, 20.0, PAPER.with_alpha(0.0), &format!("{} → {}", origin, w.name(c))),
+                EvoPart::Text(1.0),
+                words(),
+                TextLayout::justify(Justify::Center),
+                text(&fonts.title, 60.0, info.color.with_alpha(0.0), &info.name),
             ));
-            root.spawn((EvoPart::Text, text(&fonts.body, 18.0, DIM.with_alpha(0.0), w.desc(c))));
-            if !w.flavor(c).is_empty() {
-                root.spawn((EvoPart::Text, text(&fonts.body, 16.0, DIM.with_alpha(0.0), w.flavor(c))));
-            }
+            root.spawn((
+                EvoPart::Text(1.0),
+                words(),
+                TextLayout::justify(Justify::Center),
+                text(&fonts.body, 24.0, PAPER.with_alpha(0.0), &info.gain),
+            ));
         })
         .observe(|_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(0));
 }
@@ -1467,46 +1523,52 @@ fn ease_out_back(x: f32) -> f32 {
 /// 推进进化演出。
 pub(crate) fn animate_evolve(
     time: Res<Time<Real>>,
+    settings: Res<lantern_platform::Settings>,
     mut clocks: Query<&mut EvoClock>,
-    mut parts: Query<(
-        &EvoPart,
-        Option<&mut UiTransform>,
-        Option<&mut ImageNode>,
-        Option<&mut TextColor>,
-        Option<&mut BackgroundColor>,
-    )>,
+    mut parts: Query<(&EvoPart, Option<&mut UiTransform>, Option<&mut ImageNode>, Option<&mut TextColor>)>,
 ) {
     let Some(mut clock) = clocks.iter_mut().next() else { return };
     clock.0 += time.delta_secs().min(0.1);
     let t = clock.0;
-    // 旧图标：先变成墨色，再胀开淡去
+    let motion = if settings.lite_fx { 0.0 } else { 1.0 };
+    // 旧器先化墨淡去；新画从略小的尺寸落定，任何时刻都不裁掉构图。
     let ink = smooth(t / 0.45);
     let gone = smooth((t - 0.35) / 0.4);
-    // 新图标：0.55 秒起从大到小落定
+    // 新形态仍从 0.55 秒开始显现。
     let born = (t - 0.55) / 0.4;
     // 印：0.95 秒砸下
     let stamp = (t - 0.95) / 0.12;
     let words = smooth((t - 0.8) / 0.5);
-    for (part, tf, img, txt, bg) in &mut parts {
+    for (part, tf, img, txt) in &mut parts {
         match part {
             EvoPart::Old => {
+                let c = Color::WHITE.mix(&Color::srgb(0.06, 0.06, 0.08), ink).with_alpha(1.0 - gone);
                 if let Some(mut img) = img {
-                    let c = Color::WHITE.mix(&Color::srgb(0.06, 0.06, 0.08), ink);
-                    img.color = c.with_alpha(1.0 - gone);
+                    img.color = c;
+                }
+                if let Some(mut color) = txt {
+                    color.0 = c;
                 }
                 if let Some(mut tf) = tf {
                     // 化墨前轻轻一颤
-                    let shake = if t < 0.35 { (t * 70.0).sin() * 3.0 * (1.0 - t / 0.35) } else { 0.0 };
+                    let shake = if t < 0.35 {
+                        (t * 70.0).sin() * 3.0 * (1.0 - t / 0.35) * settings.shake.clamp(0.0, 1.0) * motion
+                    } else {
+                        0.0
+                    };
                     tf.translation = bevy::ui::Val2::px(shake, 0.0);
-                    tf.scale = Vec2::splat(1.0 + 0.2 * gone);
+                    tf.scale = Vec2::splat(1.0 - 0.04 * gone * motion);
                 }
             }
-            EvoPart::New(tint) => {
+            EvoPart::New => {
                 if let Some(mut img) = img {
-                    img.color = tint.with_alpha(smooth(born * 1.5));
+                    img.color = Color::WHITE.with_alpha(smooth(born * 1.5));
+                }
+                if let Some(mut color) = txt {
+                    color.0.set_alpha(smooth(born * 1.5));
                 }
                 if let Some(mut tf) = tf {
-                    tf.scale = Vec2::splat(1.35 - 0.35 * ease_out_back(born));
+                    tf.scale = Vec2::splat(1.0 - 0.06 * (1.0 - smooth(born)) * motion);
                 }
             }
             EvoPart::Seal => {
@@ -1516,20 +1578,105 @@ pub(crate) fn animate_evolve(
                 if let Some(mut img) = img {
                     img.color = Color::WHITE.with_alpha(smooth(stamp * 2.0));
                 }
-                if let Some(mut bg) = bg {
-                    bg.0.set_alpha(0.88 * smooth(stamp * 2.0));
-                }
                 if let Some(mut tf) = tf {
                     let k = stamp.clamp(0.0, 1.0);
-                    tf.scale = Vec2::splat(2.4 - 1.4 * k * k);
-                    tf.rotation = Rot2::radians(-0.12 * k);
+                    tf.scale = Vec2::splat(1.0 + 0.4 * (1.0 - k * k) * motion);
+                    tf.rotation = Rot2::radians(-0.06 * k * motion);
                 }
             }
-            EvoPart::Text => {
+            EvoPart::Text(alpha) => {
                 if let Some(mut c) = txt {
-                    c.0.set_alpha(words);
+                    c.0.set_alpha(words * alpha);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod evolution_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use lantern_sim::weapons::{Form, WeaponSlot};
+
+    #[test]
+    fn result_art_tracks_evolved_mutated_and_fused_forms() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let c = Content::load(&root.join("data")).unwrap();
+        let fusion = c.fusions.iter().position(|f| f.id == "phoenix").unwrap();
+        for (id, form, art, name) in [
+            ("lamp", Form::Evolved, "ui/card_lamp_evo", "不夜城"),
+            ("lamp", Form::Mutated, "ui/card_lamp_mut", "冰火两重天"),
+            ("crane", Form::Fused(fusion), "ui/card_phoenix", "百鸟朝凤"),
+            ("coin_sword", Form::Evolved, "ui/card_coin_sword_evo", "天罡"),
+        ] {
+            let arsenal = Arsenal(vec![WeaponSlot { form, ..WeaponSlot::new(c.weapon_index(id).unwrap()) }]);
+            let (result, origins) = evolution_info(&c, &arsenal, &Build::default(), 0);
+            assert_eq!(result.art, art);
+            assert_eq!(result.name, name);
+            assert!(!result.gain.is_empty());
+            if matches!(form, Form::Fused(_)) {
+                assert_eq!(
+                    origins.iter().map(|info| info.art.as_str()).collect::<Vec<_>>(),
+                    ["ui/card_crane_evo", "ui/card_lamp_evo"]
+                );
+            } else {
+                assert_eq!(origins.len(), 1);
+                assert_eq!(origins[0].art, format!("ui/card_{id}"));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_art_and_icon_keep_the_glyph_in_the_reveal_timing() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let c = Content::load(&root.join("data")).unwrap();
+        let arsenal = Arsenal(vec![WeaponSlot {
+            form: Form::Mutated,
+            ..WeaponSlot::new(c.weapon_index("lamp").unwrap())
+        }]);
+        let (mut info, _) = evolution_info(&c, &arsenal, &Build::default(), 0);
+        info.art = "ui/missing_result_art".into();
+        info.icon = Some("ui/missing_result_icon".into());
+        let mut app = App::new();
+        let mut settings = lantern_platform::Settings::default();
+        settings.lite_fx = true;
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin { file_path: root.to_str().unwrap().to_owned(), ..default() },
+        ))
+        .init_asset::<Image>()
+        .init_asset::<TextureAtlasLayout>()
+        .insert_resource(settings);
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      assets: Res<AssetServer>,
+                      mut layouts: ResMut<Assets<TextureAtlasLayout>>| {
+                    let db = AtlasDb::load(&root, &assets, &mut layouts).unwrap();
+                    let fonts = Fonts { title: default(), body: default() };
+                    commands.spawn((Node::default(), EvoClock::default())).with_children(|parent| {
+                        evolution_visual(parent, &fonts, &db, &info, EvoPart::New, EVOLVE_ART_SIZE);
+                    });
+                },
+            )
+            .unwrap();
+        app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_millis(100));
+        for step in 1..=10 {
+            app.world_mut().run_system_once(animate_evolve).unwrap();
+            let world = app.world_mut();
+            let (part, color, transform) = world
+                .query_filtered::<(&EvoPart, &TextColor, &UiTransform), With<Text>>()
+                .single(world)
+                .unwrap();
+            assert!(matches!(part, EvoPart::New));
+            if step <= 5 {
+                assert_eq!(color.0.alpha(), 0.0);
+            } else if step == 10 {
+                assert_eq!(color.0.alpha(), 1.0);
+            }
+            // 精简模式只淡入淡出，字形回退也没有缩放或颤动。
+            assert_eq!(*transform, UiTransform::IDENTITY);
         }
     }
 }
