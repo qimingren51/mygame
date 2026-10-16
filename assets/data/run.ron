@@ -30,7 +30,12 @@
         mix: [
             (enemy: "wisp", from_minute: 1.0, share: (0.08, 0.3), late_minute: 5.0, late_mult: 1.5),
             (enemy: "golem", from_minute: 2.5, share: (0.05, 0.2), late_minute: 5.0, late_mult: 1.6),
+            // 狐火 1:30 起占 10%，讨封狐 4:00 起占 8%（docs/BALANCE.md 第 12.1 节）
+            (enemy: "fox_wisp", from_minute: 1.5, share: (0.1, 0.1), late_minute: 99.0, late_mult: 1.0),
+            (enemy: "taofeng_fox", from_minute: 4.0, share: (0.08, 0.08), late_minute: 99.0, late_mult: 1.0),
         ],
+        // 竹魅 3:00 起每 20 秒从离你 260–400 的一丛竹子里钻出一只，场上最多 4 只
+        ambush: [(enemy: "bamboo_wraith", from: 180.0, every: 20.0, dist: (260.0, 400.0), max: 4)],
         // 妖群：0:40 起每 18–32 秒一群，8 + 5m 只，从一侧涌来；不受常规上限限制
         packs: (
             start: 40.0,

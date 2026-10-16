@@ -9,13 +9,13 @@ use lantern_core::step::DT;
 
 use crate::charms::Survival;
 use crate::combat::{ActionQueue, Hard, HurtCtx, SLOW_CAP, apply_hard, hurt_player};
-use crate::enemies::{CHARGE_DASH, CHARGE_IDLE, CHARGE_RECOVER, CHARGE_WINDUP, Enemies};
+use crate::enemies::{CHARGE_DASH, CHARGE_IDLE, CHARGE_RECOVER, CHARGE_WINDUP, Enemies, TAG_REVEALED};
 use crate::reveal::Reveal;
 use crate::run::{Director, RunPlan, SimView};
 use crate::spatial::Grid;
 use crate::stats::{Effects, Stats};
 use crate::weapons::drop::{Fissures, Wall};
-use crate::{GameContent, Health, HurtBy, Player, Pos, SimOutbox, SimRng, Tick};
+use crate::{GameContent, Health, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
 /// 以玩家为中心重建空间网格（妖物移动、互推之后，docs/DESIGN.md 第 6.3 节）。
 pub(crate) fn build_grid(
@@ -138,7 +138,7 @@ pub(crate) fn update_enemies(
             && matches!(en.charge[i], CHARGE_WINDUP | CHARGE_DASH)
         {
             en.charge[i] = CHARGE_IDLE;
-            en.charge_t[i] = ch.every;
+            en.charge_t[i] = charge_every(ch, en.wob[i]);
         }
 
         if en.frozen[i] > 0.0 {
@@ -211,12 +211,18 @@ pub(crate) fn update_enemies(
                         x += (ax * c - ay * s) * sp * DT;
                         y += (ax * s + ay * c) * sp * DT;
                     }
+                    Movement::Circle | Movement::Keep => {
+                        let step =
+                            band_step(def.movement, def.band.unwrap_or((0.0, 0.0)), (dx, dy), d, en.wob[i]);
+                        x += step.x * sp * DT;
+                        y += step.y * sp * DT;
+                    }
                 }
             }
         }
 
         // 离得太远的普通妖物绕到玩家前方；上一步位置一起改，画面插值不会拖出残影
-        if def.rank == Rank::Normal && def.movement == Movement::Chase && d > relocate_dist {
+        if def.rank == Rank::Normal && def.movement != Movement::Flee && d > relocate_dist {
             let a = face_angle + relocate_rng.range_f32(-spread, spread);
             let (s, c) = ops::sin_cos(a);
             let r = view.radius + content.run.spawn.ring_extra;
@@ -235,6 +241,21 @@ pub(crate) fn update_enemies(
         }
         en.x[i] = x;
         en.y[i] = y;
+        // 伪装（讨封狐）：照见圈外锁定不到；一进照见圈就现形、换成现形的速度，之后一直现形
+        if let Some(dg) = &def.disguise
+            && en.tags[i] & TAG_REVEALED == 0
+        {
+            if reveal.covers(Vec2::new(x, y)) {
+                en.tags[i] |= TAG_REVEALED;
+                if def.speed > 0.0 {
+                    en.speed[i] *= dg.speed / def.speed;
+                }
+                en.cloaked[i] = false;
+                ctx.outbox.0.push(SimEvent::Unmasked { pos: Vec2::new(x, y), kind: en.kind[i] });
+            } else {
+                en.cloaked[i] = true;
+            }
+        }
         if en.affix[i] & cloak_bit != 0 {
             en.cloaked[i] = !reveal.covers(Vec2::new(x, y));
         }
@@ -259,6 +280,31 @@ pub(crate) fn update_enemies(
             apply_hard(en, i, def.rank, Hard::Freeze { blast: false }, thorn_time);
         }
     }
+}
+
+/// 冲锋的冷却：every ± jitter，按每只妖物的随机相位错开（狐火 2–4 秒扑一次）。
+pub(crate) fn charge_every(ch: &ChargeDef, wob: f32) -> f32 {
+    ch.every + ch.jitter * ops::sin(wob)
+}
+
+/// 绕圈、守距的一步方向（长度不超过 1，乘移速就是这一步的速度）。
+/// 带外：朝带里走，顺带一点横移；带里：绕圈全速横移，守距慢慢横移，并轻轻往带中间修正。
+/// 横移的方向（顺时针或逆时针）按每只妖物的随机相位定。
+fn band_step(movement: Movement, (near, far): (f32, f32), (dx, dy): (f32, f32), d: f32, wob: f32) -> Vec2 {
+    let to = Vec2::new(dx / d, dy / d);
+    let side = if wob < std::f32::consts::PI { 1.0 } else { -1.0 };
+    let tangent = Vec2::new(-to.y, to.x) * side;
+    let (radial, strafe) = if d > far {
+        (1.0, 0.25)
+    } else if d < near {
+        (-1.0, 0.25)
+    } else {
+        let mid = 0.5 * (near + far);
+        let pull = ((d - mid) / (far - near).max(1.0)).clamp(-0.5, 0.5);
+        (pull, if movement == Movement::Circle { 1.0 } else { 0.35 })
+    };
+    let v = to * radial + tangent * strafe;
+    if v.length_squared() > 1.0 { v.normalize() } else { v }
 }
 
 /// 冲锋走一步（docs/BALANCE.md 第 12.6 节）。返回这一步的速度；`None` 表示照常追击。
@@ -297,7 +343,7 @@ fn charge(
         CHARGE_RECOVER => {
             if done {
                 en.charge[i] = CHARGE_IDLE;
-                en.charge_t[i] = ch.every;
+                en.charge_t[i] = charge_every(ch, en.wob[i]);
             }
             Some(Vec2::ZERO)
         }

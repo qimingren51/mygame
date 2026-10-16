@@ -80,6 +80,8 @@ pub enum HurtBy {
     Sweep,
     /// 狐火雨
     Rain,
+    /// 小妖的远程弹（竹魅的竹刺）
+    Spike { kind: u16 },
 }
 
 /// 等待下一步处理的命令。
@@ -253,6 +255,22 @@ pub enum SimEvent {
         kind: u16,
     },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
+    /// 远程小妖开始瞄准：方向已锁定，预警线从 pos 沿 dir 画出去
+    EnemyAim {
+        pos: Vec2,
+        dir: Vec2,
+        kind: u16,
+    },
+    /// 远程小妖出手
+    EnemyShot {
+        pos: Vec2,
+        kind: u16,
+    },
+    /// 伪装的妖物进了照见圈，现形
+    Unmasked {
+        pos: Vec2,
+        kind: u16,
+    },
     BossVolley {
         pos: Vec2,
         illusion: bool,

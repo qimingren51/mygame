@@ -67,6 +67,10 @@ impl Director {
         if let Some(e) = &self.endless {
             e.hash_into(h);
         }
+        h.write_u32(self.ambush_t.len() as u32);
+        for &v in &self.ambush_t {
+            h.write_f32(v);
+        }
     }
 }
 
@@ -232,6 +236,8 @@ pub struct Director {
     pub rush_release: f32,
     /// 无尽夜的进度；普通一夜是 None
     pub endless: Option<Endless>,
+    /// 每条伏击（`run.ron` 的 `spawn.ambush`）下一次出的时刻（秒）；开局第一步按 from 填上
+    pub ambush_t: Vec<f32>,
 }
 
 impl Default for Director {
@@ -248,6 +254,7 @@ impl Default for Director {
             encircle: Vec::new(),
             rush_release: 0.0,
             endless: None,
+            ambush_t: Vec::new(),
         }
     }
 }
