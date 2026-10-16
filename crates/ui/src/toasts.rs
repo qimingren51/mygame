@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use lantern_content::Rank;
-use lantern_sim::{AppState, GameContent, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Director, GameContent, SimEvent, SimOutbox};
 
 use crate::describe::{element_color, hex};
 use crate::skin::Skin;
@@ -88,6 +88,7 @@ fn read_events(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     outbox: Res<SimOutbox>,
+    director: Option<Res<Director>>,
     stack: Single<Entity, With<ToastStack>>,
     toasts: Query<(Entity, &Toast)>,
     mut muted: ResMut<Muted>,
@@ -95,6 +96,7 @@ fn read_events(
     replay: Option<Res<lantern_sim::ReplayPlayback>>,
 ) {
     let c = &content.0;
+    let boss_active = director.as_ref().is_some_and(|d| d.boss.is_some());
     let mut count = toasts.iter().count();
     let mut oldest: Vec<(Entity, f32)> = toasts.iter().map(|(e, t)| (e, t.t)).collect();
     oldest.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -165,7 +167,9 @@ fn read_events(
                 let color = element_color(c, r.b);
                 // 之后同种反应的名字在发生的地方飘出来（画面层），不占提示栏
                 if first {
-                    msg(format!("反应 · {}", r.name), short_or(&r.short, &r.desc), color, true)
+                    // 夜主战保留单行名称，省去大印和重复说明，让中央交战区留给预警。
+                    let body = if boss_active { "" } else { short_or(&r.short, &r.desc) };
+                    msg(format!("反应 · {}", r.name), body, color, !boss_active)
                 } else {
                     None
                 }

@@ -15,16 +15,25 @@ pub(crate) const CARD_HEIGHT: f32 = 460.0;
 pub(crate) const CARD_GAP: f32 = 20.0;
 /// 升级页除卡片以外的高度：页头、聚焦说明、操作提示、按钮
 const UPGRADE_CHROME: f32 = 292.0;
+/// 宝箱用更紧凑的成果卡，五连可在默认窗口横向铺开。
+pub(crate) const CHEST_CARD_WIDTH: f32 = 224.0;
+pub(crate) const CHEST_CARD_HEIGHT: f32 = 320.0;
+pub(crate) const CHEST_CARD_GAP: f32 = 16.0;
+const CHEST_CHROME: f32 = 240.0;
 
 #[derive(Component)]
 pub(crate) enum FitViewport {
     Fixed(Vec2),
     Upgrades(usize),
+    ChestRewards(usize),
 }
 
 /// 卡片网格与画布使用同一个列数，避免浮点边界使 flex 额外换行。
 #[derive(Component)]
 pub(crate) struct UpgradeCards(pub usize);
+
+#[derive(Component)]
+pub(crate) struct ChestCards(pub usize);
 
 impl FitViewport {
     /// 准备页的可选行随解锁增加，为每行和页头、页脚留足空间。
@@ -41,6 +50,7 @@ impl FitViewport {
         match *self {
             Self::Fixed(size) => size,
             Self::Upgrades(cards) => upgrade_canvas(logical_size, cards),
+            Self::ChestRewards(cards) => chest_layout(logical_size, cards).0,
         }
     }
 }
@@ -100,10 +110,31 @@ fn upgrade_layout(logical_size: Vec2, cards: usize) -> (Vec2, usize) {
     (best_size, best_columns)
 }
 
+fn chest_layout(logical_size: Vec2, cards: usize) -> (Vec2, usize) {
+    let cards = cards.max(1);
+    let mut best = (Vec2::ZERO, 1);
+    let mut best_scale = 0.0;
+    for columns in 1..=cards {
+        let rows = cards.div_ceil(columns) as f32;
+        let width = CHEST_CARD_WIDTH * columns as f32 + CHEST_CARD_GAP * (columns - 1) as f32;
+        let size = Vec2::new(
+            (width / (PANEL_WIDTH_PERCENT / 100.0)).max(360.0),
+            CHEST_CHROME + rows * CHEST_CARD_HEIGHT + (rows - 1.0) * CHEST_CARD_GAP,
+        );
+        let scale = panel_scale(logical_size, size);
+        if scale >= best_scale {
+            best = (size, columns);
+            best_scale = scale;
+        }
+    }
+    best
+}
+
 fn fit_viewport(
     window: Single<&Window, With<PrimaryWindow>>,
     mut panels: Query<(&FitViewport, &mut Node, &mut UiTransform)>,
-    mut grids: Query<(&UpgradeCards, &mut Node), Without<FitViewport>>,
+    mut grids: Query<(&UpgradeCards, &mut Node), (Without<FitViewport>, Without<ChestCards>)>,
+    mut chests: Query<(&ChestCards, &mut Node), (Without<FitViewport>, Without<UpgradeCards>)>,
 ) {
     for (panel, mut node, mut transform) in &mut panels {
         let scale = panel_scale(window.size(), panel.min_size(window.size()));
@@ -129,6 +160,12 @@ fn fit_viewport(
         let (_, columns) = upgrade_layout(window.size(), cards.0);
         if node.grid_template_columns.len() != columns {
             node.grid_template_columns = vec![GridTrack::px(CARD_WIDTH); columns];
+        }
+    }
+    for (cards, mut node) in &mut chests {
+        let (_, columns) = chest_layout(window.size(), cards.0);
+        if node.grid_template_columns.len() != columns {
+            node.grid_template_columns = vec![GridTrack::px(CHEST_CARD_WIDTH); columns];
         }
     }
 }
@@ -226,6 +263,24 @@ mod tests {
     }
 
     #[test]
+    fn chest_rewards_keep_five_cards_wide_and_reflow_in_portrait_windows() {
+        assert_eq!(chest_layout(Vec2::new(1280.0, 720.0), 5).1, 5);
+        assert_eq!(chest_layout(Vec2::new(360.0, 640.0), 5).1, 2);
+        for cards in [1, 3, 5] {
+            for viewport in [Vec2::new(1280.0, 720.0), Vec2::new(640.0, 360.0), Vec2::new(360.0, 640.0)] {
+                let (canvas, columns) = chest_layout(viewport, cards);
+                let rows = cards.div_ceil(columns) as f32;
+                assert!(columns <= cards);
+                assert!(
+                    CHEST_CARD_WIDTH * columns as f32 + CHEST_CARD_GAP * (columns - 1) as f32
+                        <= canvas.x * 0.9 + 0.001
+                );
+                assert_eq!(canvas.y, CHEST_CHROME + rows * CHEST_CARD_HEIGHT + (rows - 1.0) * CHEST_CARD_GAP);
+            }
+        }
+    }
+
+    #[test]
     fn title_and_upgrade_layouts_fit_small_windows_and_high_dpi() {
         for physical in [
             Vec2::new(3440.0, 1440.0),
@@ -239,8 +294,9 @@ mod tests {
         ] {
             for dpi in [1.0, 1.5, 2.0] {
                 let logical = physical / dpi;
-                for panel in
-                    std::iter::once(FitViewport::for_meta(12)).chain((1..=4).map(FitViewport::Upgrades))
+                for panel in std::iter::once(FitViewport::for_meta(12))
+                    .chain((1..=4).map(FitViewport::Upgrades))
+                    .chain([1, 3, 5].map(FitViewport::ChestRewards))
                 {
                     let min_size = panel.min_size(logical);
                     let scale = panel_scale(logical, min_size);

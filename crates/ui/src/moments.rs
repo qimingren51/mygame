@@ -188,6 +188,10 @@ struct Wash(f32);
 #[derive(Component)]
 struct BossCard;
 
+/// 反应名称已有上方提示；夜主在场时让大印退让，避免挡住出手与落点。
+#[derive(Component)]
+struct ReactionStamp;
+
 /// 演出里会跟着淡入淡出的颜色。
 type Paint<'w, 's> = Query<
     'w,
@@ -213,7 +217,7 @@ fn spawn_stamp(
     at: (f32, f32),
     rot: f32,
     life: f32,
-) {
+) -> Entity {
     commands
         .spawn((
             Moment { t: 0.0, life, anim: Anim::Stamp { rot } },
@@ -230,7 +234,8 @@ fn spawn_stamp(
             BaseAlpha(0.88),
             UiTransform::from_scale(Vec2::splat(2.5)),
         ))
-        .with_child((Node { width: px(size), height: px(size), ..default() }, db.ui_image(frame)));
+        .with_child((Node { width: px(size), height: px(size), ..default() }, db.ui_image(frame)))
+        .id()
 }
 
 fn absolute() -> Node {
@@ -260,9 +265,18 @@ fn read_events(
     db: Res<AtlasDb>,
     outbox: Res<SimOutbox>,
     director: Option<Res<Director>>,
+    reaction_stamps: Query<Entity, With<ReactionStamp>>,
     mut last: ResMut<LastBoss>,
 ) {
     let c = &content.0;
+    // boss 在生成时设置、伏诛时清空；整个夜主战都退让，不等到预警出现才遮掉印章。
+    let boss_active = director.as_ref().is_some_and(|d| d.boss.is_some());
+    if boss_active {
+        // 首见可能发生在夜主登场前一刻，清掉仍在 2.4 秒演出中的旧印。
+        for entity in &reaction_stamps {
+            commands.entity(entity).despawn();
+        }
+    }
     for ev in &outbox.0 {
         match *ev {
             // 共鸣跨阶：朱砂印盖在屏幕上
@@ -273,14 +287,19 @@ fn read_events(
             }
             // 反应初见：盖那种反应的方印（美术图集里没有时写名字）
             SimEvent::Reaction { kind, first: true, .. } => {
+                if boss_active {
+                    continue;
+                }
                 let r = &c.elements.reactions[kind as usize];
                 if let Some(frame) = db.find(&format!("ui/seal_react_{}", r.id)) {
-                    spawn_stamp(&mut commands, &db, frame, 140.0, (60.0, 22.0), 0.1, 2.4);
+                    let stamp = spawn_stamp(&mut commands, &db, frame, 140.0, (60.0, 22.0), 0.1, 2.4);
+                    commands.entity(stamp).insert(ReactionStamp);
                     continue;
                 }
                 commands
                     .spawn((
                         Moment { t: 0.0, life: 2.4, anim: Anim::Stamp { rot: 0.1 } },
+                        ReactionStamp,
                         DespawnOnExit(AppState::Run),
                         GlobalZIndex(6),
                         Node {

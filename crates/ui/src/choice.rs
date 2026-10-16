@@ -8,12 +8,15 @@ use bevy::prelude::*;
 
 use lantern_content::Content;
 use lantern_platform::Actions;
-use lantern_sim::flow::{ChestSource, Flow, LampReward};
+use lantern_sim::flow::{ChestItem, ChestSource, Flow, LampReward};
 use lantern_sim::{Arsenal, Build, GameContent, Offer, RunState, SimCommand, SimCommands, SimPhase};
 use lantern_view::atlas::AtlasDb;
 
 use crate::describe::{OfferInfo, Rarity, element_color, hex, offer_info, offer_note};
-use crate::responsive::{CARD_GAP, CARD_HEIGHT, CARD_WIDTH, FitViewport, PANEL_WIDTH_PERCENT, UpgradeCards};
+use crate::responsive::{
+    CARD_GAP, CARD_HEIGHT, CARD_WIDTH, CHEST_CARD_GAP, CHEST_CARD_HEIGHT, CHEST_CARD_WIDTH, ChestCards,
+    FitViewport, PANEL_WIDTH_PERCENT, UpgradeCards,
+};
 use crate::skin::Skin;
 use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
@@ -1073,6 +1076,145 @@ fn spawn_charm(
     });
 }
 
+/// 一箱可能连续升级同一件法器；最终构筑不能替代每件奖励自己的等级快照。
+/// 只为描述恢复领取前一级，让现有 OfferInfo 计算本次收益，不修改模拟状态。
+fn chest_info(c: &Content, arsenal: &Arsenal, build: &Build, item: &ChestItem) -> OfferInfo {
+    match item.offer {
+        Offer::WeaponUp(k) => {
+            let mut before = Arsenal(arsenal.0.clone());
+            before.0[k].level = item.level.saturating_sub(1).max(1);
+            offer_info(c, &before, build, item.offer)
+        }
+        Offer::PassiveUp(k) => {
+            let mut before = build.clone();
+            before.passives[k].level = item.level.saturating_sub(1);
+            offer_info(c, arsenal, &before, item.offer)
+        }
+        _ => offer_info(c, arsenal, build, item.offer),
+    }
+}
+
+fn chest_card(
+    parent: &mut ChildSpawnerCommands,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    skin: &Skin,
+    info: &OfferInfo,
+    item: &ChestItem,
+    index: usize,
+    gold: bool,
+) {
+    let at = CHIME_AT + index as f32 * CHIME_GAP;
+    let outcome = match item.offer {
+        Offer::WeaponUp(_) | Offer::PassiveUp(_) => {
+            format!("Lv{} → {}", item.level.saturating_sub(1), item.level)
+        }
+        Offer::NewWeapon(_) | Offer::NewPassive(_) => format!("{} · Lv{}", info.kind, item.level),
+        _ => info.kind.clone(),
+    };
+    parent
+        .spawn((
+            Card,
+            Rise::after(at - 0.05),
+            Node {
+                width: px(CHEST_CARD_WIDTH),
+                height: px(CHEST_CARD_HEIGHT),
+                flex_shrink: 0.0,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(px(12)),
+                ..default()
+            },
+            skin.image(card_skin(info.rarity)),
+            BoxShadow::new(Color::BLACK.with_alpha(0.3), px(0), px(6), px(0), px(14)),
+        ))
+        .with_children(|card| {
+            card.spawn((
+                Node {
+                    width: percent(100),
+                    height: px((CHEST_CARD_WIDTH - 24.0) * 0.75),
+                    flex_shrink: 0.0,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(art_ground(info.color)),
+            ))
+            .with_children(|art| {
+                if let Some(frame) = db.find(&info.art) {
+                    art.spawn((
+                        Node { width: percent(100), height: percent(100), ..default() },
+                        db.ui_image(frame),
+                    ));
+                } else {
+                    spawn_icon(art, db, fonts, info.icon.as_deref(), &info.glyph, info.color, 104.0);
+                }
+                art.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: px(6),
+                        right: px(6),
+                        padding: UiRect::axes(px(8), px(3)),
+                        ..default()
+                    },
+                    skin.image("chip_dark"),
+                ))
+                .with_child(text(
+                    &fonts.body,
+                    13.0,
+                    info.rarity.color(),
+                    info.rarity.name(),
+                ));
+            });
+            card.spawn(Node {
+                width: percent(100),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(6),
+                ..default()
+            })
+            .with_children(|body| {
+                body.spawn((
+                    text(&fonts.title, 28.0, on_paper(info.color), &info.name),
+                    TextLayout::justify(Justify::Center),
+                    Node { width: percent(100), ..default() },
+                ));
+                body.spawn(text(&fonts.body, 16.0, INK_DIM, &outcome));
+                body.spawn((
+                    text(&fonts.body, 18.0, INK, &info.gain),
+                    TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
+                    Node { width: percent(100), ..default() },
+                ));
+                if let Some((level, max)) = info.level {
+                    body.spawn(Node { column_gap: px(4), ..default() }).with_children(|dots| {
+                        for step in 1..=max {
+                            dots.spawn((
+                                Node { width: px(8), height: px(8), ..default() },
+                                skin.image(if step <= level { "pip_on" } else { "pip" }),
+                            ));
+                        }
+                    });
+                }
+            });
+            // 金光只掠过卡边，不盖白整张插画；时刻仍和原开箱钟声一致。
+            card.spawn((
+                Pickable::IGNORE,
+                ChestGlow { part: ChestPart::Item { at, peak: if gold { 0.9 } else { 0.65 } }, t: 0.0 },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(-2),
+                    right: px(-2),
+                    top: px(-2),
+                    bottom: px(-2),
+                    ..default()
+                },
+                skin.image("card_focus").with_color(Color::WHITE.with_alpha(0.0)),
+            ));
+        });
+}
+
 fn spawn_chest(
     commands: &mut Commands,
     c: &Content,
@@ -1083,107 +1225,70 @@ fn spawn_chest(
     build: &Build,
     chest: &lantern_sim::flow::ChestReveal,
 ) {
-    let title = match (chest.source, chest.items.len()) {
-        (ChestSource::Altar, _) => "血祭 · 以血换力".to_string(),
-        (ChestSource::MiniBoss, n) => format!("小头目的宝箱 · {n} 连"),
-        (ChestSource::Merchant, _) => "货郎的宝箱".to_string(),
-        (_, 1) => "宝箱".to_string(),
-        (_, 3) => "宝箱 · 三连".to_string(),
-        (_, 5) => "宝箱 · 五连".to_string(),
-        (_, n) => format!("宝箱 · {n} 连"),
-    };
     let n = chest.items.len();
-    // 三连以上标题盖下来；五连每件亮得更足，最后一声钟后整卷泛起金光
+    let source = match chest.source {
+        ChestSource::Altar => "血祭\n以血换力",
+        ChestSource::MiniBoss => "小头目的宝箱",
+        ChestSource::Merchant => "货郎的宝箱",
+        _ => "宝箱",
+    };
+    let title = match n {
+        1 => source.to_string(),
+        3 => format!("{source}\n三连"),
+        5 => format!("{source}\n五连"),
+        _ => format!("{source}\n{n}连"),
+    };
+    // 三连以上标题盖下来；五连每张卡的金边更亮，最后一声钟后整组泛起金光。
     let big = n >= 3;
     let gold = n >= 5;
     commands
         .spawn(overlay(skin))
+        .insert(FitViewport::ChestRewards(n))
         .with_children(|root| {
-            let mut title = root.spawn(text(&fonts.title, 64.0, CHEST_GOLD, &title));
+            let mut title = root.spawn((
+                text(&fonts.title, if big { 34.0 } else { 48.0 }, CHEST_GOLD, &title),
+                TextLayout::new(Justify::Center, bevy::text::LineBreak::NoWrap),
+                Node {
+                    // 来源与连数各占完整行；字号为原有放大动画留宽，不靠挤窄文字换行。
+                    max_width: percent(PANEL_WIDTH_PERCENT),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
             if big {
                 // 先藏着、放大，第一帧就从大到小砸下来
                 title.insert((
                     ChestGlow { part: ChestPart::Title, t: 0.0 },
                     TextColor(CHEST_GOLD.with_alpha(0.0)),
                     TextShadow { offset: Vec2::new(3.0, 3.0), color: Color::BLACK.with_alpha(0.0) },
-                    UiTransform::from_scale(Vec2::splat(1.7)),
+                    UiTransform::from_scale(Vec2::splat(CHEST_TITLE_SCALE)),
                 ));
             }
-            // 卷轴：展开的纸上一行一件
-            let mut scroll = root.spawn((
+            let width = CHEST_CARD_WIDTH * n as f32 + CHEST_CARD_GAP * n.saturating_sub(1) as f32;
+            let mut cards = root.spawn((
+                ChestCards(n),
                 Node {
-                    width: px(480),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(6),
-                    padding: UiRect::axes(px(40), px(36)),
-                    // 金光是按节点的方框画的，圆角让它贴着纸边、不显得方
-                    border_radius: BorderRadius::all(px(18)),
+                    display: Display::Grid,
+                    width: percent(PANEL_WIDTH_PERCENT),
+                    max_width: px(width),
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(CHEST_CARD_GAP),
+                    row_gap: px(CHEST_CARD_GAP),
+                    border_radius: BorderRadius::all(px(14)),
                     ..default()
                 },
-                skin.image("panel"),
             ));
             if gold {
-                scroll.insert((
+                cards.insert((
                     ChestGlow { part: ChestPart::Halo { at: CHIME_AT + n as f32 * CHIME_GAP }, t: 0.0 },
                     BoxShadow::new(CHEST_GOLD.with_alpha(0.0), px(0), px(0), px(6), px(44)),
                 ));
             }
-            scroll.with_children(|list| {
+            cards.with_children(|grid| {
                 for (k, item) in chest.items.iter().enumerate() {
-                    // 物品已经生效，按生效前的样子描述（升级显示“Lv a → a+1”）
-                    let info = offer_info(c, arsenal, build, item.offer);
-                    let kind = match item.offer {
-                        Offer::WeaponUp(_) | Offer::PassiveUp(_) => {
-                            format!("Lv{} → {}", item.level - 1, item.level)
-                        }
-                        Offer::Evolve(_) => "进化".into(),
-                        Offer::Mutate(_) => "异化".into(),
-                        Offer::Fuse { .. } => "合璧".into(),
-                        Offer::NewWeapon(_) | Offer::NewPassive(_) => "新".into(),
-                        _ => "补给".into(),
-                    };
-                    if k > 0 {
-                        list.spawn((
-                            Node { height: px(10), width: percent(100), ..default() },
-                            skin.image("divider"),
-                        ));
-                    }
-                    // 和开箱的钟声对上：第 k 声在 0.35 + 0.28k 秒，那一行跟着亮一下
-                    let at = CHIME_AT + k as f32 * CHIME_GAP;
-                    list.spawn((
-                        Node {
-                            align_items: AlignItems::Center,
-                            column_gap: px(14),
-                            padding: UiRect::axes(px(8), px(2)),
-                            border_radius: BorderRadius::all(px(6)),
-                            ..default()
-                        },
-                        Rise::after(at - 0.05),
-                        BackgroundColor(CHEST_GOLD.with_alpha(0.0)),
-                        ChestGlow { part: ChestPart::Row { at, peak: if gold { 0.5 } else { 0.3 } }, t: 0.0 },
-                    ))
-                    .with_children(|row| {
-                        spawn_icon(
-                            row,
-                            db,
-                            fonts,
-                            info.icon.as_deref(),
-                            &info.glyph,
-                            on_paper(info.color),
-                            56.0,
-                        );
-                        row.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(
-                            |t| {
-                                t.spawn(text(&fonts.title, 28.0, on_paper(info.color), &info.name));
-                                t.spawn(text(
-                                    &fonts.body,
-                                    14.0,
-                                    INK_DIM,
-                                    &format!("{}　{kind}", info.rarity.name()),
-                                ));
-                            },
-                        );
-                    });
+                    let info = chest_info(c, arsenal, build, item);
+                    chest_card(grid, fonts, db, skin, &info, item, k, gold);
                 }
             });
             root.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} 继续"));
@@ -1195,6 +1300,7 @@ fn spawn_chest(
 const CHIME_AT: f32 = 0.35;
 const CHIME_GAP: f32 = 0.28;
 const CHEST_GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
+const CHEST_TITLE_SCALE: f32 = 1.7;
 
 /// 宝箱的金光（docs/FEEL.md 第 5 节）。
 #[derive(Component)]
@@ -1207,9 +1313,9 @@ pub(crate) struct ChestGlow {
 enum ChestPart {
     /// 三连以上的标题：从大到小砸下来
     Title,
-    /// 一行：钟响时亮一下再暗下去；peak 是最亮时底色的不透明度
-    Row { at: f32, peak: f32 },
-    /// 五连：最后一声钟后卷轴外圈泛起金光，留一圈淡的
+    /// 单卡：钟响时金边亮一下再暗下去；peak 是最亮时的不透明度。
+    Item { at: f32, peak: f32 },
+    /// 五连：最后一声钟后整组外圈泛起金光，留一圈淡的。
     Halo { at: f32 },
 }
 
@@ -1217,7 +1323,7 @@ pub(crate) fn animate_chest(
     time: Res<Time<Real>>,
     mut q: Query<(
         &mut ChestGlow,
-        Option<&mut BackgroundColor>,
+        Option<&mut ImageNode>,
         Option<&mut BoxShadow>,
         &mut UiTransform,
         Option<&mut TextColor>,
@@ -1225,7 +1331,7 @@ pub(crate) fn animate_chest(
     )>,
 ) {
     let dt = time.delta_secs().min(0.1);
-    for (mut g, bg, shadow, mut tf, color, text_shadow) in &mut q {
+    for (mut g, image, shadow, mut tf, color, text_shadow) in &mut q {
         g.t += dt;
         let t = g.t;
         match g.part {
@@ -1235,7 +1341,7 @@ pub(crate) fn animate_chest(
                 }
                 let k = (t / 0.16).min(1.0);
                 let s = if t < 0.16 {
-                    1.7 - 0.7 * k * k
+                    CHEST_TITLE_SCALE - (CHEST_TITLE_SCALE - 1.0) * k * k
                 } else {
                     1.0 + 0.06 * (-(t - 0.16) * 14.0).exp() * ((t - 0.16) * 40.0).cos()
                 };
@@ -1248,14 +1354,14 @@ pub(crate) fn animate_chest(
                     sh.color.set_alpha(0.8 * a);
                 }
             }
-            ChestPart::Row { at, peak } => {
+            ChestPart::Item { at, peak } => {
                 let k = t - at;
                 if !(0.0..=1.6).contains(&k) {
                     continue;
                 }
                 let a = peak * (k / 0.05).min(1.0) * (-(k - 0.05).max(0.0) * 3.5).exp();
-                if let Some(mut bg) = bg {
-                    bg.0.set_alpha(a);
+                if let Some(mut image) = image {
+                    image.color.set_alpha(a);
                 }
             }
             ChestPart::Halo { at } => {
@@ -1590,6 +1696,51 @@ pub(crate) fn animate_evolve(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod chest_tests {
+    use super::*;
+    use lantern_sim::build::PassiveSlot;
+    use lantern_sim::weapons::{Form, WeaponSlot};
+
+    #[test]
+    fn repeated_chest_upgrades_use_each_items_received_level() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let c = Content::load(&root.join("data")).unwrap();
+        let lamp = c.weapon_index("lamp").unwrap();
+        let paper = c.passive_index("zhezhi").unwrap();
+        let mut arsenal = Arsenal(vec![WeaponSlot { level: 4, ..WeaponSlot::new(lamp) }]);
+        let build = Build { passives: vec![PassiveSlot { def: paper, level: 5 }], ..default() };
+        for received in [2, 3] {
+            let info =
+                chest_info(&c, &arsenal, &build, &ChestItem { offer: Offer::WeaponUp(0), level: received });
+            let levels = &c.weapons[lamp].levels;
+            let expected = crate::describe::weapon_upgrade_text(
+                &levels[received as usize - 2],
+                &levels[received as usize - 1],
+            );
+            assert_eq!(info.desc, format!("{expected}。"));
+            assert_eq!(info.level, Some((received, levels.len() as u32)));
+        }
+        let passive = chest_info(&c, &arsenal, &build, &ChestItem { offer: Offer::PassiveUp(0), level: 2 });
+        assert_eq!(passive.level, Some((2, 5)));
+        assert_eq!(passive.art, "ui/card_zhezhi");
+        assert_eq!(arsenal.0[0].level, 4);
+        assert_eq!(build.passives[0].level, 5);
+
+        // 后一项已让同一法器进化，先前的满级卡仍展示领取当时的原形与等级。
+        let max = c.weapons[lamp].levels.len() as u32;
+        arsenal.0[0].level = max;
+        arsenal.0[0].form = Form::Evolved;
+        let before_evolution =
+            chest_info(&c, &arsenal, &build, &ChestItem { offer: Offer::WeaponUp(0), level: max });
+        let evolved = chest_info(&c, &arsenal, &build, &ChestItem { offer: Offer::Evolve(0), level: max });
+        assert_eq!(before_evolution.level, Some((max, max)));
+        assert_eq!(before_evolution.art, "ui/card_lamp");
+        assert_eq!(evolved.art, "ui/card_lamp_evo");
+        assert!(evolved.level.is_none());
     }
 }
 
