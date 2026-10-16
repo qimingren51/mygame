@@ -13,8 +13,13 @@
 狐灯 fox_lanterns：两根木柱、一根竹梁撑起一段四坡翘角瓦檐，檐下拉一根绳，挂三盏青纸灯（青火，发光；
   窗开得小，看得见青纸和竹篾），左柱贴一条朱砂纸符，
   狐村的光源。约 1.5 米。挂点 glow（三盏灯的中心，放一盏大光用）、glow_0..2（每盏灯芯，放小光用）。
+狐祠庭院（每局一处，crates/view/src/ground.rs）：
+  大狐仙祠 fox_shrine_grand：庭院正殿，按自己的尺寸建（约 3.4 米高），原样摆。帧 512²（2 倍）。挂点 glow、eave_lamp。
+  石牌坊 fox_gate：冲天柱式一间两柱一楼的石牌坊，庭院入口。帧 384²（2 倍）。
+  檐下留灯 fox_eave_lamp / fox_eave_lamp_lit：挂在大狐仙祠 eave_lamp 上的小圆纸灯笼（没点 / 点着），同画布同锚点；
+    锚点 HANGING_ANCHOR 是挂钩顶端（meta anchor_kind: hanging）。帧 160²（2 倍）。挂点 flame。
 
-青火的颜色 QING_GLOW 不在 style 调色板里，写进素材 meta 的 palette_extra 和 light_color。
+青火的颜色 QING_GLOW 不在 style 调色板里，写进素材 meta 的 palette_extra 和 light_color；留灯的光色 EAVE_LAMP_GLOW 只写 light_color。
 """
 
 from __future__ import annotations
@@ -713,10 +718,323 @@ def build_fox_lanterns():
     return root, {"root": root}, socks
 
 
+# ================================================================ 狐祠庭院：大狐仙祠、石牌坊、檐下留灯
+GRAND_FRAME_1X = 256  # 大狐仙祠（2 倍 512²）
+GATE_FRAME_1X = 192  # 石牌坊（2 倍 384²）
+HANGING_ANCHOR = (0.5, 0.1)  # 挂着的道具（檐下留灯）：锚点是挂钩顶端，灯挂在它下面
+EAVE_LAMP_GLOW = "#FF9A4A"  # 留灯的光色：主角红纸灯的火（assets/data/lamps.ron 的 red）
+
+
+def _roof_k(prefix, parent, m, k, **kw):
+    """放大 k 倍的 _roof：几何挂在放大的空物体下，鸱尾、檐边、屋脊一起变粗；尺寸参数照实际米数给。"""
+    sc = B.empty(f"{prefix}RoofScale", parent)
+    sc.scale = (k,) * 3
+    for key in ("hx", "hy", "y_c", "z_eave", "rise", "curl", "ridge_r", "fascia"):
+        if key in kw:
+            kw[key] = kw[key] / k
+    return _roof(prefix, sc, m, **kw)
+
+
+def _skirt(prefix, parent, m, hx, hy, y_c, z_eave, rise, curl, s_top=0.55, nf=18, **kw):
+    """重檐的下檐：一圈四坡瓦檐，只做到 s_top（顶上封平，被上层墙身盖住），不做屋脊。"""
+    build = _hip_roof_build(hx, hy, z_eave, rise, curl, nf=nf, s_top=s_top, **kw)
+    ob = B.mesh_object(f"{prefix}Skirt", build, [m["tile_light"], m["fascia_light"]], "inner", parent, loc=(0, y_c, 0),
+                       smooth=False, contour=False)
+    _mark_tiles(ob, *build.grid, build.cols)
+    return ob
+
+
+def _plate_build(poly_xz, depth):
+    """xz 平面上的多边形（逆时针）沿 y 挤出 depth（居中）：雀替这类薄石板。"""
+    def build(bm):
+        f = [bm.verts.new((x, -depth / 2, z)) for x, z in poly_xz]
+        b = [bm.verts.new((x, depth / 2, z)) for x, z in poly_xz]
+        n = len(f)
+        bm.faces.new(f)
+        bm.faces.new(list(reversed(b)))
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((f[j], f[i], b[i], b[j]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return build
+
+
+def _banner_build(top, width, length, sway=0.03, phase=0.0):
+    """布幡：从 top 垂下的一条布，微微飘（下半截往前、往一侧摆），下缘燕尾。"""
+    t0 = Vector(top)
+
+    def build(bm):
+        rows = []
+        nv = 8
+        for j in range(nv + 1):
+            t = j / nv
+            off = Vector((sway * math.sin(math.pi * t + phase) * t, -0.6 * sway * t * t, -length * t))
+            row = []
+            for u in (-0.5, 0.0, 0.5):
+                notch = 0.18 * length * t ** 8 * (1 - 2 * abs(u))  # 燕尾：中间往上缩
+                row.append(t0 + off + Vector((u * width * (1 - 0.08 * t), 0, notch)))
+            rows.append(row)
+        vs = [[bm.verts.new(p) for p in r] for r in rows]
+        for j in range(nv):
+            for i in range(2):
+                bm.faces.new((vs[j][i], vs[j][i + 1], vs[j + 1][i + 1], vs[j + 1][i]))
+        for f in bm.faces:
+            if f.normal.y > 0:
+                f.normal_flip()
+    return build
+
+
+def build_fox_shrine_grand():
+    """大狐仙祠（狐祠庭院的正殿）：按自己的尺寸建（约 3.4 米高、3.5 米宽），不是把小祠放大。
+    两层石台基，正面四级台阶；三开间：明间是龛（白石狐坐在石座上），
+    两次间是石墙，各开一个小龛供一颗白石狐珠，墙前额枋下各垂一条褪色朱砂布幡；四根朱砂柱、一道淡墨额枋；
+    重檐四坡顶（淡墨瓦、翼角起翘，正脊中间一个葫芦宝顶）。台阶上方一张石供桌：一碟白团子、三足香炉插三炷香、一碗果子。
+    右前檐角挂一盏小青灯（发光，挂点 glow）；左次间檐下一个小铁钩（挂点 eave_lamp = 钩子下端，挂檐下留灯）。"""
+    m = _mats()
+    lm = _lantern_mats("QqGrandLantern")
+    banner = K.toon("QqGrandBanner", W["zhusha"], wash=0.35, edge=0.3, seed=341.0)
+    beam = K.toon("QqGrandBeam", ramp=[I["dan"], I["zhong"], I["nong"]], wash=0.25, edge=0.3, seed=342.0)
+    root = B.empty("FoxShrineGrand")
+    obj = B.mesh_object
+    st = m["stone"]
+    # 两层台基 + 台阶（四级，每级高 0.1、深 0.2）
+    obj("GrandBase1", _box(3.5, 0.2, 2.3), st, "outer", root, loc=(0, -0.05, 0.1), smooth=False)
+    obj("GrandBase2", _box(3.0, 0.2, 1.75), st, "outer", root, loc=(0, 0.08, 0.3), smooth=False)
+    for k, (y0, y1, z0, z1) in enumerate(((-1.6, -1.2, 0.0, 0.1), (-1.4, -1.2, 0.1, 0.2), (-1.2, -0.795, 0.2, 0.3),
+                                          (-1.0, -0.795, 0.3, 0.4))):
+        obj(f"GrandStep{k}", _box(1.1, z1 - z0, y1 - y0), st, "outer", root, loc=(0, (y0 + y1) / 2, (z0 + z1) / 2),
+            smooth=False)
+    # 殿身：两次间是实心石墙块（前脸就是墙），明间后墙；明间里面浓墨
+    zb, zt = 0.4, 1.84
+    yf, yb = -0.38, 0.72
+    for sx in (-1, 1):
+        obj(f"GrandWing{sx:+d}", _box(0.8, zt - zb, yb - yf), st, "outer", root, loc=(0.85 * sx, (yf + yb) / 2, (zb + zt) / 2),
+            smooth=False)
+        # 次间小龛：浓墨龛口、石台沿，上面供一颗白石狐珠
+        obj(f"GrandSideNiche{sx:+d}", _box(0.30, 0.34, 0.01), m["dark"], "none", root, loc=(0.85 * sx, yf - 0.006, 0.79),
+            smooth=False)
+        obj(f"GrandSideSill{sx:+d}", _box(0.40, 0.04, 0.08), st, "inner", root, loc=(0.85 * sx, yf - 0.035, 0.60),
+            smooth=False)
+        obj(f"GrandPearlStand{sx:+d}", B.cylinder(0.05, 0.04, 0.035, 12), st, "inner", root,
+            loc=(0.85 * sx, yf - 0.05, 0.6375))
+        obj(f"GrandPearl{sx:+d}", B.uv_sphere(0.072, 14, 8), m["white"], "inner", root, loc=(0.85 * sx, yf - 0.05, 0.725))
+    obj("GrandBack", _box(0.9, zt - zb, 0.1), st, "outer", root, loc=(0, 0.67, (zb + zt) / 2), smooth=False)
+    obj("GrandNiche", _box(0.9, zt - zb, 0.01), m["dark"], "none", root, loc=(0, 0.614, (zb + zt) / 2), smooth=False)
+    obj("GrandNicheFloor", _box(0.9, 0.006, 1.0), m["dark"], "none", root, loc=(0, 0.12, zb + 0.003), smooth=False)
+    # 龛里：石座 + 白石狐（朱砂围嘴，有人照看）
+    obj("GrandFoxSeat", _box(0.56, 0.16, 0.40), st, "inner", root, loc=(0, 0.30, zb + 0.08), smooth=False)
+    _stone_fox("GrandFox", root, {"stone": m["white"], "tip": m["white"], "eye": m["eye"], "dark": m["dark"]}, m["red"],
+               loc=(0.0, 0.30, zb + 0.16), scale=1.2, yaw_deg=-26.0, head_yaw_deg=-6.0)
+    # 朱砂柱（石柱础）+ 额枋
+    yp = -0.45
+    for k, x in enumerate((-1.15, -0.42, 0.42, 1.15)):
+        obj(f"GrandPillarBase{k}", B.cylinder(0.105, 0.115, 0.06, 12), st, "inner", root, loc=(x, yp, zb + 0.03))
+        K.limb(f"GrandPillar{k}", (x, yp, zb + 0.06), (x, yp, zt - 0.13), 0.068, 0.062, m["red"], "inner", root, segs=12)
+    obj("GrandBeam", _box(2.64, 0.14, 0.14), beam, "inner", root, loc=(0, yp, zt - 0.07), smooth=False)
+    # 次间墙前、额枋下各垂一条布幡（顶上一根墨色挑杆）
+    for sx in (-1, 1):
+        bx = 0.62 * sx
+        obj(f"GrandBanner{sx:+d}", _banner_build((bx, yp - 0.09, zt - 0.16), 0.16, 0.58, sway=0.025 * sx,
+                                                 phase=0.4 * sx), banner, "inner", root, smooth=False)
+        K.limb(f"GrandBannerRod{sx:+d}", (bx - 0.105, yp - 0.09, zt - 0.155), (bx + 0.105, yp - 0.09, zt - 0.155), 0.011,
+               0.011, m["rope"], "none", root, segs=6)
+    # 供桌：石板 + 两条腿；白团子、三足香炉（三炷香）、果子
+    ty, tz = -0.62, zb + 0.30
+    obj("GrandTableTop", _box(0.74, 0.05, 0.26), st, "inner", root, loc=(0, ty, tz - 0.025), smooth=False)
+    for sx in (-1, 1):
+        obj(f"GrandTableLeg{sx:+d}", _box(0.08, 0.25, 0.20), st, "inner", root, loc=(0.27 * sx, ty, zb + 0.125), smooth=False)
+    obj("GrandPlate", B.cylinder(0.075, 0.062, 0.016, 16), m["bowl"], "inner", root, loc=(-0.22, ty, tz + 0.008))
+    for k, (dx, dy, dz) in enumerate(((-0.03, 0.0, 0.0), (0.03, 0.0, 0.0), (0.0, -0.025, 0.0), (0.0, 0.0, 0.045))):
+        obj(f"GrandBun{k}", B.uv_sphere(0.031, 10, 6), m["bun"], "inner", root, loc=(-0.22 + dx, ty + dy, tz + 0.045 + dz))
+    obj("GrandBurner", B.lathe([(0.0, 0.0), (0.05, 0.0), (0.072, 0.03), (0.075, 0.06), (0.068, 0.075)], 16, cap_top=True),
+        m["bowl"], "inner", root, loc=(0, ty, tz + 0.03))
+    for k in range(3):
+        th = math.radians(90 + 120 * k)
+        K.limb(f"GrandBurnerLeg{k}", (0.045 * math.cos(th), ty + 0.045 * math.sin(th), tz + 0.035),
+               (0.05 * math.cos(th), ty + 0.05 * math.sin(th), tz), 0.009, 0.007, m["bowl"], "none", root, segs=6)
+        sx = (k - 1) * 0.022
+        K.limb(f"GrandIncense{k}", (sx, ty, tz + 0.09), (sx * 1.6, ty - 0.006, tz + 0.25), 0.004, 0.004, m["rope"], "none",
+               root, segs=4)
+        obj(f"GrandIncenseTip{k}", B.uv_sphere(0.007, 6, 4), m["red"], "none", root, loc=(sx * 1.6, ty - 0.006, tz + 0.252))
+    obj("GrandBowl", B.lathe([(0.0, 0.0), (0.04, 0.0), (0.068, 0.04), (0.07, 0.06)], 14, cap_top=False), m["bowl"],
+        "inner", root, loc=(0.22, ty, tz))
+    for k, (dx, dy, dz) in enumerate(((-0.024, 0.0, 0.0), (0.024, 0.006, 0.0), (0.0, -0.016, 0.03))):
+        obj(f"GrandFruit{k}", B.uv_sphere(0.03, 10, 6, scale=(1, 1, 0.9)), m["fruit"], "inner", root,
+            loc=(0.22 + dx, ty + dy, tz + 0.066 + dz))
+    # 重檐：下檐（只做一圈）+ 上层墙身 + 上檐（带正脊、鸱尾）
+    yc = 0.17
+    z1, hx1, hy1 = 2.05, 1.56, 0.92
+    _skirt("Grand", root, m, hx=hx1, hy=hy1, y_c=yc, z_eave=z1, rise=0.34, curl=0.13, fascia=0.035, flare=0.06,
+           edge_pow=3.0, edge_w=0.55)
+    obj("GrandUpperWall", _box(2.16, 0.40, 0.88), st, "inner", root, loc=(0, yc, 2.30), smooth=False)
+    z2, rise2 = 2.50, 0.72
+    _roof_k("GrandUpper", root, m, 1.5, hx=1.30, hy=0.62, y_c=yc, z_eave=z2, rise=rise2, curl=0.17, nf=18,
+            tile="tile_light", fascia_mat="fascia_light", ridge_r=0.03, fascia=0.04, flare=0.06, edge_pow=3.0, edge_w=0.55,
+            line="inner", contour=False)
+    zr = z2 + rise2 * 0.93 ** 1.6 + 0.02 * 1.5  # 正脊高（同 _roof 的算法）
+    # 正脊中间的宝顶：葫芦形（墨色）
+    obj("GrandFinialBase", B.cylinder(0.06, 0.045, 0.05, 12), m["ridge"], "inner", root, loc=(0, yc, zr + 0.035))
+    obj("GrandFinial", B.lathe([(0.0, 0.0), (0.05, 0.02), (0.058, 0.06), (0.03, 0.105), (0.036, 0.135), (0.03, 0.165),
+                                (0.0, 0.19)], 14), m["ridge"], "inner", root, loc=(0, yc, zr + 0.055))
+    # 右前檐角的小青灯
+    hook = Vector((1.50, -0.70, 2.07))
+    lr, lh = 0.085, 0.10
+    lc = hook - Vector((0, 0, 0.16 + lh))
+    K.limb("GrandLampCord", hook, lc + Vector((0, 0, lh)), 0.005, 0.005, m["rope"], "none", root, segs=4)
+    glow = _paper_lantern("GrandLantern", root, lc, lr, lh, lm)
+    # 左次间檐下的小铁钩：钩子下端就是 eave_lamp（檐下留灯的挂绳顶端对准这里）
+    ex, ey = -0.90, yc - hy1 + 0.025
+    ez = z1 - 0.035 + 0.13 * 0.55 * (abs(ex) / hx1) ** 3.0 - 0.05  # 檐口下沿往下 5 厘米
+    K.limb("GrandEaveHook", (ex, ey, ez + 0.09), (ex, ey, ez + 0.012), 0.007, 0.006, m["rope"], "none", root, segs=6)
+    obj("GrandEaveHookTip", B.uv_sphere(0.012, 8, 6), m["rope"], "none", root, loc=(ex, ey, ez + 0.006))
+    sockets = {"glow": glow, "eave_lamp": B.empty("GrandEaveLamp", root, loc=(ex, ey, ez)),
+               "feet": B.empty("GrandFeet", root)}
+    bpy.context.view_layer.update()
+    return root, {"root": root}, sockets
+
+
+def build_fox_gate():
+    """石牌坊（狐祠庭院的入口，冲天柱式一间两柱一楼，中式，不是鸟居）：两根方石柱各夹一对方墩（夹杆石），
+    柱子穿过屋顶往上冲，柱头一个石雕的宝珠头；两柱之间小额枋、花板、大额枋三层（花板两边各刻一块浅浮雕方框，
+    额枋两头出头），正中一块空白石匾（浓墨边框，只盖一方朱砂小印，没有字），柱和小额枋之间一对雀替；
+    大额枋上一段夹在两柱之间的四坡翘角瓦顶（淡墨瓦、瓦垄、正脊两端鸱尾）。石头风化，墩、额枋、柱头有苔，
+    左柱上系一条褪色的红布。约 3 米宽、3.2 米高，门洞净宽约 1.8 米、净高 2.4 米。"""
+    m = _mats()
+    st = m["stone"]
+    moss = m["moss_thin"]
+    carve = K.toon("QqGateCarve", ramp=[I["dan"], I["zhong"], I["nong"]], wash=0.3, edge=0.3, seed=362.0)
+    root = B.empty("FoxGate")
+    obj = B.mesh_object
+    px = 1.15
+    z_lo, z_pa, z_hi, z_top = 2.40, 2.51, 2.65, 2.78  # 小额枋底、花板底、大额枋底、大额枋顶
+    Z_PILLAR = 2.98  # 冲天柱顶（柱头另算）
+
+    def mossy(name, build, loc=(0, 0, 0), k=1.02, mat=moss):
+        obj(name + "Moss", build, mat, "none", root, loc=loc, smooth=False, scale=(k, k, 1.0 + (k - 1) / 2), contour=True)
+
+    for sx in (-1, 1):
+        x = px * sx
+        pl = _prism(0.36, 0.33, 0.0, 0.52, seg=4, rot=math.radians(45))
+        obj(f"GatePlinth{sx:+d}", pl, st, "outer", root, loc=(x, 0, 0), smooth=False)
+        mossy(f"GatePlinth{sx:+d}", pl, loc=(x, 0, 0), mat=m["moss"])
+        cap = _prism(0.33, 0.25, 0.52, 0.60, seg=4, rot=math.radians(45))
+        obj(f"GatePlinthCap{sx:+d}", cap, st, "outer", root, loc=(x, 0, 0), smooth=False)
+        mossy(f"GatePlinthCap{sx:+d}", cap, loc=(x, 0, 0), mat=m["moss"])
+        obj(f"GatePillar{sx:+d}", _prism(0.172, 0.158, 0.0, Z_PILLAR, seg=4, rot=math.radians(45)), st, "outer", root,
+            loc=(x, 0, 0), smooth=False)
+        # 冲天柱头：一块方帽石 + 宝珠头
+        hat = _prism(0.2, 0.19, Z_PILLAR, Z_PILLAR + 0.05, seg=4, rot=math.radians(45))
+        obj(f"GatePillarHat{sx:+d}", hat, st, "outer", root, loc=(x, 0, 0), smooth=False)
+        bud = B.lathe([(0.0, 0.0), (0.10, 0.0), (0.115, 0.025), (0.085, 0.05), (0.10, 0.07), (0.07, 0.10), (0.0, 0.125)], 16)
+        obj(f"GatePillarBud{sx:+d}", bud, st, "outer", root, loc=(x, 0, Z_PILLAR + 0.05))
+        mossy(f"GatePillarBud{sx:+d}", bud, loc=(x, 0, Z_PILLAR + 0.05), k=1.03, mat=m["moss"])
+        # 雀替：柱子内侧、小额枋下面的一块弯石板
+        xi = x - 0.115 * sx
+        poly = [(xi, z_lo), (xi, z_lo - 0.27), (xi - 0.05 * sx, z_lo - 0.17), (xi - 0.15 * sx, z_lo - 0.08),
+                (xi - 0.26 * sx, z_lo - 0.03), (xi - 0.36 * sx, z_lo)]
+        if sx < 0:
+            poly = poly[::-1]
+        obj(f"GateBracket{sx:+d}", _plate_build(poly, 0.12), st, "inner", root, smooth=False)
+    # 三层额枋：小额枋、花板（缩进一点，两边各一块浅浮雕方框）、大额枋
+    lo = _box(2.62, z_pa - z_lo, 0.20)
+    obj("GateBeamLow", lo, st, "outer", root, loc=(0, 0, (z_lo + z_pa) / 2), smooth=False)
+    mossy("GateBeamLow", lo, loc=(0, 0, (z_lo + z_pa) / 2), k=1.01)
+    obj("GatePanel", _box(2.30, z_hi - z_pa, 0.10), st, "inner", root, loc=(0, 0.02, (z_pa + z_hi) / 2), smooth=False)
+    for sx in (-1, 1):
+        obj(f"GatePanelCarve{sx:+d}", _box(0.50, 0.075, 0.01), carve, "inner", root, loc=(0.70 * sx, -0.034, (z_pa + z_hi) / 2),
+            smooth=False)
+    hi = _box(2.86, z_top - z_hi, 0.24)
+    obj("GateBeamHigh", hi, st, "outer", root, loc=(0, 0, (z_hi + z_top) / 2), smooth=False)
+    mossy("GateBeamHigh", hi, loc=(0, 0, (z_hi + z_top) / 2), k=1.01)
+    # 石匾：浓墨边框、石面空白，正中一方朱砂小印（压在三层额枋前面）
+    zc = (z_pa + z_hi) / 2
+    obj("GatePlaqueFrame", _box(0.74, 0.28, 0.05), m["dark"], "inner", root, loc=(0, -0.125, zc), smooth=False)
+    obj("GatePlaque", _box(0.62, 0.18, 0.02), m["white"], "none", root, loc=(0, -0.155, zc), smooth=False)
+    obj("GatePlaqueSeal", _box(0.065, 0.065, 0.006), m["red"], "none", root, loc=(0, -0.167, zc), smooth=False)
+    # 两柱之间的四坡翘角瓦顶：淡墨瓦、浓墨檐边、瓦垄、正脊两端鸱尾；出檐浅，露得出大额枋
+    # （瓦上不罩苔：罩一层苔会挡住瓦垄的描线）
+    _roof_k("Gate", root, m, 1.2, hx=1.02, hy=0.26, y_c=0.03, z_eave=2.86, rise=0.25, curl=0.12, nf=14,
+            tile="tile_light", ridge_r=0.032, fascia=0.04, flare=0.07)
+    # 左柱上系的红布：一圈布带 + 垂下的两条布尾
+    cz = 1.32
+    obj("GateCloth", _prism(0.19, 0.188, cz - 0.04, cz + 0.04, seg=4, rot=math.radians(45)), m["bib_faded"], "inner", root,
+        loc=(-px, 0, 0), smooth=False)
+    for k, (dx, L, ph) in enumerate(((-0.025, 0.40, 0.0), (0.03, 0.32, 1.3))):
+        pts = [Vector((-px + dx + 0.03 * math.sin(2.2 * t + ph) * t, -0.14 - 0.03 * t, cz - 0.02 - L * t))
+               for t in np.linspace(0, 1, 7)]
+        obj(f"GateClothTail{k}", K.strip_build(pts, 0.05, 0.006, taper=(1.0, 0.7)), m["bib_faded"], "inner", root,
+            smooth=False)
+    sockets = {"feet": B.empty("FoxGateFeet", root)}
+    bpy.context.view_layer.update()
+    return root, {"root": root}, sockets
+
+
+def _eave_lamp(lit: bool):
+    """檐下留灯：小圆纸灯笼（扁圆、十二根竹篾），木顶盖、木底托、朱砂穗，挂绳顶上一个小铁钩。
+    原点 = 铁钩顶端（锚点），灯挂在下面：灯身直径约 0.35 米，从钩到穗尖约 0.78 米（石灯笼的一半高都不到）。
+    lit=False：素白纸、墨线，不发光；lit=True：纸壳开窗露出暖色灯芯（发光），纸边一圈藤黄、赭石。挂点 flame 是灯芯。"""
+    m = _mats()
+    root = B.empty("FoxEaveLamp")
+    obj = B.mesh_object
+    if lit:
+        shell = K.toon("QqEaveLampPaperLit", ramp=[W["tenghuang"], A["tenghuang"], A["zheshi"]], wash=0.2, edge=0.25,
+                       seed=351.0)
+        paper = B.window_material("QqEaveLampWindow", shell, open_facing=0.42)
+        rib = B.flat_material("QqEaveLampRibLit", S.shade_ramp(A["zheshi"])[1])
+    else:
+        paper = K.toon("QqEaveLampPaper", ramp=[S.PAPER, S.PAPER_SHADOW, I["qing"]], wash=0.25, edge=0.3, seed=352.0)
+        rib = B.flat_material("QqEaveLampRib", I["dan"])
+    wood = K.toon("QqEaveLampWood", A["zheshi"], wash=0.3, edge=0.35, seed=353.0)
+    # 铁钩（C 形）+ 挂绳
+    ring = [Vector((0.016 * math.sin(a), 0.0, -0.016 + 0.016 * math.cos(a))) for a in np.linspace(0.0, math.radians(300), 9)]
+    obj("EaveLampHook", K.tube_build(ring, lambda t: 0.0045, 6), m["rope"], "none", root, sharp_deg=0)
+    r, h = 0.172, 0.152
+    z_knob = -0.032 - 0.14
+    cz = z_knob - 0.03 - 0.035 - h
+    K.limb("EaveLampCord", (0, 0, -0.03), (0, 0, z_knob), 0.004, 0.004, m["rope"], "none", root, segs=4)
+    obj("EaveLampKnob", B.cylinder(0.018, 0.024, 0.03, 10), wood, "inner", root, loc=(0, 0, z_knob - 0.015))
+    obj("EaveLampCapTop", B.cylinder(0.075, 0.062, 0.035, 14), wood, "inner", root, loc=(0, 0, cz + h + 0.0175))
+    # 扁圆纸壳：十二道竹篾处略鼓
+    prof = [(0.066, -h), (0.62 * r, -0.86 * h), (0.86 * r, -0.58 * h), (r, -0.18 * h), (r, 0.18 * h), (0.86 * r, 0.58 * h),
+            (0.62 * r, 0.86 * h), (0.066, h)]
+    obj("EaveLampShell", B.lathe(prof, 24, radial=lambda th, z: 1 + 0.03 * abs(math.cos(6 * th))), paper, "outer", root,
+        loc=(0, 0, cz), sharp_deg=0)
+
+    def ribs(bm):
+        for k in range(12):
+            th = math.pi / 12 * 2 * k
+            pts = [Vector((rr * 1.035 * math.cos(th), rr * 1.035 * math.sin(th), cz + z)) for rr, z in prof]
+            K.tube_build(pts, lambda t: 0.0035, 4)(bm)
+    obj("EaveLampRibs", ribs, rib, "none", root, sharp_deg=0)
+    if lit:
+        obj("EaveLampCore", B.uv_sphere(1.0, 16, 10, scale=(0.86 * r, 0.86 * r, 0.84 * h)), B.emissive_material(
+            "QqEaveLampCore", S.LANTERN_LIGHT, 1.0), "none", root, loc=(0, 0, cz))
+    obj("EaveLampCapBot", B.cylinder(0.062, 0.072, 0.03, 14), wood, "inner", root, loc=(0, 0, cz - h - 0.015))
+    obj("EaveLampDrop", B.cylinder(0.022, 0.012, 0.03, 10), wood, "inner", root, loc=(0, 0, cz - h - 0.045))
+    zk = cz - h - 0.075
+    obj("EaveLampKnot", B.uv_sphere(0.017, 8, 6), m["red"], "none", root, loc=(0, 0, zk))
+    K.limb("EaveLampTassel", (0, 0, zk - 0.01), (0, 0, zk - 0.13), 0.008, 0.026, m["red"], "thin", root, segs=10)
+    sockets = {"flame": B.empty("EaveLampFlame", root, loc=(0, 0, cz)), "feet": B.empty("EaveLampTop", root)}
+    bpy.context.view_layer.update()
+    return root, {"root": root}, sockets
+
+
+def build_fox_eave_lamp():
+    return _eave_lamp(lit=False)
+
+
+def build_fox_eave_lamp_lit():
+    return _eave_lamp(lit=True)
+
+
 BUILDERS = {
     "bamboo_clump": build_bamboo_clump,
     "bamboo_clump_broken": build_bamboo_clump_broken,
     "fox_shrine": build_fox_shrine,
     "stone_fox": build_stone_fox,
     "fox_lanterns": build_fox_lanterns,
+    "fox_shrine_grand": build_fox_shrine_grand,
+    "fox_gate": build_fox_gate,
+    "fox_eave_lamp": build_fox_eave_lamp,
+    "fox_eave_lamp_lit": build_fox_eave_lamp_lit,
 }
