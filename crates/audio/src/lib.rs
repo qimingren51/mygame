@@ -357,7 +357,7 @@ fn run_music_mode(
     mut last_sample: Local<f64>,
     mut audio: NonSendMut<Audio>,
 ) {
-    let boss = director.is_some_and(|d| d.boss.is_some());
+    let boss = director.as_ref().is_some_and(|d| d.boss.is_some());
     let over = phase.as_deref() == Some(&SimPhase::Over);
     let menu = phase.as_deref().is_some_and(|p| *p != SimPhase::Play)
         || run.is_some_and(|r| *r.get() != RunState::Playing);
@@ -385,7 +385,15 @@ fn run_music_mode(
                 progress: seconds / duration.max(1.0),
             };
             let mode = audio.music.pressure.update(input, dt.min(0.5) as f32);
-            audio.music.request(if boss { MusicMode::Boss } else { mode });
+            // 妖潮在涌时直接上围攻的配器（行进织体和战鼓），不等压力慢慢升上去
+            let surge = director.as_ref().is_some_and(|d| d.surge_t > 0.0);
+            audio.music.request(if boss {
+                MusicMode::Boss
+            } else if surge {
+                MusicMode::Siege
+            } else {
+                mode
+            });
         }
     }
     // 天明即使已进入结算，也保留完整频带。
@@ -617,10 +625,12 @@ fn play_sim_events(
                 let s = a.sfx.resonance.clone();
                 a.foreground(&s);
             }
-            // 夜主换阶段：太鼓、低锣、一声狐啸
-            SimEvent::BossPhase { .. } => {
+            // 夜主换阶段：太鼓、低锣、一声狐啸；配乐在下一个小节线上加一层
+            SimEvent::BossPhase { phase } => {
                 let s = a.sfx.boss_phase.clone();
                 a.foreground(&s);
+                let now = a.now;
+                a.music.boss_phase(phase, now);
             }
             SimEvent::BossEnraged => {
                 let s = a.sfx.big_bell.clone();
