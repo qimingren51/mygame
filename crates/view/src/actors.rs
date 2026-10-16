@@ -31,6 +31,8 @@ const DIRS: [&str; 8] = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
 
 /// 光源颜色与半径（docs/PORTING-NOTES.md 第 7 节）
 pub(crate) const LANTERN_LIGHT: (Color, f32) = (crate::palette::LANTERN_LIGHT, 200.0);
+/// 光池（平顶）比尖顶的光照得开，按同样的照明半径画会盖掉大半个画面，收到八成。
+const POOL_RADIUS: f32 = 0.8;
 
 /// 两种颜色按比例混合（t = 0 时是 a）。
 fn mix(a: Color, b: Color, t: f32) -> Color {
@@ -219,6 +221,8 @@ pub(crate) struct ActorFrames {
     gems: [FrameId; 3],
     pub(crate) shadow: FrameId,
     pub(crate) light: FrameId,
+    /// 主角灯笼的光池（平顶），见 `GlowRequests::pool_light`
+    light_pool: Option<FrameId>,
     /// 光环（升级时扩开）
     pub(crate) ring: FrameId,
     /// 竹丛：立着的、打碎的、影子缩放
@@ -323,6 +327,7 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
         gems: [need("vfx/gem_0"), need("vfx/gem_1"), need("vfx/gem_2")],
         shadow,
         light: need("vfx/light"),
+        light_pool: db.find("vfx/light_pool"),
         ring: need("weapons/ring"),
         bamboo: db
             .find("bamboo_clump/idle_S_00")
@@ -359,14 +364,34 @@ pub(crate) struct GlowRequests(pub Vec<Glow>);
 
 impl GlowRequests {
     pub fn light(&mut self, frames: &ActorFrames, db: &AtlasDb, at: Vec2, (color, radius): (Color, f32)) {
+        self.light_frame(frames.light, db, at, (color, radius));
+    }
+
+    /// 主角灯笼那盏大光：平顶的光池（美术的 `vfx/light_pool`，半径四成以内一样亮，再往外半个余弦收掉），
+    /// 灯下一圈都看得清，没有旧光那几道色带。平顶照得开，半径收到八成，灯外还留得住月夜；
+    /// 没有这帧时照旧用尖顶的 `vfx/light`。别的光源都用尖顶的，小光画成平顶会像圆饼。
+    pub fn pool_light(
+        &mut self,
+        frames: &ActorFrames,
+        db: &AtlasDb,
+        at: Vec2,
+        (color, radius): (Color, f32),
+    ) {
+        match frames.light_pool {
+            Some(pool) => self.light_frame(pool, db, at, (color, radius * POOL_RADIUS)),
+            None => self.light_frame(frames.light, db, at, (color, radius)),
+        }
+    }
+
+    fn light_frame(&mut self, frame: FrameId, db: &AtlasDb, at: Vec2, (color, radius): (Color, f32)) {
         if color.alpha() <= 0.01 {
             return;
         }
         self.0.push(Glow {
-            frame: frames.light,
+            frame,
             color: quantize(color),
             pos: at.extend(0.0),
-            scale: Vec2::splat(frames.light_scale(db, radius)),
+            scale: Vec2::splat(radius * 2.0 / db.frame(frame).size.x),
             rot: 0.0,
             flip: false,
             light: true,
@@ -448,7 +473,8 @@ impl HeroView {
             .and_then(|s| s.get(DIRS[self.dir]))
             .and_then(|s| s.get(self.frame))
             .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
-        (socket, self.light.map_or(LANTERN_LIGHT.0, |c| mix(LANTERN_LIGHT.0, c, 0.45)))
+        // 换上的灯笼的灯色只混进两成半：灯光底色已经偏橙，混多了整片灯下发橙（试玩第 1 轮，原来 0.45）
+        (socket, self.light.map_or(LANTERN_LIGHT.0, |c| mix(LANTERN_LIGHT.0, c, 0.25)))
     }
 }
 
@@ -658,7 +684,7 @@ pub(crate) fn hero_glow(
         if let Some(frame) = view.frame_id {
             surfaces.0.push(Draw::new(frame, tf.translation));
         }
-        glow.light(&frames, &db, pos + socket, (color, radius));
+        glow.pool_light(&frames, &db, pos + socket, (color, radius));
         if let Some(emit) = view.emit {
             glow.emit(emit, pos, false, Color::WHITE.with_alpha(sprite.color.alpha()));
         }
