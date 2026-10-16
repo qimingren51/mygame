@@ -90,8 +90,10 @@ pub(crate) struct FxFrames {
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
     coin: Option<(FrameId, Option<FrameId>)>,
-    /// 冲锋预警：车道、箭头
+    /// 冲锋预警：车道、箭头（竹魅瞄准也用它）
     charge: Option<(FrameId, FrameId)>,
+    /// 竹魅的竹刺：刺身（普通混合）、拖尾（叠加，染色）
+    spike: Option<(FrameId, FrameId)>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
     zone_lava: Option<(FrameId, Option<FrameId>)>,
     zone_mud: Option<FrameId>,
@@ -151,6 +153,7 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
         charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
+        spike: db.find("weapons/bamboo_spike").zip(db.find("weapons/bamboo_spike_trail")),
         ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
         zone_mud: db.find("ground/zone_mud"),
@@ -1011,6 +1014,45 @@ pub(crate) fn collect_fx(
         }
     }
 
+    // ---- 竹魅瞄准：方向在预警开始时就锁定，沿竹刺要飞的路画车道，越接近出手越亮
+    if let (Some(en), Some((line, head))) = (&res.enemies, f.charge) {
+        let c = &content.0;
+        let red = rgb(0xff4a3a);
+        for i in en.iter_alive() {
+            if en.aim_t[i] <= 0.0 {
+                continue;
+            }
+            let Some(sh) = &c.enemies[en.kind[i] as usize].shot else { continue };
+            let u = (1.0 - en.aim_t[i] / sh.warn).clamp(0.0, 1.0);
+            let at = Vec2::new(en.x[i], en.y[i]);
+            let dir = Vec2::new(en.aim_dx[i], en.aim_dy[i]);
+            // 和真实危险区一致：竹刺飞 speed × life，宽度 2 ×（竹刺半径 + 主角半径）
+            let reach = sh.radius + c.player.radius;
+            let len = sh.speed * sh.life;
+            let start = to_screen(at);
+            let screen_dir = to_screen(at + dir * len) - start;
+            foreground.protect(start + screen_dir * 0.5, len * 0.5);
+            let rot = screen_dir.y.atan2(screen_dir.x);
+            let (line_a, glow_a) = (0.35 + 0.6 * u, 0.15 + 0.5 * u);
+            let (lf, hf) = (db.frame(line), db.frame(head));
+            let k = reach * 2.0 / lf.width.unwrap_or(lf.size.y);
+            let head_len = hf.head_len.unwrap_or(hf.size.x) * k;
+            let body = (screen_dir.length() - head_len).max(0.0);
+            let tip = start + screen_dir.normalize_or_zero() * body;
+            for (id, pos, scale) in
+                [(line, start, Vec2::new(body / lf.size.x, k)), (head, tip, Vec2::splat(k))]
+            {
+                pools.fx.push(Draw {
+                    scale,
+                    rot,
+                    color: red.with_alpha(line_a),
+                    ..Draw::new(id, pos.extend(layer::DANGER))
+                });
+                glow.add(id, pos.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
+            }
+        }
+    }
+
     // ---- 精英词缀：头顶一排小图标。画在妖物这一层的最上面、夜色之下，暗处和妖物一起看不见；“隐”着的不画
     if let Some(en) = &res.enemies
         && f.affix.iter().any(Option::is_some)
@@ -1528,6 +1570,16 @@ pub(crate) fn collect_fx(
                 ..Draw::new(frames.shadow, ground.extend(layer::SHADOW))
             });
             let p = ground + Vec2::new(0.0, FOXFIRE_HEIGHT);
+            // 竹魅的竹刺：刺身朝飞行方向，拖尾接在后面（DESIGN 第 15 节“竹刺”）
+            if fo.kind.is_some()
+                && let Some((spike, trail)) = f.spike
+            {
+                let dir = to_screen(fo.pos + fo.vel) - to_screen(fo.pos);
+                let rot = dir.y.atan2(dir.x);
+                glow.add(trail, p.extend(layer::EMISSIVE), Vec2::ONE, rot, rgb(0xa8e6b8).with_alpha(0.8));
+                pools.fx.push(Draw { rot, ..Draw::new(spike, p.extend(sort_z(layer::WEAPONS, fo.pos.y))) });
+                continue;
+            }
             glow.add(
                 f.glow,
                 p.extend(layer::EMISSIVE),
