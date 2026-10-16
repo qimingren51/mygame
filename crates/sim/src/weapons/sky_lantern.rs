@@ -9,7 +9,7 @@ use lantern_content::{Element, FissureDef, Stat, WeaponBehavior};
 use lantern_core::StateHasher;
 use lantern_core::step::DT;
 
-use super::{Ctx, WeaponSlot, cooldown_ready};
+use super::{Ctx, WeaponSlot, cooldown_ready, densest};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes};
 use crate::enemies::Enemies;
 use crate::spatial::Grid;
@@ -51,35 +51,6 @@ impl SkyLanterns {
             }
         }
     }
-}
-
-/// 在 around 附近 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只（同伴一样多取更近的）；
-/// 离 avoid 里任何一个点不到 spread 的不要。found 是借来的缓冲。
-fn densest(
-    grid: &Grid,
-    en: &Enemies,
-    around: Vec2,
-    (range, pick, cluster, spread): (f32, u32, f32, f32),
-    avoid: &[Vec2],
-    found: &mut Vec<u32>,
-) -> Option<Vec2> {
-    grid.nearest_k(en, around.x, around.y, range, pick as usize, found);
-    let at = |i: u32| Vec2::new(en.x[i as usize], en.y[i as usize]);
-    let c2 = cluster * cluster;
-    let s2 = spread * spread;
-    let mut best: Option<(usize, Vec2)> = None;
-    for &i in found.iter() {
-        let p = at(i);
-        if avoid.iter().any(|a| a.distance_squared(p) < s2) {
-            continue;
-        }
-        let n = found.iter().filter(|&&j| at(j).distance_squared(p) <= c2).count();
-        // nearest_k 已按距离从近到远排好，只有更多同伴才换
-        if best.is_none_or(|(m, _)| n > m) {
-            best = Some((n, p));
-        }
-    }
-    best.map(|(_, p)| p)
 }
 
 pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {

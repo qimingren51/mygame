@@ -299,6 +299,17 @@ pub enum SimEvent {
         bind: bool,
         evolved: bool,
     },
+    /// 镇妖塔落地（预警圈和立着的塔画面直接读 `Towers`）
+    TowerLand {
+        pos: Vec2,
+        radius: f32,
+        evolved: bool,
+    },
+    /// 玲珑塔到时间炸开
+    TowerBurst {
+        pos: Vec2,
+        radius: f32,
+    },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {
         pos: Vec2,

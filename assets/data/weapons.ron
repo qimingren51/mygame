@@ -289,4 +289,33 @@
             level: (cooldown: 0.5, count: 8, radius: 200.0, damage: 30.0),
         )),
     ),
+    (
+        id: "tower", name: "镇妖塔", icon: "塔", element: Earth,
+        desc: "在妖物最密的地方落下宝塔，砸晕一片，再把周围的妖物吸到塔下。", short: "落塔吸妖，聚成一团",
+        flavor: "土伯拿它压门缝。塔一落，周围的妖都被吸到塔底。",
+        // 落点：300 以内最近的 24 只里，挑 100 以内同伴最多的那只（几座至少隔开 120）；预警 0.5 秒，落地击晕 0.5 秒。
+        // 立 4 秒：2.2 倍半径以内往塔下吸，每秒 90（精英一半，夜主不吸）；每 0.5 秒伤害 × 0.15
+        behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
+                        pull: 2.2, pull_speed: 90.0, tick: 0.5, tick_scale: 0.15),
+        levels: [
+            (cooldown: 9.0, count: 1, radius: 44.0, damage: 30.0),
+            (cooldown: 8.8, count: 1, radius: 46.0, damage: 36.0),
+            (cooldown: 8.5, count: 1, radius: 52.0, damage: 42.0),
+            (cooldown: 8.2, count: 1, radius: 54.0, damage: 50.0),
+            (cooldown: 7.9, count: 1, radius: 56.0, damage: 58.0),
+            (cooldown: 7.6, count: 1, radius: 60.0, damage: 64.0),
+            (cooldown: 7.3, count: 1, radius: 60.0, damage: 72.0),
+            (cooldown: 7.0, count: 1, radius: 60.0, damage: 80.0),
+        ],
+        evolution: Some((
+            name: "玲珑塔", passive: "panshi",
+            desc: "每 10 秒落一座，把几乎全屏的妖物吸到塔下，4 秒后一起炸开。", short: "全屏吸妖，到时炸开",
+            flavor: "托塔天王手里那一座。整片的妖收进去，再一起炸出来。",
+            // 吸的范围 64 × 7.8 ≈ 500，每秒 140；到时间炸开：半径 140，伤害 200，击晕 1 秒
+            behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
+                            pull: 7.8, pull_speed: 140.0, tick: 0.5, tick_scale: 0.15,
+                            burst: Some((radius: 140.0, damage: 200.0, stun: 1.0))),
+            level: (cooldown: 10.0, count: 1, radius: 64.0, damage: 160.0),
+        )),
+    ),
 ]

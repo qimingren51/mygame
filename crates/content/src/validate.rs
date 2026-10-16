@@ -253,6 +253,7 @@ impl Checker<'_> {
                     | WeaponBehavior::SkyLantern { .. }
                     | WeaponBehavior::Wave { .. }
                     | WeaponBehavior::Vine { .. }
+                    | WeaponBehavior::Tower { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -453,6 +454,48 @@ impl Checker<'_> {
                         .fail(file, format!("\"{id}\"：Vine.bind_every 和 bind 要么都写，要么都不写"));
                 }
                 self.fraction(file, "Vine.lifesteal", *lifesteal)
+            }
+            WeaponBehavior::Tower {
+                range,
+                pick,
+                cluster,
+                spread,
+                warn,
+                stun,
+                life,
+                pull,
+                pull_speed,
+                tick,
+                tick_scale,
+                burst,
+            } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：Tower.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[("Tower.range", *range), ("Tower.life", *life), ("Tower.tick", *tick)],
+                )?;
+                self.non_negative(
+                    file,
+                    &[
+                        ("Tower.cluster", *cluster),
+                        ("Tower.spread", *spread),
+                        ("Tower.warn", *warn),
+                        ("Tower.stun", *stun),
+                        ("Tower.pull", *pull),
+                        ("Tower.pull_speed", *pull_speed),
+                        ("Tower.tick_scale", *tick_scale),
+                    ],
+                )?;
+                if let Some(b) = burst {
+                    self.positive(
+                        file,
+                        &[("Tower.burst.radius", b.radius), ("Tower.burst.damage", b.damage)],
+                    )?;
+                    self.non_negative(file, &[("Tower.burst.stun", b.stun)])?;
+                }
+                Ok(())
             }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {

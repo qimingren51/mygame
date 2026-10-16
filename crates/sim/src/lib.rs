@@ -270,6 +270,7 @@ impl Plugin for SimPlugin {
                         weapons::drop::update_seals,
                         weapons::sky_lantern::update_sky_lanterns,
                         weapons::wave::update_waves,
+                        weapons::tower::update_towers,
                         weapons::drop::update_ground,
                         player::dash_strike,
                         reveal::flame_band,

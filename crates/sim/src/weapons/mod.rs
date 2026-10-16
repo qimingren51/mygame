@@ -8,6 +8,7 @@
 //! - [`sky_lantern`] 孔明灯（孔明灯 / 万灯升）
 //! - [`wave`] 推浪（沧浪 / 北冥潮）
 //! - [`vine`] 连藤（青藤 / 万木春）
+//! - [`tower`] 落塔（镇妖塔 / 玲珑塔）
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -30,6 +31,7 @@ pub mod pulse;
 pub mod seeker;
 pub mod sky_lantern;
 pub mod sweep;
+pub mod tower;
 pub mod vine;
 pub mod volley;
 pub mod wave;
@@ -243,7 +245,7 @@ impl Arsenal {
     }
 }
 
-/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、藤、地裂）。
+/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、藤、塔、地裂）。
 /// 合成一个参数，免得 `update_weapons` 超过 Bevy 的参数个数上限。
 #[derive(SystemParam)]
 pub(crate) struct Props<'w> {
@@ -252,6 +254,7 @@ pub(crate) struct Props<'w> {
     lanterns: ResMut<'w, sky_lantern::SkyLanterns>,
     waves: ResMut<'w, wave::Waves>,
     vines: ResMut<'w, vine::Vines>,
+    towers: ResMut<'w, tower::Towers>,
     ground: ResMut<'w, drop::Fissures>,
 }
 
@@ -275,6 +278,7 @@ pub(crate) struct Ctx<'a> {
     pub lanterns: &'a mut sky_lantern::SkyLanterns,
     pub waves: &'a mut wave::Waves,
     pub vines: &'a mut vine::Vines,
+    pub towers: &'a mut tower::Towers,
     /// 排到下一步执行的动作（青藤回血）
     pub actions: &'a mut crate::combat::ActionQueue,
     pub ground: &'a mut drop::Fissures,
@@ -330,6 +334,7 @@ pub(crate) fn update_weapons(
             lanterns: &mut props.lanterns,
             waves: &mut props.waves,
             vines: &mut props.vines,
+            towers: &mut props.towers,
             actions: &mut actions,
             ground: &mut props.ground,
             outbox: &mut outbox,
@@ -346,8 +351,38 @@ pub(crate) fn update_weapons(
             WeaponBehavior::SkyLantern { .. } => sky_lantern::update(&mut ctx, slot),
             WeaponBehavior::Wave { .. } => wave::update(&mut ctx, slot),
             WeaponBehavior::Vine { .. } => vine::update(&mut ctx, slot),
+            WeaponBehavior::Tower { .. } => tower::update(&mut ctx, slot),
         }
     }
+}
+
+/// 妖物最密的地方（孔明灯、镇妖塔的落点）：在 around 附近 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只（同伴一样多取更近的）；
+/// 离 avoid 里任何一个点不到 spread 的不要。found 是借来的缓冲。
+pub(crate) fn densest(
+    grid: &Grid,
+    en: &Enemies,
+    around: Vec2,
+    (range, pick, cluster, spread): (f32, u32, f32, f32),
+    avoid: &[Vec2],
+    found: &mut Vec<u32>,
+) -> Option<Vec2> {
+    grid.nearest_k(en, around.x, around.y, range, pick as usize, found);
+    let at = |i: u32| Vec2::new(en.x[i as usize], en.y[i as usize]);
+    let c2 = cluster * cluster;
+    let s2 = spread * spread;
+    let mut best: Option<(usize, Vec2)> = None;
+    for &i in found.iter() {
+        let p = at(i);
+        if avoid.iter().any(|a| a.distance_squared(p) < s2) {
+            continue;
+        }
+        let n = found.iter().filter(|&&j| at(j).distance_squared(p) <= c2).count();
+        // nearest_k 已按距离从近到远排好，只有更多同伴才换
+        if best.is_none_or(|(m, _)| n > m) {
+            best = Some((n, p));
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 /// 冷却计时：到点返回 true（调用方负责重置）。

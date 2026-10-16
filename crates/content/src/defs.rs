@@ -898,6 +898,25 @@ pub enum WeaponBehavior {
         #[serde(default)]
         bind: f32,
     },
+    /// 落塔（镇妖塔 / 玲珑塔，docs/BALANCE.md 第 6.3 节）：每次落 count 座，落点和孔明灯一样挑（range、pick、cluster、spread）。
+    /// 预警 warn 秒后落地，对 radius 以内造成 damage、击晕 stun 秒；之后立 life 秒：把 pull × radius 以内的妖物
+    /// 往塔下吸，每秒 pull_speed（精英一半，夜主不吸），每 tick 秒对 radius 以内造成 damage × tick_scale。
+    /// burst：到时间炸开（玲珑塔）。
+    Tower {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        warn: f32,
+        stun: f32,
+        life: f32,
+        pull: f32,
+        pull_speed: f32,
+        tick: f32,
+        tick_scale: f32,
+        #[serde(default)]
+        burst: Option<TowerBurstDef>,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点
@@ -961,6 +980,15 @@ pub enum GroundKind {
     Fire,
     Bamboo,
     Sword,
+}
+
+/// 玲珑塔到时间炸开：半径、伤害、击晕秒数。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TowerBurstDef {
+    pub radius: f32,
+    pub damage: f32,
+    pub stun: f32,
 }
 
 /// 赤霄：命中熔金（易伤），击杀时分剑。
