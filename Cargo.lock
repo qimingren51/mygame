@@ -3440,6 +3440,7 @@ dependencies = [
  "lantern_sim",
  "lantern_ui",
  "lantern_view",
+ "serde_json",
  "winresource",
 ]
 

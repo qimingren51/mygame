@@ -21,6 +21,9 @@ lantern_ui.workspace = true
 lantern_platform.workspace = true
 bevy.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [build-dependencies]
 # 依赖在宿主机编译；build.rs 仅对 Windows 目标调用资源编译器。
 winresource.workspace = true
