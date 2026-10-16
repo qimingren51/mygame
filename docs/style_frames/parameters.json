@@ -4,7 +4,8 @@
     "INK": "#17140F",
     "GOLD": "#E2B23A",
     "DUST": "#6A645A",
-    "NIGHT_AMBIENT": "#161B2C",
+    "NIGHT_AMBIENT": "#46557F",
+    "NO_MOON_AMBIENT": "#161B2C",
     "LANTERN_LIGHT": "#FFC27A",
     "FLAME_LIGHT": "#FF9A4D",
     "SOUL_LIGHT": "#BFEFFF",
@@ -30,14 +31,14 @@
     "01_night": {
       "tide": 0.0,
       "dawn": 0.0,
-      "ambient_srgb": "#161B2C",
-      "ambient_linear_y": 0.011363
+      "ambient_srgb": "#46557F",
+      "ambient_linear_y": 0.093314
     },
     "02_tide": {
       "tide": 1.0,
       "dawn": 0.0,
-      "ambient_srgb": "#14192A",
-      "ambient_linear_y": 0.010227
+      "ambient_srgb": "#425179",
+      "ambient_linear_y": 0.083983
     },
     "03_dawn": {
       "tide": 0.0,

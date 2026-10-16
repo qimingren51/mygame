@@ -20,7 +20,7 @@ use lantern_sim::{AppState, Director, Health, Player, Pos, RunState, SimEvent, S
 use crate::actors::{GlowRequests, Pools};
 use crate::fx::ult_flare;
 use crate::lighting::{LightCamera, NIGHT_AMBIENT};
-use crate::palette::{TIDE_AMBIENT_GAIN, TIDE_DECOR_GAIN, TIDE_PARTICLE_GAIN, dawn_ambient};
+use crate::palette::{NO_MOON_AMBIENT, TIDE_AMBIENT_GAIN, TIDE_DECOR_GAIN, TIDE_PARTICLE_GAIN, dawn_ambient};
 use crate::particles::{INK, Particles};
 use crate::{Feel, MainCamera, layer, to_screen};
 
@@ -252,7 +252,11 @@ pub(crate) fn update_atmos(
     mut light: Single<&mut Camera, With<LightCamera>>,
     feel: Res<Feel>,
     director: Option<Res<Director>>,
+    (stats, setup): (Option<Res<lantern_sim::Stats>>, Option<Res<lantern_sim::RunSetup>>),
 ) {
+    // 夜签：“无月”是原来的黑夜；“浓雾”才有冷蓝的夜雾（平时是月夜，没有雾）
+    let no_moon = stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
+    let fog = setup.as_ref().is_some_and(|s| s.omen.as_ref().is_some_and(|o| o.id == "fog"));
     let rdt = real.delta_secs().min(0.1);
     // 妖潮、合围：约 1.5 秒压下去，结束后约 3 秒回来
     let tide = director.is_some_and(|d| d.surge_t > 0.0 || !d.encircle.is_empty());
@@ -303,7 +307,7 @@ pub(crate) fn update_atmos(
     }
 
     // ---- 光照图底色：夜色 → 夜主登场时更暗 → 天明时变成晨光
-    let night = NIGHT_AMBIENT.to_linear();
+    let night = if no_moon { NO_MOON_AMBIENT } else { NIGHT_AMBIENT }.to_linear();
     // 夜主登场：0.4 秒压暗，停一会儿，最后 1.5 秒慢慢回来（短的按比例缩）
     let gloom = if atmos.gloom > 0.0 {
         let len = atmos.gloom_len;
@@ -365,7 +369,10 @@ pub(crate) fn update_atmos(
         }
     }
 
-    // ---- 夜雾：大片冷蓝的薄雾慢慢横移，叠加在暗层之上，暗处泛起一层月色，亮处几乎看不出
+    // ---- 夜雾：大片冷蓝的薄雾慢慢横移，叠加在暗层之上；只在“浓雾”的夜里有
+    if !fog {
+        return;
+    }
     for w in &mut atmos.wisps {
         w.off.x += w.vel * dt;
         if w.off.x > 560.0 {

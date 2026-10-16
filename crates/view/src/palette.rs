@@ -8,7 +8,10 @@ use bevy::prelude::*;
 pub(crate) const INK: Color = Color::srgb_u8(23, 20, 15);
 pub(crate) const GOLD: Color = Color::srgb_u8(226, 178, 58);
 pub(crate) const DUST: Color = Color::srgb_u8(106, 100, 90);
-pub const NIGHT_AMBIENT: Color = Color::srgb_u8(22, 27, 44);
+/// 月夜（试玩第 1 轮：暗处也看得清地面和妖物）：光照图的底色，没被灯照到的地方乘它。
+pub const NIGHT_AMBIENT: Color = Color::srgb_u8(70, 85, 127);
+/// 夜签“无月”：原来的黑夜。
+pub const NO_MOON_AMBIENT: Color = Color::srgb_u8(22, 27, 44);
 pub(crate) const LANTERN_LIGHT: Color = Color::srgb_u8(255, 194, 122);
 pub(crate) const FLAME_LIGHT: Color = Color::srgb_u8(255, 154, 77);
 pub(crate) const SOUL_LIGHT: Color = Color::srgb_u8(191, 239, 255);
@@ -52,7 +55,8 @@ mod tests {
     #[test]
     fn ink_and_night_match_art_srgb() {
         assert_eq!(INK.to_srgba().to_u8_array(), [0x17, 0x14, 0x0f, 255]);
-        assert_eq!(NIGHT_AMBIENT.to_srgba().to_u8_array(), [0x16, 0x1b, 0x2c, 255]);
+        assert_eq!(NIGHT_AMBIENT.to_srgba().to_u8_array(), [0x46, 0x55, 0x7f, 255]);
+        assert_eq!(NO_MOON_AMBIENT.to_srgba().to_u8_array(), [0x16, 0x1b, 0x2c, 255]);
     }
 
     #[test]
