@@ -58,7 +58,10 @@ EXPECTED_VFX = {
     "coin_emit.png": (sz(32, 26), (0.5, 0.5)),
     # 青丘：可平铺的迷雾
     **{f"mist_{i}.png": (sz(256, 256), (0.5, 0.5)) for i in range(2)},
+    # 月夜（只在 2 倍）：主角灯笼专用的光照池，同 light 的尺寸、锚点
+    **({"light_pool.png": (sz(128, 128), (0.5, 0.5))} if V.MOON else {}),
 }
+MOON_VFX = ["light_pool.png"] if V.MOON else []  # vfx/meta.json 里追加在青丘条目之后
 EXPECTED_GROUND = {
     "paper.png": (sz(512, 512), (0.0, 0.0)),
     **{f"wash_{i}.png": (sz(240, 160), (0.5, 0.5)) for i in range(3)},
@@ -91,7 +94,7 @@ EXPECTED_GROUND = {
     "qq_fox_tracks.png": (sz(128, 40), (0.5, 0.5)),
 }
 BOTTOM_ANCHORED = ("grass", "reed", "bamboo", "qq_shoots")  # 锚点在底边，底边允许有根
-WHITE_TEXTURES = ["light.png", "glow.png", "eyes.png", "spark.png", "gem_0.png", "gem_1.png", "gem_2.png", "mist_0.png", "mist_1.png"]
+WHITE_TEXTURES = ["light.png", "glow.png", "eyes.png", "spark.png", "gem_0.png", "gem_1.png", "gem_2.png", "mist_0.png", "mist_1.png", *MOON_VFX]
 WHITE_GROUND = ["rift_glow.png", "zone_lava_glow.png", "zone_herb_glow.png"]
 M25_VFX = ["coin.png", "coin_emit.png"]
 M25_GROUND = ["zone_lava.png", "zone_lava_glow.png", "zone_mud.png", "zone_herb.png", "zone_herb_glow.png"]
@@ -201,6 +204,9 @@ def test_meta_density_and_blend():
             assert e["blend"] == "normal" and e["tint"] is False, f"{name} 应为正常混合、不染色"
     assert vm["coin.png"]["blend"] == "normal" and vm["coin.png"]["tint"] is False and vm["coin.png"]["color"] == "full", "金币应全彩、正常混合"
     assert vm["coin_emit.png"]["blend"] == "add" and vm["coin_emit.png"]["tint"] is False, "金币的自发光应叠加、不染色（自带暖金色）"
+    if V.MOON:
+        e = vm["light_pool.png"]
+        assert e["blend"] == "add" and e["tint"] is True and e["color"] == "white" and e.get("note"), "light_pool 应为白色、染色、叠加，带说明"
     for name in ("zone_lava.png", "zone_mud.png", "zone_herb.png"):
         assert isinstance(gm[name]["radius_px"], int) and gm[name]["radius_px"] > 0, f"{name} meta 应有 radius_px"
     for name in TILEABLE:
@@ -326,6 +332,29 @@ def test_light_dither():
     assert differs > 0.2, f"看不出抖动（只有 {differs:.2%} 的像素偏离取整值）"
 
 
+def test_light_pool():
+    """月夜（2 倍）：主角灯笼的光照池。边界同 light（光心满亮，半径外、四边、圆周为 0，径向单调）；
+    0.48R 以内的环平均都 ≥ 0.9（中间平），0.7R 处约 0.5，0.95R 外 ≤ 0.03；抖动 < 1 LSB、无偏。"""
+    if not V.MOON:
+        assert not (V.VFX_DIR / "light_pool.png").exists(), "1 倍（网页版冻结）不应有 light_pool"
+        return
+    a = rgba(V.VFX_DIR, "light_pool.png")[..., 3].astype(np.float64)
+    n = a.shape[0]
+    d = V.radial_d(n)
+    assert a[n // 2 - 1 : n // 2 + 1, n // 2 - 1 : n // 2 + 1].min() >= 254, "光心不够亮"
+    assert a[d >= 1.0].max() == 0 and max(a[0].max(), a[-1].max(), a[:, 0].max(), a[:, -1].max()) == 0, "半径之外、四边 alpha 必须为 0"
+    assert a[(d >= 1.0 - 1.0 / (n / 2)) & (d < 1.0)].max() <= 1, "圆周处 alpha 应为 0"
+    r_px = np.floor(d * n / 2).astype(int)
+    prof = np.array([a[r_px == r].mean() for r in range(n // 2)]) / 255.0
+    assert np.diff(prof).max() <= 0.6 / 255, "径向不单调"
+    assert prof[: int(0.48 * n / 2)].min() >= 0.9, "0.48R 以内应 ≥ 0.9（中间平的亮区）"
+    assert abs(prof[int(0.7 * n / 2)] - 0.5) < 0.03 and prof[int(0.95 * n / 2) :].max() <= 0.03, "外圈收法不对"
+    f = V.curve_light_pool(d) * 255.0
+    sel = (d > 0.3) & (d < 0.95) & (f > 2) & (f < 253)
+    err = a[sel] - f[sel]
+    assert np.abs(err).max() < 1.0 + 1e-9 and abs(err.mean()) < 0.06, "抖动超过 1 LSB 或有偏"
+
+
 # ---------------------------------------------------------------- 宣纸
 
 
@@ -355,12 +384,18 @@ def test_paper_seamless():
 
 
 def test_paper_tone():
+    """1 倍（第一版，冻结）：亮度标准差 1–8（0..255）。2 倍（月夜版）：放宽到 0.035–0.045（×255 约 8.9–11.5）——
+    试玩说“地图像蒙了一层雾”，第一版约 0.013 的纸乘上月光底色后是一片平的灰；均值还要和第一版的 2 倍纸相同（差 < 0.25），地面亮度不漂。"""
     p = np.asarray(Image.open(V.GROUND_DIR / "paper.png"), dtype=np.float64)
     mean = p.reshape(-1, 3).mean(0)
     want = np.array(S.hex_to_rgb(S.PAPER), dtype=np.float64)
     assert np.abs(mean - want).max() <= 3.0, f"宣纸平均色 {mean.round(1)} 偏离 PAPER {want}"
     sd = lum(p).std()
-    assert 1.0 <= sd <= 8.0, f"宣纸对比度不合适（亮度标准差 {sd:.2f}）"
+    if V.MOON:
+        assert 0.035 * 255 <= sd <= 0.045 * 255, f"月夜版宣纸的亮度标准差 {sd / 255:.4f} 不在 0.035–0.045"
+        assert np.abs(mean - np.array(V.PAPER_MEAN_2X)).max() < 0.25, f"月夜版宣纸均值 {mean.round(3)} 和第一版 {V.PAPER_MEAN_2X} 不同"
+    else:
+        assert 1.0 <= sd <= 8.0, f"宣纸对比度不合适（亮度标准差 {sd:.2f}）"
 
 
 def test_paper_deterministic():
@@ -508,7 +543,10 @@ def test_total_size():
     limit = 800 * 1024 * D * D
     assert total < limit, f"贴图总体积 {total / 1024:.1f} KB 超过 {limit / 1024:.0f} KB"
     paper = (V.GROUND_DIR / "paper.png").stat().st_size
-    assert paper < 250 * 1024 * D * D, f"宣纸 {paper / 1024:.1f} KB 超过 {250 * D * D:.0f} KB"
+    # 月夜版宣纸（2 倍）：亮度标准差 0.040、细纤维铺满纸面，PNG 每像素约 11 bit，压不下去（去掉哪一层都只省 3%–5%），
+    # 约 1.4 MB（第一版 614 KB），上限放宽到 1600 KB；总量仍在原来的 800 KB × D² 里
+    cap = 1600 if V.MOON else 250 * D * D
+    assert paper < cap * 1024, f"宣纸 {paper / 1024:.1f} KB 超过 {cap:.0f} KB"
 
 
 def test_review_images():
@@ -522,8 +560,11 @@ def test_review_images():
 def test_pre_m25_unchanged():
     """快照里的 vfx/、ground/ 产物（M2.5 之前 + M2.5 第一批）逐字节不变，meta 已有条目与顶层字段不变（post/golden_m25.json，两种密度）。"""
     testkit.check_snapshot(V.ASSETS, ("vfx", "ground"), D)
-    for folder, m25, qq in (("vfx", M25_VFX, QQ_VFX), ("ground", M25_GROUND, QQ_GROUND)):
+    for folder, m25, qq, moon in (("vfx", M25_VFX, QQ_VFX, MOON_VFX), ("ground", M25_GROUND, QQ_GROUND, [])):
         files = list(json.loads((V.ASSETS / folder / "meta.json").read_text(encoding="utf-8"))["files"])
+        if moon:  # 月夜（2 倍）的条目追加在最后
+            assert files[-len(moon) :] == moon, f"{folder}/meta.json 的月夜条目应追加在最后：{files[-len(moon):]}"
+            files = files[: -len(moon)]
         assert files[-len(qq) :] == qq, f"{folder}/meta.json 的青丘条目应追加在最后：{files[-len(qq):]}"
         assert files[-len(qq) - len(m25) : -len(qq)] == m25, f"{folder}/meta.json 的 M2.5 条目应紧挨在青丘条目之前"
 
@@ -540,8 +581,11 @@ def test_density_2x_same_art():
     if D != 2:
         return
     one = V.OUT / "assets"
+    # 不比：宣纸（两种密度本来就各画各的）、只有 2 倍才有的 light_pool、月夜调浓的地面帧（浓淡有意和冻结的 1 倍不同；
+    # 调浓只调一次、色相不变、alpha 只增不减由 test_moon_textures.py 核对）
+    skip = {"paper.png", *MOON_VFX, *(f"{k}.png" for k in V.MOON_BOOST_FRAMES)}
     for folder, expected in (("vfx", EXPECTED_VFX), ("ground", EXPECTED_GROUND)):
-        names = [n for n in expected if n != "paper.png"]
+        names = [n for n in expected if n not in skip]
         res = testkit.density_consistency(V.ASSETS / folder, one / folder, names)
         assert len(res) == len(names), f"{folder}: 1 倍产物不全，先跑一遍 1 倍"
 

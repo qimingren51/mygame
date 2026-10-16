@@ -12,6 +12,8 @@ art/out/<ASSETS_DIR_NAME>/ground/ 与同一份 meta.json（一个文件夹只有
 
 青丘追加（帧名前缀 qq_，只往后追加，前面的条目逐字节不变）：qq_bamboo_leaves_0..2 落竹叶、qq_shoots_0..1 竹笋（锚点在底边）、
 qq_moss_0..1 苔点与地衣、qq_wash_0..1 兑花青石绿的淡墨晕、qq_fox_tracks 一行狐狸脚印。
+月夜（只在 2 倍；1 倍逐字节不变）：leaves_0..1、pebbles_0..1、qq_bamboo_leaves_0..2、qq_moss_0..1、qq_fox_tracks
+在各自生成处调浓一次（vfx_textures.moon_boost，对纸面的 L* 反差目标 +12%）。
 青丘审图（读盘：地面装饰、vfx/mist_0..1、weapons/bamboo_spike，先跑 vfx_textures.py 和 weapon_textures.py）：
   LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/ground_decor.py --sample   # → art/out/review@2x/qq_2d_sample.png
 """
@@ -961,6 +963,10 @@ def make_qq_fox_tracks() -> Image.Image:
 # ============================================================== 汇总
 
 
+LEAVES_SEEDS = (4400, 4401)
+PEBBLES_SEEDS = (4600, 4601)
+
+
 def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     """{名字: (图, 锚点, meta 附加字段)}。不写盘。"""
     normal = {"color": "full", "blend": "normal", "tint": False}
@@ -972,10 +978,11 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
                                            "note": f"裂隙里的光：与 rift 同尺寸同锚点叠加，游戏里染色（建议 {RIFT_TINT}）并做呼吸闪烁"})
     for i, (seed, n, plumes) in enumerate(((4300, 4, (1,)), (4301, 3, (0, 2)), (4302, 5, (2, 3)))):
         out[f"reed_{i}"] = (make_reed(seed, n, plumes), (0.5, 1.0), {**normal, "kind": "decor", "note": "芦苇，锚点在根部（底边）"})
-    for i, seed in enumerate((4400, 4401)):
-        out[f"leaves_{i}"] = (make_leaves(seed), (0.5, 0.5), {**normal, "kind": "decor", "note": "散落的叶子，可随机旋转"})
-    for i, seed in enumerate((4600, 4601)):
-        out[f"pebbles_{i}"] = (make_pebbles(seed), (0.5, 0.5), {**normal, "kind": "decor", "note": "一撮卵石"})
+    # 落叶、卵石在 2 倍（桌面版）按月夜调浓（V.moon_boost；1 倍原样）
+    for i, seed in enumerate(LEAVES_SEEDS):
+        out[f"leaves_{i}"] = (V.moon_boost(make_leaves(seed)), (0.5, 0.5), {**normal, "kind": "decor", "note": "散落的叶子，可随机旋转"})
+    for i, seed in enumerate(PEBBLES_SEEDS):
+        out[f"pebbles_{i}"] = (V.moon_boost(make_pebbles(seed)), (0.5, 0.5), {**normal, "kind": "decor", "note": "一撮卵石"})
     out["puddle_0"] = (make_puddle(), (0.5, 0.5), {**normal, "kind": "decor", "note": "小水洼"})
     out["bamboo_0"] = (make_bamboo(4700, 2, True), (0.5, 1.0), {**normal, "kind": "decor", "note": "两竿短竹 + 竹笋，锚点在根部（底边）"})
     out["bamboo_1"] = (make_bamboo(4701, 3, False), (0.5, 1.0), {**normal, "kind": "decor", "note": "三竿短竹，锚点在根部（底边）"})
@@ -997,13 +1004,14 @@ def build() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     return out
 
 
-def build_qq() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
-    """青丘的地面装饰（帧名前缀 qq_），追加在 build() 的最后。"""
+def build_qq(boost: bool | None = None) -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
+    """青丘的地面装饰（帧名前缀 qq_），追加在 build() 的最后。落竹叶、苔点、狐爪印在 2 倍按月夜调浓
+    （V.moon_boost）；boost=False 时给原图（moon_textures 审图用），None 时看密度。"""
     normal = {"color": "full", "blend": "normal", "tint": False, "region": "qingqiu"}
     out: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
     specs = ((5401, 72, 44, 12, -0.25, 0.45, 1.0), (5402, 56, 36, 7, 0.4, 0.9, 0.8), (5403, 96, 40, 14, -0.12, 0.3, 1.5))
     for i, (seed, w, h, n, axis, spread, elong) in enumerate(specs):
-        out[f"qq_bamboo_leaves_{i}"] = (make_qq_bamboo_leaves(seed, w, h, n, axis=axis, spread=spread, elong=elong), (0.5, 0.5),
+        out[f"qq_bamboo_leaves_{i}"] = (V.moon_boost(make_qq_bamboo_leaves(seed, w, h, n, axis=axis, spread=spread, elong=elong), boost), (0.5, 0.5),
                                         {**normal, "kind": "decor", "note": "青丘：被风扫成一堆的落竹叶（枯黄、赭、灰，少数灰绿），可随机旋转、镜像"})
     shoots = (
         (5501, 44, 44, ((-8.0, 30.0, 6.2, 1.6, 0.2), (7.5, 19.0, 4.6, -1.4, 0.5), (16.5, 9.0, 3.0, 0.6, 0.0))),
@@ -1012,11 +1020,11 @@ def build_qq() -> dict[str, tuple[Image.Image, tuple[float, float], dict]]:
     for i, (seed, w, h, sp) in enumerate(shoots):
         out[f"qq_shoots_{i}"] = (make_qq_shoots(seed, w, h, sp), (0.5, 1.0), {**normal, "kind": "decor", "note": "青丘：刚冒头的竹笋，锚点在根部（底边），可水平镜像"})
     for i, (seed, w, h, nc, nl) in enumerate(((5601, 56, 36, 6, 2), (5602, 44, 30, 4, 1))):
-        out[f"qq_moss_{i}"] = (make_qq_moss(seed, w, h, nc, nl), (0.5, 0.5), {**normal, "kind": "decor", "note": "青丘：苔点与地衣，可随机旋转（小角度）、镜像"})
+        out[f"qq_moss_{i}"] = (V.moon_boost(make_qq_moss(seed, w, h, nc, nl), boost), (0.5, 0.5), {**normal, "kind": "decor", "note": "青丘：苔点与地衣，可随机旋转（小角度）、镜像"})
     for i, (seed, w, h, lobes, ba, kw) in enumerate(QQ_WASHES):
         out[f"qq_wash_{i}"] = (make_qq_wash(seed, w, h, lobes, ba, **kw), (0.5, 0.5),
                                {**normal, "kind": "decor", "max_alpha": 0.3, "note": "青丘：兑花青、石绿的淡墨晕，大片柔边，铺在宣纸上最底层；可随机旋转、镜像"})
-    out["qq_fox_tracks"] = (make_qq_fox_tracks(), (0.5, 0.5), {**normal, "kind": "decor", "flat": QQ_FLAT,
+    out["qq_fox_tracks"] = (V.moon_boost(make_qq_fox_tracks(), boost), (0.5, 0.5), {**normal, "kind": "decor", "flat": QQ_FLAT,
                                                                "note": "青丘：一行狐狸脚印（从左下往右上走，越往右越新），已按地面透视压扁；可水平镜像、小角度旋转"})
     return out
 
