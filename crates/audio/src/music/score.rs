@@ -441,10 +441,11 @@ mod tests {
     }
 
     #[test]
-    fn pcm_budget_includes_all_sfx_and_dawn_reuses_original_theme() {
+    fn pcm_budget_includes_all_sfx_ambience_and_dawn_reuses_original_theme() {
         let score = test_score();
         let sfx = crate::sfx::Sfx::new();
-        assert!(score.pcm_bytes() + sfx.pcm_bytes() < 120 * 1024 * 1024);
+        let ambience = crate::ambience::Ambience::new();
+        assert!(score.pcm_bytes() + sfx.pcm_bytes() + ambience.pcm_bytes() < 120 * 1024 * 1024);
         for index in 0..FRAMES {
             for layer in 0..LAYERS {
                 assert_eq!(score.sample(layer, index as i64, true), score.sample(layer, index as i64, false));
@@ -476,11 +477,16 @@ mod tests {
             let start = Instant::now();
             let sfx = crate::sfx::Sfx::new();
             let sfx_time = start.elapsed();
+            let start = Instant::now();
+            let ambience = crate::ambience::Ambience::new();
+            let ambience_time = start.elapsed();
+            let mib = |bytes: usize| bytes as f64 / 1048576.0;
             println!(
-                "trial={trial} music_init={init_time:?} music_ready={music_time:?} sfx={sfx_time:?} music_pcm={:.3} MiB sfx_pcm={:.3} MiB total_pcm={:.3} MiB",
-                score.pcm_bytes() as f64 / 1048576.0,
-                sfx.pcm_bytes() as f64 / 1048576.0,
-                (score.pcm_bytes() + sfx.pcm_bytes()) as f64 / 1048576.0
+                "trial={trial} music_init={init_time:?} music_ready={music_time:?} sfx={sfx_time:?} ambience={ambience_time:?} music_pcm={:.3} MiB sfx_pcm={:.3} MiB ambience_pcm={:.3} MiB total_pcm={:.3} MiB",
+                mib(score.pcm_bytes()),
+                mib(sfx.pcm_bytes()),
+                mib(ambience.pcm_bytes()),
+                mib(score.pcm_bytes() + sfx.pcm_bytes() + ambience.pcm_bytes())
             );
         }
     }

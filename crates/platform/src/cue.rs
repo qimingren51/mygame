@@ -1,5 +1,5 @@
 //! 界面上发生、要出声的事（docs/FEEL.md 第 6 节）。音频原本只听模拟事件；开场卷轴、灯驿这些
-//! 界面上的演出由界面发一条 [`UiCue`]，音频照着播。
+//! 界面上的演出和菜单操作由界面发一条 [`UiCue`]，音频照着播。界面不依赖音频，只写这里的类型。
 
 use bevy::prelude::*;
 
@@ -13,4 +13,26 @@ pub enum UiCue {
     LampLit,
     /// 灯驿远山的晨光开始铺开
     DawnSpread,
+    /// 菜单里换了一项，或把设置调了一格
+    Move,
+    /// 菜单确认、换面板
+    Confirm,
+    /// 菜单返回
+    Back,
+}
+
+impl UiCue {
+    /// 菜单操作音：一帧里只响最后一个，连按也不会叠。演出音每个都要响。
+    pub fn is_menu(self) -> bool {
+        matches!(self, Self::Move | Self::Confirm | Self::Back)
+    }
+}
+
+/// 标题界面此刻在哪：音频按它换环境声和混响。界面写，音频读。
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MenuSoundscape {
+    #[default]
+    Title,
+    /// 灯驿长卷和里面的四处
+    Hub,
 }

@@ -18,6 +18,10 @@ pub struct Settings {
     pub music_volume: f32,
     /// 0–1
     pub sfx_volume: f32,
+    /// 界面反馈，0–1
+    pub ui_volume: f32,
+    /// 风声、灯火等环境声，0–1
+    pub ambience_volume: f32,
     /// 震屏、镜头冲击和手柄震动的强度，0–1（0 为关）
     pub shake: f32,
     /// 顿帧与慢镜
@@ -43,6 +47,8 @@ impl Default for Settings {
             vsync: true,
             music_volume: 0.8,
             sfx_volume: 0.8,
+            ui_volume: 0.8,
+            ambience_volume: 0.6,
             shake: 1.0,
             hitstop: true,
             bloom: true,
@@ -210,9 +216,12 @@ mod tests {
         assert_eq!(s, Settings { path: Some(dir.join("settings.ron")), ..Settings::default() });
         s.fullscreen = true;
         s.debug_tools = true;
+        s.music_volume = 0.2;
+        s.sfx_volume = 0.4;
+        s.ui_volume = 0.6;
+        s.ambience_volume = 0.0;
         s.save().unwrap();
-        assert!(Settings::load(&dir).fullscreen);
-        assert!(Settings::load(&dir).debug_tools);
+        assert_eq!(Settings::load(&dir), s);
 
         std::fs::write(dir.join("settings.ron"), "(fullscreen: maybe").unwrap();
         let broken = Settings::load(&dir);
@@ -225,6 +234,17 @@ mod tests {
         let s = Settings::load(&dir);
         assert!(s.fullscreen && s.vsync);
         assert!(!s.debug_tools);
+        assert_eq!(s.ui_volume, Settings::default().ui_volume);
+        assert_eq!(s.ambience_volume, Settings::default().ambience_volume);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_audio_settings_keep_existing_levels() {
+        let s: Settings = ron::from_str("(version: 1, music_volume: 0.3, sfx_volume: 0.0)").unwrap();
+        assert_eq!(s.music_volume, 0.3);
+        assert_eq!(s.sfx_volume, 0.0);
+        assert_eq!(s.ui_volume, 0.8);
+        assert_eq!(s.ambience_volume, 0.6);
     }
 }
