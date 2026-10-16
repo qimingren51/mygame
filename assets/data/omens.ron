@@ -22,7 +22,7 @@
     (id: "wonders", name: "奇遇夜", good: "奇遇出现频率翻倍", bad: "妖物血量 +15%",
      effects: [Mul(EventRate, 1.0), Mul(EnemyHp, 0.15)]),
     // M2.5 新增（docs/GAMEPLAY.md 第 10.2 节）
-    (id: "wuyue", name: "无月", good: "对照见圈外的妖物伤害 +50%", bad: "照见圈外完全看不见",
+    (id: "wuyue", name: "无月", good: "对圈外妖物伤害 +50%", bad: "圈外完全看不见",
      effects: [Add(DarkDamage, 0.5), Rule(NoMoon)]),
     (id: "nike", name: "逆克", good: "相克反应的伤害翻倍", bad: "相生被动无效",
      effects: [Mul(KeReaction, 1.0), Rule(NoSheng)]),
