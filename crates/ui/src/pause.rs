@@ -1,9 +1,9 @@
-//! 暂停：继续、音乐与音效音量、全屏、回到标题。
+//! 暂停：继续、设置项（四类音量、画面、按键）、回到标题。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
-use lantern_platform::{Actions, Settings};
+use lantern_platform::{Actions, Settings, UiCue};
 use lantern_sim::{AppState, RunState};
 
 use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
@@ -140,12 +140,14 @@ pub(crate) fn input(
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
+    mut cues: MessageWriter<UiCue>,
 ) {
     if controls.is_open() || transition.active() {
         ui.clicked = None;
         ui.hovered = None;
         return;
     }
+    let before_selected = ui.selected;
     if let Some(h) = ui.hovered.take()
         && actions.pointer_moved
     {
@@ -169,6 +171,13 @@ pub(crate) fn input(
         a.confirm |= clicked.is_some();
         settings_ui::adjust(ITEMS[sel - 1], &a, &mut settings, &mut window, &mut controls);
     }
+    if actions.pause || actions.back || actions.quit_to_title {
+        cues.write(UiCue::Back);
+    } else if actions.confirm || clicked.is_some() {
+        cues.write(UiCue::Confirm);
+    } else if before_selected != ui.selected || actions.nav.x != 0 {
+        cues.write(UiCue::Move);
+    }
 }
 
 fn highlight(ui: Res<PauseUi>, mut q: Query<(&PauseFocus, &mut Visibility)>) {
@@ -191,13 +200,15 @@ mod tests {
             .init_resource::<crate::transition::InkTransition>()
             .init_resource::<NextState<RunState>>()
             .init_resource::<NextState<AppState>>()
+            .add_message::<UiCue>()
             .add_systems(Update, input);
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
         app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
-        for _ in 0..9 {
+        for _ in 0..ITEMS.len() {
             app.update();
         }
-        assert_eq!(app.world().resource::<PauseUi>().selected, 9);
+        // 最后一项是手柄按键
+        assert_eq!(app.world().resource::<PauseUi>().selected, ITEMS.len());
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
         app.update();
         assert!(app.world().resource::<crate::controls::Controls>().is_open());

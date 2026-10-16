@@ -4,7 +4,7 @@ use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
 use lantern_content::Content;
-use lantern_platform::{Actions, HubNews, Profile, Settings};
+use lantern_platform::{Actions, HubNews, MenuSoundscape, Profile, Settings, UiCue};
 use lantern_sim::omens::{draw_omens, omen_good, omen_name};
 use lantern_sim::{AppState, GameContent, OmenPick, RunSetup};
 
@@ -65,6 +65,7 @@ pub(crate) fn register(app: &mut App) {
     app.init_resource::<TitleMode>()
         .init_resource::<TitleUi>()
         .add_systems(OnEnter(AppState::Title), (enter, spawn_background))
+        .add_systems(Update, sync_soundscape.after(input).run_if(in_state(AppState::Title)))
         .add_systems(
             Update,
             (
@@ -79,6 +80,20 @@ pub(crate) fn register(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::Title)),
         );
+}
+
+/// 灯驿长卷上的几处换成灯驿的环境声和混响；音频读这个资源，界面不直接碰音轨。
+fn sync_soundscape(mode: Res<TitleMode>, mut soundscape: ResMut<MenuSoundscape>) {
+    let scene = if on_scroll(&mode) { MenuSoundscape::Hub } else { MenuSoundscape::Title };
+    soundscape.set_if_neq(scene);
+}
+
+/// 灯驿长卷上的面板：彼此切换不转场，环境声也算灯驿。
+fn on_scroll(m: &TitleMode) -> bool {
+    matches!(
+        m,
+        TitleMode::Hub | TitleMode::Meta | TitleMode::Shop | TitleMode::Achievements | TitleMode::Codex
+    )
 }
 
 pub(super) fn enter(
@@ -125,6 +140,7 @@ pub(crate) fn input(
     mut next: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
+    mut cues: MessageWriter<UiCue>,
 ) {
     if controls.is_open() || transition.active() {
         ui.clicked = None;
@@ -334,13 +350,16 @@ pub(crate) fn input(
             }
         }
     }
+    // 界面音按这一帧的意图出：返回、确认（换面板、点击、回车）、移动（换选项、调设置）。
+    let adjusting = matches!(*mode, TitleMode::Settings | TitleMode::AdvancedSettings) && actions.nav.x != 0;
+    if actions.back {
+        cues.write(UiCue::Back);
+    } else if *mode != previous || clicked.is_some() || actions.confirm {
+        cues.write(UiCue::Confirm);
+    } else if ui.selected != selected || adjusting {
+        cues.write(UiCue::Move);
+    }
     // 保留旧面板，等墨色盖满后再重画；同一面板内的数值刷新、灯驿长卷上的几个面板之间切换不转场。
-    let on_scroll = |m: &TitleMode| {
-        matches!(
-            m,
-            TitleMode::Hub | TitleMode::Meta | TitleMode::Shop | TitleMode::Achievements | TitleMode::Codex
-        )
-    };
     if *mode != previous && !(on_scroll(&mode) && on_scroll(&previous)) {
         transition.page(mode.clone(), ui.selected);
         *mode = previous;
@@ -786,7 +805,7 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 padding: UiRect::axes(px(42), px(24)),
-                row_gap: px(4),
+                row_gap: px(2),
                 ..default()
             },
             skin.image("panel"),
@@ -800,7 +819,7 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
             for (i, &item) in items.iter().enumerate() {
                 let mut row = panel.spawn(Node {
                     width: percent(100),
-                    padding: UiRect::axes(px(18), px(5)),
+                    padding: UiRect::axes(px(18), px(4)),
                     ..default()
                 });
                 row.with_children(|r| {
@@ -851,9 +870,14 @@ mod input_tests {
             .init_resource::<crate::transition::InkTransition>()
             .init_resource::<NextState<AppState>>()
             .add_message::<AppExit>()
+            .add_message::<UiCue>()
             .add_systems(Update, input);
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
         app
+    }
+
+    fn cues(app: &App) -> Vec<UiCue> {
+        app.world().resource::<Messages<UiCue>>().iter_current_update_messages().copied().collect()
     }
 
     #[test]
@@ -862,10 +886,12 @@ mod input_tests {
         app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
         app.update();
         assert_eq!(app.world().resource::<TitleUi>().selected, 2);
+        assert_eq!(cues(&app), [UiCue::Move]);
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
         app.update();
-        // 换面板要先拉墨幕；这里直接跳过
+        // 换面板要先拉墨幕；这里直接跳过。确认声在按下时就响。
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Main);
+        assert_eq!(cues(&app), [UiCue::Confirm]);
         app.world_mut().resource_scope(|world, mut t: Mut<crate::transition::InkTransition>| {
             let mut mode = world.resource_mut::<TitleMode>();
             let mut m = mode.clone();
@@ -876,7 +902,7 @@ mod input_tests {
         });
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
         *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::Y, ..default() };
-        for _ in 0..7 {
+        for _ in 0..9 {
             app.update();
         }
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
@@ -885,7 +911,7 @@ mod input_tests {
         *app.world_mut().resource_mut::<Actions>() = Actions { back: true, nav: IVec2::Y, ..default() };
         app.update();
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
-        assert_eq!(app.world().resource::<TitleUi>().selected, 7);
+        assert_eq!(app.world().resource::<TitleUi>().selected, 9);
     }
 
     #[test]

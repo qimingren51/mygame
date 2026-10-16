@@ -19,7 +19,7 @@ mod rumble;
 pub mod settings;
 
 pub use bindings::{Action, ActiveInput, InputDevice, Rebind};
-pub use cue::UiCue;
+pub use cue::{MenuSoundscape, UiCue};
 pub use profile::{HubNews, Profile};
 pub use settings::Settings;
 
@@ -73,6 +73,7 @@ impl Plugin for PlatformPlugin {
         app.insert_resource(self.settings.clone())
             .init_resource::<Actions>()
             .add_message::<UiCue>()
+            .init_resource::<MenuSoundscape>()
             .configure_sets(PreUpdate, (InputSet::Gather, InputSet::Feed).chain().after(InputSystems))
             .add_systems(Update, toggle_fullscreen);
         input::register(app);

@@ -4,14 +4,20 @@
 use kira::sound::static_sound::StaticSoundData;
 use lantern_content::WeaponIdentity;
 
+use crate::impact::VARIANTS;
 use crate::synth::{Buf, FilterKind, NoiseOpts, Wave, jiao, pent, render, render_seeded};
 
 /// 渲染好的全部音效。
 pub struct Sfx {
+    /// 没有法器的命中（燃灯、爆炸、冲撞）用的通用命中声
     pub hit: StaticSoundData,
-    /// 法器 × 普通/暴击 × 三种材质纹理
-    pub impacts: [[[StaticSoundData; 3]; 2]; 5],
+    /// 法器 × 普通/暴击 × 三种材质纹理（洗牌轮换见 [`crate::impact`]）
+    pub impacts: [[[StaticSoundData; VARIANTS]; 2]; 5],
     pub crit: StaticSoundData,
+    /// 菜单：换一项、确认、返回（走界面总线）
+    pub ui_move: StaticSoundData,
+    pub ui_confirm: StaticSoundData,
+    pub ui_back: StaticSoundData,
     pub kill: StaticSoundData,
     /// 拾取魂火：基准音 pent(10)，播放时按连拾次数升调
     pub gem: StaticSoundData,
@@ -228,6 +234,9 @@ impl Sfx {
             &self.blast,
             &self.quake,
             &self.warn,
+            &self.volley_warn,
+            &self.sweep_warn,
+            &self.rain_warn,
             &self.warn_big,
             &self.soul_bell,
             &self.heal,
@@ -249,6 +258,9 @@ impl Sfx {
             &self.scroll_line,
             &self.lamp_lit,
             &self.dawn_spread,
+            &self.ui_move,
+            &self.ui_confirm,
+            &self.ui_back,
         ]
         .into_iter()
         .chain(self.chest.iter())
@@ -272,6 +284,9 @@ impl Sfx {
                 b.sine(4980.0, 0.0, 0.12, 0.025);
                 b.wood(0.0, 0.05, 1500.0);
             }),
+            ui_move: render(0.12, |b| b.wood(0.0, 0.055, 760.0)),
+            ui_confirm: render(0.32, |b| b.pluck(pent(12), 0.0, 0.10, 0.28)),
+            ui_back: render(0.22, |b| b.pluck(pent(8), 0.0, 0.075, 0.18)),
             kill: render(0.2, |b| b.osc(Wave::Sine, 285.0, 0.0, 0.12, 0.1, Some((85.0, 0.12)), 0.004)),
             gem: render(0.25, |b| {
                 let f = pent(10);
@@ -664,6 +679,9 @@ mod tests {
             ("scroll_line", &s.scroll_line),
             ("lamp_lit", &s.lamp_lit),
             ("dawn_spread", &s.dawn_spread),
+            ("ui_move", &s.ui_move),
+            ("ui_confirm", &s.ui_confirm),
+            ("ui_back", &s.ui_back),
             ("crit", &s.crit),
             ("combo", &s.combo),
             ("stamp", &s.stamp),
@@ -671,7 +689,6 @@ mod tests {
             ("boss_down", &s.boss_down),
             ("dawn", &s.dawn),
             ("elite_down", &s.elite_down),
-            ("hit", &s.hit),
             ("kill", &s.kill),
             ("ult", &s.ult),
             ("evolution", &s.evolution),
