@@ -18,37 +18,37 @@
     bonus_sword_rate: 30.0,
     elements: [
         (id: Metal, name: "金", star: "太白", resonance: "锐", color: "#E9D9A6", tiers: [
-            (desc: "暴击率 +10%", effects: [Add(CritChance, 0.10)]),
-            (desc: "暴击伤害 +50%", effects: [Add(CritMult, 0.50)]),
-            (desc: "暴击时 50% 追加飞剑", superseded: true, effects: [
+            (desc: "暴击率 +10%", short: "暴击率 +10%", effects: [Add(CritChance, 0.10)]),
+            (desc: "暴击伤害 +50%", short: "暴击伤害 +50%", effects: [Add(CritMult, 0.50)]),
+            (desc: "暴击时 50% 追加飞剑", short: "暴击追加飞剑", superseded: true, effects: [
                 Trigger(on: Crit, chance: 0.5, only: NotBonus,
                         action: BonusSword(damage: (10.0, 1.0, 0.0), pierce: 2, speed: 380.0, life: 1.5,
                                            turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
             ]),
-            (desc: "每次暴击都追加飞剑，追加的也能暴击、继续追加", effects: [
+            (desc: "每次暴击都追加飞剑，追加的也能暴击、继续追加", short: "飞剑无限追加", effects: [
                 Trigger(on: Crit,
                         action: BonusSword(damage: (10.0, 1.0, 0.0), pierce: 2, speed: 380.0, life: 1.5,
                                            turn: 8.0, hit_radius: 6.0, knockback: 30.0)),
             ]),
         ]),
         (id: Wood, name: "木", star: "岁星", resonance: "生", color: "#6FD6A0", tiers: [
-            (desc: "每秒回复 0.5% 生命", effects: [Add(Regen, 0.005)]),
-            (desc: "数量 +1", effects: [Add(Amount, 1.0)]),
-            (desc: "击杀回复生命", effects: [Trigger(on: Kill, action: Heal(0.4))]),
-            (desc: "纸鹤数量 ×1.5；满血时多出的回复转成护盾", effects: [
+            (desc: "每秒回复 0.5% 生命", short: "每秒回血 0.5%", effects: [Add(Regen, 0.005)]),
+            (desc: "数量 +1", short: "数量 +1", effects: [Add(Amount, 1.0)]),
+            (desc: "击杀回复生命", short: "击杀回血", effects: [Trigger(on: Kill, action: Heal(0.4))]),
+            (desc: "纸鹤数量 ×1.5；满血时多出的回复转成护盾", short: "纸鹤多，溢疗成盾", effects: [
                 Mul(SummonMult, 0.5),
                 Add(OverhealShield, 0.3),
             ]),
         ]),
         (id: Water, name: "水", star: "辰星", resonance: "凝", color: "#6FB8FF", tiers: [
-            (desc: "命中减速", effects: [Trigger(on: Hit, action: Slow(amount: 0.2, duration: 1.0))]),
-            (desc: "命中有概率冰冻", effects: [Trigger(on: Hit, chance: 0.12, action: Freeze(duration: 1.0))]),
-            (desc: "冰冻目标易伤并碎裂", superseded: true, effects: [
+            (desc: "命中减速", short: "命中减速", effects: [Trigger(on: Hit, action: Slow(amount: 0.2, duration: 1.0))]),
+            (desc: "命中有概率冰冻", short: "命中可冰冻", effects: [Trigger(on: Hit, chance: 0.12, action: Freeze(duration: 1.0))]),
+            (desc: "冰冻目标易伤并碎裂", short: "冰冻易伤碎裂", superseded: true, effects: [
                 Add(FrozenVuln, 0.5),
                 Trigger(on: Kill, only: TargetFrozen,
                         action: Explode(radius: 52.0, damage: (10.0, 5.0, 0.0), kind: Ice)),
             ]),
-            (desc: "每第 3 次命中必定冰冻；冰爆也能冰冻", effects: [
+            (desc: "每第 3 次命中必定冰冻；冰爆也能冰冻", short: "每三击必冻", effects: [
                 Add(FrozenVuln, 0.5),
                 Trigger(on: Kill, only: TargetFrozen,
                         action: Explode(radius: 52.0, damage: (10.0, 5.0, 0.0), kind: Ice, freeze: 1.0)),
@@ -56,23 +56,23 @@
             ]),
         ]),
         (id: Fire, name: "火", star: "荧惑", resonance: "焚", color: "#FF8A3D", tiers: [
-            (desc: "命中附加灼烧", effects: [Trigger(on: Hit, action: Burn(duration: 3.0, ratio: 0.2))]),
-            (desc: "灼烧可叠加", effects: [Add(BurnStacks, 4.0)]),
-            (desc: "妖物死亡时爆炸", superseded: true, effects: [
+            (desc: "命中附加灼烧", short: "命中灼烧", effects: [Trigger(on: Hit, action: Burn(duration: 3.0, ratio: 0.2))]),
+            (desc: "灼烧可叠加", short: "灼烧可叠加", effects: [Add(BurnStacks, 4.0)]),
+            (desc: "妖物死亡时爆炸", short: "死亡爆炸", superseded: true, effects: [
                 Trigger(on: Kill, action: Explode(radius: 46.0, damage: (8.0, 4.0, 0.0), kind: Fire)),
             ]),
-            (desc: "爆炸更大，炸到的直接 5 层灼烧", effects: [
+            (desc: "爆炸更大，炸到的直接 5 层灼烧", short: "爆炸更大更烫", effects: [
                 Trigger(on: Kill, action: Explode(radius: 69.0, damage: (8.0, 4.0, 0.0), kind: Fire, ignite: 5.0)),
             ]),
         ]),
         (id: Earth, name: "土", star: "镇星", resonance: "固", color: "#C9925A", tiers: [
-            (desc: "周期获得护盾", effects: [Shield(amount: (20.0, 5.0, 0.0))]),
-            (desc: "击退加倍", effects: [Mul(Knockback, 1.0)]),
-            (desc: "护盾破碎时震地", superseded: true, effects: [
+            (desc: "周期获得护盾", short: "周期护盾", effects: [Shield(amount: (20.0, 5.0, 0.0))]),
+            (desc: "击退加倍", short: "击退加倍", effects: [Mul(Knockback, 1.0)]),
+            (desc: "护盾破碎时震地", short: "盾碎震地", superseded: true, effects: [
                 Trigger(on: ShieldBreak,
                         action: Quake(radius: 150.0, damage: (30.0, 6.0, 0.0), knockback: 120.0, stun: 0.8)),
             ]),
-            (desc: "每 3 秒震地一次，范围加倍", effects: [
+            (desc: "每 3 秒震地一次，范围加倍", short: "每 3 秒震地", effects: [
                 Trigger(on: Periodic(3.0),
                         action: Quake(radius: 300.0, damage: (30.0, 6.0, 0.0), knockback: 120.0, stun: 0.8)),
             ]),
@@ -80,13 +80,13 @@
     ],
     // 木 → 火 → 土 → 金 → 水 → 木
     sheng: [
-        (from: Wood, to: Fire, name: "木生火", desc: "灼烧伤害 +30%", effects: [Mul(BurnDamage, 0.3)]),
-        (from: Fire, to: Earth, name: "火生土", desc: "护盾恢复加快", effects: [Add(ShieldCooldown, -4.0)]),
-        (from: Earth, to: Metal, name: "土生金", desc: "被击晕的目标必定暴击", effects: [Add(StunCrit, 1.0)]),
-        (from: Metal, to: Water, name: "金生水", desc: "暴击使目标减速", effects: [
+        (from: Wood, to: Fire, name: "木生火", desc: "灼烧伤害 +30%", short: "灼烧伤害 +30%", effects: [Mul(BurnDamage, 0.3)]),
+        (from: Fire, to: Earth, name: "火生土", desc: "护盾恢复加快", short: "护盾恢复加快", effects: [Add(ShieldCooldown, -4.0)]),
+        (from: Earth, to: Metal, name: "土生金", desc: "被击晕的目标必定暴击", short: "被击晕必暴击", effects: [Add(StunCrit, 1.0)]),
+        (from: Metal, to: Water, name: "金生水", desc: "暴击使目标减速", short: "暴击减速", effects: [
             Trigger(on: Crit, action: Slow(amount: 0.35, duration: 1.5)),
         ]),
-        (from: Water, to: Wood, name: "水生木", desc: "生命回复翻倍", effects: [Mul(Regen, 1.0), Mul(RegenFlat, 1.0)]),
+        (from: Water, to: Wood, name: "水生木", desc: "生命回复翻倍", short: "回血翻倍", effects: [Mul(Regen, 1.0), Mul(RegenFlat, 1.0)]),
     ],
     taiji: (name: "太极", desc: "每 30 秒全屏轮转五行之力", effects: [
         Trigger(on: Periodic(30.0), action: ScreenDamage(damage: (40.0, 16.0, 0.0), boss_cap: 600.0)),
@@ -94,25 +94,25 @@
     // 五行反应：带着一系印记的妖物被另一系命中时发生（不分先后）。
     // 前五种是相生，后五种是相克。“触发伤害”是触发那一击在加成区之后、暴击和易伤之前的值。
     reactions: [
-        (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%",
+        (a: Wood, b: Fire, id: "liaoyuan", name: "燎原", desc: "灼烧蔓延到附近 3 只妖物，这次灼烧 +50%", short: "灼烧蔓延三只",
          effect: Spread(count: 3, radius: 60.0, mult: 1.5, duration: 3.0, burn_ratio: 0.2)),
-        (a: Fire, b: Earth, id: "rongyan", name: "赤地", desc: "地面烧红 3 秒，持续伤害",
+        (a: Fire, b: Earth, id: "rongyan", name: "赤地", desc: "地面烧红 3 秒，持续伤害", short: "地面烧红",
          effect: Zone(zone: Lava, radius: 50.0, duration: 3.0, dps_ratio: 1.0, slow: 0.0, knock_mult: 1.0)),
-        (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透",
+        (a: Earth, b: Metal, id: "zhubing", name: "铸兵", desc: "妖物身上迸出 3 片金刃，四散穿透", short: "迸出金刃",
          effect: Blades(count: 3, ratio: 0.5, pierce: 2, speed: 320.0, life: 0.8, hit_radius: 7.0)),
-        (a: Metal, b: Water, id: "ningshuang", name: "凝霜", desc: "冻结 1 秒，周围减速",
+        (a: Metal, b: Water, id: "ningshuang", name: "凝霜", desc: "冻结 1 秒，周围减速", short: "冻结并减速",
          effect: Frost(freeze: 1.0, radius: 50.0, slow: 0.4, slow_time: 1.5)),
-        (a: Water, b: Wood, id: "zisheng", name: "滋生", desc: "长出灵草：缠住附近妖物，走过去能回血",
+        (a: Water, b: Wood, id: "zisheng", name: "滋生", desc: "长出灵草：缠住附近妖物，走过去能回血", short: "长出灵草",
          effect: Bloom(radius: 50.0, root: 1.5, herb_life: 5.0, heal: 2.0, heal_per_second: 6.0)),
-        (a: Water, b: Fire, id: "zhengteng", name: "蒸腾", desc: "蒸汽爆炸，被炸到的妖物晕头乱走",
+        (a: Water, b: Fire, id: "zhengteng", name: "蒸腾", desc: "蒸汽爆炸，被炸到的妖物晕头乱走", short: "蒸汽炸晕",
          effect: Steam(radius: 70.0, ratio: 1.5, per_level: 2.0, confuse: 1.5)),
-        (a: Fire, b: Metal, id: "rongjin", name: "熔金", desc: "妖物 4 秒内受到伤害 +30%",
+        (a: Fire, b: Metal, id: "rongjin", name: "熔金", desc: "妖物 4 秒内受到伤害 +30%", short: "易伤 +30%",
          effect: Melt(vuln: 0.3, duration: 4.0)),
-        (a: Metal, b: Wood, id: "duanmu", name: "断木", desc: "追加两倍斩击；残血小妖直接斩杀",
+        (a: Metal, b: Wood, id: "duanmu", name: "断木", desc: "追加两倍斩击；残血小妖直接斩杀", short: "斩击，残血斩杀",
          effect: Sever(ratio: 2.0, execute: 0.2)),
-        (a: Wood, b: Earth, id: "lietu", name: "裂土", desc: "地刺破土，周围妖物击晕 1 秒",
+        (a: Wood, b: Earth, id: "lietu", name: "裂土", desc: "地刺破土，周围妖物击晕 1 秒", short: "地刺击晕",
          effect: Rupture(radius: 60.0, stun: 1.0, ratio: 0.5)),
-        (a: Earth, b: Water, id: "yuni", name: "淤泥", desc: "泥沼 4 秒：大幅减速，击退翻倍",
+        (a: Earth, b: Water, id: "yuni", name: "淤泥", desc: "泥沼 4 秒：大幅减速，击退翻倍", short: "泥沼减速",
          effect: Zone(zone: Mud, radius: 70.0, duration: 4.0, dps_ratio: 0.0, slow: 0.6, knock_mult: 2.0)),
     ],
 )

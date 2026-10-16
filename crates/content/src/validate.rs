@@ -8,6 +8,10 @@ use crate::{
     Action, Content, ContentError, Effect, Element, Rank, ReactionEffect, Stat, WeaponBehavior, When,
 };
 
+/// 卡面一行、提示条正文的字数上限（docs/LORE-TEXT.md 第 6 节）
+pub const CARD_SHORT: usize = 12;
+pub const TOAST_SHORT: usize = 8;
+
 struct Checker<'a> {
     dir: &'a Path,
 }
@@ -33,6 +37,15 @@ impl Checker<'_> {
             if !(v.is_finite() && v >= 0.0) {
                 return self.fail(file, format!("{field} 不能为负数，现在是 {v}"));
             }
+        }
+        Ok(())
+    }
+
+    /// 短句的字数上限（docs/LORE-TEXT.md 第 6 节）：只数汉字，数字、符号、空格不算。
+    fn short(&self, file: &str, who: &str, text: &str, max: usize) -> Res {
+        let n = text.chars().filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c)).count();
+        if n > max {
+            return self.fail(file, format!("{who} 的 short“{text}”有 {n} 个字，最多 {max} 个"));
         }
         Ok(())
     }
@@ -794,6 +807,33 @@ impl Content {
         if self.run.ground_cap == 0 || self.run.ground_cap > 256 {
             return c
                 .fail("run.ron", format!("ground_cap 要在 1 到 256 之间，现在是 {}", self.run.ground_cap));
+        }
+        // ---- 卡面和提示条的短句 ----
+        for w in &self.weapons {
+            c.short("weapons.ron", &w.name, &w.short, CARD_SHORT)?;
+            if let Some(e) = &w.evolution {
+                c.short("weapons.ron", &e.name, &e.short, CARD_SHORT)?;
+            }
+            if let Some(m) = &w.mutation {
+                c.short("weapons.ron", &m.name, &m.short, CARD_SHORT)?;
+            }
+        }
+        for f in &self.fusions {
+            c.short("fusions.ron", &f.name, &f.short, CARD_SHORT)?;
+        }
+        for p in &self.passives {
+            c.short("passives.ron", &p.name, &p.short, CARD_SHORT)?;
+        }
+        for r in &self.elements.reactions {
+            c.short("elements.ron", &r.name, &r.short, TOAST_SHORT)?;
+        }
+        for s in &self.elements.sheng {
+            c.short("elements.ron", &s.name, &s.short, TOAST_SHORT)?;
+        }
+        for e in &self.elements.elements {
+            for t in &e.tiers {
+                c.short("elements.ron", &e.resonance, &t.short, TOAST_SHORT)?;
+            }
         }
         // ---- weapons.ron ----
         c.unique("weapons.ron", "法器", self.weapons.iter().map(|w| w.id.as_str()))?;

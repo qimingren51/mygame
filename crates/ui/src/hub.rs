@@ -427,11 +427,6 @@ pub(crate) fn achievements_panel(
     });
 }
 
-/// 一句话描述另起一行；没有就是空的。
-fn flavor_line(flavor: &str) -> String {
-    if flavor.is_empty() { String::new() } else { format!("\n{flavor}") }
-}
-
 /// 无尽夜各更的最长存活；没打过时是空的。
 fn endless_line(c: &Content, profile: &Profile) -> String {
     let v: Vec<String> = profile
@@ -550,24 +545,11 @@ pub(crate) fn prep_panel(
     let rows = prep_rows(c, profile);
     let last = &profile.last;
     let hint = "{nav} 选择 / 更换　{confirm} 确定　{back} 返回";
-    let root = frame(
-        commands,
-        fonts,
-        skin,
-        960.0,
-        "出发",
-        "地区 · 青丘（其余地区抢先体验开放）",
-        hint,
-        |panel| {
-            for (i, row) in rows.iter().enumerate() {
-                // (标签, 值, 值的颜色, 说明, 图标)
-                let (label, value, color, desc, icon): (
-                    &str,
-                    String,
-                    Color,
-                    String,
-                    Option<(String, String)>,
-                ) = match *row {
+    let root = frame(commands, fonts, skin, 960.0, "出发", "地区 · 青丘", hint, |panel| {
+        for (i, row) in rows.iter().enumerate() {
+            // (标签, 值, 值的颜色, 说明, 图标)
+            let (label, value, color, desc, icon): (&str, String, Color, String, Option<(String, String)>) =
+                match *row {
                     PrepRow::Mode if last.endless => {
                         let best = profile
                             .endless
@@ -580,21 +562,17 @@ pub(crate) fn prep_panel(
                             "玩法",
                             "无尽夜".into(),
                             on_paper(hex("#B07CF0")),
-                            format!(
-                                "不等天明，往梦的深处走：夜主倒下也不天明，每 5 分钟妖潮过后它再来，一次比一次凶{best}"
-                            ),
+                            format!("往梦的深处走，夜主一再回来{best}"),
                             None,
                         )
                     }
-                    PrepRow::Mode => {
-                        ("玩法", "夜行".into(), INK, "一夜 10 分钟，击败夜主迎来天明".into(), None)
-                    }
+                    PrepRow::Mode => ("玩法", "夜行".into(), INK, "10 分钟，击败夜主迎天明".into(), None),
                     PrepRow::Tier => {
                         let d = c.difficulty.get(last.tier as usize - 1);
                         let locked = if last.endless {
-                            "　（无尽夜只能选通关过的更）"
+                            "　（限已通关的更）"
                         } else if profile.tier < c.difficulty.len() as u8 {
-                            "　（通关上一更开放下一更）"
+                            "　（通关上一更解锁）"
                         } else {
                             ""
                         };
@@ -621,13 +599,8 @@ pub(crate) fn prep_panel(
                             "灯",
                             l.name.clone(),
                             ink_tint(hex(&l.color)),
-                            format!(
-                                "{} · 起手「{weapon}」　＋ {}　－ {}{more}{}",
-                                l.school,
-                                l.good,
-                                l.bad,
-                                flavor_line(&l.flavor)
-                            ),
+                            // 不放背景故事（试玩反馈：文字太多，背景进图鉴）
+                            format!("起手「{weapon}」　＋ {}　－ {}{more}", l.good, l.bad),
                             Some((format!("ui/icon_lamp_{}", l.id), l.name.chars().take(1).collect())),
                         )
                     }
@@ -638,21 +611,21 @@ pub(crate) fn prep_panel(
                                 "灯坠",
                                 d.name.clone(),
                                 on_paper(hex("#B07CF0")),
-                                format!("＋ {}　－ {}{}", d.good, d.bad, flavor_line(&d.flavor)),
+                                format!("＋ {}　－ {}", d.good, d.bad),
                                 Some((format!("ui/icon_charm_{}", d.id), d.name.chars().take(1).collect())),
                             )
                         }
-                        None => ("灯坠", "不挂".into(), INK_DIM, "出发前可以挂一枚已解锁的灯坠".into(), None),
+                        None => ("灯坠", "不挂".into(), INK_DIM, "挂一枚灯坠".into(), None),
                     },
                     PrepRow::Insight => match last.insight {
                         Some(e) => (
                             "悟",
                             format!("悟·{}", c.element(e).name),
                             on_paper(element_color(c, e)),
-                            format!("{}系的升级选项更容易出现", c.element(e).name),
+                            format!("{}系选项更常出现", c.element(e).name),
                             None,
                         ),
-                        None => ("悟", "不选".into(), INK_DIM, "从点亮的悟·五行里选一个生效".into(), None),
+                        None => ("悟", "不选".into(), INK_DIM, "选一系，选项更常出现".into(), None),
                     },
                     PrepRow::Attribute(k) => {
                         let a = &c.attributes.list[k];
@@ -668,49 +641,44 @@ pub(crate) fn prep_panel(
                     }
                     PrepRow::Go => ("", "出发".into(), INK, String::new(), None),
                 };
-                let mut r = panel.spawn(Node {
-                    width: percent(100),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(16), px(if *row == PrepRow::Go { 12.0 } else { 5.0 })),
-                    justify_content: if *row == PrepRow::Go {
-                        JustifyContent::Center
-                    } else {
-                        JustifyContent::Start
-                    },
-                    ..default()
-                });
-                r.with_children(|r| {
-                    r.spawn(focus(skin, "focus_ring", i, 2.0));
-                    if *row == PrepRow::Go {
-                        r.spawn(text(&fonts.title, 40.0, INK, &value));
-                        return;
-                    }
-                    r.spawn((text(&fonts.body, 16.0, INK_DIM, label), Node { width: px(48), ..default() }));
-                    if let Some((name, glyph)) = &icon {
-                        spawn_icon(r, db, fonts, Some(name), glyph, color, 40.0);
-                    }
-                    r.spawn(Node { flex_direction: FlexDirection::Column, flex_shrink: 1.0, ..default() })
-                        .with_children(|t| {
-                            // 马善政体没有箭头，箭头用正文字体
-                            t.spawn(Node {
-                                column_gap: px(10),
-                                align_items: AlignItems::Center,
-                                ..default()
-                            })
+            let mut r = panel.spawn(Node {
+                width: percent(100),
+                align_items: AlignItems::Center,
+                column_gap: px(16),
+                padding: UiRect::axes(px(16), px(if *row == PrepRow::Go { 12.0 } else { 5.0 })),
+                justify_content: if *row == PrepRow::Go {
+                    JustifyContent::Center
+                } else {
+                    JustifyContent::Start
+                },
+                ..default()
+            });
+            r.with_children(|r| {
+                r.spawn(focus(skin, "focus_ring", i, 2.0));
+                if *row == PrepRow::Go {
+                    r.spawn(text(&fonts.title, 40.0, INK, &value));
+                    return;
+                }
+                r.spawn((text(&fonts.body, 16.0, INK_DIM, label), Node { width: px(48), ..default() }));
+                if let Some((name, glyph)) = &icon {
+                    spawn_icon(r, db, fonts, Some(name), glyph, color, 40.0);
+                }
+                r.spawn(Node { flex_direction: FlexDirection::Column, flex_shrink: 1.0, ..default() })
+                    .with_children(|t| {
+                        // 马善政体没有箭头，箭头用正文字体
+                        t.spawn(Node { column_gap: px(10), align_items: AlignItems::Center, ..default() })
                             .with_children(|v| {
                                 v.spawn(text(&fonts.body, 14.0, INK_DIM, "◀"));
                                 v.spawn(text(&fonts.title, 28.0, color, &value));
                                 v.spawn(text(&fonts.body, 14.0, INK_DIM, "▶"));
                             });
-                            if !desc.is_empty() {
-                                t.spawn(para(fonts, 13.0, INK_DIM, &desc, 700.0));
-                            }
-                        });
-                });
-                clickable(&mut r, i);
-            }
-        },
-    );
+                        if !desc.is_empty() {
+                            t.spawn(para(fonts, 13.0, INK_DIM, &desc, 700.0));
+                        }
+                    });
+            });
+            clickable(&mut r, i);
+        }
+    });
     commands.entity(root).insert(crate::responsive::FitViewport::for_prep(rows.len()));
 }

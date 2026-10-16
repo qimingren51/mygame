@@ -955,6 +955,9 @@ pub struct WeaponDef {
     pub icon: String,
     pub element: Element,
     pub desc: String,
+    /// 卡面一行（docs/LORE-TEXT.md 第 6 节，不超过 12 个字，数字符号不算）；说明全文 desc 只进图鉴
+    #[serde(default)]
+    pub short: String,
     /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
     #[serde(default)]
     pub flavor: String,
@@ -972,6 +975,9 @@ pub struct WeaponDef {
 pub struct EvolutionDef {
     pub name: String,
     pub desc: String,
+    /// 卡面一行（docs/LORE-TEXT.md 第 6 节，不超过 12 个字，数字符号不算）；说明全文 desc 只进图鉴
+    #[serde(default)]
+    pub short: String,
     /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
     #[serde(default)]
     pub flavor: String,
@@ -987,6 +993,9 @@ pub struct EvolutionDef {
 pub struct MutationDef {
     pub name: String,
     pub desc: String,
+    /// 卡面一行（docs/LORE-TEXT.md 第 6 节，不超过 12 个字，数字符号不算）；说明全文 desc 只进图鉴
+    #[serde(default)]
+    pub short: String,
     /// 一句话描述（docs/LORE-TEXT.md 第 5.3 节），卡片详情里的一行小字
     #[serde(default)]
     pub flavor: String,
@@ -1001,6 +1010,9 @@ pub struct FusionDef {
     pub id: String,
     pub name: String,
     pub desc: String,
+    /// 卡面一行（docs/LORE-TEXT.md 第 6 节，不超过 12 个字，数字符号不算）；说明全文 desc 只进图鉴
+    #[serde(default)]
+    pub short: String,
     /// 一句话描述（docs/LORE-TEXT.md 第 5.4 节），卡片详情里的一行小字
     #[serde(default)]
     pub flavor: String,
@@ -1019,6 +1031,9 @@ pub struct PassiveDef {
     #[serde(default)]
     pub element: Option<Element>,
     pub desc: String,
+    /// 卡面一行（docs/LORE-TEXT.md 第 6 节，不超过 12 个字，数字符号不算）；说明全文 desc 只进图鉴
+    #[serde(default)]
+    pub short: String,
     /// 一句话描述（docs/LORE-TEXT.md 第 3.6 节），卡片上说明下面的一行小字
     #[serde(default)]
     pub flavor: String,
@@ -1099,6 +1114,9 @@ pub struct ReactionDef {
     pub id: String,
     pub name: String,
     pub desc: String,
+    /// 提示条正文（docs/LORE-TEXT.md 第 6.7 节，不超过 8 个字，数字符号不算）
+    #[serde(default)]
+    pub short: String,
     pub effect: ReactionEffect,
 }
 
@@ -1150,6 +1168,9 @@ pub struct ElementDef {
 #[serde(deny_unknown_fields)]
 pub struct TierDef {
     pub desc: String,
+    /// 提示条正文（docs/LORE-TEXT.md 第 6.7 节，不超过 8 个字，数字符号不算）
+    #[serde(default)]
+    pub short: String,
     pub effects: Vec<Effect>,
     /// 到了下一阶就不再生效（下一阶写了加强版）
     #[serde(default)]
@@ -1163,6 +1184,9 @@ pub struct ShengDef {
     pub to: Element,
     pub name: String,
     pub desc: String,
+    /// 提示条正文（docs/LORE-TEXT.md 第 6.7 节，不超过 8 个字，数字符号不算）
+    #[serde(default)]
+    pub short: String,
     pub effects: Vec<Effect>,
 }
 

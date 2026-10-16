@@ -520,6 +520,31 @@ mod tests {
         assert!(c.validate(Path::new("data")).is_err());
     }
 
+    /// 卡面和提示条的短句都填了（docs/LORE-TEXT.md 第 6 节），太长的校验不过。
+    #[test]
+    fn every_card_and_toast_has_a_short_line_within_the_limit() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        for w in &c.weapons {
+            assert!(!w.short.is_empty(), "{}", w.name);
+            assert!(w.evolution.as_ref().is_none_or(|e| !e.short.is_empty()), "{} 进化", w.name);
+            assert!(w.mutation.as_ref().is_none_or(|m| !m.short.is_empty()), "{} 异化", w.name);
+        }
+        assert!(c.fusions.iter().all(|f| !f.short.is_empty()));
+        assert!(c.passives.iter().all(|p| !p.short.is_empty()));
+        assert!(c.elements.reactions.iter().all(|r| !r.short.is_empty()));
+        assert!(c.elements.sheng.iter().all(|s| !s.short.is_empty()));
+        assert!(c.elements.elements.iter().flat_map(|e| &e.tiers).all(|t| !t.short.is_empty()));
+        let mut long = c.clone();
+        long.passives[0].short = "一二三四五六七八九十一二三".into();
+        assert!(long.validate(Path::new("data")).is_err(), "卡面超过 12 个字");
+        let mut ok = c.clone();
+        ok.passives[0].short = "暴击伤害 +200% 一二三四五六七八".into();
+        ok.validate(Path::new("data")).unwrap();
+        let mut long = c;
+        long.elements.reactions[0].short = "一二三四五六七八九".into();
+        assert!(long.validate(Path::new("data")).is_err(), "提示条超过 8 个字");
+    }
+
     /// 接触半径按画出来的身体算，不超过碰撞半径；不写等于 radius（docs/PLAYTEST.md 的表）。
     #[test]
     fn contact_radius_defaults_to_radius_and_cannot_exceed_it() {

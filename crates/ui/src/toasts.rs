@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use lantern_content::{BossLines, Content, PlanEvent, Rank};
+use lantern_content::Rank;
 use lantern_sim::{AppState, GameContent, SimEvent, SimOutbox};
 
 use crate::describe::{element_color, hex};
@@ -58,14 +58,9 @@ struct Msg {
     big: bool,
 }
 
-/// 这一夜夜主（时间表里的那一个）的一句台词。
-fn boss_line(c: &Content, pick: impl Fn(&BossLines) -> &String) -> Option<&str> {
-    let id = c.run.schedule.iter().find_map(|s| match &s.event {
-        PlanEvent::Boss { enemy, .. } => Some(enemy),
-        _ => None,
-    })?;
-    let lines = c.enemies[c.enemy_index(id)?].boss.as_ref()?.lines.as_ref()?;
-    Some(pick(lines).as_str())
+/// 有短句用短句（docs/LORE-TEXT.md 第 6 节），没写就用说明全文。
+fn short_or<'a>(short: &'a str, desc: &'a str) -> &'a str {
+    if short.is_empty() { desc } else { short }
 }
 
 /// 只讲一次的说明：讲过以后提示条只出标题。
@@ -131,39 +126,32 @@ fn read_events(
                 let body = if count > 1 { format!("{count} 只出现了") } else { "出现了".into() };
                 msg(format!("{title} · {}", e.name), body, hex(&e.eye), false)
             }
-            SimEvent::Surge => msg("妖潮来袭", "妖物大量涌来，撑过去", hex("#B07CF0"), true),
+            SimEvent::Surge => msg("妖潮来袭", "撑过去", hex("#B07CF0"), true),
             // 无尽夜每 5 分钟深一层（docs/BALANCE.md 第 4.7 节）
-            SimEvent::NightDeeper { layer } => msg(
-                format!("夜深 · 第 {layer} 层"),
-                "妖物更硬、更快，越来越不怕冻和晕；魂火越来越少",
-                hex("#7C6CF0"),
-                true,
-            ),
-            SimEvent::EncircleWarn { .. } => msg("合围", "妖物从四面合拢，找缺口突围", hex("#FF6B5A"), true),
+            SimEvent::NightDeeper { layer } => {
+                msg(format!("夜深 · 第 {layer} 层"), "妖物更硬更快", hex("#7C6CF0"), true)
+            }
+            SimEvent::EncircleWarn { .. } => msg("合围", "找缺口突围", hex("#FF6B5A"), true),
             SimEvent::LanternLit { lit, all, .. } => {
                 if all {
-                    msg("灯阵完整", "五盏石灯笼全部点亮：夜主少两成生命", hex("#FFD98A"), true)
+                    msg("灯阵完整", "夜主生命 -20%", hex("#FFD98A"), true)
                 } else {
-                    msg(format!("点亮石灯笼 {lit} / 5"), "光区里的妖物减速、易伤", hex("#FFD98A"), false)
+                    msg(format!("点亮石灯笼 {lit} / 5"), "光里妖物减速易伤", hex("#FFD98A"), false)
                 }
             }
             // 换阶段：标题写新招式，下面一行写怎么打；夜主的台词由 moments.rs 在画面下方写出来
-            SimEvent::BossPhase { phase: 2 } => {
-                msg("分出幻身", "幻身没有影子，照见圈能让它们散去", hex("#D8C8FF"), true)
+            SimEvent::BossPhase { phase: 2 } => msg("分出幻身", "幻身无影，照见即散", hex("#D8C8FF"), true),
+            SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开扇形预警", hex("#FF6B5A"), true),
+            SimEvent::BossEnraged => msg("夜主狂暴", "攻击更密", hex("#FF3B30"), false),
+            // 退场那句台词写在画面下方（moments.rs），提示条只写结果
+            SimEvent::BossDefeated { dawn: false, .. } => {
+                msg("夜主退去", "妖潮过后再来", hex("#FFD98A"), true)
             }
-            SimEvent::BossPhase { phase: 3 } => msg("九尾扫", "躲开地上的扇形预警", hex("#FF6B5A"), true),
-            SimEvent::BossEnraged => msg("夜主狂暴", "攻击变得更密", hex("#FF3B30"), false),
-            SimEvent::BossDefeated { dawn: false, .. } => msg(
-                boss_line(c, |l| &l.retreat).unwrap_or("夜主退去"),
-                "夜主退去：梦太深，光透不上来，下一次妖潮过后它还会回来",
-                hex("#FFD98A"),
-                true,
-            ),
             // 夜主登场、伏诛有专门的演出（moments.rs）
             SimEvent::Resonance { element, tier } => {
                 let e = c.element(element);
                 let name = ["一阶", "二阶", "三阶", "极境"].get(tier as usize - 1).copied().unwrap_or("");
-                let desc = e.tiers.get(tier as usize - 1).map(|t| t.desc.as_str()).unwrap_or("");
+                let desc = e.tiers.get(tier as usize - 1).map(|t| short_or(&t.short, &t.desc)).unwrap_or("");
                 msg(
                     format!("{} · {} 共鸣{name}", e.name, e.resonance),
                     desc,
@@ -176,13 +164,17 @@ fn read_events(
                 let r = &c.elements.reactions[kind as usize];
                 let color = element_color(c, r.b);
                 // 之后同种反应的名字在发生的地方飘出来（画面层），不占提示栏
-                if first { msg(format!("反应 · {}", r.name), r.desc.clone(), color, true) } else { None }
+                if first {
+                    msg(format!("反应 · {}", r.name), short_or(&r.short, &r.desc), color, true)
+                } else {
+                    None
+                }
             }
             SimEvent::Sheng { index } => {
                 let s = &c.elements.sheng[index as usize];
-                msg(format!("相生 · {}", s.name), s.desc.clone(), element_color(c, s.to), false)
+                msg(format!("相生 · {}", s.name), short_or(&s.short, &s.desc), element_color(c, s.to), false)
             }
-            SimEvent::Taiji => msg(c.elements.taiji.name.clone(), c.elements.taiji.desc.clone(), PAPER, true),
+            SimEvent::Taiji => msg(c.elements.taiji.name.clone(), "每 30 秒轮转五行", PAPER, true),
             // 连斩里程碑在屏幕左边竖着题字（moments.rs）
             SimEvent::UltReady => msg("燃灯已满", "{ult} 释放", hex("#FFD98A"), false),
             SimEvent::Encounter { kind, .. } => {
@@ -191,24 +183,16 @@ fn read_events(
             }
             SimEvent::CritterFled { .. } => msg("金蟾遁走了", "下次快一点", DIM, false),
             SimEvent::CritterLooted { .. } => msg("金蟾散财", "魂火与铜钱", hex("#FFD98A"), false),
+            // 古灯：只写增益，不写秒数
             SimEvent::Buff { index } => {
                 let b = &c.events.buffs[index as usize];
-                let secs = c
-                    .events
-                    .kinds
-                    .iter()
-                    .find_map(|k| match k.kind {
-                        lantern_content::EventKind::Shrine { duration, .. } => Some(duration),
-                        _ => None,
-                    })
-                    .unwrap_or(30.0);
-                msg(format!("古灯 · {}", b.name), format!("{}，持续 {secs} 秒", b.desc), hex(&b.color), true)
+                msg(format!("古灯 · {}", b.name), b.desc.clone(), hex(&b.color), true)
             }
             SimEvent::Sacrifice { amount } => {
-                msg("血祭", format!("失去 {} 生命，换一个宝箱", amount.round()), hex("#FF6B5A"), false)
+                msg("血祭", format!("献血 {}，换宝箱", amount.round()), hex("#FF6B5A"), false)
             }
-            SimEvent::LastStand { .. } => msg("回光", "灯焰一暗又亮，震开了周围的妖物", hex("#FFD98A"), true),
-            SimEvent::Revived { .. } => msg("九转金丹", "金丹化开，长明火又亮了起来", hex("#FFD98A"), true),
+            SimEvent::LastStand { .. } => msg("回光", "灯焰一暗又亮", hex("#FFD98A"), true),
+            SimEvent::Revived { .. } => msg("九转金丹", "长明火又亮了", hex("#FFD98A"), true),
             SimEvent::CharmTaken { index } => {
                 let d = &c.charms[index as usize];
                 msg(format!("灯坠 · {}", d.name), d.good.clone(), hex("#B07CF0"), false)

@@ -4,7 +4,7 @@
 [
     (
         id: "lamp", name: "灯火", icon: "灯", element: Fire,
-        desc: "火焰环绕周身，烧灼靠近的妖物。",
+        desc: "火焰环绕周身，烧灼靠近的妖物。", short: "火环绕身，烧近身妖",
         flavor: "长明火自己的火。它绕着你转，夜挨不近你。",
         // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
         behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
@@ -20,7 +20,7 @@
         ],
         evolution: Some((
             name: "不夜城", passive: "changming",
-            desc: "十盏灯笼环城而行，内圈多一层火海。",
+            desc: "十盏灯笼环城而行，内圈多一层火海。", short: "十盏灯环身，内圈火海",
             flavor: "东莱有不夜县，夜里出过太阳。十盏灯一围，这里也是。",
             // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
@@ -28,7 +28,7 @@
             level: (count: 10, radius: 92.0, damage: 52.0),
         )),
         mutation: Some((
-            name: "冰火两重天", desc: "五盏冰焰冻结、五盏火焰灼烧。绕行让同一只妖先后触两焰，引爆蒸腾；舍弃内环火海与合璧。",
+            name: "冰火两重天", desc: "五盏冰焰冻结、五盏火焰灼烧。绕行让同一只妖先后触两焰，引爆蒸腾；舍弃内环火海与合璧。", short: "半冰半火，引爆蒸腾",
             flavor: "十盏灯，一半的焰是冷的。冷热一撞，就是一团白汽。",
             // 冰焰冻结 0.6 秒，火焰点 1 层灼烧；固定十盏，不吃数量加成
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.38, knockback: 35.0, size: 12.0,
@@ -38,7 +38,7 @@
     ),
     (
         id: "sword", name: "符剑", icon: "剑", element: Metal,
-        desc: "自动射出追踪符剑，可穿透。",
+        desc: "自动射出追踪符剑，可穿透。", short: "追踪飞剑，可穿透",
         flavor: "剑身贴着符，认得妖气，自己会找过去。",
         // 朝 460 内最近的妖物齐射，扇形间隔 0.14 弧度；飞剑速度 380、存活 1.5 秒、追踪转向 8 弧度/秒
         behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 6.0,
@@ -55,14 +55,14 @@
         ],
         evolution: Some((
             name: "万剑归宗", passive: "jianyi",
-            desc: "飞剑连发，无限穿透。",
+            desc: "飞剑连发，无限穿透。", short: "三剑连发，无限穿透",
             flavor: "万剑同出一宗。一剑过去，后面的都跟上。",
             behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
                              knockback: 30.0, spread: 0.14, retry: 0.2),
             level: (cooldown: 0.42, count: 3, damage: 84.5, pierce: 999),
         )),
         mutation: Some((
-            name: "赤霄", desc: "赤剑命中熔金易伤，击杀分作两剑，分剑不再分裂。舍弃无限穿透与合璧，追逐残血妖群。",
+            name: "赤霄", desc: "赤剑命中熔金易伤，击杀分作两剑，分剑不再分裂。舍弃无限穿透与合璧，追逐残血妖群。", short: "熔金易伤，击杀分剑",
             flavor: "汉高祖斩白蛇的剑叫赤霄。符剑在火里烧红了，也就成了它。",
             // 熔金：易伤 30%、4 秒；击杀时朝 460 内最近的两只各分一剑，伤害为这一击的 60%
             behavior: Volley(range: 460.0, speed: 400.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
@@ -75,7 +75,7 @@
     ),
     (
         id: "bell", name: "霜铃", icon: "铃", element: Water,
-        desc: "周期震出寒波，伤害并减速周围妖物。",
+        desc: "周期震出寒波，伤害并减速周围妖物。", short: "寒波伤敌并减速",
         flavor: "檐下的铃，夜里摇出霜来。",
         // 寒波击退 40，减速 35% 持续 1.5 秒
         behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5),
@@ -91,7 +91,7 @@
         ],
         evolution: Some((
             name: "寒山钟", passive: "jingxin",
-            desc: "每 6 秒钟鸣全屏，冻结所有妖物。",
+            desc: "每 6 秒钟鸣全屏，冻结所有妖物。", short: "每 6 秒全屏冻结",
             flavor: "夜半钟声到客船。钟一响，什么都停了。",
             // 每 6 秒（乘以冷却）全屏钟鸣：冻结 1.5 秒（夜主除外）、伤害 90（对夜主单次封顶 400）
             behavior: Pulse(knockback: 40.0, slow: 0.35, slow_time: 1.5,
@@ -99,7 +99,7 @@
             level: (cooldown: 1.26, radius: 184.6, damage: 67.0),
         )),
         mutation: Some((
-            name: "冻土", desc: "脚下冻土常驻，圈内持续减速，小妖死于圈内便碎裂伤敌，碎裂不连锁。舍弃全屏钟鸣与合璧，守住近身阵地。",
+            name: "冻土", desc: "脚下冻土常驻，圈内持续减速，小妖死于圈内便碎裂伤敌，碎裂不连锁。舍弃全屏钟鸣与合璧，守住近身阵地。", short: "脚下冻土，冻死即碎",
             flavor: "铃声渗进地里，脚下的土冻住了，再也化不开。",
             // 碎裂：半径 65、伤害为冻土的 1.5 倍，每步至多 8 次
             behavior: Pulse(knockback: 0.0, slow: 0.6, slow_time: 0.65,
@@ -109,7 +109,7 @@
     ),
     (
         id: "crane", name: "纸鹤", icon: "鹤", element: Wood,
-        desc: "纸鹤自动扑向妖物，撞击后折返。",
+        desc: "纸鹤自动扑向妖物，撞击后折返。", short: "纸鹤自动扑击",
         flavor: "纸扎的鹤，本是送亡魂上路的。现在它替你去找妖。",
         // 平时绕身（半径 34）；随机扑向 340 内最近 3 只之一，撞到即伤害，休息 0.35 秒；速度 250 + 6·等级
         behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.35,
@@ -127,14 +127,14 @@
         ],
         evolution: Some((
             name: "千鹤引", passive: "zhezhi",
-            desc: "十只纸鹤随身，扑击更快更狠。",
+            desc: "十只纸鹤随身，扑击更快更狠。", short: "十只纸鹤，更快更狠",
             flavor: "鹤多了，就成了一条引魂的路。",
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.2,
                              knockback: 50.0, speed: (330.0, 0.0, 0.0), steer: 7.0, reach: 6.0),
             level: (count: 10, damage: 49.5),
         )),
         mutation: Some((
-            name: "铁鹤", desc: "鹤群收为五只铁鹤，单次伤害三倍，扑击射出穿透铁羽；斩杀两成血以下小妖。数量加成失效，不能合璧。",
+            name: "铁鹤", desc: "鹤群收为五只铁鹤，单次伤害三倍，扑击射出穿透铁羽；斩杀两成血以下小妖。数量加成失效，不能合璧。", short: "五只铁鹤，伤害 ×3",
             flavor: "纸鹤让金气浸透，成了铁的。少了，可每一只都要命。",
             // 铁羽：穿透 5、速度 480、存活 0.6 秒，伤害为扑击的 30%（全额会远超进化的伤害预算）
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 360.0, pick: 3, rest: 0.5,
@@ -145,7 +145,7 @@
     ),
     (
         id: "seal", name: "山印", icon: "印", element: Earth,
-        desc: "石印从天而降，范围伤害并击晕。",
+        desc: "石印从天而降，范围伤害并击晕。", short: "石印落地，击晕一片",
         flavor: "盖下去的是一座山。印下的妖，一时站不起来。",
         // 从 300 内最近 12 只里随机选落点（不足时在主角周围随机），预警 0.45 秒、依次间隔 0.12 秒；
         // 落地击退 90、击晕 0.5 秒
@@ -163,7 +163,7 @@
         ],
         evolution: Some((
             name: "镇岳", passive: "houde",
-            desc: "巨岩砸出地裂，裂缝持续伤害并减速。",
+            desc: "巨岩砸出地裂，裂缝持续伤害并减速。", short: "巨岩砸地，裂缝伤敌",
             flavor: "印里的山长成了岳，砸下来，地都裂开。",
             // 地裂：半径 ×0.85、持续 2.5 秒、每 0.5 秒造成落地伤害的 25%、减速 40%
             behavior: Drop(range: 300.0, candidates: 12, delay: 0.45, stagger: 0.12, knockback: 90.0,
@@ -174,7 +174,7 @@
             level: (cooldown: 2.6, count: 4, radius: 112.0, damage: 129.0),
         )),
         mutation: Some((
-            name: "竹印", desc: "巨竹破土挑飞妖物，留存四秒阻挡追兵。舍弃地裂持续伤害与合璧，借竹墙绕出活路。",
+            name: "竹印", desc: "巨竹破土挑飞妖物，留存四秒阻挡追兵。舍弃地裂持续伤害与合璧，借竹墙绕出活路。", short: "巨竹挑飞，竹墙挡路",
             flavor: "石印没落下来，地下冲出一根竹子。青丘的竹，顶得起山。",
             // 竹墙：不造成伤害，普通妖物穿过时移速 ×0.12（和地图竹丛取更慢的一个），夜主、精英不受阻
             behavior: Drop(range: 300.0, candidates: 12, delay: 0.3, stagger: 0.12, knockback: 90.0,

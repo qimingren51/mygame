@@ -405,6 +405,11 @@ fn read_events(
                 // 信息栏的血条在最下面，写在它上面一点
                 spawn_line_at(&mut commands, &fonts, line, 0.25, 3.4, percent(22), Some(&db));
             }
+            // 无尽夜夜主退去：退场那句和换阶段一样写在画面下方（提示条只写“夜主退去”）
+            SimEvent::BossDefeated { dawn: false, .. } => {
+                let Some(lines) = boss_lines(c, last.0) else { continue };
+                spawn_line_at(&mut commands, &fonts, &lines.retreat, 0.25, 3.4, percent(22), Some(&db));
+            }
             // 夜主伏诛：慢镜里黑边再合上，它说最后一句；天明在黑边之间亮起来，结算浮现前收走
             SimEvent::BossDefeated { dawn: true, .. } => {
                 let Some(lines) = boss_lines(c, last.0) else { continue };
