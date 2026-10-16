@@ -12,7 +12,7 @@ pub struct Sfx {
     /// 没有法器的命中（燃灯、爆炸、冲撞）用的通用命中声
     pub hit: StaticSoundData,
     /// 法器 × 普通/暴击 × 三种材质纹理（洗牌轮换见 [`crate::impact`]）
-    pub impacts: [[[StaticSoundData; VARIANTS]; 2]; 5],
+    pub impacts: [[[StaticSoundData; VARIANTS]; 2]; WeaponIdentity::ALL.len()],
     pub crit: StaticSoundData,
     /// 菜单：换一项、确认、返回（走界面总线）
     pub ui_move: StaticSoundData,
@@ -32,6 +32,11 @@ pub struct Sfx {
     pub dash: StaticSoundData,
     pub hurt: StaticSoundData,
     pub sword: StaticSoundData,
+    /// 铜钱剑：近身短促钱鸣；天罡多一层低音，不堆叠长钟尾。
+    pub coin_sweep: [StaticSoundData; 2],
+    /// 竹魅出手与讨封狐现形，走独立危险声道。
+    pub enemy_shot: StaticSoundData,
+    pub unmask: StaticSoundData,
     pub bell_pulse: StaticSoundData,
     pub big_bell: StaticSoundData,
     pub seal: StaticSoundData,
@@ -122,6 +127,7 @@ pub(crate) fn impact_group(identity: WeaponIdentity, crit: bool) -> (usize, &'st
         Bell => (2, ["bell_hit", "bell_crit"], 0.075),
         Crane => (3, ["crane_hit", "crane_crit"], 0.06),
         Seal => (4, ["seal_hit", "seal_crit"], 0.10),
+        CoinSword => (5, ["coin_sword_hit", "coin_sword_crit"], 0.07),
     };
     (index, keys[usize::from(crit)], gap)
 }
@@ -137,6 +143,7 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
         Bell => 0.24,
         Crane => 0.13,
         Seal => 0.22,
+        CoinSword => 0.16,
     };
     render_seeded(life, 0x92a4_017b_u32.wrapping_add((index * 37 + variant * 101) as u32), |b| {
         match identity {
@@ -178,6 +185,18 @@ fn impact_sound(identity: WeaponIdentity, crit: bool, variant: usize) -> StaticS
                         0.0,
                         0.065 - i as f32 * 0.014,
                         0.035 * gain / (i + 1) as f32,
+                    );
+                }
+            }
+            CoinSword => {
+                b.wood(0.0, 0.09 * gain, 780.0 + v * 35.0);
+                b.noise(0.0, 0.025, 0.05 * gain, noise(FilterKind::Band, 2300.0 + v * 180.0));
+                for (i, ratio) in [1.0, 1.43, 2.09].into_iter().enumerate() {
+                    b.sine(
+                        (1280.0 + v * 45.0) * ratio,
+                        i as f32 * 0.004,
+                        0.11 - i as f32 * 0.02,
+                        0.055 * gain / (i + 1) as f32,
                     );
                 }
             }
@@ -228,6 +247,8 @@ impl Sfx {
             &self.dash,
             &self.hurt,
             &self.sword,
+            &self.enemy_shot,
+            &self.unmask,
             &self.bell_pulse,
             &self.big_bell,
             &self.seal,
@@ -264,6 +285,7 @@ impl Sfx {
         ]
         .into_iter()
         .chain(self.chest.iter())
+        .chain(self.coin_sweep.iter())
         .chain(self.impacts.iter().flatten().flatten())
         .map(|s| s.frames.len() * size_of::<kira::Frame>())
         .sum()
@@ -392,6 +414,39 @@ impl Sfx {
                         ..Default::default()
                     },
                 )
+            }),
+            coin_sweep: std::array::from_fn(|i| {
+                let evolved = i == 1;
+                render(if evolved { 0.32 } else { 0.22 }, |b| {
+                    b.noise(
+                        0.0,
+                        0.11,
+                        0.085,
+                        NoiseOpts { slide: Some(4200.0), ..noise(FilterKind::Band, 1000.0) },
+                    );
+                    for (k, frequency) in [1420.0, 2030.0, 2970.0].into_iter().enumerate() {
+                        b.sine(frequency, k as f32 * 0.015, 0.15, 0.055 / (k + 1) as f32);
+                    }
+                    if evolved {
+                        b.drum(0.0, 0.12, 130.0);
+                        b.bell(jiao(15), 0.035, 0.045, 0.24);
+                    }
+                })
+            }),
+            enemy_shot: render(0.18, |b| {
+                b.wood(0.0, 0.18, 920.0);
+                b.noise(
+                    0.008,
+                    0.11,
+                    0.065,
+                    NoiseOpts { slide: Some(3600.0), ..noise(FilterKind::High, 1900.0) },
+                );
+            }),
+            unmask: render(0.42, |b| {
+                b.wood(0.0, 0.15, 480.0);
+                b.wood(0.07, 0.1, 760.0);
+                b.osc(Wave::Sine, 420.0, 0.0, 0.30, 0.09, Some((840.0, 0.24)), 0.005);
+                b.noise(0.0, 0.18, 0.07, noise(FilterKind::Band, 1300.0));
             }),
             bell_pulse: render(1.4, |b| b.bell(jiao(15), 0.0, 0.06, 1.1)),
             big_bell: render(3.2, |b| {
@@ -668,6 +723,10 @@ mod tests {
         let s = Sfx::new();
         let all = [
             ("volley_warn", &s.volley_warn),
+            ("coin_sweep", &s.coin_sweep[0]),
+            ("coin_sweep_evolved", &s.coin_sweep[1]),
+            ("enemy_shot", &s.enemy_shot),
+            ("unmask", &s.unmask),
             ("sweep_warn", &s.sweep_warn),
             ("rain_warn", &s.rain_warn),
             ("boss_phase", &s.boss_phase),

@@ -18,9 +18,11 @@ pub(crate) enum Category {
 impl Category {
     pub fn of(event: &SimEvent) -> Self {
         match event {
-            SimEvent::SweepStrike { .. } | SimEvent::RainStrike { .. } | SimEvent::BossVolley { .. } => {
-                Self::Hostile
-            }
+            SimEvent::SweepStrike { .. }
+            | SimEvent::RainStrike { .. }
+            | SimEvent::BossVolley { .. }
+            | SimEvent::EnemyShot { .. }
+            | SimEvent::Unmasked { .. } => Self::Hostile,
             _ => Self::Decorative,
         }
     }
@@ -74,6 +76,7 @@ impl Priority {
             | SimEvent::LastStand { .. }
             | SimEvent::Revived { .. } => Self::Ultimate,
             SimEvent::Hit { crit: true, .. } => Self::Critical,
+            SimEvent::Sweep { evolved: true, .. } | SimEvent::Unmasked { .. } => Self::Impact,
             SimEvent::Kill { rank: Rank::Elite, .. }
             | SimEvent::BossArrived { .. }
             | SimEvent::BossPhase { .. }
@@ -120,6 +123,8 @@ fn family(event: &SimEvent) -> Option<(u16, Vec2, usize)> {
         }
         SimEvent::Reaction { kind, pos, first: false, .. } => Some((32 + u16::from(kind), pos, 2)),
         SimEvent::IllusionDispelled { pos } => Some((12, pos, 3)),
+        SimEvent::Sweep { pos, .. } => Some((19, pos, 3)),
+        SimEvent::SweepEcho { pos, .. } => Some((20, pos, 6)),
         _ => None,
     }
 }
@@ -128,6 +133,7 @@ fn strength(event: &SimEvent) -> f32 {
     match event {
         SimEvent::Hit { damage, .. } => *damage,
         SimEvent::Strike { radius, .. } => *radius,
+        SimEvent::Sweep { radius, evolved, .. } => *radius + if *evolved { 10_000.0 } else { 0.0 },
         _ => 0.0,
     }
 }
@@ -302,6 +308,14 @@ mod tests {
         events.extend([SimEvent::RainStrike { pos: Vec2::ZERO }; 20]);
         events.extend([SimEvent::SweepStrike { pos: Vec2::ZERO, dir: 0.0 }; 5]);
         events.extend([SimEvent::BossVolley { pos: Vec2::ZERO, illusion: true }; 3]);
+        events.extend([SimEvent::Unmasked { pos: Vec2::ZERO, kind: 0 }; 5]);
+        events.extend(
+            [SimEvent::EnemyShot {
+                enemy: lantern_sim::enemies::EnemyHandle::from_raw(0),
+                pos: Vec2::ZERO,
+                kind: 0,
+            }; 8],
+        );
         for lite in [false, true] {
             let mut f = Feedback::default();
             f.prepare(&events, 0.016, lite);

@@ -6,7 +6,7 @@ use lantern_core::Pcg32;
 
 /// 每组命中的纹理数。
 pub(crate) const VARIANTS: usize = 3;
-const WEAPONS: usize = 5;
+const WEAPONS: usize = lantern_content::WeaponIdentity::ALL.len();
 
 #[derive(Clone, Copy)]
 struct Bag {

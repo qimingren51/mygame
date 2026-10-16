@@ -429,6 +429,7 @@ impl Particles {
         let angle = dir.y.atan2(dir.x);
         let (frame, life, size, stretch) = match identity {
             Some(Sword) => (self.f.streak, 0.10, 0.18, 4.5),
+            Some(CoinSword) => (self.f.streak, 0.08, 0.22, 3.0),
             Some(Bell) => (self.f.ember, 0.04, 1.0, 1.0),
             Some(Crane) => (self.f.ash, 0.05, 0.65, 1.5),
             Some(Seal) => (self.f.drop, 0.06, 0.5, 1.7),
@@ -439,6 +440,7 @@ impl Particles {
         } else {
             match identity {
                 Some(Sword) => Color::srgb(1.0, 0.95, 0.78),
+                Some(CoinSword) => Color::srgb(1.0, 0.83, 0.47),
                 Some(Bell) => Color::srgb(0.88, 0.97, 1.0),
                 _ => color,
             }
@@ -476,6 +478,14 @@ impl Particles {
                     p.stretch = 1.5;
                     p.life = 0.16;
                     p.size = (0.22, 0.04);
+                }
+                Some(CoinSword) => {
+                    p.frame = self.f.ash;
+                    p.color = Color::srgb(0.96, 0.72, 0.3);
+                    p.spin = if k % 2 == 0 { 16.0 } else { -14.0 };
+                    p.accel = Vec2::NEG_Y * 180.0;
+                    p.life = 0.20;
+                    p.size = (0.35, 0.08);
                 }
                 Some(Bell) => {
                     p.frame = self.f.ash;

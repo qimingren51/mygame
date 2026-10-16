@@ -389,6 +389,21 @@ pub struct SpawnDef {
     pub base: String,
     pub mix: Vec<MixDef>,
     pub packs: PackDef,
+    /// 从地形里冒出来的妖物（竹魅从竹丛里钻出）
+    #[serde(default)]
+    pub ambush: Vec<AmbushDef>,
+}
+
+/// 伏击：开局 from 秒起每 every 秒，在离主角 dist 以内一丛立着的竹子里冒出一只 enemy；
+/// 场上已有 max 只时这一次不出。附近没有竹子就 2 秒后再找。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AmbushDef {
+    pub enemy: String,
+    pub from: f32,
+    pub every: f32,
+    pub dist: (f32, f32),
+    pub max: u32,
 }
 
 /// 混进常规刷怪的其他妖物。每局开局时在 share 范围内随机取一个比例。
@@ -465,6 +480,10 @@ pub enum Movement {
     Chase,
     /// 背着玩家逃，路线左右摇摆
     Flee,
+    /// 在 `band` 的距离带里绕着玩家转（狐火）；带外先靠近或退开
+    Circle,
+    /// 停在 `band` 的距离带里，带里慢慢横移（竹魅）
+    Keep,
 }
 
 /// 妖物（`enemies.ron`）。
@@ -504,6 +523,37 @@ pub struct EnemyDef {
     /// 冲锋（扑击、冲撞）
     #[serde(default)]
     pub charge: Option<ChargeDef>,
+    /// 绕圈（Circle）、守距（Keep）的距离带：(近, 远)
+    #[serde(default)]
+    pub band: Option<(f32, f32)>,
+    /// 远程：预警之后射一根弹（竹魅的竹刺）
+    #[serde(default)]
+    pub shot: Option<ShotDef>,
+    /// 伪装：照见圈外不能被自动瞄准锁定，进了照见圈现形并换成这个速度（讨封狐）
+    #[serde(default)]
+    pub disguise: Option<DisguiseDef>,
+}
+
+/// 妖物的远程弹（docs/BALANCE.md 第 12.1 节）：离主角 range 以内、冷却好了就锁定方向预警 warn 秒，
+/// 然后朝那个方向射一根弹（速度 speed、半径 radius、存活 life 秒）。伤害和接触伤害一样吃曲线和更的倍率。
+/// 冻住、击晕、定身、晕头会打断预警。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ShotDef {
+    pub every: f32,
+    pub warn: f32,
+    pub range: f32,
+    pub speed: f32,
+    pub damage: f32,
+    pub radius: f32,
+    pub life: f32,
+}
+
+/// 伪装（讨封狐）：现形以后的移速（基础值，同样乘难度和随机浮动）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DisguiseDef {
+    pub speed: f32,
 }
 
 impl EnemyDef {
@@ -528,6 +578,9 @@ pub struct ChargeDef {
     pub duration: f32,
     pub damage_mult: f32,
     pub recover: f32,
+    /// 每只的冷却在 every ± jitter 里错开（按妖物的随机相位，固定不变）
+    #[serde(default)]
+    pub jitter: f32,
 }
 
 /// 夜主的招式（docs/BALANCE.md 第 12.2 节）：一阶段放狐火环、召唤小妖；
@@ -786,6 +839,19 @@ pub enum WeaponBehavior {
         /// 绕身巨凤，沿环路接敌；不受召唤数量加成
         #[serde(default)]
         escort: Option<EscortDef>,
+    },
+    /// 挥一道扇形剑气（铜钱剑 / 天罡，docs/BALANCE.md 第 6.3 节）。arc 是整个扇形的张角（弧度，
+    /// 一整圈就是一周）；方向朝 radius + aim 以内最近的妖物，没有就朝面向；扇形里按距离从近到远
+    /// 最多打 count 只（数量加成照加）。
+    Sweep {
+        arc: f32,
+        aim: f32,
+        knockback: f32,
+        /// 这把剑的命中额外加的暴击率
+        crit_bonus: f32,
+        /// 天罡：暴击的那一下对同一只再斩一次，伤害倍率（0 表示没有）；再斩不再触发
+        #[serde(default)]
+        echo: f32,
     },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {

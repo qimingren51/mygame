@@ -41,6 +41,7 @@ impl Response {
         let strength = match self.identity {
             Some(WeaponIdentity::Seal) => 1.2,
             Some(WeaponIdentity::Sword) => 0.9,
+            Some(WeaponIdentity::CoinSword) => 1.05,
             _ => 1.0,
         };
         let (along, across, push) = if self.age < hold {

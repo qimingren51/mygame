@@ -20,6 +20,8 @@ pub const TAG_MINIBOSS: u8 = 1;
 pub const TAG_CHILD: u8 = 2;
 /// “狂”已经发作
 pub const TAG_FRENZY: u8 = 4;
+/// 伪装的妖物已经现形（讨封狐）
+pub const TAG_REVEALED: u8 = 8;
 
 /// 指向某只妖物的句柄。妖物死后（或槽位被复用后）解析为 `None`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -47,6 +49,9 @@ pub const CHARGE_RECOVER: u8 = 3;
 /// 刚刷出的妖物多久内不造成接触伤害（秒）。九尾、召唤词缀在主角身边召唤时，不会同一步就打中；
 /// 画面在这段时间里让它从墨里浮现。
 pub const SPAWN_GRACE: f32 = 0.4;
+
+/// 讨封狐现形动作播完前不造成接触伤害（reveal：4 帧，每秒 8 帧）。
+pub const UNMASK_GRACE: f32 = 0.5;
 
 #[derive(Resource)]
 pub struct Enemies {
@@ -79,7 +84,7 @@ pub struct Enemies {
     pub burn_dps: Vec<f32>,
     pub burn_acc: Vec<f32>,
     pub burn_show: Vec<f32>,
-    /// 夜主的出招计时：弹幕、召唤
+    /// 夜主的出招计时：弹幕、召唤；远程小妖（竹魅）的出刺冷却也用 atk_t
     pub atk_t: Vec<f32>,
     pub summon_t: Vec<f32>,
     /// 五行印记：0 没有，否则是 [`lantern_content::Element::index`] + 1；剩余时间；反应冷却
@@ -110,7 +115,14 @@ pub struct Enemies {
     pub charge_t: Vec<f32>,
     pub charge_dx: Vec<f32>,
     pub charge_dy: Vec<f32>,
-    /// “隐”：在照见圈外，自动瞄准锁定不到
+    /// 远程小妖的预警：剩余时间（大于 0 表示正在瞄）、固定原点与方向。
+    /// 画面和出手都读这个原点，击退或互推不能把弹道挪出已经画好的预警。
+    pub aim_t: Vec<f32>,
+    pub aim_x: Vec<f32>,
+    pub aim_y: Vec<f32>,
+    pub aim_dx: Vec<f32>,
+    pub aim_dy: Vec<f32>,
+    /// “隐”，或伪装还没现形：在照见圈外，自动瞄准锁定不到
     pub cloaked: Vec<bool>,
     /// 刚刷出来的保护时间：大于 0 时不造成接触伤害（召唤可能刷在主角身上，见 [`SPAWN_GRACE`]）
     pub grace: Vec<f32>,
@@ -182,6 +194,11 @@ impl Default for Enemies {
             charge_t: f(),
             charge_dx: f(),
             charge_dy: f(),
+            aim_t: f(),
+            aim_x: f(),
+            aim_y: f(),
+            aim_dx: f(),
+            aim_dy: f(),
             cloaked: vec![false; ENEMY_CAP],
             grace: f(),
             charge_speed: f(),
@@ -245,6 +262,11 @@ impl Enemies {
             &mut self.charge_dx,
             &mut self.charge_dy,
             &mut self.charge_speed,
+            &mut self.aim_t,
+            &mut self.aim_x,
+            &mut self.aim_y,
+            &mut self.aim_dx,
+            &mut self.aim_dy,
         ] {
             v[i] = 0.0;
         }
@@ -343,6 +365,11 @@ impl Enemies {
                 self.charge_t[i],
                 self.charge_dx[i],
                 self.charge_dy[i],
+                self.aim_t[i],
+                self.aim_x[i],
+                self.aim_y[i],
+                self.aim_dx[i],
+                self.aim_dy[i],
                 self.hard_t[i],
                 self.soft_t[i],
                 self.grace[i],

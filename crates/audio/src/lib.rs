@@ -557,6 +557,20 @@ fn play_sim_events(
     let critical = |e: &&SimEvent| matches!(e, SimEvent::Hit { crit: true, .. });
     for ev in outbox.0.iter().filter(critical).chain(outbox.0.iter().filter(|e| !critical(e))) {
         match *ev {
+            SimEvent::Sweep { pos, evolved, .. } if a.can("coin_sweep", 0.07) => {
+                let s = a.sfx.coin_sweep[usize::from(evolved)].clone();
+                a.play_at(&s, 1.0, 0.0, place(pos));
+            }
+            SimEvent::EnemyShot { pos, .. } if a.can("enemy_shot", 0.08) => {
+                let (pan, far) = place(pos);
+                let s = a.sfx.enemy_shot.panning(Panning(pan)).volume(Decibels(-far));
+                a.warning(s);
+            }
+            SimEvent::Unmasked { pos, .. } if a.can("unmask", 0.12) => {
+                let (pan, far) = place(pos);
+                let s = a.sfx.unmask.panning(Panning(pan)).volume(Decibels(-far));
+                a.warning(s);
+            }
             SimEvent::Hit { crit, kind, pos, impact_pos, weapon, .. } => {
                 if matches!(kind, lantern_sim::HitKind::Dot | lantern_sim::HitKind::Reaction) {
                     continue;

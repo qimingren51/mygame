@@ -69,6 +69,8 @@ pub(crate) struct FxFrames {
     crack: FrameId,
     slash: FrameId,
     streak: FrameId,
+    /// 竹魅的实体竹刺及短拖尾；缺帧时仍显示细长危险标记。
+    bamboo_spike: Option<(FrameId, FrameId)>,
     taiji: FrameId,
     shield: FrameId,
     chest: FrameId,
@@ -129,6 +131,7 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         crack: need("weapons/crack"),
         slash: need("fx/slash"),
         streak: need("fx/streak"),
+        bamboo_spike: db.find("weapons/bamboo_spike").zip(db.find("weapons/bamboo_spike_trail")),
         taiji: need("weapons/taiji"),
         shield: need("weapons/shield"),
         chest: need("weapons/chest"),
@@ -172,12 +175,16 @@ enum OneShot {
     HostileBlast { color: Color },
     Taiji,
     Residue(WeaponIdentity),
+    Sweep { dir: Vec2, arc: f32, evolved: bool, lite: bool },
+    SweepEcho,
+    HostileCue { color: Color, reveal: bool },
 }
 
 fn residue_life(identity: WeaponIdentity) -> f32 {
     match identity {
         WeaponIdentity::Lamp => 1.1,
         WeaponIdentity::Sword => 0.45,
+        WeaponIdentity::CoinSword => 0.45,
         WeaponIdentity::Bell => 0.7,
         WeaponIdentity::Crane => 0.9,
         WeaponIdentity::Seal => 1.0,
@@ -201,13 +208,14 @@ impl Live {
     }
 
     fn advance(&mut self, dt: f32, real_dt: f32) -> bool {
-        if matches!(self.kind, OneShot::Ult) {
-            // 燃灯先画事件帧的收束姿态与光爆峰值；随后穿过顿帧继续演出。
-            if !self.fresh {
-                self.t += real_dt;
-            }
-        } else {
-            self.t += dt;
+        // 短促扫击、现形同样要呈现事件帧，不能被上一帧耗时直接吃掉。
+        let keep_first = matches!(
+            self.kind,
+            OneShot::Ult | OneShot::Sweep { .. } | OneShot::SweepEcho | OneShot::HostileCue { .. }
+        );
+        // 只有燃灯穿过顿帧继续演出，其他效果仍跟随虚拟时间。
+        if !self.fresh || !keep_first {
+            self.t += if matches!(self.kind, OneShot::Ult) { real_dt } else { dt };
         }
         self.fresh = false;
         self.t < self.life
@@ -217,7 +225,7 @@ impl Live {
 impl OneShot {
     fn category(self) -> Category {
         match self {
-            Self::HostileBlast { .. } => Category::Hostile,
+            Self::HostileBlast { .. } | Self::HostileCue { .. } => Category::Hostile,
             _ => Category::Decorative,
         }
     }
@@ -360,6 +368,27 @@ pub(crate) fn read_fx_events(
         let ev = &outbox.0[index];
         fx.priority = Priority::of(ev);
         match *ev {
+            SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
+                fx.push(
+                    OneShot::Sweep { dir, arc, evolved, lite: feel.lite },
+                    to_screen(pos),
+                    radius,
+                    if evolved { 0.25 } else { 0.18 },
+                );
+            }
+            SimEvent::SweepEcho { pos, .. } => {
+                fx.push(OneShot::SweepEcho, to_screen(pos), 30.0, 0.15);
+            }
+            SimEvent::EnemyShot { pos, kind, .. } | SimEvent::Unmasked { pos, kind, .. } => {
+                let reveal = matches!(ev, SimEvent::Unmasked { .. });
+                let color = content.0.enemies.get(kind as usize).map_or(rgb(0x9fdb8a), |e| hex(&e.eye));
+                fx.push(
+                    OneShot::HostileCue { color, reveal },
+                    to_screen(pos),
+                    if reveal { 24.0 } else { 12.0 },
+                    if reveal { 0.32 } else { 0.12 },
+                );
+            }
             SimEvent::Kill { pos, kind, weapon, incoming_dir, .. }
                 if fx.residue_quiet == 0.0 && residues < per_frame =>
             {
@@ -1125,6 +1154,42 @@ pub(crate) fn collect_fx(
         let personal_start = (pools.fx.len(), glow.0.len());
         let u = l.t / l.life;
         match l.kind {
+            OneShot::Sweep { .. } => draw_sweep(l, &f, &db, &mut pools, &mut glow),
+            OneShot::SweepEcho => {
+                for rot in [-TAU / 8.0, TAU / 8.0] {
+                    glow.add(
+                        f.streak,
+                        l.pos.extend(layer::EMISSIVE + 1.0),
+                        Vec2::new(px(f.streak, l.r), 0.25 * (1.0 - u)),
+                        rot,
+                        rgb(0xffedb3).with_alpha((1.0 - u).powi(2) * 0.85),
+                    );
+                }
+            }
+            OneShot::HostileCue { color, reveal } => {
+                let k = (l.r * (0.65 + u * 0.35)) / db.frame(f.ring).radius.unwrap_or(28.5);
+                glow.add(
+                    f.ring,
+                    l.pos.extend(layer::DANGER),
+                    Vec2::splat(k),
+                    0.0,
+                    color.with_alpha((1.0 - u).powi(2) * 0.85),
+                );
+                if reveal {
+                    // 现形只在妖物周围裂开四笔，不用全屏闪白抢走危险轮廓。
+                    for i in 0..4 {
+                        let angle = i as f32 * TAU / 4.0 + TAU / 8.0;
+                        let at = l.pos + Vec2::from_angle(angle) * l.r * (0.5 + u * 0.45);
+                        glow.add(
+                            f.streak,
+                            at.extend(layer::DANGER + 0.1),
+                            Vec2::new(px(f.streak, 14.0), 0.2),
+                            angle,
+                            color.with_alpha((1.0 - u).powi(2)),
+                        );
+                    }
+                }
+            }
             OneShot::Residue(identity) => draw_residue(l, identity, &f, &parts.f, &db, &mut pools, &mut glow),
             OneShot::Ring { color, ink, light, strong } => {
                 let rr = 12.0 + (l.r - 12.0) * (1.0 - (1.0 - u) * (1.0 - u));
@@ -1518,7 +1583,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 夜主弹幕（狐火）：判定在地面，火球画在腰部高度，地上留影子——擦过脚下算中，看着也是打在身上
+    // ---- 敌弹：竹刺为实体尖刺，夜主狐火为光团；共用腰部高度与地面判定影子。
     if let Some(foes) = &res.foes {
         for fo in &foes.0 {
             let ground = lerp(fo.prev, fo.pos);
@@ -1527,6 +1592,35 @@ pub(crate) fn collect_fx(
                 color: Color::srgba(1.0, 1.0, 1.0, 0.45),
                 ..Draw::new(frames.shadow, ground.extend(layer::SHADOW))
             });
+            if fo.kind.is_some() {
+                let dir = to_screen(fo.vel).normalize_or(Vec2::X);
+                let rot = dir.y.atan2(dir.x);
+                let at = ground + Vec2::Y * FOXFIRE_HEIGHT;
+                let (spike, trail) = f.bamboo_spike.unwrap_or((f.streak, f.trail));
+                let size = db.frame(spike).size;
+                let length = (fo.radius * 4.5).clamp(24.0, 36.0);
+                pools.fx.push(Draw {
+                    scale: Vec2::new(length / size.x, fo.radius * 1.4 / size.y),
+                    rot,
+                    ..Draw::new(spike, at.extend(layer::DANGER))
+                });
+                glow.add(
+                    trail,
+                    (at - dir * length * 0.2).extend(layer::DANGER - 0.1),
+                    Vec2::new(px(trail, 20.0), 0.75),
+                    rot,
+                    rgb(0xafd87c).with_alpha(0.8),
+                );
+                // 尖端的暖白亮点不依赖辉光设置，也不受玩家高光压暗。
+                glow.add(
+                    f.spark,
+                    (at + dir * length * 0.4).extend(layer::DANGER + 0.1),
+                    Vec2::splat(0.25),
+                    rot,
+                    rgb(0xffe0aa).with_alpha(0.9),
+                );
+                continue;
+            }
             let p = ground + Vec2::new(0.0, FOXFIRE_HEIGHT);
             glow.add(
                 f.glow,
@@ -1724,6 +1818,72 @@ fn dim_personal(pools: &mut Pools, glow: &mut GlowRequests, start: (usize, usize
     }
 }
 
+/// 攻击范围按模拟平面转屏幕坐标，不沿用地面装饰的纵向压缩。
+fn sweep_point(dir: Vec2, arc: f32, radius: f32, fraction: f32) -> Vec2 {
+    let angle = dir.y.atan2(dir.x) + arc * (fraction - 0.5);
+    to_screen(Vec2::from_angle(angle) * radius)
+}
+
+fn draw_sweep(l: &Live, f: &FxFrames, db: &AtlasDb, pools: &mut Pools, glow: &mut GlowRequests) {
+    let OneShot::Sweep { dir, arc, evolved, lite } = l.kind else { return };
+    let u = l.t / l.life;
+    let fade = (1.0 - u).powi(2);
+    let color = if evolved { rgb(0xffe5a1) } else { rgb(0xe8b75c) };
+    let arc = arc.clamp(0.0, TAU);
+    // 首帧即呈现完整弧边；铜钱串的挥动只补动作，不把即时判定伪装成逐帧伤害。
+    let steps = (arc / (TAU / if lite { 24.0 } else { 36.0 })).ceil().max(2.0) as usize;
+    let size = db.frame(f.streak).size;
+    let mut line = |a: Vec2, b: Vec2, width: f32, alpha: f32| {
+        let delta = b - a;
+        let pos = l.pos + (a + b) * 0.5;
+        let rot = delta.y.atan2(delta.x);
+        let scale = Vec2::new(delta.length() / size.x, width / size.y);
+        pools.fx.push(Draw {
+            scale: scale * Vec2::new(1.02, 1.8),
+            rot,
+            color: crate::particles::INK.with_alpha(alpha * 0.75),
+            ..Draw::new(f.streak, pos.extend(layer::WEAPONS + 1.0))
+        });
+        glow.add(f.streak, pos.extend(layer::EMISSIVE), scale, rot, color.with_alpha(alpha));
+    };
+    for i in 0..steps {
+        line(
+            sweep_point(dir, arc, l.r, i as f32 / steps as f32),
+            sweep_point(dir, arc, l.r, (i + 1) as f32 / steps as f32),
+            if evolved { 3.5 } else { 2.5 },
+            fade * 0.85,
+        );
+    }
+    if arc < TAU - 0.01 {
+        for edge in [0.0, 1.0] {
+            line(Vec2::ZERO, sweep_point(dir, arc, l.r, edge), 1.3, fade * 0.3);
+        }
+    }
+    // 沿用现有铜钱帧，红线穿钱形成短剑；与飞行的追踪符剑保持不同轮廓。
+    if let Some((coin, _)) = f.coin {
+        let axis = sweep_point(dir, arc, 1.0, (u * 1.6).min(1.0));
+        let length = (l.r * 0.7).min(72.0);
+        let rot = axis.y.atan2(axis.x);
+        glow.add(
+            f.streak,
+            (l.pos + axis * length * 0.6).extend(layer::EMISSIVE),
+            Vec2::new(length * 0.8 / size.x, 1.5 / size.y),
+            rot,
+            rgb(0xe16d45).with_alpha(fade * 0.8),
+        );
+        let count = if lite { 4 } else { 6 };
+        for i in 0..count {
+            let at = l.pos + axis * length * (0.2 + 0.8 * i as f32 / (count - 1) as f32);
+            pools.fx.push(Draw {
+                scale: Vec2::splat(9.0 / db.frame(coin).size.x),
+                rot,
+                color: Color::WHITE.with_alpha(fade),
+                ..Draw::new(coin, at.extend(layer::WEAPONS + 2.0))
+            });
+        }
+    }
+}
+
 /// 残留只用已有图集，每组最多六次绘制；在普通特效与地面层之间保持克制。
 fn draw_residue(
     l: &Live,
@@ -1741,12 +1901,12 @@ fn draw_residue(
     let ground = layer::GROUND + 0.96;
     let color = match identity {
         Lamp => rgb(0xff6528),
-        Sword => rgb(0xf5e6b4),
+        Sword | CoinSword => rgb(0xf5e6b4),
         Bell => rgb(0xc6eeff),
         Crane => rgb(0x92dcb4),
         Seal => rgb(0xb79a6b),
     };
-    if identity == Sword {
+    if matches!(identity, Sword | CoinSword) {
         let size = Vec2::new(l.r * 3.0 / db.frame(p.slash).size.x, 0.06);
         pools.fx.push(Draw {
             rot: l.rot,
@@ -1841,6 +2001,45 @@ mod identity_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sweep_boundary_matches_world_radius_and_facing_without_flattening() {
+        let arc = TAU / 3.0;
+        let radius = 120.0;
+        for dir in [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y] {
+            assert!(sweep_point(dir, arc, radius, 0.5).distance(to_screen(dir * radius)) < 0.001);
+            for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let point = sweep_point(dir, arc, radius, t);
+                assert!((point.length() - radius).abs() < 0.001);
+                assert!(point.normalize().dot(to_screen(dir)) >= 0.5 - 0.001);
+            }
+        }
+        assert!(sweep_point(Vec2::X, TAU, radius, 0.25).distance(Vec2::Y * radius) < 0.001);
+        assert!(sweep_point(Vec2::X, TAU, radius, 0.75).distance(Vec2::NEG_Y * radius) < 0.001);
+        assert!(
+            sweep_point(Vec2::X, TAU, radius, 0.0).distance(sweep_point(Vec2::X, TAU, radius, 1.0)) < 0.001
+        );
+    }
+
+    #[test]
+    fn short_attack_cues_keep_their_first_frame_and_pause_with_the_game() {
+        for kind in [
+            OneShot::Sweep { dir: Vec2::X, arc: TAU / 3.0, evolved: false, lite: false },
+            OneShot::SweepEcho,
+            OneShot::HostileCue { color: Color::WHITE, reveal: false },
+            OneShot::HostileCue { color: Color::WHITE, reveal: true },
+        ] {
+            let mut fx = FxState::default();
+            fx.push(kind, Vec2::ZERO, 120.0, 0.18);
+            let cue = &mut fx.live[0];
+            assert!(cue.advance(0.25, 0.25));
+            assert_eq!(cue.t, 0.0);
+            assert!(cue.advance(0.0, 1.0));
+            assert_eq!(cue.t, 0.0);
+            assert!(cue.advance(0.1, 0.1));
+            assert!(!cue.advance(0.1, 0.1));
+        }
+    }
 
     #[test]
     fn ult_keeps_impact_pose_then_advances_on_real_time_through_hitstop() {

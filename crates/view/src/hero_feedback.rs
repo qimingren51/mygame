@@ -35,6 +35,8 @@ impl HeroFeedback {
         self.hurt_age = self.hurt_age.map(|age| age + dt).filter(|age| *age < Duration::from_millis(200));
         for event in events {
             match event {
+                // 主动闪避立即交代新动作；挨打带来的无敌闪烁仍按模拟剩余时间结束。
+                SimEvent::Dash { .. } => self.hurt_age = None,
                 SimEvent::PlayerHurt { .. } => {
                     self.hurt_age = Some(Duration::ZERO);
                     self.rescued = false;
@@ -190,6 +192,19 @@ mod tests {
         f.update(&[], Duration::from_millis(16), 0.0, false);
         f.update(&[], Duration::from_millis(16), 0.45, false);
         assert_eq!(f.alpha(0.45), 1.0);
+    }
+
+    #[test]
+    fn dash_replaces_hurt_pose_without_hiding_remaining_protection() {
+        let hurt = SimEvent::PlayerHurt { amount: 5.0, by: HurtBy::Shot, from: Vec2::X };
+        let dash = SimEvent::Dash { pos: Vec2::ZERO };
+        let mut f = HeroFeedback::default();
+        f.update(&[hurt, dash], Duration::ZERO, 0.45, false);
+        assert_eq!(f.hurt_frame(10.0), None);
+        assert!(f.alpha(0.45) < 1.0);
+        // 同一步闪避后又真实受伤，仍交代这一次受击。
+        f.update(&[dash, hurt], Duration::ZERO, 0.45, false);
+        assert_eq!(f.hurt_frame(10.0), Some(0));
     }
 
     #[test]

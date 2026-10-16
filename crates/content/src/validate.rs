@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::{
-    Action, Content, ContentError, Effect, Element, Rank, ReactionEffect, Stat, WeaponBehavior, When,
+    Action, Content, ContentError, Effect, Element, Movement, Rank, ReactionEffect, Stat, WeaponBehavior,
+    When,
 };
 
 /// 卡面一行、提示条正文的字数上限（docs/LORE-TEXT.md 第 6 节）
@@ -243,7 +244,10 @@ impl Checker<'_> {
                 && lv.cooldown <= 0.0)
             || (matches!(
                 b,
-                WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
+                WeaponBehavior::Orbit { .. }
+                    | WeaponBehavior::Pulse { .. }
+                    | WeaponBehavior::Drop { .. }
+                    | WeaponBehavior::Sweep { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -384,6 +388,17 @@ impl Checker<'_> {
                 self.positive(file, &[("Seeker.range", *range), ("Seeker.steer", *steer)])?;
                 self.non_negative(file, &[("Seeker.rest", *rest)])
             }
+            WeaponBehavior::Sweep { arc, aim, knockback, crit_bonus, echo } => {
+                self.positive(file, &[("Sweep.arc", *arc)])?;
+                if *arc > std::f32::consts::TAU + 1e-3 {
+                    return self.fail(file, format!("\"{id}\"：Sweep.arc 不能超过一整圈"));
+                }
+                self.non_negative(
+                    file,
+                    &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
+                )?;
+                self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
+            }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {
                     return self.fail(file, format!("\"{id}\"：Drop.candidates 和 amount_div 至少为 1"));
@@ -519,6 +534,15 @@ impl Content {
             c.range("run.ron", "spawn.mix.share", m.share)?;
         }
         c.range("run.ron", "spawn.packs.interval", s.packs.interval)?;
+        for a in &s.ambush {
+            enemy_ref("run.ron", "spawn.ambush", &a.enemy)?;
+            c.non_negative("run.ron", &[("spawn.ambush.from", a.from)])?;
+            c.positive("run.ron", &[("spawn.ambush.every", a.every), ("spawn.ambush.dist.min", a.dist.0)])?;
+            c.range("run.ron", "spawn.ambush.dist", a.dist)?;
+            if a.max == 0 {
+                return c.fail("run.ron", format!("spawn.ambush 的 \"{}\" max 至少为 1", a.enemy));
+            }
+        }
         for m in &s.packs.mix {
             enemy_ref("run.ron", "spawn.packs.mix", &m.enemy)?;
             if !s.mix.iter().any(|x| x.enemy == m.enemy) {
@@ -728,6 +752,48 @@ impl Content {
                 if ch.lock > ch.windup {
                     return c.fail("enemies.ron", format!("{} 的 charge.lock 不能超过 windup", e.id));
                 }
+                c.non_negative("enemies.ron", &[("charge.jitter", ch.jitter)])?;
+                if ch.jitter >= ch.every {
+                    return c.fail("enemies.ron", format!("{} 的 charge.jitter 要小于 every", e.id));
+                }
+            }
+            match (e.movement, e.band) {
+                (Movement::Circle | Movement::Keep, Some((near, far))) => {
+                    c.positive("enemies.ron", &[("band.near", near), ("band.far", far)])?;
+                    if near >= far {
+                        return c.fail("enemies.ron", format!("{} 的 band 要满足 0 < 近 < 远", e.id));
+                    }
+                }
+                (Movement::Circle | Movement::Keep, None) => {
+                    return c.fail("enemies.ron", format!("{} 绕圈或守距，要写 band", e.id));
+                }
+                (_, Some(_)) => {
+                    return c.fail("enemies.ron", format!("{} 不绕圈也不守距，不用写 band", e.id));
+                }
+                _ => {}
+            }
+            if let Some(sh) = &e.shot {
+                c.positive(
+                    "enemies.ron",
+                    &[
+                        ("shot.every", sh.every),
+                        ("shot.warn", sh.warn),
+                        ("shot.range", sh.range),
+                        ("shot.speed", sh.speed),
+                        ("shot.damage", sh.damage),
+                        ("shot.radius", sh.radius),
+                        ("shot.life", sh.life),
+                    ],
+                )?;
+                if sh.warn >= sh.every {
+                    return c.fail("enemies.ron", format!("{} 的 shot.warn 要短于 every", e.id));
+                }
+                if e.boss.is_some() {
+                    return c.fail("enemies.ron", format!("{} 不能同时使用 shot 和 boss 出招计时", e.id));
+                }
+            }
+            if let Some(d) = &e.disguise {
+                c.positive("enemies.ron", &[("disguise.speed", d.speed), ("speed", e.speed)])?;
             }
             if let Some(b) = &e.boss {
                 c.positive(
@@ -1239,5 +1305,115 @@ impl Content {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sweep_content_rejects_invalid_geometry_and_damage_parameters() {
+        let c = Content::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).unwrap();
+        let coin = c.weapon_index("coin_sword").unwrap();
+        for (field, value) in [
+            ("arc", 0.0),
+            ("arc", 7.0),
+            ("arc", f32::NAN),
+            ("aim", -1.0),
+            ("knockback", f32::INFINITY),
+            ("crit_bonus", 1.1),
+            ("echo", -1.0),
+            ("radius", 0.0),
+            ("cooldown", 0.0),
+            ("count", 0.0),
+        ] {
+            let mut bad = c.clone();
+            let w = &mut bad.weapons[coin];
+            let WeaponBehavior::Sweep { arc, aim, knockback, crit_bonus, echo } = &mut w.behavior else {
+                panic!("铜钱剑必须使用扇扫行为");
+            };
+            match field {
+                "arc" => *arc = value,
+                "aim" => *aim = value,
+                "knockback" => *knockback = value,
+                "crit_bonus" => *crit_bonus = value,
+                "echo" => *echo = value,
+                "radius" => w.levels[0].radius = value,
+                "cooldown" => w.levels[0].cooldown = value,
+                "count" => w.levels[0].count = value as u32,
+                _ => unreachable!(),
+            }
+            let err = bad.validate(std::path::Path::new("data")).unwrap_err().to_string();
+            assert!(err.contains("weapons.ron"), "{field}: {err}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod qingqiu_tests {
+    //! 青丘妖物的新数据字段：距离带、攻击预警、伏击和伪装必须在加载时拒绝无效值。
+    use std::path::Path;
+
+    use super::Content;
+
+    fn content() -> Content {
+        Content::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).unwrap()
+    }
+
+    #[test]
+    fn bands_and_charge_cooldowns_cannot_be_nonfinite_or_empty() {
+        let original = content();
+        let fox = original.enemy_index("fox_wisp").unwrap();
+        for band in [None, Some((0.0, 220.0)), Some((220.0, 160.0)), Some((160.0, f32::INFINITY))] {
+            let mut c = original.clone();
+            c.enemies[fox].band = band;
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("band"));
+        }
+        for jitter in [-1.0, 3.0, f32::NAN] {
+            let mut c = original.clone();
+            c.enemies[fox].charge.as_mut().unwrap().jitter = jitter;
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("charge.jitter"));
+        }
+    }
+
+    #[test]
+    fn ranged_warning_and_disguise_require_usable_values() {
+        let original = content();
+        let bamboo = original.enemy_index("bamboo_wraith").unwrap();
+        for warn in [0.0, 3.0, f32::NAN] {
+            let mut c = original.clone();
+            c.enemies[bamboo].shot.as_mut().unwrap().warn = warn;
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("shot.warn"));
+        }
+        let fox = original.enemy_index("taofeng_fox").unwrap();
+        for speed in [0.0, f32::INFINITY] {
+            let mut c = original.clone();
+            c.enemies[fox].disguise.as_mut().unwrap().speed = speed;
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("disguise.speed"));
+        }
+        let mut c = original.clone();
+        c.enemies[fox].speed = 0.0;
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("speed"));
+        let mut c = original.clone();
+        let boss = c.enemy_index("jiuwei").unwrap();
+        c.enemies[boss].shot = c.enemies[bamboo].shot.clone();
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("shot 和 boss"));
+    }
+
+    #[test]
+    fn ambush_requires_known_enemies_safe_distances_and_a_positive_cap() {
+        let original = content();
+        for field in ["enemy", "distance", "every", "max"] {
+            let mut c = original.clone();
+            let a = &mut c.run.spawn.ambush[0];
+            match field {
+                "enemy" => a.enemy = "missing_enemy".into(),
+                "distance" => a.dist = (-10.0, 400.0),
+                "every" => a.every = 0.0,
+                _ => a.max = 0,
+            }
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("spawn.ambush"));
+        }
     }
 }

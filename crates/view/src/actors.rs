@@ -4,6 +4,7 @@
 //! 前后关系按脚底 y 排序（z 越大越靠前）。光源和自发光帧先攒成 [`Glow`] 请求，由 [`apply_glow`]
 //! 统一写进 Mesh2d 池（光源在光照相机的图层，自发光在暗层之上）。
 
+use std::collections::BTreeMap;
 use std::f32::consts::{FRAC_PI_4, TAU};
 
 use bevy::camera::visibility::RenderLayers;
@@ -13,9 +14,12 @@ use bevy::sprite::Anchor;
 use lantern_content::Stat;
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::boss::BossState;
-use lantern_sim::enemies::{CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, SPAWN_GRACE};
+use lantern_sim::enemies::{
+    CHARGE_DASH, CHARGE_RECOVER, CHARGE_WINDUP, EnemyHandle, SPAWN_GRACE, TAG_REVEALED,
+};
 use lantern_sim::{
-    AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox, Stats,
+    AppState, Arsenal, Enemies, GameContent, Gems, Player, Pos, PrevPos, RunState, SimEvent, SimOutbox,
+    Stats, Tick,
 };
 
 use crate::atlas::{AnimMeta, AtlasDb, FrameId};
@@ -196,6 +200,9 @@ struct EnemyFrames {
     base: EnemyAnim,
     /// 冲锋（赤面狐 pounce、青面鬼 charge）
     charge: Option<EnemyAnim>,
+    /// 远程蓄力、出手与收势；现形后的移动。
+    shoot: Option<EnemyAnim>,
+    revealed: Option<EnemyAnim>,
     /// 九尾扫、召唤（召唤和狐火雨时播）
     sweep: Option<EnemyAnim>,
     summon: Option<EnemyAnim>,
@@ -299,6 +306,8 @@ pub(crate) fn build_frames(mut commands: Commands, db: Res<AtlasDb>, content: Re
             EnemyFrames {
                 base: EnemyAnim::load(&db, asset, anim, am),
                 charge: e.charge.as_ref().and_then(|_| named(&["pounce", "charge"])),
+                shoot: e.shot.as_ref().and_then(|_| named(&["shoot"])),
+                revealed: e.disguise.as_ref().and_then(|_| named(&["move"])),
                 sweep: e.boss.as_ref().and_then(|_| named(&["sweep"])),
                 summon: e.boss.as_ref().and_then(|_| named(&["summon"])),
                 floating: meta.floating,
@@ -408,7 +417,7 @@ impl GlowRequests {
 pub(crate) struct HeroView {
     pub(crate) feedback: HeroFeedback,
     dir: usize,
-    /// 待机、闪避、倒地动画的计时
+    /// 当前动作的计时；切换时从头开始，闪避另读模拟进度
     clock: f32,
     /// 走路动画按移动距离推进
     stride: f32,
@@ -427,6 +436,51 @@ pub(crate) struct HeroView {
 }
 
 impl HeroView {
+    fn pose<'a>(
+        &mut self,
+        hero: &'a HeroFrames,
+        player: &Player,
+        dash_duration: f32,
+        moved: f32,
+        dt: f32,
+    ) -> (&'a HeroAnim, usize) {
+        // 闪避中输入仍会改变 facing，但实际移动沿 dash_vel；倒地后保留最后的朝向。
+        if !self.dying {
+            let facing = if player.dash_t > 0.0 { player.dash_vel } else { player.facing };
+            self.dir = pick_dir(self.dir, facing);
+        }
+        let hurt = self.feedback.hurt_frame(hero.hurt.fps);
+        let anim = if self.dying {
+            &hero.death
+        } else if hurt.is_some() {
+            &hero.hurt
+        } else if player.dash_t > 0.0 {
+            &hero.dash
+        } else if player.moved > 0.01 {
+            &hero.walk
+        } else {
+            &hero.idle
+        };
+        let entering = self.anim != anim.name;
+        self.clock = if entering { 0.0 } else { self.clock + dt };
+        let n = anim.frames[self.dir].len().max(1);
+        let frame = match anim.name {
+            "death" => ((self.clock * anim.fps) as usize).min(n - 1),
+            "hurt" => hurt.unwrap_or(0).min(n - 1),
+            // 四帧覆盖完整的实际闪避窗口，暂停或顿帧时不会先播完。
+            "dash" => progress_frame(n, 1.0 - player.dash_t / dash_duration.max(f32::EPSILON)),
+            "walk" => {
+                let stride = anim.stride.unwrap_or(80.0);
+                self.stride = if entering { 0.0 } else { (self.stride + moved) % stride };
+                (self.stride / stride * n as f32) as usize
+            }
+            _ => (self.clock * anim.fps) as usize % n,
+        };
+        self.anim = anim.name;
+        self.frame = frame;
+        (anim, frame)
+    }
+
     /// 受光、影子和光照图共用同一个逐帧挂点。
     pub(crate) fn lamp(&self, db: &AtlasDb) -> (Vec2, Color) {
         let socket = db
@@ -439,6 +493,11 @@ impl HeroView {
             .map_or(Vec2::new(8.0, 14.0), |&[x, y]| Vec2::new(x, -y) / db.px_per_unit);
         (socket, self.light.map_or(LANTERN_LIGHT.0, |c| mix(LANTERN_LIGHT.0, c, 0.45)))
     }
+}
+
+/// 非循环动作按实际阶段进度覆盖全部帧，结束时停在尾帧。
+fn progress_frame(n: usize, progress: f32) -> usize {
+    ((progress.clamp(0.0, 1.0) * n as f32) as usize).min(n.saturating_sub(1))
 }
 
 /// 叠在主角身上的灯笼（逐帧跟着主角的动作和朝向）。
@@ -524,17 +583,13 @@ pub(crate) fn animate_hero(
     let layer = setup.and_then(|s| hero.lanterns.get(s.lamp_index(&content.0)));
     let over = run.as_ref().is_some_and(|s| *s.get() == RunState::Over);
     let paused = run.as_ref().is_some_and(|s| !matches!(s.get(), RunState::Playing | RunState::Over));
-    let dt = time.delta_secs();
+    let dt = if paused { 0.0 } else { time.delta_secs() };
     for (player, tf, mut view, mut sprite, mut anchor) in &mut q {
         let pos = tf.translation.truncate();
-        let moved = pos.distance(view.last_pos);
+        let moved = if paused { 0.0 } else { pos.distance(view.last_pos) };
         view.last_pos = pos;
-        view.dir = pick_dir(view.dir, player.facing);
-        if over && !view.dying {
-            view.dying = true;
-            view.clock = 0.0;
-        }
-        let dying = view.dying || outbox.0.iter().any(|e| matches!(e, SimEvent::PlayerDied));
+        let dying = over || view.dying || outbox.0.iter().any(|e| matches!(e, SimEvent::PlayerDied));
+        view.dying = dying;
         view.feedback.update(
             &outbox.0,
             if paused { std::time::Duration::ZERO } else { real.delta() },
@@ -543,27 +598,8 @@ pub(crate) fn animate_hero(
         );
         let alpha = if dying { 1.0 } else { view.feedback.alpha(player.iframe) };
         sprite.color.set_alpha(alpha);
-        view.clock += dt;
-        let (anim, frame) = if view.dying {
-            let n = hero.death.frames[view.dir].len().max(1);
-            (&hero.death, ((view.clock * hero.death.fps) as usize).min(n - 1))
-        } else if let Some(frame) = view.feedback.hurt_frame(hero.hurt.fps) {
-            (&hero.hurt, frame)
-        } else if player.dash_t > 0.0 {
-            (&hero.dash, (view.clock * hero.dash.fps) as usize)
-        } else if player.moved > 0.01 {
-            let stride = hero.walk.stride.unwrap_or(80.0);
-            view.stride = (view.stride + moved) % stride;
-            let n = hero.walk.frames[view.dir].len().max(1);
-            (&hero.walk, (view.stride / stride * n as f32) as usize)
-        } else {
-            view.stride = 0.0;
-            (&hero.idle, (view.clock * hero.idle.fps) as usize)
-        };
+        let (anim, k) = view.pose(&hero, player, content.0.player.dash.duration, moved, dt);
         let seq = &anim.frames[view.dir];
-        let k = frame % seq.len().max(1);
-        view.anim = anim.name;
-        view.frame = k;
         view.emit = anim.emit[view.dir].get(k).copied();
         view.frame_id = seq.get(k).copied();
         if let Some(&id) = seq.get(k) {
@@ -769,6 +805,37 @@ impl BossClock {
     }
 }
 
+/// 远程出手只记发射者的带代数句柄，槽位复用或同类妖物不会借走它的动作。
+#[derive(Default)]
+struct ShotClock {
+    strikes: BTreeMap<EnemyHandle, (f32, bool)>,
+}
+
+impl ShotClock {
+    fn update(&mut self, events: &[SimEvent], en: &Enemies, frames: &[EnemyFrames], now: f32) {
+        self.strikes.retain(|&enemy, (at, _)| {
+            now >= *at
+                && en
+                    .resolve(enemy)
+                    .and_then(|i| frames[en.kind[i] as usize].shoot.as_ref())
+                    .is_some_and(|a| a.strike_frame(now - *at, false).is_some())
+        });
+        for event in events {
+            if let SimEvent::EnemyShot { enemy, .. } = *event
+                && let Some(i) = en.resolve(enemy)
+                && frames[en.kind[i] as usize].shoot.is_some()
+            {
+                self.strikes.insert(enemy, (now, en.aim_dx[i] < 0.0));
+            }
+        }
+    }
+
+    fn frame(&self, enemy: EnemyHandle, anim: &EnemyAnim, now: f32) -> Option<(usize, bool)> {
+        let &(at, flip) = self.strikes.get(&enemy)?;
+        anim.strike_frame(now - at, false).map(|k| (k, flip))
+    }
+}
+
 /// 挑妖物的出手动作要读的模拟状态（DESIGN 第 15 节“妖物动作”）。
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct Moves<'w, 's> {
@@ -776,11 +843,15 @@ pub(crate) struct Moves<'w, 's> {
     boss: Option<Res<'w, BossState>>,
     outbox: Res<'w, SimOutbox>,
     clock: Local<'s, BossClock>,
+    shots: Local<'s, ShotClock>,
+    tick: Option<Res<'w, Tick>>,
 }
 
 impl Moves<'_, '_> {
-    fn update(&mut self, now: f32) {
+    fn update(&mut self, now: f32, en: &Enemies, frames: &ActorFrames) {
         self.clock.update(&self.outbox.0, now);
+        let shot_time = self.tick.as_ref().map_or(0.0, |t| t.secs());
+        self.shots.update(&self.outbox.0, en, &frames.enemies, shot_time);
     }
 
     /// 正在出招的妖物：播哪个动作的第几帧，朝不朝左（None：照常朝着主角）。
@@ -791,6 +862,26 @@ impl Moves<'_, '_> {
         i: usize,
         now: f32,
     ) -> Option<(&'f EnemyAnim, usize, Option<bool>)> {
+        if let Some(a) = &f.shoot
+            && let Some(sh) = &self.content.0.enemies[en.kind[i] as usize].shot
+        {
+            if en.aim_t[i] > 0.0 {
+                // 两张聚力帧铺满实际预警窗口，只有真实发射事件才能进入出手帧。
+                let k = progress_frame(a.windup, 1.0 - en.aim_t[i] / sh.warn);
+                return Some((a, k, Some(en.aim_dx[i] < 0.0)));
+            }
+            let shot_time = self.tick.as_ref().map_or(0.0, |t| t.secs());
+            if let Some((k, flip)) = self.shots.frame(en.handle(i), a, shot_time) {
+                return Some((a, k, Some(flip)));
+            }
+        }
+        if let Some(a) = &f.revealed
+            && en.tags[i] & TAG_REVEALED != 0
+        {
+            let n = a.normal.len();
+            let phase = en.wob[i] / TAU * n as f32;
+            return Some((a, ((now * a.fps + phase) as usize) % n, None));
+        }
         // 冲锋：蓄力时停在最后一个蓄力帧，冲出去接着播，停下来以后播完剩下的
         if let Some(a) = &f.charge
             && let Some(ch) = &self.content.0.enemies[en.kind[i] as usize].charge
@@ -830,6 +921,11 @@ fn view_rect(cam: &Transform, proj: &Projection) -> Rect {
     Rect::from_center_half_size(cam.translation.truncate(), half + Vec2::splat(80.0))
 }
 
+/// 伪装仅禁止自动锁定；只有真正的“隐”词缀隐藏本体。无月仍由照见圈单独限制。
+fn enemy_hidden(en: &Enemies, i: usize, disguised: bool, cloak_bit: u16) -> bool {
+    en.cloaked[i] && (!disguised || en.affix[i] & cloak_bit != 0)
+}
+
 pub(crate) fn collect_draws(
     time: Res<Time>,
     fixed: Res<Time<Fixed>>,
@@ -866,14 +962,23 @@ pub(crate) fn collect_draws(
     let rect = view_rect(camera.0, camera.1);
     let (ppos, pprev) = *player;
     let player_now = pprev.0.lerp(ppos.0, a);
-    moves.update(t);
+    moves.update(t, &en, &frames);
 
     // 夜签“无月”：照见圈外完全看不见；“隐”的精英在照见圈外也看不见
     let no_moon = sight.stats.as_ref().is_some_and(|s| s.rule(lantern_content::Rule::NoMoon));
+    let cloak_bit = moves
+        .content
+        .0
+        .affixes
+        .iter()
+        .position(|a| matches!(a.kind, lantern_content::AffixKind::Cloak))
+        .map_or(0, |i| 1u16 << i);
     for i in en.iter_alive() {
+        let def = &moves.content.0.enemies[en.kind[i] as usize];
+        let disguised = def.disguise.is_some() && en.tags[i] & TAG_REVEALED == 0;
         let p = Vec2::new(en.px[i], en.py[i]).lerp(Vec2::new(en.x[i], en.y[i]), a);
         let s = to_screen(p);
-        if !rect.contains(s) || en.cloaked[i] {
+        if !rect.contains(s) || enemy_hidden(&en, i, disguised, cloak_bit) {
             continue;
         }
         if no_moon
@@ -927,10 +1032,14 @@ pub(crate) fn collect_draws(
         if fade <= 0.01 {
             continue;
         }
-        let def = &moves.content.0.enemies[en.kind[i] as usize];
         // 分裂出来的小号按实际碰撞半径画小；刚刷出来的从墨里浮现（这段时间不伤人）
         let size = Vec2::splat(en.r[i] / def.radius);
-        let born = 1.0 - (en.grace[i] / SPAWN_GRACE).clamp(0.0, 1.0);
+        // 现形保护也使用 grace；此时妖物已经在场，不能重复出生淡入而藏起威胁。
+        let born = if def.disguise.is_some() && en.tags[i] & TAG_REVEALED != 0 {
+            1.0
+        } else {
+            1.0 - (en.grace[i] / SPAWN_GRACE).clamp(0.0, 1.0)
+        };
         let color = color.with_alpha(fade * (0.2 + 0.8 * born));
         // 夜主用伪法线受光（lighting::apply_surface_lights 叠在身上）
         if def.boss.is_some() && !flashing {
@@ -957,7 +1066,10 @@ pub(crate) fn collect_draws(
             color: Color::srgba(1.0, 1.0, 1.0, if f.floating { 0.42 } else { 0.62 } * fade),
             ..Draw::new(frames.shadow, (s + offset).extend(layer::SHADOW))
         });
-        if !flashing && let Some(&emit) = anim.emit.get(k) {
+        if !flashing
+            && !disguised
+            && let Some(&emit) = anim.emit.get(k)
+        {
             let before = glow.0.len();
             glow.emit(emit, body, flip, Color::WHITE.with_alpha(fade * born));
             if glow.0.len() > before
@@ -1227,6 +1339,123 @@ pub(crate) fn reset_pools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disguised_fox_is_drawn_but_real_cloak_still_hides_it() {
+        let mut en = Enemies::default();
+        let i = en.alloc().unwrap();
+        en.cloaked[i] = true;
+        let cloak_bit = 1 << 4;
+        assert!(!enemy_hidden(&en, i, true, cloak_bit), "伪装路人可见，自动锁定仍由模拟拒绝");
+        assert!(en.cloaked[i]);
+        assert!(enemy_hidden(&en, i, false, cloak_bit), "普通隐身妖物仍不可见");
+        en.affix[i] = cloak_bit;
+        assert!(enemy_hidden(&en, i, true, cloak_bit), "伪装不能绕过真正的隐词缀");
+        en.cloaked[i] = false;
+        assert!(!enemy_hidden(&en, i, false, cloak_bit), "进入照见圈后可见");
+    }
+
+    #[test]
+    fn ranged_animation_waits_for_shot_and_belongs_to_one_enemy_generation() {
+        let anim = || EnemyAnim {
+            normal: (0..5).map(FrameId).collect(),
+            flash: Vec::new(),
+            emit: Vec::new(),
+            fps: 10.0,
+            windup: 2,
+            loop_from: None,
+        };
+        let frames = vec![EnemyFrames {
+            base: anim(),
+            charge: None,
+            shoot: Some(anim()),
+            revealed: None,
+            sweep: None,
+            summon: None,
+            floating: false,
+            shadow_scale: 1.0,
+        }];
+        let a = frames[0].shoot.as_ref().unwrap();
+        let mut en = Enemies::default();
+        let first = en.alloc().unwrap();
+        let second = en.alloc().unwrap();
+        let enemy = en.handle(first);
+        en.aim_dx[first] = -1.0;
+        let mut clock = ShotClock::default();
+        // 预警中无论等待多久都只用聚力帧，不会擅自播放出手。
+        for (progress, want) in [(0.0, 0), (0.49, 0), (0.5, 1), (1.0, 1)] {
+            assert_eq!(progress_frame(a.windup, progress), want);
+        }
+        assert_eq!(clock.frame(enemy, a, 10.0), None);
+        clock.update(&[SimEvent::EnemyShot { enemy, pos: Vec2::ZERO, kind: 0 }], &en, &frames, 0.0);
+        assert_eq!(clock.frame(enemy, a, 0.0), Some((2, true)));
+        assert_eq!(clock.frame(en.handle(second), a, 0.0), None, "同种其他妖物没有出手");
+        clock.update(&[], &en, &frames, 0.0);
+        assert_eq!(clock.frame(enemy, a, 0.0), Some((2, true)), "模拟暂停，动作保持");
+        assert_eq!(clock.frame(enemy, a, 0.11), Some((3, true)));
+        assert_eq!(clock.frame(enemy, a, 0.21), Some((4, true)));
+        clock.update(&[], &en, &frames, 0.31);
+        assert!(clock.strikes.is_empty());
+        clock.update(&[SimEvent::EnemyShot { enemy, pos: Vec2::ZERO, kind: 0 }], &en, &frames, 1.0);
+        en.kill(first);
+        let replacement = en.alloc().unwrap();
+        assert_eq!(replacement, first);
+        assert_eq!(clock.frame(en.handle(replacement), a, 1.0), None, "新妖物不继承旧槽位的出手");
+        clock.update(&[], &en, &frames, 1.0);
+        assert!(clock.strikes.is_empty());
+    }
+
+    fn hero_frames() -> HeroFrames {
+        let anim = |name, n, fps, stride| HeroAnim {
+            name,
+            frames: vec![(0..n).map(FrameId).collect(); 8],
+            emit: vec![Vec::new(); 8],
+            fps,
+            stride,
+        };
+        HeroFrames {
+            idle: anim("idle", 6, 6.0, None),
+            walk: anim("walk", 8, 12.0, Some(80.0)),
+            dash: anim("dash", 4, 16.0, None),
+            hurt: anim("hurt", 2, 10.0, None),
+            death: anim("death", 6, 8.0, None),
+            shadow_scale: 1.0,
+            lanterns: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hero_actions_restart_and_dash_tracks_actual_motion() {
+        let hero = hero_frames();
+        let mut view = HeroView::default();
+        let mut player = Player::default();
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 10.0).1, 0);
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 0.5).1, 3);
+        player.moved = 4.0;
+        assert_eq!(view.pose(&hero, &player, 0.16, 4.0, 0.1).1, 0);
+        assert_eq!(view.pose(&hero, &player, 0.16, 40.0, 0.1).1, 4);
+        // 闪避时输入已经转向西，移动仍向东；四帧按 160ms 模拟窗口播完。
+        player.facing = Vec2::NEG_X;
+        player.dash_vel = Vec2::X * 500.0;
+        for (remaining, want) in [(0.16, 0), (0.11, 1), (0.07, 2), (0.03, 3)] {
+            player.dash_t = remaining;
+            assert_eq!(view.pose(&hero, &player, 0.16, 10.0, 0.05).1, want);
+            assert_eq!(view.anim, "dash");
+            assert_eq!(view.dir, 0);
+            assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 0.0).1, want, "暂停不前进");
+        }
+        // 停步从待机首帧开始；死亡也独立起播，播放结束后保持倒地与朝向。
+        player.dash_t = 0.0;
+        player.moved = 0.0;
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 0.1).1, 0);
+        assert_eq!(view.dir, 4);
+        view.dying = true;
+        player.facing = Vec2::X;
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 0.1).1, 0);
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 1.0).1, 5);
+        assert_eq!(view.pose(&hero, &player, 0.16, 0.0, 1.0).1, 5);
+        assert_eq!(view.dir, 4);
+    }
 
     /// 出手动作（DESIGN 第 15 节）：蓄力帧停在最后一个，出手后接着播；
     /// 只播一遍的停在最后一帧，招式结束回到平时；loop_from 的从那一帧循环。

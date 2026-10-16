@@ -69,7 +69,7 @@ fn a_dash_reaches_with_the_whole_collision_radius_at_its_real_speed() {
     let mut sim = arena();
     pinned(&mut sim, "fox", Vec2::new(gap, 0.0));
     assert!(!hurt_within(&mut sim, 10));
-    // 同样的距离扑过来就够得着（往侧面扑，第一步还在原处判定）
+    // 同样的距离往侧面扑，移动后的身体仍然够得着
     let mut sim = arena();
     let i = sim.spawn("fox", Vec2::new(gap, 0.0)).unwrap();
     {
@@ -113,6 +113,36 @@ fn freshly_spawned_enemies_cannot_hurt_until_their_grace_ends() {
     let safe = (SPAWN_GRACE * HZ) as usize - 2;
     assert!(!hurt_within(&mut sim, safe), "保护时间里不伤人");
     assert!(hurt_within(&mut sim, 10), "保护时间过了照常");
+}
+
+#[test]
+fn contact_follows_the_current_position_after_knockback() {
+    let c = common::content();
+    let body = c.enemies[c.enemy_index("shade").unwrap()].radius + c.player.radius;
+    for (offset, velocity, hurts) in [(-1.0, 2400.0, false), (10.0, -1200.0, true)] {
+        let mut sim = arena();
+        let i = pinned(&mut sim, "shade", Vec2::new(body + offset, 0.0));
+        sim.world_mut().resource_mut::<Enemies>().kx[i] = velocity;
+        assert_eq!(hurt_within(&mut sim, 1), hurts, "接触按位移后的位置判定");
+    }
+}
+
+#[test]
+fn the_last_fraction_of_freeze_or_stun_is_still_harmless() {
+    for freeze in [true, false] {
+        let mut sim = arena();
+        let i = pinned(&mut sim, "shade", Vec2::new(4.0, 0.0));
+        {
+            let mut en = sim.world_mut().resource_mut::<Enemies>();
+            if freeze {
+                en.frozen[i] = 0.5 / HZ;
+            } else {
+                en.stun[i] = 0.5 / HZ;
+            }
+        }
+        assert!(!hurt_within(&mut sim, 1), "本步仍被冻结或眩晕，不能原地伤人");
+        assert!(hurt_within(&mut sim, 1), "下一步解除控制后照常接触");
+    }
 }
 
 #[test]

@@ -184,4 +184,30 @@
             level: (cooldown: 2.9, count: 3, radius: 90.0, damage: 120.0),
         )),
     ),
+    // 铜钱剑（docs/BALANCE.md 第 6.3 节）：近身扇扫，区别于符剑的远程追踪。
+    (
+        id: "coin_sword", name: "铜钱剑", icon: "钱", element: Metal,
+        desc: "朝最近的妖物近身扇扫，暴击率额外 +15%。", short: "近身扇扫，暴击 +15%",
+        flavor: "一串压岁的铜钱，红绳一勒就是一把剑。钱眼里都是人间的香火。",
+        // 120° 扇形；方向朝 radius + 40 以内最近的妖物，没有就朝面向；扇形里从近到远最多打 count 只；暴击率 +15%
+        behavior: Sweep(arc: 2.0944, aim: 40.0, knockback: 20.0, crit_bonus: 0.15),
+        levels: [
+            (cooldown: 1.20, count: 3, radius: 70.0, damage: 20.0),
+            (cooldown: 1.14, count: 3, radius: 72.0, damage: 25.0),
+            (cooldown: 1.08, count: 4, radius: 76.0, damage: 30.0),
+            (cooldown: 1.02, count: 4, radius: 78.0, damage: 36.0),
+            (cooldown: 0.96, count: 5, radius: 80.0, damage: 42.0),
+            (cooldown: 0.90, count: 5, radius: 85.0, damage: 48.0),
+            (cooldown: 0.85, count: 6, radius: 85.0, damage: 54.0),
+            (cooldown: 0.80, count: 6, radius: 85.0, damage: 60.0),
+        ],
+        evolution: Some((
+            name: "天罡", passive: "ruimu",
+            desc: "周身剑气旋风，暴击时再斩一次。", short: "周身环斩，暴击再斩",
+            flavor: "三十六天罡，一钱一星。绕身转一圈，头顶就是一片星天。",
+            // 一整圈；暴击的那一下对同一只再斩一次（× 1.0，再斩不再触发）
+            behavior: Sweep(arc: 6.2832, aim: 40.0, knockback: 25.0, crit_bonus: 0.15, echo: 1.0),
+            level: (cooldown: 0.80, count: 10, radius: 100.0, damage: 100.0),
+        )),
+    ),
 ]

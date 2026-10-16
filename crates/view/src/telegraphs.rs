@@ -1,4 +1,4 @@
-//! 夜主预警：直接描摹模拟几何，在夜色、自发光之上保留稳定墨边与朱砂轮廓。
+//! 敌方预警：直接描摹模拟几何，在夜色、自发光之上保留稳定墨边与朱砂轮廓。
 //! 外缘从起手到出手固定；沿边行进的浅金笔迹表示剩余蓄力，不用缩圈冒充伤害范围。
 
 use std::f32::consts::{PI, TAU};
@@ -8,8 +8,9 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
+use lantern_content::Content;
 use lantern_sim::boss::{BossState, DangerArea};
-use lantern_sim::{AppState, GameContent, Player, Pos, PrevPos};
+use lantern_sim::{AppState, Enemies, GameContent, Player, Pos, PrevPos};
 
 use crate::{layer, to_screen};
 
@@ -30,19 +31,41 @@ pub(crate) fn update_readability(
     fixed: Res<Time<Fixed>>,
     content: Res<GameContent>,
     boss: Option<Res<BossState>>,
+    enemies: Option<Res<Enemies>>,
     player: Single<(&Pos, &PrevPos), With<Player>>,
     mut readability: ResMut<Readability>,
 ) {
     let (pos, prev) = *player;
     let visible = prev.0.lerp(pos.0, fixed.overstep_fraction());
     // 狐火环的弹道太长，二阶段几乎总站在某条上；只在扫击、狐火雨的落点里压暗自己的特效
-    let danger = boss.is_some_and(|b| {
+    let boss_danger = boss.is_some_and(|b| {
         b.in_strike_zone(pos.0, content.0.player.radius) || b.in_strike_zone(visible, content.0.player.radius)
     });
+    let ranged_danger = enemies.is_some_and(|en| {
+        (0..en.hi)
+            .filter_map(|i| ranged_warning(&en, i, &content.0))
+            .any(|(area, _)| area.contains(pos.0) || area.contains(visible))
+    });
     // 预警本身够亮，自己的法器压一半就分得清（质感会话定的数）
+    let danger = boss_danger || ranged_danger;
     let target = if danger { 0.5 } else { 1.0 };
     let rate = if danger { 24.0 } else { 7.0 };
     readability.gain += (target - readability.gain) * (1.0 - (-time.delta_secs() * rate).exp());
+}
+
+/// 竹刺的起点、方向在模拟蓄力时锁定；描边包含玩家半径，与实际碰撞安全距离一致。
+fn ranged_warning(en: &Enemies, i: usize, content: &Content) -> Option<(DangerArea, f32)> {
+    if !en.alive[i] || en.grace[i] > 0.0 || en.aim_t[i] <= 0.0 {
+        return None;
+    }
+    let shot = content.enemies.get(en.kind[i] as usize)?.shot.as_ref()?;
+    let start = Vec2::new(en.aim_x[i], en.aim_y[i]);
+    let dir = Vec2::new(en.aim_dx[i], en.aim_dy[i]);
+    let end = start + dir * shot.speed * shot.life;
+    Some((
+        DangerArea::Lane { start, end, radius: shot.radius + content.player.radius },
+        (1.0 - en.aim_t[i] / shot.warn).clamp(0.0, 1.0),
+    ))
 }
 
 #[derive(Component)]
@@ -159,7 +182,7 @@ impl InkMesh {
             _ => color,
         };
         let ink = Color::srgba(0.055, 0.025, 0.04, if lane { 0.55 } else { 0.85 });
-        let edge = Color::srgba(1.0, 0.29, 0.17, if lane { 0.6 } else { 0.8 });
+        let edge = Color::srgba(1.0, 0.29, 0.17, if lane { 0.6 } else { 0.95 });
         let gold = Color::srgba(1.0, 0.74, 0.42, 0.8);
         let perimeter: f32 =
             (0..points.len()).map(|k| points[k].distance(points[(k + 1) % points.len()])).sum();
@@ -167,11 +190,24 @@ impl InkMesh {
         for k in 0..points.len() {
             let (a, b) = (points[k], points[(k + 1) % points.len()]);
             self.triangle([center, a, b], 0.0, [fade(center, fill), fade(a, fill), fade(b, fill)]);
-            self.line(a, b, if lane { 1.8 } else { 3.0 }, 0.1, [fade(a, ink), fade(b, ink)]);
-            self.line(a, b, if lane { 0.7 } else { 1.1 }, 0.2, [fade(a, edge), fade(b, edge)]);
+            // 近身落点描边高于长弹道，重叠时仍能辨认扇扫和狐火雨的完整边界。
+            self.line(
+                a,
+                b,
+                if lane { 1.8 } else { 4.5 },
+                if lane { 0.1 } else { 0.5 },
+                [fade(a, ink), fade(b, ink)],
+            );
+            self.line(
+                a,
+                b,
+                if lane { 0.7 } else { 1.8 },
+                if lane { 0.2 } else { 0.6 },
+                [fade(a, edge), fade(b, edge)],
+            );
             let len = a.distance(b);
             if !lane && remaining > 0.0 && len > 0.0 {
-                self.line(a, a.lerp(b, (remaining / len).min(1.0)), 1.15, 0.3, [gold; 2]);
+                self.line(a, a.lerp(b, (remaining / len).min(1.0)), 2.0, 0.7, [gold; 2]);
             }
             remaining -= len;
         }
@@ -189,6 +225,7 @@ impl InkMesh {
 
 pub(crate) fn draw(
     boss: Option<Res<BossState>>,
+    enemies: Option<Res<Enemies>>,
     content: Res<GameContent>,
     q: Single<(&Mesh2d, &mut Visibility), With<TelegraphMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -207,6 +244,14 @@ pub(crate) fn draw(
         }
         for drop in &boss.drops {
             ink.warning(drop.danger(reach), drop.t / drop.warn);
+        }
+    }
+    if let Some(en) = enemies {
+        for (area, progress) in (0..en.hi).filter_map(|i| ranged_warning(&en, i, &content.0)) {
+            ink.warning(area, progress);
+            if let DangerArea::Lane { start, .. } = area {
+                ink.charge(start, progress);
+            }
         }
     }
     let (handle, mut visibility) = q.into_inner();
@@ -257,5 +302,41 @@ mod tests {
         for p in boundary(lane) {
             assert!(lane.contains(p * 0.99999));
         }
+    }
+
+    #[test]
+    fn bamboo_warning_uses_locked_origin_and_disappears_when_cancelled() {
+        let content =
+            Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"))
+                .unwrap();
+        let kind = content.enemies.iter().position(|e| e.id == "bamboo_wraith").unwrap();
+        let shot = content.enemies[kind].shot.as_ref().unwrap();
+        let mut en = Enemies::default();
+        en.hi = 1;
+        en.alive[0] = true;
+        en.kind[0] = kind as u16;
+        en.x[0] = 900.0;
+        en.y[0] = 700.0;
+        en.aim_x[0] = 40.0;
+        en.aim_y[0] = 60.0;
+        en.aim_dx[0] = 0.6;
+        en.aim_dy[0] = 0.8;
+        en.aim_t[0] = shot.warn * 0.5;
+        let (area, progress) = ranged_warning(&en, 0, &content).unwrap();
+        assert!((progress - 0.5).abs() < 1e-5);
+        let origin = Vec2::new(40.0, 60.0);
+        let axis = Vec2::new(0.6, 0.8);
+        let end = origin + axis * shot.speed * shot.life;
+        let radius = shot.radius + content.player.radius;
+        assert!(area.contains(end + axis.perp() * (radius - 0.01)));
+        assert!(!area.contains(end + axis.perp() * (radius + 0.01)));
+        en.aim_t[0] = 0.0;
+        assert!(ranged_warning(&en, 0, &content).is_none());
+        en.aim_t[0] = shot.warn;
+        en.alive[0] = false;
+        assert!(ranged_warning(&en, 0, &content).is_none());
+        en.alive[0] = true;
+        en.grace[0] = 0.2;
+        assert!(ranged_warning(&en, 0, &content).is_none());
     }
 }

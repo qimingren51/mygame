@@ -205,7 +205,9 @@ Points(2), Favor,                                                 // 夜签“�
 - **升级选项**：权重同网页版，已到一阶的五行 ×1.5；灵光一闪的概率是属性 `Inspiration`。保底：前 5 次升级至少出现 2 件不同的新法器；法器 Lv7 以上缺进化心法时，每次升级 25% 把那门心法放进选项（`run.ron` 的 `pity`）。封印（`SimCommand::Banish`）把选中的一项永久移出本局卡池，换一个新选项，次数来自属性 `Banishes`。
 - 新增一种动作 = 给枚举加一个变体，再在 `lantern_sim::combat` 里写处理分支。之后任何法器、共鸣、夜签、心法都能用它。M2.5 的五行反应、灯坠按这个方式加（docs/GAMEPLAY.md 第 16 节）。
 
-**法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）。用已有行为做新法器，只需要写数据。
+**法器** = 行为 + 每级数值表 + 五行 + 正统进化 + 可选异化（`WeaponDef.mutation: Option<MutationDef>`，含 `name / desc / flavor / behavior / level`，共用正统的心法钥匙，行为和原法器同一种）。行为在 `sim/weapons/` 里，一种一个文件：`Orbit` 环绕（灯火）、`Volley` 追踪齐射（符剑，也负责全部飞剑的飞行）、`Pulse` 震波（霜铃，进化后加全屏钟鸣）、`Seeker` 扑击（纸鹤）、`Drop` 落印（山印，进化后留地裂）、`Sweep` 扇形挥击（铜钱剑，进化后环斩）。用已有行为做新法器，只需要写数据。
+
+**扇形挥击**（`sim/weapons/sweep.rs`，BALANCE 6.3）：冷却后朝 `radius + aim` 内最近的可锁定妖物出手，无目标时朝 `Player.facing`。扇形按妖物中心判断角度，半径计入妖物碰撞半径；按距离、槽位排序，最多打 `count + Amount` 只。`Hit.crit_bonus` 增加本击暴击率，天罡的 `Hit.echo` 在暴击时追加一次同目标命中，再斩的 echo 清零；已被前一击杀死的目标不再结算。出手发 `SimEvent::Sweep { pos, dir, arc, radius, weapon, evolved }`，再斩实际结算时发 `SweepEcho { pos, weapon }`（目标中心）。表现使用世界坐标、实际攻击半径与弧度张角，不把攻击区域按装饰环压扁；事件和 `Hit.sweep_echo` 只供音画使用。
 
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
@@ -216,7 +218,9 @@ Points(2), Favor,                                                 // 夜签“�
 - **地面区域**：`FissureDef.kind: GroundKind` 区分地裂、凤火、竹墙、剑林，`FissureDef.wall: Option<f32>` 是竹墙的移速倍率。它们（包括镇岳的地裂，不论开关）共用 `Fissures` 区域池（`weapons::drop::update_ground` 跳伤害），全场至多 `run.ron` 的 `ground_cap`（64）块，满了替换最早的一块。区域跳伤害时同类对同一只妖物只算每秒伤害最高的一块（相同取最早），也和范围打击一样打竹丛；不打印记、不引起命中连锁。竹墙：普通妖物降到墙的倍率（0.12，是墙不是减速，不受减速上限）；精英按一般减速算，最多减 70%（`combat::SLOW_CAP`）；夜主和奇遇小动物不受影响；和地图竹丛不连乘，取更慢的一个；冲锋不减。移动阶段每步把竹墙收集一次再逐只查。
 - **其他**：分剑随 `Hit.molten` 带着熔金参数，分出的剑 `split = None` 不再分裂，找目标复用缓冲，飞剑总量仍受 512 上限；冻土碎裂每步至多 `shatter_budget` 次，`HIT_SHATTER` 阻断碎裂连锁；精英和夜主不被碎裂或斩杀。状态哈希也记法器内部计时和纸鹤状态（`Arsenal::hash_detail`）、飞行物的寿命伤害和效果（`Shots::hash_detail`）、区域池和待落石印、封印明细。
 
-**妖物** = 数值 + 移动方式（追击、逃跑）+ 精灵 + 等级（普通、精英、夜主、奇遇小动物）。夜主的招式参数写在 `enemies.ron` 的 `boss` 里（弹幕、召唤），逻辑在 `sim/boss.rs`；M2.5 起每个夜主一个状态机。
+**妖物** = 数值 + 移动方式（追击、逃跑、绕圈、守距）+ 精灵 + 等级（普通、精英、夜主、奇遇小动物）。夜主的招式参数写在 `enemies.ron` 的 `boss` 里（弹幕、召唤），逻辑在 `sim/boss.rs`；M2.5 起每个夜主一个状态机。
+
+青丘小妖通过可选 `band`（距离带）、`shot: ShotDef`（预警和弹道）、`disguise`（现形移速）扩展。竹魅的 `aim_x/y`、`aim_dx/dy` 和 `aim_t` 锁定预警原点、方向及剩余时间，`view/telegraphs.rs` 据此绘制含玩家半径的危险走廊；被控制、击退或推离原点后取消蓄力。`EnemyShot { enemy, pos, kind }` 带有代数的 `EnemyHandle`，使同种不同个体和复用槽位不会借用出手动画。`Foe.kind` 区分竹刺与夜主狐火；伏击计时 `Director.ambush_t`、瞄准状态及敌弹种类计入模拟哈希。讨封狐的 `TAG_REVEALED` 保持现形状态，现形保护只限制伤害，不重复出生淡入。
 
 ### 6.7 模拟与外界的接口
 
