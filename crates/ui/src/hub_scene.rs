@@ -4,10 +4,12 @@
 //! 四处一直铺着这幅长卷（按“铺满再居中裁边”缩放），代替标题画：
 //! - 四个人物各有点击区和聚光，选中的那位身上亮一团暖光；
 //! - 心灯 12 盏，节点等级 > 0 就亮（灯身、火苗、灯芯、光晕四层，光晕按“等级 ÷ 最大等级”）；
-//! - 通关过的地区，远山上铺着晨光（P0 只有青丘：通关一更）。
+//! - 通关过的地区，远山上铺着晨光（P0 只有青丘：通关一更）；
+//! - 门外的路灯 10 盏，回来一回点一盏（`Profile::road_lamps`），四层同心灯，没点到的不显示。
 //!
 //! 长卷的节点只在进出灯驿时建、拆，选中项变了不重建，质感会话的 `hub_fx` 可以在上面播动画：
-//! 它读 [`HubLamp`]、[`HubDawn`] 这些标记，只改透明度、缩放、颜色，不改布局。
+//! 它读 [`HubLamp`]、[`HubRoadLamp`]、[`HubDawn`] 这些标记，只改透明度、缩放、颜色，不改布局。
+//! 这次归来新添的那盏路灯记在 `HubNews::road_lit`（点亮动画的入口，由 `hub_fx` 播完清掉）。
 //! 人物名牌、台词、标题和提示是界面面板（[`labels`]），跟着选中项重画。
 
 use std::collections::BTreeMap;
@@ -79,6 +81,9 @@ struct HubJson {
     lamps: BTreeMap<String, Lamp>,
     #[serde(default)]
     dawn: BTreeMap<String, Dawn>,
+    /// 门外的路灯，按点亮顺序排
+    #[serde(default)]
+    road_lamps: Vec<Lamp>,
     /// 画面安静、可以放字的地方：左上角的标题和钱袋、底部的操作提示
     #[serde(default)]
     text_safe: Vec<[f32; 4]>,
@@ -144,6 +149,21 @@ pub(crate) struct HubImage(pub String);
 /// 人物的聚光（第几个人物）。
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct HubLight(pub usize);
+
+/// 门外的一盏路灯的一层（第 `index` 盏，从 0 起）。`lit` 是建节点或上次刷新时点没点着。
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct HubRoadLamp {
+    pub index: usize,
+    /// 质感会话的 `hub_fx` 演路灯点亮时按层处理（同 [`HubLamp`]）
+    #[allow(dead_code)]
+    pub part: LampPart,
+    pub lit: bool,
+}
+
+/// 第 index 盏路灯（从 0 起）点着没有：回来几回点几盏。
+pub(crate) fn road_lamp_lit(profile: &Profile, index: usize) -> bool {
+    index < profile.road_lamps() as usize
+}
 
 #[derive(Component)]
 pub(crate) struct SceneRoot;
@@ -356,6 +376,32 @@ pub(crate) fn sync_scene(
                     on,
                 ));
             }
+            // 门外的路灯：回来一回点一盏，四层同心灯；没点到的不显示（底图上本来没有）
+            for (index, l) in j.road_lamps.iter().enumerate() {
+                let lit = road_lamp_lit(&profile, index);
+                let mark = |part| HubRoadLamp { index, part, lit };
+                for (layer, part) in [(&l.body, LampPart::Body), (&l.flame, LampPart::Flame)] {
+                    let mut e = root.spawn((
+                        place(&scene, layer.rect),
+                        ImageNode::new(assets.load(file(&layer.file))).with_mode(NodeImageMode::Stretch),
+                        mark(part),
+                        HubImage(file(&layer.file)),
+                        shown(lit),
+                    ));
+                    if let Some([bx, by]) = layer.base {
+                        e.insert(HubFlameBase(Vec2::new(bx - layer.rect[0], by - layer.rect[1])));
+                    }
+                }
+                for (layer, part) in [(&l.core, LampPart::Core), (&l.glow, LampPart::Glow)] {
+                    root.spawn((
+                        place(&scene, layer.rect),
+                        add(assets.load(file(&layer.file)), Vec4::ONE),
+                        mark(part),
+                        HubImage(file(&layer.file)),
+                        shown(lit),
+                    ));
+                }
+            }
             // 人物：聚光（选中时亮）和点击区
             for (i, ch) in j.characters.iter().enumerate() {
                 let at = |k: usize, or: f32| ch.light.get(k).copied().unwrap_or(or);
@@ -398,7 +444,15 @@ pub(crate) fn refresh_scene(
     mut adds: ResMut<Assets<UiAdd>>,
     mut lamps: Query<(&mut HubLamp, &mut Visibility, Option<&MaterialNode<UiAdd>>), Without<HubLight>>,
     mut lights: Query<(&HubLight, &mut Visibility), Without<HubLamp>>,
+    mut roads: Query<(&mut HubRoadLamp, &mut Visibility), (Without<HubLamp>, Without<HubLight>)>,
 ) {
+    for (mut road, mut vis) in &mut roads {
+        let lit = road_lamp_lit(&profile, road.index);
+        if lit != road.lit {
+            road.lit = lit;
+            vis.set_if_neq(shown(lit));
+        }
+    }
     for (mut lamp, mut vis, mat) in &mut lamps {
         let level = profile.meta.get(&lamp.id).copied().unwrap_or(0);
         if level == lamp.level {
@@ -436,7 +490,7 @@ pub(crate) fn labels(
     c: &Content,
     fonts: &Fonts,
     profile: &mut Profile,
-    news: &HubNews,
+    news: &mut HubNews,
     selected: usize,
     window: Vec2,
 ) -> bool {
@@ -572,5 +626,22 @@ mod tests {
             assert!(j.lamps.contains_key(&n.id), "长卷上没有心灯 {}", n.id);
         }
         assert!(j.dawn.contains_key("qingqiu"));
+        // 路灯：十盏，火苗都记了底部那一点
+        assert_eq!(j.road_lamps.len(), lantern_platform::profile::ROAD_LAMPS as usize);
+        assert!(j.road_lamps.iter().all(|l| l.flame.base.is_some()));
+    }
+
+    /// 回来几回点几盏路灯，十盏为止；回放、跑分不记局数，也就不添灯。
+    #[test]
+    fn road_lamps_follow_returns() {
+        let profile = |runs: u32| {
+            let mut p = Profile::default();
+            p.runs = runs;
+            p
+        };
+        let lit = |runs: u32| (0..10).filter(|&i| road_lamp_lit(&profile(runs), i)).count();
+        assert_eq!([lit(0), lit(1), lit(3), lit(10), lit(15)], [0, 1, 3, 10, 10]);
+        let p = profile(3);
+        assert!(road_lamp_lit(&p, 2) && !road_lamp_lit(&p, 3), "按数组顺序点前几盏");
     }
 }

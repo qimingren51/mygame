@@ -173,7 +173,7 @@ mod tests {
         assert_eq!(c.stats.len(), Stat::COUNT);
         assert_eq!(c.stat(Stat::CritMult).base, 2.0);
         let luck = c.meta.node("luck").unwrap();
-        assert_eq!((c.meta.cost(luck, 0), c.meta.cost(luck, 2), c.meta.cost(luck, 4)), (300, 770, 1970));
+        assert_eq!((c.meta.cost(luck, 0), c.meta.cost(luck, 2), c.meta.cost(luck, 4)), (200, 800, 3200));
         let dmg = &c.attributes.list[0];
         assert_eq!((c.attributes.price(dmg, 0, 0), c.attributes.price(dmg, 9, 0)), (60, 600));
         assert_eq!(c.attributes.price(dmg, 1, 10), 145);
@@ -257,6 +257,90 @@ mod tests {
         assert_eq!(el.weapon_points(8, false), 3);
         assert_eq!(el.weapon_points(8, true), 4);
         assert_eq!(el.passive_points(5), 3);
+    }
+
+    #[test]
+    fn hub_milestones_validate_thresholds_references_and_ids() {
+        let original = Content::load(&repo_data_dir()).unwrap();
+        let invalid = [
+            HubWhen::MetaLevels(0),
+            HubWhen::MetaLevels(1000),
+            HubWhen::MetaLevel("missing".into(), 1),
+            HubWhen::MetaLevel("luck".into(), 0),
+            HubWhen::MetaLevel("luck".into(), 6),
+            HubWhen::Runs(0),
+            HubWhen::Wins(0),
+        ];
+        for when in invalid {
+            let mut c = original.clone();
+            c.hub[0].lines.push(HubLineDef { once: "test_bad".into(), when, text: "灯".into() });
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("hub.ron"));
+        }
+        for when in [
+            HubWhen::MetaLevels(1),
+            HubWhen::MetaLevel("luck".into(), 5),
+            HubWhen::Runs(10),
+            HubWhen::Wins(1),
+        ] {
+            let mut c = original.clone();
+            c.hub[0].lines.push(HubLineDef { once: "test_ok".into(), when, text: "灯".into() });
+            c.validate(Path::new("data")).unwrap();
+            c.hub[0].lines.last_mut().unwrap().once.clear();
+            assert!(c.validate(Path::new("data")).is_err(), "里程碑必须有稳定 ID");
+        }
+        // 包在 All 里的里程碑也要带 once
+        let mut c = original.clone();
+        let when = HubWhen::All(vec![HubWhen::Runs(3), HubWhen::WithoutStory("qingqiu_entered".into())]);
+        c.hub[0].lines.push(HubLineDef { once: String::new(), when, text: "灯".into() });
+        assert!(c.validate(Path::new("data")).is_err());
+        // once 不能挂在初见上
+        let mut c = original.clone();
+        c.hub[0].lines.push(HubLineDef {
+            once: "test_first".into(),
+            when: HubWhen::First,
+            text: "灯".into(),
+        });
+        assert!(c.validate(Path::new("data")).is_err());
+        // 同一个人几句共用一个 once 可以（同一问的几种说法），别的人物再用就算重复
+        let mut c = original.clone();
+        let shared = c.hub[2].lines.iter().find(|l| l.once == "qingqiu_asked_dark").unwrap().clone();
+        c.hub[2].lines.push(shared.clone());
+        c.validate(Path::new("data")).unwrap();
+        c.hub[1].lines.push(shared);
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("重复"));
+        let mut c = original;
+        let duplicate = c.hub[0].lines.iter().find(|l| !l.once.is_empty()).unwrap().clone();
+        c.hub[1].lines.push(duplicate);
+        assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("重复"));
+        let old: HubLineDef = ron::from_str("(when: Idle, text: \"灯\")").unwrap();
+        assert!(old.once.is_empty());
+    }
+
+    /// 带故事条件的 once 台词算青丘追问（排在初见前面），积累门槛算里程碑。
+    #[test]
+    fn hub_conditions_classify_story_questions_and_milestones() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let child = &c.hub[2];
+        let asked: Vec<_> = child.lines.iter().filter(|l| l.when.is_story() && !l.once.is_empty()).collect();
+        assert_eq!(asked.len(), 4);
+        assert!(child.lines.iter().any(|l| l.when.is_milestone() && l.once == "child_three_returns"));
+        assert!(!HubWhen::HasCleared(1).is_story() && !HubWhen::JournalCount(1).is_milestone());
+        // 余烬那句跟着老灯匠
+        assert!(c.hub[0].lines.iter().any(|l| l.once == "smith_ember"));
+        assert!(!c.hub[1].lines.iter().any(|l| l.text.contains("火种")));
+    }
+
+    #[test]
+    fn intro_route_rejects_invalid_levels_and_references() {
+        let original = Content::load(&repo_data_dir()).unwrap();
+        for entry in [("missing", 1), ("luck", 0), ("luck", 6), ("luck", 1)] {
+            let mut c = original.clone();
+            c.meta.intro.push((entry.0.into(), entry.1));
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("meta.ron"));
+        }
+        let mut c = original;
+        c.meta.intro.clear();
+        c.validate(Path::new("data")).unwrap();
     }
 
     #[test]

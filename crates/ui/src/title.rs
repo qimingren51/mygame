@@ -464,7 +464,7 @@ fn redraw(
     skin: Res<Skin>,
     db: Res<AtlasDb>,
     mut profile: ResMut<Profile>,
-    news: Res<HubNews>,
+    mut news: ResMut<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
     art: Res<crate::scroll::ScrollArt>,
@@ -495,7 +495,7 @@ fn redraw(
                     c,
                     &fonts,
                     &mut profile,
-                    &news,
+                    &mut news,
                     ui.selected,
                     Vec2::new(window.width(), window.height()),
                 ) {
@@ -504,7 +504,7 @@ fn redraw(
             }
             None => {
                 hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news);
-                if profile.saw_hub(c, ui.selected, &news) {
+                if profile.saw_hub(c, ui.selected, &mut news) {
                     save(&profile);
                 }
             }
@@ -723,7 +723,16 @@ fn meta_panel(
         ))
         .with_children(|panel| {
             panel.spawn(text(&fonts.title, 56.0, INK, "心灯"));
-            panel.spawn(text(&fonts.body, 18.0, on_paper(hex("#FFD98A")), &format!("灯油 {}", profile.oil)));
+            // 初程建议（meta.ron 的 intro）：只提示下一盏，不锁别的选择
+            panel.spawn(text(
+                &fonts.body,
+                18.0,
+                on_paper(hex("#FFD98A")),
+                &match profile.next_meta_intro(c) {
+                    Some(n) => format!("灯油 {}　·　初程下一盏：{}　·　也可自由点灯", profile.oil, n.name),
+                    None => format!("灯油 {}", profile.oil),
+                },
+            ));
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
             let mut grid = panel.spawn(Node {
                 width: percent(100),
