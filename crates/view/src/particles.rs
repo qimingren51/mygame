@@ -32,7 +32,7 @@ const RESERVE: usize = 480;
 const FRAME_BUDGET: [u32; Priority::ALL.len()] = [32, 120, 180, 64, 128, 320, 180, 320];
 
 /// 墨色（普通混合的粒子）
-pub(crate) const INK: Color = Color::srgb(0.07, 0.075, 0.1);
+pub(crate) const INK: Color = crate::palette::INK;
 
 // ---------------------------------------------------------------------------
 // 程序生成的贴图

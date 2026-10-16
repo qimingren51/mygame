@@ -14,6 +14,7 @@ use bevy::sprite_render::AlphaMode2d;
 use lantern_sim::RunSetup;
 
 use crate::atlas::AtlasDb;
+use crate::palette::TIDE_DECOR_GAIN;
 use crate::{Dawn, Feel, MainCamera, layer};
 
 /// （帧名，不透明度，漂移速度：世界单位 / 秒）。HDR 镜头在线性空间里混合，亮雾盖在暗处
@@ -105,6 +106,7 @@ pub(crate) fn setup_mist(
 pub(crate) fn update_mist(
     time: Res<Time>,
     dawn: Res<Dawn>,
+    atmos: Res<crate::atmos::Atmos>,
     feel: Res<Feel>,
     setup: Option<Res<RunSetup>>,
     cam: Single<(&Transform, &Projection), With<MainCamera>>,
@@ -122,7 +124,8 @@ pub(crate) fn update_mist(
     } + Vec2::splat(24.0);
     let center = cam_tf.translation.truncate();
     let t = time.elapsed_secs();
-    let fade = 1.0 - 0.5 * dawn.progress();
+    // 天明时淡一半；妖潮、合围时也压低（和萤火、夜雾一起，危险色留在最前面）
+    let fade = (1.0 - 0.5 * dawn.progress()) * (1.0 - (1.0 - TIDE_DECOR_GAIN) * atmos.tide);
     let fog = setup.is_some_and(|s| s.omen.as_ref().is_some_and(|o| o.id == "fog"));
     let (thick, slow) = if fog { (FOG_THICK, FOG_DRIFT) } else { (1.0, 1.0) };
     for (m, mut tf, mat, mut vis) in &mut q {
