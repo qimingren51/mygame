@@ -60,6 +60,8 @@ pub(crate) fn update_lanterns(
     content: Res<GameContent>,
     player: Single<&Pos, With<Player>>,
     mut lanterns: ResMut<Lanterns>,
+    mut story: ResMut<crate::story::Story>,
+    mut rng: ResMut<crate::SimRng>,
     mut flow: ResMut<Flow>,
     mut outbox: ResMut<SimOutbox>,
 ) {
@@ -81,6 +83,7 @@ pub(crate) fn update_lanterns(
     }
     if let Some(k) = lit_now {
         flow.lamp_queue += 1;
+        story.find_journal(&mut rng, &mut outbox);
         let lit = lanterns.lit();
         outbox.0.push(SimEvent::LanternLit { index: k as u8, lit: lit as u8, all: lanterns.complete() });
     }

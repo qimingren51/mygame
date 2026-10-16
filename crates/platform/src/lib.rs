@@ -28,6 +28,7 @@ pub use settings::Settings;
 pub struct Actions {
     pub move_dir: Vec2,
     pub dash: bool,
+    pub interact: bool,
     pub confirm: bool,
     pub back: bool,
     pub pause: bool,
@@ -113,6 +114,9 @@ fn feed_sim(
     *input = InputFrame::quantize(actions.move_dir);
     if actions.dash {
         commands.0.push(SimCommand::Dash);
+    }
+    if actions.interact {
+        commands.0.push(SimCommand::Interact);
     }
     if actions.ult {
         commands.0.push(SimCommand::Ult);

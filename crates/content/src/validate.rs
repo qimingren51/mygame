@@ -886,6 +886,12 @@ impl Content {
         let m = &self.meta;
         c.positive("meta.ron", &[("cost_exp", m.cost_exp), ("cost_round", m.cost_round)])?;
         c.unique("meta.ron", "心灯", m.nodes.iter().map(|n| n.id.as_str()))?;
+        let mut intro = std::collections::BTreeSet::new();
+        for (id, lv) in &m.intro {
+            if m.node(id).is_none_or(|n| *lv == 0 || *lv > n.max_level) || !intro.insert((id, lv)) {
+                return c.fail("meta.ron", format!("初程节点 {id} 的等级 {lv} 无效或重复"));
+            }
+        }
         for n in &m.nodes {
             if n.max_level == 0 {
                 return c.fail("meta.ron", format!("心灯 \"{}\" 的 max_level 至少为 1", n.id));
@@ -972,20 +978,63 @@ impl Content {
             }
         }
 
+        // 手记必须恰好覆盖三十页，不能重号、缺页或把谜语误放到别卷。
+        if self.journals.len() != 30
+            || (1..=30).any(|page| self.journals.iter().filter(|j| j.page == page).count() != 1)
+            || self
+                .journals
+                .iter()
+                .any(|j| j.text.trim().is_empty() || (!(13..=18).contains(&j.page) && !j.clue.is_empty()))
+        {
+            return c.fail("journals.ron", "手记须完整覆盖 1–30 页，正文不能为空，谜语仅在卷三".into());
+        }
+        fn valid_when(w: &crate::HubWhen, content: &Content) -> bool {
+            use crate::HubWhen;
+            match w {
+                HubWhen::Story(id) | HubWhen::WithoutStory(id) => crate::STORY_EVENTS.contains(&id.as_str()),
+                HubWhen::JournalCount(n) => (1..=30).contains(n),
+                HubWhen::HasCleared(t) => *t > 0 && *t as usize <= content.difficulty.len(),
+                HubWhen::All(ws) => !ws.is_empty() && ws.iter().all(|w| valid_when(w, content)),
+                HubWhen::Lamp(id) => content.lamp_index(id).is_some(),
+                HubWhen::Charm(id) => content.charm_index(id).is_some(),
+                HubWhen::Cleared(t) => *t > 0 && *t as usize <= content.difficulty.len(),
+                HubWhen::MetaLevels(n) => {
+                    *n > 0 && *n <= content.meta.nodes.iter().map(|n| n.max_level).sum::<u32>()
+                }
+                HubWhen::MetaLevel(id, lv) => {
+                    content.meta.node(id).is_some_and(|n| (1..=n.max_level).contains(lv))
+                }
+                HubWhen::Runs(n) | HubWhen::Wins(n) => *n > 0,
+                _ => true,
+            }
+        }
         // ---- hub.ron ----
         c.unique("hub.ron", "人物", self.hub.iter().map(|p| p.id.as_str()))?;
+        // once：同一个人的几句可以共用（同一问的几种说法），不同人物不能共用。
+        let mut owners = std::collections::BTreeMap::new();
+        for person in &self.hub {
+            for l in person.lines.iter().filter(|l| !l.once.is_empty()) {
+                let owner = *owners.entry(l.once.as_str()).or_insert(person.id.as_str());
+                if owner != person.id {
+                    return c.fail(
+                        "hub.ron",
+                        format!("once \"{}\" 重复：{owner} 和 {} 都用了", l.once, person.id),
+                    );
+                }
+            }
+        }
         for person in &self.hub {
             if !person.lines.iter().any(|l| l.when == crate::HubWhen::Idle) {
                 return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
             }
             for l in &person.lines {
-                let bad = match &l.when {
-                    crate::HubWhen::Lamp(id) => self.lamp_index(id).is_none(),
-                    crate::HubWhen::Charm(id) => self.charm_index(id).is_none(),
-                    crate::HubWhen::Cleared(t) => *t == 0 || *t as usize > self.difficulty.len(),
-                    _ => false,
-                };
-                if bad || l.text.is_empty() {
+                // 积累里程碑必须带 once；once 不能有首尾空白，也不能挂在“平时”“初见”上。
+                let bad = !valid_when(&l.when, self)
+                    || (l.when.is_milestone() && l.once.trim().is_empty())
+                    || (!l.once.is_empty()
+                        && (l.once.trim() != l.once
+                            || matches!(l.when, crate::HubWhen::Idle | crate::HubWhen::First)));
+                if bad || l.text.trim().is_empty() {
                     return c.fail(
                         "hub.ron",
                         format!("{} 的台词条件 {:?} 不对，或者台词是空的", person.id, l.when),

@@ -141,8 +141,9 @@ pub(crate) fn input(
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
     mut cues: MessageWriter<UiCue>,
+    mut reader: ResMut<crate::journals::Reader>,
 ) {
-    if controls.is_open() || transition.active() {
+    if controls.is_open() || transition.active() || reader.open {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -295,6 +296,10 @@ pub(crate) fn input(
             }
         }
         TitleMode::Achievements | TitleMode::Codex => {
+            if *mode == TitleMode::Codex && actions.meta {
+                reader.open = true;
+                return;
+            }
             if actions.back || actions.confirm || clicked.is_some() {
                 let i = if *mode == TitleMode::Codex { 3 } else { 2 };
                 back_to_hub(&mut mode, &mut ui, i);
@@ -477,8 +482,8 @@ fn redraw(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     db: Res<AtlasDb>,
-    profile: Res<Profile>,
-    news: Res<HubNews>,
+    mut profile: ResMut<Profile>,
+    mut news: ResMut<HubNews>,
     settings: Res<Settings>,
     mode: Res<TitleMode>,
     art: Res<crate::scroll::ScrollArt>,
@@ -500,18 +505,28 @@ fn redraw(
         TitleMode::Omen { picks, .. } => omen_panel(&mut commands, c, &fonts, &skin, &db, picks),
         TitleMode::Meta => meta_panel(&mut commands, c, &fonts, &skin, &db, &profile),
         TitleMode::Prep => hub::prep_panel(&mut commands, c, &fonts, &skin, &db, &profile),
+        // 台词只确认选中的那位真正说出口的一句；存档有变才写盘，重画不重复写。
         TitleMode::Hub => match &scene {
-            Some(scene) => crate::hub_scene::labels(
-                &mut commands,
-                scene,
-                c,
-                &fonts,
-                &profile,
-                &news,
-                ui.selected,
-                Vec2::new(window.width(), window.height()),
-            ),
-            None => hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news),
+            Some(scene) => {
+                if crate::hub_scene::labels(
+                    &mut commands,
+                    scene,
+                    c,
+                    &fonts,
+                    &mut profile,
+                    &mut news,
+                    ui.selected,
+                    Vec2::new(window.width(), window.height()),
+                ) {
+                    save(&profile);
+                }
+            }
+            None => {
+                hub::hub_panel(&mut commands, c, &fonts, &skin, &db, &profile, &news);
+                if profile.saw_hub(c, ui.selected, &mut news) {
+                    save(&profile);
+                }
+            }
         },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
@@ -727,7 +742,16 @@ fn meta_panel(
         ))
         .with_children(|panel| {
             panel.spawn(text(&fonts.title, 56.0, INK, "心灯"));
-            panel.spawn(text(&fonts.body, 18.0, on_paper(hex("#FFD98A")), &format!("灯油 {}", profile.oil)));
+            // 初程建议（meta.ron 的 intro）：只提示下一盏，不锁别的选择
+            panel.spawn(text(
+                &fonts.body,
+                18.0,
+                on_paper(hex("#FFD98A")),
+                &match profile.next_meta_intro(c) {
+                    Some(n) => format!("灯油 {}　·　初程下一盏：{}　·　也可自由点灯", profile.oil, n.name),
+                    None => format!("灯油 {}", profile.oil),
+                },
+            ));
             panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
             let mut grid = panel.spawn(Node {
                 width: percent(100),
@@ -868,6 +892,7 @@ mod input_tests {
             .init_resource::<TitleUi>()
             .init_resource::<crate::controls::Controls>()
             .init_resource::<crate::transition::InkTransition>()
+            .init_resource::<crate::journals::Reader>()
             .init_resource::<NextState<AppState>>()
             .add_message::<AppExit>()
             .add_message::<UiCue>()

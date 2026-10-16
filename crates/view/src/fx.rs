@@ -713,6 +713,60 @@ pub(crate) fn collect_fx(
         }
     }
 
+    // 狐村借用现有狐祠、石灯和狐狸帧；小狐无敌人实体、无红眼与血条。
+    if let Some(v) = res.story.as_ref().and_then(|s| s.village.as_ref()) {
+        use lantern_sim::story::{RADIUS, VillageStage};
+        let p = to_screen(v.pos);
+        if let Some(shrine) = db.find("fox_shrine/idle_S_00") {
+            pools.fx.push(Draw {
+                scale: Vec2::splat(1.15),
+                ..Draw::new(shrine, (p + Vec2::new(0.0, 24.0)).extend(sort_z(layer::ACTORS, v.pos.y - 24.0)))
+            });
+        }
+        // 青火仍在檐下；留下的是自己灯里分出的一缕暖光。
+        glow.light(&frames, &db, p + Vec2::new(0.0, 30.0), (rgb(0x81cdb2).with_alpha(0.65), 100.0));
+        // 火芯要看得见，不能只剩一片绿光；护住以后，摇动慢下来。
+        let sway = (now * if v.stage == VillageStage::Guard { 5.0 } else { 1.8 }).sin();
+        let fire = (p + Vec2::new(sway * 1.5, 30.0)).extend(layer::EMISSIVE);
+        glow.add(f.spark, fire, Vec2::new(px(f.spark, 15.0), px(f.spark, 25.0)), sway * 0.08, rgb(0x8de4b9));
+        glow.add(f.glow, fire, Vec2::splat(px(f.glow, 28.0)), 0.0, rgb(0x81cdb2).with_alpha(0.55));
+        if let Some((stone, emit)) = f.stone {
+            let lit = v.stage == VillageStage::Lit;
+            let at = p + Vec2::new(35.0, -20.0);
+            let frame = if lit { stone } else { f.stone_dark.unwrap_or(stone) };
+            pools.fx.push(Draw {
+                scale: Vec2::splat(0.7),
+                ..Draw::new(frame, at.extend(sort_z(layer::ACTORS, v.pos.y + 20.0)))
+            });
+            if lit {
+                if let Some(emit) = emit {
+                    glow.add(emit, at.extend(layer::EMISSIVE), Vec2::splat(0.7), 0.0, Color::WHITE);
+                }
+                glow.light(&frames, &db, at + Vec2::new(0.0, 20.0), (rgb(0xffcf8e).with_alpha(0.85), 125.0));
+            }
+        }
+        if let Some(fox) = db.find("fox/move_E_00") {
+            for i in 0..3 {
+                let spread = if v.stage == VillageStage::Guard { 12.0 } else { 21.0 };
+                let at = p + Vec2::new(-20.0 + i as f32 * spread, -8.0 - (i % 2) as f32 * 12.0);
+                pools.fx.push(Draw {
+                    scale: Vec2::new(if i == 2 { -0.42 } else { 0.42 }, 0.42),
+                    color: rgb(0xc6b69b),
+                    ..Draw::new(fox, at.extend(sort_z(layer::ACTORS, -at.y)))
+                });
+            }
+        }
+        if v.tending {
+            let u = v.ticks as f32 / v.duration() as f32;
+            let k = px(f.ring_ink, RADIUS * 2.0);
+            pools.fx.push(Draw {
+                scale: Vec2::new(k, k * FLAT),
+                color: rgb(0x80af9b).with_alpha(0.12 + u * 0.22),
+                ..Draw::new(f.ring_ink, p.extend(layer::GROUND + 0.55))
+            });
+        }
+    }
+
     // ---- 石灯笼：没点亮的暗着，站在旁边时一圈进度；点亮后成为光区
     if let (Some(lanterns), Some((frame, emit))) = (&res.lanterns, f.stone) {
         let def = &content.0.run.lanterns;
@@ -1463,6 +1517,7 @@ pub(crate) struct FxSources<'w> {
     herbs: Option<Res<'w, Herbs>>,
     stats: Option<Res<'w, Stats>>,
     lanterns: Option<Res<'w, Lanterns>>,
+    story: Option<Res<'w, lantern_sim::story::Story>>,
     coins: Option<Res<'w, Coins>>,
     boss: Option<Res<'w, BossState>>,
     director: Option<Res<'w, Director>>,

@@ -366,6 +366,8 @@ struct Row {
 }
 
 struct KiteRun {
+    /// 实际结算灯油；打满工具时限而未结算时留空。
+    oil: Option<u32>,
     seed: u64,
     /// 实际带的灯（流派机器人会换灯）
     lamp: String,
@@ -622,6 +624,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         join(sim.build().charms.iter().map(|&c| content.charms[c].id.clone()).collect()),
     ];
     KiteRun {
+        oil: sim.flow().result.as_ref().map(|r| r.oil),
         seed,
         lamp,
         won,
@@ -706,6 +709,12 @@ fn report(
         mmss(median(all.iter().map(|r| r.secs).collect())),
         median(all.iter().map(|r| r.kills as f32).collect())
     );
+    let mut oils: Vec<_> = all.iter().filter_map(|r| r.oil).collect();
+    oils.sort_unstable();
+    if !oils.is_empty() {
+        let pct = |p: usize| oils[(oils.len() - 1) * p / 100];
+        println!("结算灯油（{} 局）：P10 {}，中位 {}，P90 {}", oils.len(), pct(10), pct(50), pct(90));
+    }
     if endless {
         let over = |m: f32| 100.0 * all.iter().filter(|r| r.secs >= m * 60.0).count() as f32 / n;
         println!(
@@ -866,7 +875,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
     for r in &content.elements.reactions {
         let _ = write!(rs, ",n_{}", r.id);
     }
-    rs.push_str(",weapons,passives,charms\n");
+    rs.push_str(",weapons,passives,charms,oil\n");
     for (label, cfg, all) in groups {
         let mode = if cfg.endless { "endless" } else { "night" };
         let head = [cell(label), cell(mode), cell(cfg.skill_name), cell(cfg.meta), cell(cfg.tier)].join(",");
@@ -931,7 +940,14 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
             for n in &r.reactions {
                 let _ = write!(rs, ",{n}");
             }
-            let _ = writeln!(rs, ",{},{},{}", cell(&r.build[0]), cell(&r.build[1]), cell(&r.build[2]));
+            let _ = writeln!(
+                rs,
+                ",{},{},{},{}",
+                cell(&r.build[0]),
+                cell(&r.build[1]),
+                cell(&r.build[2]),
+                r.oil.map_or_else(String::new, |n| n.to_string())
+            );
         }
     }
     for (name, text) in [("timeline.csv", &tl), ("runs.csv", &rs)] {

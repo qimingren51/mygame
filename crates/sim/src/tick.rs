@@ -112,6 +112,11 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(build);
     commands.insert_resource(arsenal);
     commands.insert_resource(flow);
+    commands.insert_resource(crate::story::Story::new(if matches!(setup.mode, RunMode::Bench { .. }) {
+        None
+    } else {
+        setup.story.clone()
+    }));
     commands.insert_resource(SimPhase::Play);
     commands.insert_resource(StepGate::default());
     commands.insert_resource(Hold::default());
@@ -199,6 +204,7 @@ pub(crate) fn advance_tick(mut tick: ResMut<Tick>) {
 #[derive(bevy_ecs::system::SystemParam)]
 pub(crate) struct HashParams<'w, 's> {
     tick: Res<'w, Tick>,
+    story: Res<'w, crate::story::Story>,
     rng: Res<'w, SimRng>,
     en: Res<'w, Enemies>,
     gems: Res<'w, Gems>,
@@ -285,5 +291,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.plan.hash_into(&mut h);
     p.progress.hash_into(&mut h);
     hash_flow(&p.flow, &mut h);
+    // 叙事只在启用（回放带了 StorySeed）时写入；旧路径的黄金哈希不变。
+    p.story.hash_into(&p.rng, &mut h);
     log.0.push(HashCheckpoint { tick: p.tick.0, hash: h.finish() });
 }
