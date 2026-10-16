@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::controls::Controls;
-use lantern_platform::{Actions, InputDevice, Settings};
+use lantern_platform::{Actions, DamageNumbers, InputDevice, Settings};
 use lantern_view::Feel;
 
 use crate::{Fonts, INK, INK_DIM, text};
@@ -21,12 +21,13 @@ pub(crate) enum Item {
     Hitstop,
     Bloom,
     Fx,
+    Numbers,
     Keyboard,
     Gamepad,
     DebugTools,
 }
 
-pub(crate) const ITEMS: [Item; 11] = [
+pub(crate) const ITEMS: [Item; 12] = [
     Item::Music,
     Item::Sfx,
     Item::Ui,
@@ -36,6 +37,7 @@ pub(crate) const ITEMS: [Item; 11] = [
     Item::Hitstop,
     Item::Bloom,
     Item::Fx,
+    Item::Numbers,
     Item::Keyboard,
     Item::Gamepad,
 ];
@@ -60,6 +62,7 @@ fn label(item: Item) -> &'static str {
         Item::Keyboard => "键盘按键",
         Item::Gamepad => "手柄按键",
         Item::DebugTools => "性能调试",
+        Item::Numbers => "伤害数字",
     }
 }
 
@@ -77,6 +80,12 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Bloom => on_off(s.bloom),
         Item::Fx => if s.lite_fx { "精简" } else { "完整" }.into(),
         Item::DebugTools => on_off(s.debug_tools),
+        Item::Numbers => match s.damage_numbers {
+            DamageNumbers::All => "全部",
+            DamageNumbers::Crit => "只看暴击",
+            DamageNumbers::Off => "关",
+        }
+        .into(),
     }
 }
 
@@ -140,6 +149,13 @@ pub(crate) fn adjust(
             settings.lite_fx = !settings.lite_fx;
             true
         }
+        Item::Numbers if actions.nav.x != 0 || actions.confirm => {
+            const ORDER: [DamageNumbers; 3] = [DamageNumbers::All, DamageNumbers::Crit, DamageNumbers::Off];
+            let k = ORDER.iter().position(|&m| m == settings.damage_numbers).unwrap_or(0) as i32;
+            let step = if actions.nav.x < 0 { -1 } else { 1 };
+            settings.damage_numbers = ORDER[(k + step).rem_euclid(3) as usize];
+            true
+        }
         Item::DebugTools if actions.nav.x != 0 || actions.confirm => {
             settings.debug_tools = !settings.debug_tools;
             true
@@ -181,6 +197,11 @@ pub(crate) fn sync_feel(settings: Res<Settings>, mut feel: ResMut<Feel>) {
         hitstop: settings.hitstop,
         bloom: settings.bloom,
         lite: settings.lite_fx,
+        numbers: match settings.damage_numbers {
+            DamageNumbers::All => lantern_view::NumberMode::All,
+            DamageNumbers::Crit => lantern_view::NumberMode::Crit,
+            DamageNumbers::Off => lantern_view::NumberMode::Off,
+        },
     };
     if *feel != want {
         *feel = want;

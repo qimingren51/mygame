@@ -148,7 +148,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     commands.insert_resource(Reveal::default());
     commands.insert_resource(Zones::default());
     commands.insert_resource(Herbs::default());
-    commands.insert_resource(Discoveries::default());
+    commands.insert_resource(Discoveries { seen: setup.known_reactions, ..Default::default() });
     commands.insert_resource(DashHits::default());
     commands.insert_resource(Trail::default());
     commands.insert_resource(Survival::default());

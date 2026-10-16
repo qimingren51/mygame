@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 
 pub const SETTINGS_VERSION: u32 = 2;
 
+/// 伤害数字显示多少（设置项）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageNumbers {
+    #[default]
+    All,
+    /// 只看暴击
+    Crit,
+    Off,
+}
+
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -33,6 +43,8 @@ pub struct Settings {
     pub bindings: crate::bindings::Bindings,
     /// 允许用 F3 查看种子号和性能面板；面板仍由玩家主动打开。
     pub debug_tools: bool,
+    /// 伤害数字：全部、只看暴击、关
+    pub damage_numbers: DamageNumbers,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
@@ -55,6 +67,7 @@ impl Default for Settings {
             lite_fx: false,
             bindings: Default::default(),
             debug_tools: false,
+            damage_numbers: DamageNumbers::All,
             path: None,
             save_error: None,
         }

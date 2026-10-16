@@ -9,7 +9,8 @@ use crate::describe::{element_color, hex};
 use crate::skin::Skin;
 use crate::{DIM, Fonts, PAPER, text};
 
-const MAX: usize = 4;
+/// 同时最多几条（试玩反馈：文字太多）
+const MAX: usize = 2;
 
 #[derive(Component)]
 pub(crate) struct ToastStack;
@@ -67,6 +68,21 @@ fn boss_line(c: &Content, pick: impl Fn(&BossLines) -> &String) -> Option<&str> 
     Some(pick(lines).as_str())
 }
 
+/// 只讲一次的说明：讲过以后提示条只出标题。
+fn tip(ev: &SimEvent) -> Option<&'static str> {
+    Some(match ev {
+        SimEvent::Surge => "surge",
+        SimEvent::NightDeeper { .. } => "night_deeper",
+        SimEvent::EncircleWarn { .. } => "encircle",
+        SimEvent::LanternLit { all: false, .. } => "lantern",
+        SimEvent::LanternLit { all: true, .. } => "lantern_all",
+        SimEvent::BossPhase { phase: 2 } => "illusions",
+        SimEvent::BossPhase { phase: 3 } => "sweep",
+        SimEvent::BossEnraged => "enraged",
+        _ => return None,
+    })
+}
+
 fn msg(title: impl Into<String>, body: impl Into<String>, color: Color, big: bool) -> Option<Msg> {
     Some(Msg { title: title.into(), body: body.into(), color, big })
 }
@@ -80,6 +96,8 @@ fn read_events(
     stack: Single<Entity, With<ToastStack>>,
     toasts: Query<(Entity, &Toast)>,
     mut muted: ResMut<Muted>,
+    mut profile: ResMut<lantern_platform::Profile>,
+    replay: Option<Res<lantern_sim::ReplayPlayback>>,
 ) {
     let c = &content.0;
     let mut count = toasts.iter().count();
@@ -198,7 +216,18 @@ fn read_events(
             SimEvent::ShieldBroken => None,
             _ => None,
         };
-        let Some(m) = m else { continue };
+        let Some(mut m) = m else { continue };
+        // 讲过一次的说明以后只出标题（存档记住）；看回放不算讲过
+        if let Some(key) = tip(ev) {
+            if profile.tips.contains(key) {
+                m.body.clear();
+            } else if replay.is_none() {
+                profile.tips.insert(key.into());
+                if let Err(e) = profile.save() {
+                    warn!("保存提示进度失败：{e}");
+                }
+            }
+        }
         // 太多时顶掉最早的
         if count >= MAX
             && let Some((e, _)) = oldest.first().copied()

@@ -78,6 +78,9 @@ pub struct RunSetup {
     /// 有存档的正常出发启用叙事；缺省保持旧回放和基准路径。
     #[serde(default)]
     pub story: Option<story::StorySeed>,
+    /// 存档里见过的反应（位，`elements.ron` 的反应下标）：这些反应不再算“第一次”，不停顿、不出说明，只盖印
+    #[serde(default)]
+    pub known_reactions: u32,
     pub mode: RunMode,
     #[serde(default)]
     pub omen: Option<OmenPick>,
@@ -116,6 +119,7 @@ impl RunSetup {
         RunSetup {
             seed,
             story: None,
+            known_reactions: 0,
             mode,
             omen: None,
             meta: BTreeMap::new(),

@@ -570,7 +570,7 @@ impl FlowParams<'_, '_> {
             lanterns: lit,
             lamps_complete: self.lanterns.complete(),
             feats: Feats {
-                reactions: self.discoveries.seen,
+                reactions: self.discoveries.run,
                 taiji: self.build.taiji,
                 max_tier: self.build.tiers.iter().copied().max().unwrap_or(0),
                 max_weapons: self.build.max_weapons,

@@ -129,6 +129,8 @@ pub struct Profile {
     pub runs: u32,
     pub wins: u32,
     pub onboarding: OnboardingProgress,
+    /// 只讲一次的说明（合围、妖潮、幻身、九尾扫……）：讲过以后提示条只出标题
+    pub tips: BTreeSet<String>,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
@@ -166,6 +168,7 @@ impl Default for Profile {
             runs: 0,
             wins: 0,
             onboarding: OnboardingProgress::default(),
+            tips: BTreeSet::new(),
             path: None,
             save_error: None,
         }
@@ -438,6 +441,8 @@ impl Profile {
             chapter: self.journal_chapter(),
         });
         s.meta = self.meta.clone();
+        // 见过的反应不再停顿讲解，只盖印
+        s.known_reactions = self.reactions;
         s.attributes = self.active_attributes(content);
         s.tier = self.last.tier.clamp(1, self.tier.max(1));
         // 无尽夜只能选通关过的更

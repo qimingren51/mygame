@@ -32,7 +32,7 @@ mod telegraphs;
 
 use atlas::AtlasDb;
 pub use atmos::{DAWN_LEN, Dawn};
-pub use camera::Feel;
+pub use camera::{Feel, NumberMode};
 pub use stats::ViewStats;
 
 /// 图层的 z 基数（从下到上）。同一图层内再按脚底 y 微调。

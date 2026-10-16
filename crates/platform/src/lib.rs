@@ -24,7 +24,7 @@ mod window_icon;
 pub use bindings::{Action, ActiveInput, InputDevice, Rebind};
 pub use cue::{AudioUnavailable, MenuSoundscape, UiCue};
 pub use profile::{HubNews, Profile};
-pub use settings::Settings;
+pub use settings::{DamageNumbers, Settings};
 
 /// 本帧的抽象操作。由键盘和手柄合并而来，y 轴向下（与模拟一致）。
 #[derive(Resource, Default, Debug, Clone, Copy)]

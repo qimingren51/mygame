@@ -317,9 +317,13 @@ pub(crate) fn update_control_hints(
     state: Res<State<RunState>>,
     phase: Res<SimPhase>,
     setup: Res<RunSetup>,
+    profile: Option<Res<lantern_platform::Profile>>,
     mut hints: Query<&mut Node, With<ControlHints>>,
 ) {
-    let visible = *state.get() == RunState::Playing
+    // 前两局之后不再显示底部的按键提示（试玩反馈：文字太多）
+    let novice = profile.is_none_or(|p| p.runs < 2);
+    let visible = novice
+        && *state.get() == RunState::Playing
         && *phase == SimPhase::Play
         && !matches!(setup.mode, RunMode::Bench { .. });
     for mut node in &mut hints {

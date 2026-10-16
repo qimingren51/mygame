@@ -41,11 +41,22 @@ pub struct Feel {
     pub bloom: bool,
     /// 精简特效：粒子减半，不画环境萤火、夜雾和色散
     pub lite: bool,
+    /// 伤害数字显示多少
+    pub numbers: NumberMode,
+}
+
+/// 伤害数字：全部、只看暴击、关。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NumberMode {
+    #[default]
+    All,
+    Crit,
+    Off,
 }
 
 impl Default for Feel {
     fn default() -> Self {
-        Feel { shake: 1.0, hitstop: true, bloom: true, lite: false }
+        Feel { shake: 1.0, hitstop: true, bloom: true, lite: false, numbers: NumberMode::All }
     }
 }
 

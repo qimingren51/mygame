@@ -75,6 +75,27 @@ fn first_reaction_holds_time_briefly() {
     assert_eq!(sim.tick(), at + 1);
 }
 
+/// 存档里见过的反应不再算第一次（不停顿、不出说明），但这一局触发过的仍记进结算。
+#[test]
+fn reactions_known_from_the_save_are_not_first_again() {
+    let mut setup = RunSetup::new(7, RunMode::Normal);
+    setup.god = true;
+    setup.known_reactions = u32::MAX;
+    let mut sim = SimHarness::with_setup(content(), setup);
+    sim.quiet();
+    sim.set_build(&[("bell", 8, false), ("lamp", 8, false)], &[]);
+    for k in 0..30 {
+        let a = k as f32 / 30.0 * std::f32::consts::TAU;
+        sim.spawn("golem", Vec2::new(ops::cos(a), ops::sin(a)) * 80.0);
+    }
+    let events = run_for(&mut sim, 6.0);
+    assert!(events.iter().any(|e| matches!(e, SimEvent::Reaction { .. })));
+    assert!(!events.iter().any(|e| matches!(e, SimEvent::Reaction { first: true, .. })));
+    let disc = sim.world().resource::<lantern_sim::reactions::Discoveries>();
+    assert_ne!(disc.run, 0, "这一局触发过的照样记");
+    assert_ne!(disc.run, u32::MAX, "结算只记这一局的，不把存档里的算进来");
+}
+
 #[test]
 fn reactions_are_labelled_at_most_every_two_seconds() {
     let mut sim = arena(&[("bell", 8, true), ("lamp", 8, true)], &[], "golem", 60);

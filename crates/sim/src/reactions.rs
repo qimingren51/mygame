@@ -85,13 +85,16 @@ pub struct Herbs {
 /// 本局发生过的反应（位掩码）与每种反应上次提示文字的时刻。
 #[derive(Resource, Debug)]
 pub struct Discoveries {
+    /// 见过的反应：开局带上存档里见过的（[`crate::RunSetup::known_reactions`]），之后不再算第一次
     pub seen: u32,
+    /// 这一局触发过的反应（成就、图鉴按它记）
+    pub run: u32,
     pub label_at: [f32; 32],
 }
 
 impl Default for Discoveries {
     fn default() -> Self {
-        Discoveries { seen: 0, label_at: [f32::NEG_INFINITY; 32] }
+        Discoveries { seen: 0, run: 0, label_at: [f32::NEG_INFINITY; 32] }
     }
 }
 
@@ -330,6 +333,7 @@ fn react(
     let bit = 1u32 << r;
     let first = disc.seen & bit == 0;
     disc.seen |= bit;
+    disc.run |= bit;
     let label = first || ctx.secs - disc.label_at[r] >= LABEL_EVERY;
     if label {
         disc.label_at[r] = ctx.secs;

@@ -938,7 +938,12 @@ mod input_tests {
         });
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
         *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::Y, ..default() };
-        for _ in 0..9 {
+        // 往下走到“键盘按键”（加了“伤害数字”以后是第 11 行）
+        let keyboard = 1 + crate::settings_ui::ITEMS
+            .iter()
+            .position(|&i| i == crate::settings_ui::Item::Keyboard)
+            .unwrap();
+        for _ in 0..keyboard - 1 {
             app.update();
         }
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
@@ -947,7 +952,7 @@ mod input_tests {
         *app.world_mut().resource_mut::<Actions>() = Actions { back: true, nav: IVec2::Y, ..default() };
         app.update();
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
-        assert_eq!(app.world().resource::<TitleUi>().selected, 9);
+        assert_eq!(app.world().resource::<TitleUi>().selected, keyboard - 1);
     }
 
     #[test]

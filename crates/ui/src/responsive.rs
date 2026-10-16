@@ -4,8 +4,9 @@ use bevy::prelude::*;
 use bevy::ui::{UiSystems, Val2};
 use bevy::window::PrimaryWindow;
 
-/// 面板按 1080 逻辑高度设计；宽度容纳最宽的 1160 面板及两侧留白。
-const DESIGN_SIZE: Vec2 = Vec2::new(1280.0, 1080.0);
+/// 面板按默认窗口 1280×720 的逻辑尺寸设计，窗口更小时才等比缩小；内容更高的面板（心灯、出发准备、
+/// 升级卡）按自己的最小画布缩放。之前按 1080 设计，默认窗口里所有面板都缩到三分之二，字太小。
+const DESIGN_SIZE: Vec2 = Vec2::new(1280.0, 720.0);
 
 pub(crate) const PANEL_WIDTH_PERCENT: f32 = 90.0;
 /// 升级卡的宽度（choice.rs 的卡片按它排）
@@ -67,7 +68,7 @@ fn upgrade_canvas(logical_size: Vec2, cards: usize) -> Vec2 {
         let width = CARD_WIDTH * columns as f32 + CARD_GAP * (columns - 1) as f32;
         // 每张卡为名称、说明和共鸣/进化提示留足高度；另留页头、操作提示及焦点框空间。
         let size =
-            Vec2::new(width / (PANEL_WIDTH_PERCENT / 100.0), 280.0 + rows * 600.0 + (rows - 1.0) * CARD_GAP);
+            Vec2::new(width / (PANEL_WIDTH_PERCENT / 100.0), 280.0 + rows * 440.0 + (rows - 1.0) * CARD_GAP);
         let scale = panel_scale(logical_size, size);
         if scale >= best_scale {
             best_size = size;
@@ -133,7 +134,9 @@ mod tests {
         for dpi in [1.0, 1.25, 1.5, 2.0] {
             let logical = physical / dpi;
             let scale = panel_scale(logical, DESIGN_SIZE);
-            assert!((scale - 1.0 / dpi).abs() < 0.001);
+            // 只按逻辑尺寸算一次：1920×1080 在 150% 下正好是设计尺寸 1280×720，不再缩
+            let expected = (logical / DESIGN_SIZE).min_element().min(1.0);
+            assert!((scale - expected).abs() < 0.001, "{dpi}: {scale}");
             assert!((DESIGN_SIZE * scale * dpi).cmple(physical + Vec2::splat(0.001)).all());
         }
     }

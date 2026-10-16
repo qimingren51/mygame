@@ -171,6 +171,7 @@ pub(crate) fn read_events(
     outbox: Res<SimOutbox>,
     feedback: Res<Feedback>,
     db: Res<AtlasDb>,
+    feel: Option<Res<crate::Feel>>,
     mut fx: ResMut<Effects>,
     mut numbers: Query<(&mut Text2d, &mut TextFont, &mut TextColor, &mut DamageNumber, &mut Visibility)>,
     mut words: Query<(&mut Text2d, &mut TextColor, &mut FloatWord, &mut Visibility), Without<DamageNumber>>,
@@ -180,6 +181,14 @@ pub(crate) fn read_events(
         let ev = &outbox.0[index];
         match *ev {
             SimEvent::Hit { pos, damage, crit, kind, element, .. } => {
+                // 设置里的“伤害数字”：关掉，或只看暴击
+                if match feel.as_ref().map_or(crate::NumberMode::All, |f| f.numbers) {
+                    crate::NumberMode::All => false,
+                    crate::NumberMode::Crit => !crit,
+                    crate::NumberMode::Off => true,
+                } {
+                    continue;
+                }
                 // 暴击保留独立槽位，后续普通命中不能覆盖刚盖下的金色大字。
                 let slot = if crit {
                     let slot = NUMBER_SLOTS - CRIT_SLOTS + fx.next_crit;
