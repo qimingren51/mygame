@@ -27,6 +27,14 @@
                             inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
             level: (count: 10, radius: 92.0, damage: 52.0),
         )),
+        mutation: Some((
+            name: "冰火两重天", desc: "五盏冰焰冻结、五盏火焰灼烧。绕行让同一只妖先后触两焰，引爆蒸腾；舍弃内环火海与合璧。",
+            flavor: "十盏灯，一半的焰是冷的。冷热一撞，就是一团白汽。",
+            // 冰焰冻结 0.6 秒，火焰点 1 层灼烧；固定十盏，不吃数量加成
+            behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.38, knockback: 35.0, size: 12.0,
+                            ice_fire: Some((freeze: 0.6, ignite: 1.0))),
+            level: (count: 10, radius: 92.0, damage: 39.0),
+        )),
     ),
     (
         id: "sword", name: "符剑", icon: "剑", element: Metal,
@@ -52,6 +60,17 @@
             behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
                              knockback: 30.0, spread: 0.14, retry: 0.2),
             level: (cooldown: 0.42, count: 3, damage: 84.5, pierce: 999),
+        )),
+        mutation: Some((
+            name: "赤霄", desc: "赤剑命中熔金易伤，击杀分作两剑，分剑不再分裂。舍弃无限穿透与合璧，追逐残血妖群。",
+            flavor: "汉高祖斩白蛇的剑叫赤霄。符剑在火里烧红了，也就成了它。",
+            // 熔金：易伤 30%、4 秒；击杀时朝 460 内最近的两只各分一剑，伤害为这一击的 60%
+            behavior: Volley(range: 460.0, speed: 400.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
+                knockback: 25.0, spread: 0.14, retry: 0.2,
+                molten: Some((vulnerability: 0.3, duration: 4.0,
+                    split: Some((count: 2, ratio: 0.6, range: 460.0, speed: 420.0, life: 1.0, turn: 8.0,
+                        hit_radius: 7.0, knockback: 15.0))))),
+            level: (cooldown: 0.65, count: 3, damage: 80.0, pierce: 1),
         )),
     ),
     (
@@ -79,6 +98,14 @@
                             toll: Some((period: 6.0, damage: 105.0, freeze: 1.5, boss_cap: 400.0))),
             level: (cooldown: 1.26, radius: 184.6, damage: 67.0),
         )),
+        mutation: Some((
+            name: "冻土", desc: "脚下冻土常驻，圈内持续减速，小妖死于圈内便碎裂伤敌，碎裂不连锁。舍弃全屏钟鸣与合璧，守住近身阵地。",
+            flavor: "铃声渗进地里，脚下的土冻住了，再也化不开。",
+            // 碎裂：半径 65、伤害为冻土的 1.5 倍，每步至多 8 次
+            behavior: Pulse(knockback: 0.0, slow: 0.6, slow_time: 0.65,
+                permafrost: Some((shatter_radius: 65.0, shatter_ratio: 1.5, shatter_budget: 8))),
+            level: (cooldown: 0.5, radius: 125.0, damage: 18.0),
+        )),
     ),
     (
         id: "crane", name: "纸鹤", icon: "鹤", element: Wood,
@@ -105,6 +132,15 @@
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.2,
                              knockback: 50.0, speed: (330.0, 0.0, 0.0), steer: 7.0, reach: 6.0),
             level: (count: 10, damage: 49.5),
+        )),
+        mutation: Some((
+            name: "铁鹤", desc: "鹤群收为五只铁鹤，单次伤害三倍，扑击射出穿透铁羽；斩杀两成血以下小妖。数量加成失效，不能合璧。",
+            flavor: "纸鹤让金气浸透，成了铁的。少了，可每一只都要命。",
+            // 铁羽：穿透 5、速度 480、存活 0.6 秒，伤害为扑击的 30%（全额会远超进化的伤害预算）
+            behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 360.0, pick: 3, rest: 0.5,
+                knockback: 25.0, speed: (350.0, 0.0, 0.0), steer: 7.0, reach: 8.0,
+                feather: Some((pierce: 5, speed: 480.0, life: 0.6, ratio: 0.3)), execute: 0.2, count_cap: Some(5)),
+            level: (count: 5, damage: 148.5),
         )),
     ),
     (
@@ -136,6 +172,16 @@
                                           slow: 0.4, slow_time: 0.6))),
             // 范围是满级的 1.6 倍（原型 2 倍）
             level: (cooldown: 2.6, count: 4, radius: 112.0, damage: 129.0),
+        )),
+        mutation: Some((
+            name: "竹印", desc: "巨竹破土挑飞妖物，留存四秒阻挡追兵。舍弃地裂持续伤害与合璧，借竹墙绕出活路。",
+            flavor: "石印没落下来，地下冲出一根竹子。青丘的竹，顶得起山。",
+            // 竹墙：不造成伤害，普通妖物穿过时移速 ×0.12（和地图竹丛取更慢的一个），夜主、精英不受阻
+            behavior: Drop(range: 300.0, candidates: 12, delay: 0.3, stagger: 0.12, knockback: 90.0,
+                stun: 1.2, scatter: (150.0, 100.0), amount_div: 2,
+                fissure: Some((kind: Bamboo, radius_scale: 0.5, life: 4.0, tick: 0.5,
+                    damage_scale: 0.0, slow: 0.0, slow_time: 0.0, wall: Some(0.12)))),
+            level: (cooldown: 2.9, count: 3, radius: 90.0, damage: 120.0),
         )),
     ),
 ]

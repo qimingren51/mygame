@@ -105,6 +105,8 @@ pub(crate) struct ReactRes<'w, 's> {
     hold: ResMut<'w, Hold>,
     bamboo: ResMut<'w, crate::bamboo::Bamboo>,
     found: Local<'s, Vec<u32>>,
+    /// 赤霄分剑找目标用（复用，不每次分配）
+    split: Local<'s, Vec<u32>>,
 }
 
 pub(crate) struct ReactCtx<'a, 'w, 's> {
@@ -119,6 +121,11 @@ pub(crate) struct ReactCtx<'a, 'w, 's> {
 }
 
 impl<'a, 'w, 's> ReactCtx<'a, 'w, 's> {
+    /// 赤霄分剑要用的飞剑池、网格和找目标的缓冲。
+    pub(crate) fn split_parts(&mut self) -> (&mut Shots, &Grid, &mut Vec<u32>) {
+        (&mut self.res.shots, self.grid, &mut self.res.split)
+    }
+
     pub fn new(
         content: &'a Content,
         stats: &'a Stats,
@@ -237,6 +244,7 @@ fn react(
             let a0 = rng.range_f32(0.0, TAU);
             for k in 0..count {
                 ctx.res.shots.fire(ShotSpec {
+                    effects: Default::default(),
                     pos,
                     angle: a0 + k as f32 * TAU / count as f32,
                     speed: speed * stats.get(Stat::ProjSpeed),

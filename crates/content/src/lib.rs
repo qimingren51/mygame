@@ -25,6 +25,7 @@ pub struct Content {
     pub run: RunDef,
     pub enemies: Vec<EnemyDef>,
     pub weapons: Vec<WeaponDef>,
+    pub fusions: Vec<FusionDef>,
     pub passives: Vec<PassiveDef>,
     pub elements: ElementsDef,
     pub omens: Vec<OmenDef>,
@@ -98,6 +99,7 @@ impl Content {
             run: read(data_dir, "run.ron", &mut hash)?,
             enemies: read(data_dir, "enemies.ron", &mut hash)?,
             weapons: read(data_dir, "weapons.ron", &mut hash)?,
+            fusions: read(data_dir, "fusions.ron", &mut hash)?,
             passives: read(data_dir, "passives.ron", &mut hash)?,
             elements: read(data_dir, "elements.ron", &mut hash)?,
             omens: read(data_dir, "omens.ron", &mut hash)?,
@@ -117,6 +119,15 @@ impl Content {
         content.hash = hash;
         content.validate(data_dir)?;
         Ok(content)
+    }
+
+    /// 打开异化与合璧（EA 内容，`run.ron` 里默认关闭）。工具、测试用；内容哈希跟着变，
+    /// 打开时录下的回放不会在关着开关的版本上重放。
+    pub fn enable_transformations(&mut self) {
+        if !self.run.transformations {
+            self.run.transformations = true;
+            self.hash = (self.hash ^ 0x7472_616e_7366_6f72).wrapping_mul(0x0000_0100_0000_01b3);
+        }
     }
 
     /// 妖物 ID 对应的下标。
@@ -278,6 +289,173 @@ mod tests {
         assert_eq!(el.weapon_points(8, false), 3);
         assert_eq!(el.weapon_points(8, true), 4);
         assert_eq!(el.passive_points(5), 3);
+    }
+
+    #[test]
+    fn mutation_and_fusion_catalog_is_complete_and_validated() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        assert_eq!(c.fusions.len(), 3);
+        for id in ["lamp", "sword", "bell", "crane", "seal"] {
+            assert!(c.weapons[c.weapon_index(id).unwrap()].mutation.is_some());
+        }
+        let bad = |c: &Content, file: &str| {
+            assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains(file))
+        };
+        let mut missing = c.clone();
+        missing.fusions[0].weapons[0] = "不存在".into();
+        bad(&missing, "fusions.ron");
+        // 纸鹤（木）克山印（土），不相生
+        let mut ke = c.clone();
+        ke.fusions[0].weapons = ["crane".into(), "seal".into()];
+        bad(&ke, "fusions.ron");
+        // 合璧的行为要和第一件材料同一种
+        let mut kind = c.clone();
+        kind.fusions[0].weapons = ["lamp".into(), "crane".into()];
+        bad(&kind, "fusions.ron");
+        let mut duplicate = c.clone();
+        duplicate.fusions.push(c.fusions[0].clone());
+        bad(&duplicate, "fusions.ron");
+        let mut mutation = c.clone();
+        mutation.weapons[0].mutation = None;
+        bad(&mutation, "weapons.ron");
+        let mut invalid = c.clone();
+        invalid.fusions[0].level.damage = f32::NAN;
+        bad(&invalid, "fusions.ron");
+        let unknown: Result<WeaponBehavior, _> =
+            ron::from_str("Pulse(knockback: 0.0, slow: 0.2, slow_time: 1.0, typo: true)");
+        assert!(unknown.is_err());
+    }
+
+    #[test]
+    fn transformations_flag_defaults_off() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        assert!(!c.run.transformations, "异化与合璧是 EA 内容，默认关闭");
+        let text = std::fs::read_to_string(repo_data_dir().join("run.ron")).unwrap();
+        let without: String = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("transformations:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!ron::from_str::<RunDef>(&without).unwrap().transformations, "不写开关时关闭");
+        let on = text.replace("transformations: false", "transformations: true");
+        assert!(ron::from_str::<RunDef>(&on).unwrap().transformations);
+        let mut enabled = c.clone();
+        enabled.enable_transformations();
+        assert!(enabled.run.transformations);
+        assert_ne!(enabled.hash, c.hash, "打开开关后的回放不能在关着的内容上重放");
+        let mut cap = c.clone();
+        cap.run.ground_cap = 0;
+        assert!(cap.validate(Path::new("data")).unwrap_err().to_string().contains("run.ron"));
+        let mut after = c.clone();
+        after.run.choices.pity.key_guarantee_after = -1.0;
+        assert!(after.validate(Path::new("data")).unwrap_err().to_string().contains("run.ron"));
+    }
+
+    #[test]
+    fn mutation_fusion_fields_are_validated() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        for w in c.weapons.iter().filter_map(|w| w.mutation.as_ref()) {
+            assert!(!w.flavor.is_empty(), "{} 缺一句话描述", w.name);
+        }
+        for f in &c.fusions {
+            assert!(!f.flavor.is_empty(), "{} 缺一句话描述", f.name);
+        }
+        let mutation = |id: &str| c.weapon_index(id).unwrap();
+        let bad = |edit: &dyn Fn(&mut Content), file: &str| {
+            let mut c = c.clone();
+            edit(&mut c);
+            let err = c.validate(Path::new("data")).unwrap_err().to_string();
+            assert!(err.contains(file), "{err}");
+        };
+        let behavior = |c: &Content, id: &str| -> WeaponBehavior {
+            c.weapons[mutation(id)].mutation.as_ref().unwrap().behavior.clone()
+        };
+        let set = |c: &mut Content, id: &str, b: WeaponBehavior| {
+            c.weapons[mutation(id)].mutation.as_mut().unwrap().behavior = b;
+        };
+        // 竹墙倍率在 (0, 1]
+        for w in [0.0, 1.5, f32::NAN] {
+            bad(
+                &|c| {
+                    let mut b = behavior(c, "seal");
+                    if let WeaponBehavior::Drop { fissure: Some(f), .. } = &mut b {
+                        f.wall = Some(w);
+                    }
+                    set(c, "seal", b);
+                },
+                "weapons.ron",
+            );
+        }
+        // 铁羽：穿透至少 1，倍率在 (0, 1]
+        for (pierce, ratio) in [(0, 0.5), (5, 0.0), (5, 1.5)] {
+            bad(
+                &|c| {
+                    let mut b = behavior(c, "crane");
+                    if let WeaponBehavior::Seeker { feather: Some(f), .. } = &mut b {
+                        f.pierce = pierce;
+                        f.ratio = ratio;
+                    }
+                    set(c, "crane", b);
+                },
+                "weapons.ron",
+            );
+        }
+        // 分剑数量 1–8、倍率在 (0, 1]
+        for (count, ratio) in [(0, 0.6), (9, 0.6), (2, 0.0)] {
+            bad(
+                &|c| {
+                    let mut b = behavior(c, "sword");
+                    if let WeaponBehavior::Volley { molten: Some(m), .. } = &mut b
+                        && let Some(s) = &mut m.split
+                    {
+                        s.count = count;
+                        s.ratio = ratio;
+                    }
+                    set(c, "sword", b);
+                },
+                "weapons.ron",
+            );
+        }
+        // 冻土每步碎裂至少一次
+        bad(
+            &|c| {
+                let mut b = behavior(c, "bell");
+                if let WeaponBehavior::Pulse { permafrost: Some(p), .. } = &mut b {
+                    p.shatter_budget = 0;
+                }
+                set(c, "bell", b);
+            },
+            "weapons.ron",
+        );
+        // 冰火：冻结、点燃不能为负
+        bad(
+            &|c| {
+                let mut b = behavior(c, "lamp");
+                if let WeaponBehavior::Orbit { ice_fire: Some(f), .. } = &mut b {
+                    f.freeze = -1.0;
+                }
+                set(c, "lamp", b);
+            },
+            "weapons.ron",
+        );
+        // 异化的行为要和原法器同一种
+        bad(
+            &|c| {
+                let b = behavior(c, "crane");
+                set(c, "lamp", b);
+            },
+            "weapons.ron",
+        );
+        // 巨凤转速、判定半径为正
+        bad(
+            &|c| {
+                let k = c.fusions.iter().position(|f| f.id == "phoenix").unwrap();
+                if let WeaponBehavior::Seeker { escort: Some(e), .. } = &mut c.fusions[k].behavior {
+                    e.size = 0.0;
+                }
+            },
+            "fusions.ron",
+        );
     }
 
     #[test]

@@ -551,9 +551,14 @@ fn play_sim_events(
                 let s = a.sfx.chest[i].clone();
                 a.interface(s);
             }
-            SimEvent::Evolve { .. } => {
+            SimEvent::Evolve { form, .. } => {
+                // 锣声随异化压低、合璧抬高
                 let s = a.sfx.evolution.clone();
-                a.foreground(&s);
+                match form {
+                    lantern_sim::weapons::Form::Mutated => a.foreground_with(s.playback_rate(0.88)),
+                    lantern_sim::weapons::Form::Fused(_) => a.foreground_with(s.playback_rate(1.12)),
+                    _ => a.foreground(&s),
+                }
             }
             // 共鸣跨阶：盖章的闷响 + 钟
             SimEvent::Resonance { .. } if a.can("res", 0.3) => {
@@ -646,7 +651,8 @@ fn play_sim_events(
                 let (name, gap, sound) = match fx {
                     StrikeFx::Pulse => ("pulse", 0.4, &a.sfx.bell_pulse),
                     StrikeFx::Toll => ("toll", 0.5, &a.sfx.big_bell),
-                    StrikeFx::Seal { .. } => ("seal", 0.12, &a.sfx.seal),
+                    StrikeFx::Seal { .. } | StrikeFx::Bamboo => ("seal", 0.12, &a.sfx.seal),
+                    StrikeFx::SwordGrove => ("sword_grove", 0.12, &a.sfx.sword),
                     StrikeFx::Blast(_) => ("blast", 0.09, &a.sfx.blast),
                     StrikeFx::Quake => ("quake", 0.3, &a.sfx.quake),
                     StrikeFx::Taiji => ("taiji", 1.0, &a.sfx.resonance),

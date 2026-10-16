@@ -396,6 +396,15 @@ pub(crate) fn read_fx_events(
                         fx.push(OneShot::Mark { evolved }, p, radius, if evolved { 2.4 } else { 1.8 });
                         fx.push(OneShot::Quake, p, radius * 1.2, 0.35);
                     }
+                    StrikeFx::Bamboo | StrikeFx::SwordGrove => {
+                        let color = if kind == StrikeFx::Bamboo { rgb(0x80b879) } else { rgb(0xc0d8ef) };
+                        fx.push(
+                            OneShot::Ring { color, ink: true, light: false, strong: false },
+                            p,
+                            radius,
+                            0.35,
+                        );
+                    }
                     StrikeFx::Blast(kind) => {
                         let color = if kind == BlastKind::Ice { rgb(0x6fb8ff) } else { rgb(0xff8a3d) };
                         fx.push(OneShot::Blast { color, ice: kind == BlastKind::Ice }, p, radius, 0.3);
@@ -584,6 +593,23 @@ pub(crate) fn collect_fx(
     if let (Some(arsenal), Some(stats)) = (&res.arsenal, &res.stats) {
         let c = &content.0;
         for slot in &arsenal.0 {
+            if let WeaponBehavior::Pulse { permafrost: Some(_), .. } = slot.behavior(c) {
+                let r = slot.stats(c).radius * stats.get(Stat::Area);
+                let k = px(f.ring, r * 2.0);
+                let pos = hero.extend(layer::GROUND + 0.9);
+                pools.fx.push(Draw {
+                    scale: Vec2::new(k, k * FLAT),
+                    color: rgb(0x527d9a).with_alpha(0.45),
+                    ..Draw::new(f.ring_ink, pos)
+                });
+                glow.add(
+                    f.ring,
+                    hero.extend(layer::EMISSIVE - 2.0),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    rgb(0x8fd9ff).with_alpha(0.45),
+                );
+            }
             if let WeaponBehavior::Orbit { inner: Some(fire), .. } = slot.behavior(c) {
                 let r = fire.radius * stats.get(Stat::Area);
                 let kr = px(f.wave, r * 2.0 / 0.84);
@@ -1008,16 +1034,79 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 地裂：地面上的墨痕
+    // ---- 地裂：地面上的墨痕；凤火、竹墙与剑林复用图集，以颜色和轮廓区分
     if let Some(fissures) = &res.fissures {
         for z in &fissures.0 {
+            use lantern_content::GroundKind;
+            let p = to_screen(z.pos);
             let k = px(f.crack, z.radius * 2.0);
-            let alpha = ((z.life / z.max_life) + 0.2).min(1.0) * 0.55;
+            if z.kind == GroundKind::Fissure {
+                let alpha = ((z.life / z.max_life) + 0.2).min(1.0) * 0.55;
+                pools.fx.push(Draw {
+                    scale: Vec2::new(k, k * 0.75),
+                    color: Color::WHITE.with_alpha(alpha),
+                    ..Draw::new(f.crack, p.extend(layer::GROUND + 0.9))
+                });
+                continue;
+            }
+            let alpha = ((z.life / z.max_life) + 0.2).min(1.0) * 0.65;
+            let tint = match z.kind {
+                GroundKind::Fire => rgb(0xff8138),
+                GroundKind::Bamboo => rgb(0x80b879),
+                _ => rgb(0xb4cbda),
+            };
             pools.fx.push(Draw {
-                scale: Vec2::new(k, k * 0.75),
-                color: Color::WHITE.with_alpha(alpha),
-                ..Draw::new(f.crack, to_screen(z.pos).extend(layer::GROUND + 0.9))
+                scale: Vec2::new(k, k * FLAT),
+                color: tint.with_alpha(alpha),
+                ..Draw::new(f.crack, p.extend(layer::GROUND + 0.9))
             });
+            match z.kind {
+                GroundKind::Fire => {
+                    glow.add(
+                        f.glow,
+                        p.extend(layer::EMISSIVE - 3.0),
+                        Vec2::new(k, k * FLAT),
+                        0.0,
+                        tint.with_alpha(alpha * 0.5),
+                    );
+                    for i in 0..3 {
+                        let offset =
+                            Vec2::new((i as f32 - 1.0) * z.radius * 0.6, (now * 4.0 + i as f32).sin() * 3.0);
+                        glow.add(
+                            f.trail,
+                            (p + offset).extend(layer::EMISSIVE - 1.0),
+                            Vec2::new(0.4, 0.7),
+                            std::f32::consts::FRAC_PI_2,
+                            tint.with_alpha(alpha),
+                        );
+                    }
+                }
+                GroundKind::Bamboo | GroundKind::Sword => {
+                    let frame = if z.kind == GroundKind::Bamboo {
+                        db.find("bamboo_clump/idle_S_00").unwrap_or(f.sword_evo)
+                    } else {
+                        f.sword_evo
+                    };
+                    for i in 0..5 {
+                        let x = (i as f32 - 2.0) * z.radius * 0.35;
+                        let rise = if z.kind == GroundKind::Bamboo { 34.0 } else { 18.0 };
+                        pools.fx.push(Draw {
+                            scale: Vec2::new(0.65, 1.3),
+                            rot: if z.kind == GroundKind::Bamboo {
+                                0.0
+                            } else {
+                                -std::f32::consts::FRAC_PI_2
+                            },
+                            color: tint.with_alpha(alpha),
+                            ..Draw::new(
+                                frame,
+                                (p + Vec2::new(x, rise)).extend(sort_z(layer::WEAPONS, z.pos.y)),
+                            )
+                        });
+                    }
+                }
+                GroundKind::Fissure => {}
+            }
         }
     }
 
@@ -1259,8 +1348,22 @@ pub(crate) fn collect_fx(
             );
             if s.t > 0.0 {
                 let k = (s.t / s.delay).min(1.0);
-                let drop = (1.0 - k) * (1.0 - k) * 150.0;
-                let frame = if s.evolved { f.seal_evo } else { f.seal };
+                let bamboo = s.fissure.is_some_and(|f| f.kind == lantern_content::GroundKind::Bamboo);
+                let drop = (1.0 - k) * (1.0 - k) * if bamboo { -70.0 } else { 150.0 };
+                let kind = s.fissure.map(|v| v.kind);
+                let frame = match kind {
+                    Some(lantern_content::GroundKind::Sword) => f.sword_evo,
+                    Some(lantern_content::GroundKind::Bamboo) => {
+                        db.find("bamboo_clump/idle_S_00").unwrap_or(f.seal_evo)
+                    }
+                    _ => {
+                        if s.evolved {
+                            f.seal_evo
+                        } else {
+                            f.seal
+                        }
+                    }
+                };
                 let sk = (s.radius / if s.evolved { 70.0 } else { 45.0 }).max(1.0) * (0.8 + k * 0.2);
                 pools.fx.push(Draw {
                     scale: Vec2::splat(sk),
@@ -1277,7 +1380,13 @@ pub(crate) fn collect_fx(
             let p = lerp(s.prev, s.pos);
             // 屏幕 y 向上，角度取反
             let ang = -s.vel.y.atan2(s.vel.x);
-            let trail = if s.big {
+            let trail = if s.effects.molten.is_some() {
+                rgb(0xff603c)
+            } else if s.effects.freeze > 0.0 {
+                rgb(0x80dfff)
+            } else if s.effects.execute > 0.0 {
+                rgb(0xaabed4)
+            } else if s.big {
                 rgb(0xffd98a)
             } else if s.bonus {
                 rgb(0xcfe3f5)
@@ -1287,9 +1396,12 @@ pub(crate) fn collect_fx(
             let (tk, tky) = if s.big { (1.4, 1.2) } else { (1.1, 0.9) };
             glow.add(f.trail, p.extend(layer::EMISSIVE), Vec2::new(tk, tky), ang, trail.with_alpha(0.75));
             let frame = if s.big { f.sword_evo } else { f.sword };
+            // 赤霄、冰剑、铁羽的剑身跟拖尾同色，其余飞剑照旧
+            let tinted = s.effects != lantern_sim::weapons::volley::ShotEffects::default();
             pools.fx.push(Draw {
                 scale: Vec2::new(if s.big { 1.15 } else { 1.0 }, 1.0),
                 rot: ang,
+                color: if tinted { trail } else { Color::WHITE },
                 ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, s.pos.y)))
             });
             glow.light(&frames, &db, p, (trail.with_alpha(0.5), if s.big { 40.0 } else { 28.0 }));
@@ -1299,9 +1411,29 @@ pub(crate) fn collect_fx(
     // ---- 纸鹤
     if let Some(arsenal) = &res.arsenal {
         for slot in &arsenal.0 {
-            let seq = if slot.evolved { &f.crane_evo } else { &f.crane };
+            let seq = if slot.transformed() { &f.crane_evo } else { &f.crane };
             if slot.cranes.is_empty() || seq.is_empty() {
                 continue;
+            }
+            let phoenix = matches!(slot.behavior(&content.0), WeaponBehavior::Seeker { on_hit: Some(_), .. });
+            let iron = matches!(slot.behavior(&content.0), WeaponBehavior::Seeker { count_cap: Some(_), .. });
+            let tint = if phoenix {
+                rgb(0xff9250)
+            } else if iron {
+                rgb(0x9baac7)
+            } else {
+                Color::WHITE
+            };
+            if phoenix && slot.count > 0 {
+                let angle = slot.prev_angle + (slot.angle - slot.prev_angle) * a;
+                let p = hero + to_screen(slot.orbit_offset(angle, 0));
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(2.2),
+                    color: tint,
+                    rot: -angle,
+                    ..Draw::new(seq[(now * 12.0) as usize % seq.len()], p.extend(layer::WEAPONS))
+                });
+                glow.light(&frames, &db, p, (tint.with_alpha(0.5), 65.0));
             }
             for (k, c) in slot.cranes.iter().enumerate() {
                 let p = lerp(c.prev, c.pos) + Vec2::new(0.0, 6.0);
@@ -1321,18 +1453,18 @@ pub(crate) fn collect_fx(
                 // 向左飞时上下翻转，保持鹤背朝上
                 let flip_y = if c.angle.cos() < 0.0 { -1.0 } else { 1.0 };
                 pools.fx.push(Draw {
-                    scale: Vec2::new(1.0 - contact * 0.18, flip_y * (1.0 + contact * 0.12)),
+                    scale: Vec2::new(
+                        (if phoenix { 1.3 } else { 1.0 }) * (1.0 - contact * 0.18),
+                        flip_y * (1.0 + contact * 0.12),
+                    ),
+                    color: tint,
                     rot: ang,
                     ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, c.pos.y)))
                 });
-                if slot.evolved {
-                    glow.add(
-                        f.glow,
-                        p.extend(layer::EMISSIVE),
-                        Vec2::splat(0.3),
-                        0.0,
-                        rgb(0xffd98a).with_alpha(0.35),
-                    );
+                if slot.transformed() {
+                    // 千鹤引照旧是金色微光；凤、铁鹤用自己的颜色
+                    let lit = if phoenix || iron { tint } else { rgb(0xffd98a) };
+                    glow.add(f.glow, p.extend(layer::EMISSIVE), Vec2::splat(0.3), 0.0, lit.with_alpha(0.35));
                 }
             }
         }

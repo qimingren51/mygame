@@ -108,6 +108,8 @@ fn family(event: &SimEvent) -> Option<(u16, Vec2, usize)> {
                 StrikeFx::Pulse => 5,
                 StrikeFx::Toll => 6,
                 StrikeFx::Seal { .. } => 7,
+                StrikeFx::Bamboo => 17,
+                StrikeFx::SwordGrove => 18,
                 StrikeFx::Blast(BlastKind::Fire) => 8,
                 StrikeFx::Blast(BlastKind::Ice) => 16,
                 StrikeFx::Quake => 9,

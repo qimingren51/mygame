@@ -304,6 +304,15 @@ fn camera_impulse(events: &[SimEvent], facing: Vec2, hero: Vec2) -> Impulse {
                     cue.trauma = if evolved { 0.3 } else { 0.15 };
                     cue.kick = Vec2::NEG_Y * if evolved { 0.9 } else { 0.45 };
                 }
+                // 竹印：巨竹从地下往上顶；万剑冢：群剑往下落
+                StrikeFx::Bamboo => {
+                    cue.trauma = 0.18;
+                    cue.kick = Vec2::Y * 0.55;
+                }
+                StrikeFx::SwordGrove => {
+                    cue.trauma = 0.2;
+                    cue.kick = Vec2::NEG_Y * 0.6;
+                }
                 StrikeFx::Quake => cue.trauma = 0.42,
                 StrikeFx::Toll => {
                     cue.trauma = 0.28;

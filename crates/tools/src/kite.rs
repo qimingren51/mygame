@@ -6,6 +6,8 @@
 //!
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
 //!       [--skill novice|regular|expert|circle] [--lamp <id>] [--school <流派>|all] [--combo <反应>|all]
+//!       [--fusion <合璧 ID>|all] [--transformations]（打开异化与合璧；内容里默认关闭，--fusion 自动打开）
+//!       [--assert-build-pace]（检查 3／6／9 分钟的构筑节奏）
 //!       [--csv <目录>]（每 30 秒一行的 timeline.csv、每局一行的 runs.csv）[--jobs <线程数>]
 //!       [--endless]（无尽夜，最多打 40 分钟）[--god]（主角无敌）
 //!       [--record <文件>]（把第一局存成回放并打印关键时刻，可以用 `lantern --replay <文件> --from <秒>` 在游戏里看）
@@ -315,7 +317,11 @@ fn meta_setup(setup: &mut RunSetup, meta: &str) {
 /// 回放时间线上要标出的关键时刻。
 fn moment(ev: &SimEvent) -> Option<&'static str> {
     Some(match ev {
-        SimEvent::Evolve { .. } => "进化",
+        SimEvent::Evolve { form, .. } => match form {
+            lantern_sim::weapons::Form::Mutated => "异化",
+            lantern_sim::weapons::Form::Fused(_) => "合璧",
+            _ => "进化",
+        },
         SimEvent::Resonance { tier, .. } if *tier >= 2 => "共鸣跨阶",
         SimEvent::Reaction { first: true, .. } => "反应初见",
         SimEvent::Elite { .. } => "精英",
@@ -378,6 +384,7 @@ struct KiteRun {
     rows: Vec<Row>,
     /// 每次进化：时刻（秒）、法器下标
     evolutions: Vec<(f32, u16)>,
+    fusions: Vec<(f32, usize)>,
     boss_time: Option<f32>,
     alive7: Option<u32>,
     surge_peak: u32,
@@ -501,6 +508,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
     let mut k = Kite::new(cfg.skill, seed);
     let hz = u64::from(TICK_HZ);
     let mut rows = Vec::new();
+    let mut fusions = Vec::new();
     let (mut evolutions, mut alive7, mut surge_peak, mut ults, mut ults_total) =
         (Vec::new(), None, 0u32, 0, 0);
     let (mut last_hurt, mut cause, mut taiji) = (None, None, None);
@@ -534,7 +542,8 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
                 }
             }
             match ev {
-                SimEvent::Evolve { weapon } => evolutions.push((now, weapon)),
+                SimEvent::Evolve { form: lantern_sim::weapons::Form::Fused(f), .. } => fusions.push((now, f)),
+                SimEvent::Evolve { weapon, .. } => evolutions.push((now, weapon)),
                 SimEvent::Ult => {
                     ults_total += 1;
                     if t < 570 * hz {
@@ -610,7 +619,12 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
                 .0
                 .iter()
                 .map(|w| {
-                    format!("{}{}{}", content.weapons[w.def].id, w.level, if w.evolved { "*" } else { "" })
+                    format!(
+                        "{}{}{}",
+                        content.weapons[w.def].id,
+                        w.level,
+                        if w.transformed() { "*" } else { "" }
+                    )
                 })
                 .collect(),
         ),
@@ -633,6 +647,7 @@ fn kite_one(content: &Content, seed: u64, cfg: Cfg, record: Option<&Path>) -> Ki
         level: sim.progress().level,
         rows,
         evolutions,
+        fusions,
         boss_time,
         alive7,
         surge_peak,
@@ -744,6 +759,19 @@ fn report(
         alive_at(375.0),
         evo.len(),
         mmss(when(evo.clone()))
+    );
+    let first: Vec<_> =
+        all.iter().filter_map(|r| r.tiers.iter().filter_map(|t| t[0]).min_by(f32::total_cmp)).collect();
+    let fused: Vec<_> = all.iter().filter_map(|r| r.fusions.first().map(|f| f.0)).collect();
+    println!(
+        "构筑节奏：一阶共鸣 {}（{}/{} 局），第一次进化或异化 {}，第一次合璧 {}（{}/{} 局）",
+        mmss(when(first.clone())),
+        first.len(),
+        all.len(),
+        mmss(when(evo.clone())),
+        mmss(when(fused.clone())),
+        fused.len(),
+        all.len()
     );
     // 共鸣：流派看本系，太极看太极；不限流派时看每局最高的那一系
     let tier_at = |r: &KiteRun, t: usize| -> Option<f32> {
@@ -864,7 +892,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
     }
     tl.push('\n');
     let mut rs = String::from(
-        "bot,mode,skill,meta,tier,lamp,seed,won,secs,cause,kills,level,evolutions,first_evolution,boss_secs,bosses,ults,ults_before_930,lamps,alive_7min,surge_peak",
+        "bot,mode,skill,meta,tier,lamp,seed,won,secs,cause,kills,level,evolutions,first_evolution,first_fusion,boss_secs,bosses,ults,ults_before_930,lamps,alive_7min,surge_peak",
     );
     for e in Element::ALL {
         for t in 1..=4 {
@@ -913,7 +941,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
             };
             let _ = write!(
                 rs,
-                "{head},{},{},{},{:.1},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{head},{},{},{},{:.1},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 cell(&r.lamp),
                 r.seed,
                 u8::from(r.won),
@@ -923,6 +951,7 @@ fn write_csv(content: &Content, dir: &Path, groups: &[(String, Cfg, Vec<KiteRun>
                 r.level,
                 cell(evo.join(" ")),
                 opt(r.evolutions.first().map(|e| e.0)),
+                opt(r.fusions.first().map(|e| e.0)),
                 opt(r.boss_time),
                 r.bosses,
                 r.ults_total,
@@ -973,7 +1002,12 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
     let record = text("--record").map(std::path::PathBuf::from);
     let skill_name = text("--skill").unwrap_or_else(|| "expert".into());
     let skill = Skill::by_name(&skill_name).ok_or("--skill 只能是 novice、regular、expert、circle")?;
-    let content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
+    let mut content = Content::load(&data_dir()).map_err(|e| e.to_string())?;
+    // 异化与合璧是 EA 内容，默认关闭；跑合璧路线或显式要求时才打开
+    let transformations = args.iter().any(|a| a == "--transformations") || text("--fusion").is_some();
+    if transformations {
+        content.enable_transformations();
+    }
     // 要跑的机器人：不带选卡偏好的一组，或者流派、组合（all 表示全部）
     let mut plans: Vec<Plan> = Vec::new();
     if let Some(name) = text("--school") {
@@ -994,13 +1028,21 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
             );
         }
     }
+    if let Some(name) = text("--fusion") {
+        if name == "all" {
+            plans.extend(content.fusions.iter().filter_map(|f| Plan::fusion(&content, &f.id)));
+        } else {
+            plans.push(Plan::fusion(&content, &name).ok_or("--fusion 需要合璧的 ID、名字或 all")?);
+        }
+    }
     let endless = args.iter().any(|a| a == "--endless");
     let mut groups: Vec<(String, Cfg, Vec<KiteRun>)> = Vec::new();
     let start = Instant::now();
     println!(
-        "风筝机器人每组 {runs} 局，{}，手法 {skill_name}，{tier} 更，局外成长 {meta}，灯 {}，{jobs} 个线程",
+        "风筝机器人每组 {runs} 局，{}，手法 {skill_name}，{tier} 更，局外成长 {meta}，灯 {}，{jobs} 个线程{}",
         if endless { "无尽夜" } else { "夜行" },
-        lamp.as_deref().unwrap_or("默认")
+        lamp.as_deref().unwrap_or("默认"),
+        if transformations { "，异化与合璧打开" } else { "" }
     );
     let god = args.iter().any(|a| a == "--god");
     let base = Cfg {
@@ -1022,6 +1064,27 @@ pub fn kite_cmd(args: &[String]) -> Result<(), String> {
         let rec = record.as_deref().filter(|_| g == 0);
         let all = run_all(&content, seed0, runs, jobs, cfg, rec);
         table.push(report(&content, &label, &all, plan, endless));
+        if args.iter().any(|a| a == "--assert-build-pace") {
+            let first: Vec<_> = all
+                .iter()
+                .filter_map(|r| r.tiers.iter().filter_map(|t| t[0]).min_by(f32::total_cmp))
+                .collect();
+            let evolved: Vec<_> = all.iter().filter_map(|r| r.evolutions.first().map(|v| v.0)).collect();
+            if first.len() * 2 < all.len()
+                || when(first) > 180.0
+                || evolved.len() * 2 < all.len()
+                || !(240.0..=420.0).contains(&when(evolved))
+            {
+                return Err(format!("{label} 未达到 3／6 分钟节奏；检查等级、存活率和选卡投入"));
+            }
+            if plan.is_some_and(|p| p.name.starts_with("合璧·")) {
+                let fused: Vec<_> = all.iter().filter_map(|r| r.fusions.first().map(|v| v.0)).collect();
+                if fused.len() * 2 < all.len() || when(fused) > 570.0 {
+                    return Err(format!("{label} 未达到 9 分钟前后的合璧窗口"));
+                }
+            }
+            println!("{label}：构筑节奏断言通过（真实刷怪、无赠送等级）");
+        }
         groups.push((label, cfg, all));
     }
     if table.len() > 1 {

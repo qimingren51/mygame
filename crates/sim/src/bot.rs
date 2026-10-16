@@ -1,6 +1,6 @@
 //! 自动选卡机器人（移植自网页版 tests/sim/bot.ts）：整局测试和平衡工具用它替玩家做选择、走位。
 //!
-//! 选卡策略：进化 > 已有法器升级 > 新法器（最多 4 件）> 对应进化的心法 > 心法升级 > 其他。
+//! 选卡策略：合璧 > 正统进化 > 异化 > 已有法器升级 > 新法器（最多 4 件）> 对应进化的心法 > 心法升级 > 其他。
 //! 走位：绕大圈，偶尔变向；每 2 秒闪避一次；燃灯充满就放。
 
 use bevy_math::{Vec2, ops};
@@ -10,7 +10,9 @@ use crate::{GameContent, InputFrame, Offer, SimCommand, SimHarness, SimPhase};
 fn score(sim: &SimHarness, offer: Offer) -> i32 {
     let c = &sim.world().resource::<GameContent>().0;
     match offer {
+        Offer::Fuse { .. } => 1200,
         Offer::Evolve(_) => 1000,
+        Offer::Mutate(_) => 950,
         Offer::WeaponUp(_) => 100,
         Offer::NewWeapon(_) => {
             if sim.arsenal().0.len() < 4 {

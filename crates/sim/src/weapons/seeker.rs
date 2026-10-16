@@ -2,12 +2,12 @@
 
 use bevy_math::{Vec2, ops};
 
-use lantern_content::{Stat, WeaponBehavior};
+use lantern_content::{Element, Stat, WeaponBehavior};
 use lantern_core::step::DT;
 
 use super::{Crane, Ctx, TAU, WeaponSlot};
 use crate::SimEvent;
-use crate::combat::{Hit, Source};
+use crate::combat::{Area, HIT_DOT, HIT_NOCRIT, Hit, Source, Strike, StrikeFx};
 
 pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     let WeaponBehavior::Seeker {
@@ -20,14 +20,26 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
         speed,
         steer,
         reach,
+        feather,
+        execute,
+        count_cap,
+        on_hit,
+        escort,
     } = *slot.behavior(ctx.content)
     else {
         return;
     };
     let lv = slot.stats(ctx.content);
     let p = ctx.player;
-    // 召唤物数量再乘木·极境的倍率（向上取整）
-    let n = ((lv.count + ctx.stats.amount()) as f32 * ctx.stats.get(Stat::SummonMult)).ceil() as usize;
+    // 召唤物数量再乘木·极境的倍率（向上取整）；铁鹤固定只数，不吃加成
+    let n = match count_cap {
+        Some(cap) => {
+            let n = lv.count.min(cap) as usize;
+            slot.cranes.truncate(n);
+            n
+        }
+        None => ((lv.count + ctx.stats.amount()) as f32 * ctx.stats.get(Stat::SummonMult)).ceil() as usize,
+    };
     while slot.cranes.len() < n {
         slot.cranes.push(Crane {
             pos: p,
@@ -41,7 +53,29 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
     }
     let speed = speed.at(slot.level as f32);
     let source = Source::Weapon(slot.def as u16);
-    let element = Some(ctx.content.weapons[slot.def].element);
+    let element = Some(if on_hit.is_some() { Element::Fire } else { ctx.content.weapons[slot.def].element });
+    if let Some(e) = escort {
+        // 绕身巨凤：沿环路转，每 every 秒对所在位置一击并点燃
+        slot.prev_angle = slot.angle;
+        slot.angle += e.spin * DT;
+        slot.count = 1;
+        slot.radius = e.radius * ctx.stats.get(Stat::Area);
+        slot.size = e.size;
+        slot.inner_t -= DT;
+        if slot.inner_t <= 0.0 {
+            slot.inner_t = e.every;
+            let mut s = Strike::new(
+                p + slot.orbit_offset(slot.angle, 0),
+                Area::Circle(slot.size),
+                lv.damage * e.ratio,
+                source,
+                StrikeFx::None,
+            );
+            s.element = Some(Element::Fire);
+            s.ignite = 1.0;
+            ctx.strikes.0.push(s);
+        }
+    }
     let total = slot.cranes.len();
     let en = ctx.en;
     for (i, c) in slot.cranes.iter_mut().enumerate() {
@@ -72,12 +106,56 @@ pub(crate) fn update(ctx: &mut Ctx, slot: &mut WeaponSlot) {
             };
             let target = Vec2::new(en.x[t], en.y[t]);
             if target.distance(c.pos) < en.r[t] + reach {
-                ctx.hits.0.push(
-                    Hit::new(en.handle(t), lv.damage, source)
-                        .knock(knockback, c.pos)
-                        .incoming(c.vel)
-                        .element(element),
-                );
+                let mut hit = Hit::new(en.handle(t), lv.damage, source)
+                    .knock(knockback, c.pos)
+                    .incoming(c.vel)
+                    .element(element);
+                hit.execute = execute;
+                ctx.hits.0.push(hit);
+                if let Some(f) = feather {
+                    // 铁羽：沿扑击方向穿出，伤害是扑击的 ratio 倍
+                    let direction = if c.vel.length_squared() > 0.01 { c.vel } else { target - p };
+                    ctx.shots.fire(super::volley::ShotSpec {
+                        pos: target,
+                        angle: ops::atan2(direction.y, direction.x),
+                        speed: f.speed,
+                        life: f.life,
+                        turn: 0.0,
+                        hit_radius: reach,
+                        knockback,
+                        damage: lv.damage * f.ratio,
+                        pierce: f.pierce,
+                        target: None,
+                        skip: Some(en.handle(t)),
+                        big: false,
+                        bonus: false,
+                        flags: 0,
+                        element,
+                        source,
+                        effects: super::volley::ShotEffects { execute, ..Default::default() },
+                    });
+                }
+                if let Some(impact) = on_hit {
+                    let radius = impact.radius * ctx.stats.get(Stat::Area);
+                    let mut s = Strike::new(
+                        target,
+                        Area::Circle(radius),
+                        lv.damage * impact.ratio,
+                        source,
+                        StrikeFx::Blast(lantern_content::BlastKind::Fire),
+                    );
+                    // 扑击打印记，余爆与火海不打印记，也不触发命中连锁
+                    s.flags = HIT_DOT | HIT_NOCRIT;
+                    ctx.strikes.0.push(s);
+                    ctx.ground.add(
+                        target,
+                        radius,
+                        lv.damage,
+                        source,
+                        impact.zone,
+                        ctx.content.run.ground_cap as usize,
+                    );
+                }
                 ctx.outbox.0.push(SimEvent::CraneStrike { pos: c.pos });
                 ctx.bamboo.circle(c.pos, reach, lv.damage);
                 c.striking = false;

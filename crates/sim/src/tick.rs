@@ -213,6 +213,8 @@ pub(crate) struct HashParams<'w, 's> {
     stats: Res<'w, crate::stats::Stats>,
     progress: Res<'w, Progress>,
     shots: Res<'w, Shots>,
+    ground: Res<'w, Fissures>,
+    seals: Res<'w, Seals>,
     foes: Res<'w, Foes>,
     pickups: Res<'w, Pickups>,
     encounters: Res<'w, Encounters>,
@@ -277,6 +279,12 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.build.hash_into(&mut h);
     p.stats.hash_into(&mut h);
     p.shots.hash_into(&mut h);
+    // 法器内部计时、飞行物的寿命与效果、地面区域、待落石印、封印明细
+    p.arsenal.hash_detail(&mut h);
+    p.shots.hash_detail(&mut h);
+    p.ground.hash_into(&mut h);
+    p.seals.hash_into(&mut h);
+    p.build.hash_banished(&mut h);
     p.foes.hash_into(&mut h);
     p.pickups.hash_into(&mut h);
     p.encounters.hash_into(&mut h);
