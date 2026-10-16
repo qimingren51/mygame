@@ -155,7 +155,6 @@ pub(crate) struct HubLight(pub usize);
 pub(crate) struct HubRoadLamp {
     pub index: usize,
     /// 质感会话的 `hub_fx` 演路灯点亮时按层处理（同 [`HubLamp`]）
-    #[allow(dead_code)]
     pub part: LampPart,
     pub lit: bool,
 }

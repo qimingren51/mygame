@@ -1,5 +1,6 @@
-//! 灯驿长卷的动画（docs/FEEL.md 第 9 节）：心灯亮起、地区晨光铺开、平时灯火摇曳。
-//! 布局由 `hub_scene.rs` 按美术的 hub.json 生成（节点挂 `HubLamp`、`HubDawn` 等标记）；这里只改
+//! 灯驿长卷的动画（docs/FEEL.md 第 9 节）：心灯亮起、门外新添的路灯立起来点亮、地区晨光铺开、
+//! 平时灯火摇曳。
+//! 布局由 `hub_scene.rs` 按美术的 hub.json 生成（节点挂 `HubLamp`、`HubRoadLamp`、`HubDawn` 等标记）；这里只改
 //! 透明度、缩放和颜色，不动布局。叠加层用 `hub_scene` 的 `UiAdd`；晨光要铺开时，把那一层的
 //! `ImageNode` 换成 `DawnReveal`（按“先亮哪里”的灰度图铺开）。
 
@@ -15,7 +16,7 @@ use lantern_platform::{HubNews, UiCue};
 use lantern_sim::GameContent;
 
 use crate::hub_scene::{
-    DawnPart, HubDawn, HubDawnMask, HubFlameBase, HubImage, HubLamp, LampPart, UiAdd, glow_alpha,
+    DawnPart, HubDawn, HubDawnMask, HubFlameBase, HubImage, HubLamp, HubRoadLamp, LampPart, UiAdd, glow_alpha,
 };
 
 /// 地区晨光：按“先亮哪里”的灰度图铺开（`dawn_reveal.wesl`）。
@@ -42,6 +43,9 @@ impl UiMaterial for DawnReveal {
 const LIGHT_DELAY: f32 = 0.5;
 const LIGHT_STAGGER: f32 = 0.35;
 const LIGHT_LEN: f32 = 1.4;
+/// 路灯：灯驿出现后这么久开始（比心灯早，是回来那一刻的事），灯身用 ROAD_RISE 秒从底下立起来，再点火。
+const ROAD_DELAY: f32 = 0.35;
+const ROAD_RISE: f32 = 0.45;
 /// 晨光：灯驿出现后 DAWN_DELAY 秒开始，DAWN_LEN 秒铺满。
 const DAWN_DELAY: f32 = 0.8;
 const DAWN_LEN: f32 = 3.2;
@@ -52,7 +56,7 @@ const WARM: Vec3 = Vec3::new(1.0, 0.85, 0.54);
 #[derive(Resource, Default)]
 pub(crate) struct HubAnim {
     clock: f32,
-    /// （灯的 id，开始的时刻）
+    /// （灯的 id，开始的时刻）；路灯的 id 是 `road_<第几盏>`
     lighting: Vec<(String, f32)>,
     /// （地区，开始的时刻）
     dawn: Option<(String, f32)>,
@@ -167,10 +171,16 @@ fn start(
     if lamps.is_empty() {
         return;
     }
+    // 回来一回，路边就添一盏：先点它，心灯跟在后面
+    let road = news.road_lit.take().is_some_and(|i| {
+        anim.lighting.push((road_id(i), clock + ROAD_DELAY));
+        true
+    });
     if !news.lit.is_empty() {
         let lit = std::mem::take(&mut news.lit);
+        let first = clock + LIGHT_DELAY + if road { ROAD_RISE + LIGHT_STAGGER } else { 0.0 };
         for (k, id) in lit.into_iter().enumerate() {
-            anim.lighting.push((id, clock + LIGHT_DELAY + k as f32 * LIGHT_STAGGER));
+            anim.lighting.push((id, first + k as f32 * LIGHT_STAGGER));
         }
     }
     if let Some(region) = news.dawn.take() {
@@ -189,6 +199,10 @@ fn start(
     }
 }
 
+fn road_id(index: usize) -> String {
+    format!("road_{index}")
+}
+
 /// 每盏灯一个相位，摇曳的节拍错开。
 fn phase(id: &str) -> f32 {
     let h = id.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
@@ -202,6 +216,7 @@ fn smooth(x: f32) -> f32 {
 
 /// 平时：火苗每秒抖六七下、幅度很小，内圈光跟着火苗，外圈光晕约 3 秒一次慢慢呼吸。
 /// 点亮：火苗从底部长出来，内圈闪一下，外圈胀开再落定，灯身跟着淡入，飘几颗余烬，纸上荡开一圈光。
+/// 路灯（底图上本来没有）：灯身连灯杆先从底下“立起来”（竖着从四成长到略高再落定），立稳了再点火。
 #[expect(clippy::type_complexity)]
 fn animate_lamps(
     mut commands: Commands,
@@ -210,26 +225,43 @@ fn animate_lamps(
     tex: Option<Res<HubTex>>,
     images: Res<Assets<Image>>,
     mut adds: ResMut<Assets<UiAdd>>,
-    mut q: Query<(
-        Entity,
-        &HubLamp,
-        &ComputedNode,
-        &mut UiTransform,
-        Option<&mut ImageNode>,
-        Option<&MaterialNode<UiAdd>>,
-        Option<&HubFlameBase>,
-    )>,
+    mut q: Query<
+        (
+            Entity,
+            Option<&HubLamp>,
+            Option<&HubRoadLamp>,
+            &ComputedNode,
+            &mut UiTransform,
+            Option<&mut ImageNode>,
+            Option<&MaterialNode<UiAdd>>,
+            Option<&HubFlameBase>,
+        ),
+        Or<(With<HubLamp>, With<HubRoadLamp>)>,
+    >,
 ) {
     let t = anim.clock;
-    for (e, lamp, node, mut tf, img, mat, base) in &mut q {
-        let ph = phase(&lamp.id);
+    for (e, heart, road, node, mut tf, img, mat, base) in &mut q {
+        let (id, part) = match (heart, road) {
+            (Some(l), _) => (l.id.clone(), l.part),
+            (None, Some(r)) if r.lit => (road_id(r.index), r.part),
+            _ => continue,
+        };
+        let ph = phase(&id);
         let flick =
             0.5 * (t * 13.7 + ph * 20.0).sin() + 0.3 * (t * 23.1 + ph * 7.0).sin() + 0.2 * (t * 7.3).sin();
         let breath = (t * TAU / 3.2 + ph * TAU).sin();
-        // 点亮了多久：还没轮到它时整盏不亮，播完以后照平时
-        let lit = anim.lit_for(&lamp.id).map(|u| if u > LIGHT_LEN { f32::INFINITY } else { u });
+        // 点亮了多久：还没轮到它时整盏不亮，播完以后照平时。路灯先立灯身，火从立稳那一刻算
+        let rise = if road.is_some() { ROAD_RISE } else { 0.0 };
+        let raw = anim.lit_for(&id).map(|u| if u > LIGHT_LEN + rise { f32::INFINITY } else { u });
+        let lit = raw.map(|u| u - rise);
         let u = lit.unwrap_or(f32::INFINITY);
-        let (alpha, scale) = match lamp.part {
+        let (alpha, scale) = match part {
+            // 立起来：竖着 0.4 → 1.06 → 1，横着稍稍收一点再放开
+            LampPart::Body if road.is_some() => {
+                let r = raw.unwrap_or(f32::INFINITY) / ROAD_RISE;
+                let up = if r < 1.0 { 0.4 + 0.66 * smooth(r) } else { 1.0 + 0.06 * (-(r - 1.0) * 6.0).exp() };
+                (smooth(r / 0.3), Vec2::new(1.0 - 0.06 * (1.0 - smooth(r)), up.min(1.06)))
+            }
             LampPart::Body => (smooth((u - 0.05) / 0.3), Vec2::ONE),
             LampPart::Flame => {
                 // 从底部长出来：0 → 1.15 → 1（0.25 秒），之后照平时抖
@@ -259,13 +291,16 @@ fn animate_lamps(
             }
         };
         tf.scale = scale;
+        let logical = node.size() * node.inverse_scale_factor();
         // 火苗绕底部那一点缩放：节点按中心缩放，挪回去
         if let (Some(base), Some(img)) = (base, &img)
             && let Some(size) = images.get(&img.image).map(|i| i.size().as_vec2())
         {
-            let logical = node.size() * node.inverse_scale_factor();
             let d = (base.0 / size - Vec2::splat(0.5)) * logical;
             tf.translation = Val2::px(d.x * (1.0 - scale.x), d.y * (1.0 - scale.y));
+        } else if road.is_some() && part == LampPart::Body {
+            // 灯杆脚钉在地上
+            tf.translation = Val2::px(0.0, logical.y * 0.5 * (1.0 - scale.y));
         }
         if let Some(mut img) = img {
             img.color.set_alpha(alpha.clamp(0.0, 1.0));
@@ -273,24 +308,26 @@ fn animate_lamps(
         if let Some(mat) = mat
             && let Some(mut m) = adds.get_mut(&mat.0)
         {
-            // 光晕的底子按“等级 ÷ 最大等级”（hub_scene 定的），点亮和呼吸乘在上面
-            let base = if lamp.part == LampPart::Glow {
-                let max = content.0.meta.nodes.iter().find(|n| n.id == lamp.id).map_or(1, |n| n.max_level);
-                glow_alpha(lamp.level.max(1), max)
-            } else {
-                1.0
+            // 心灯光晕的底子按“等级 ÷ 最大等级”（hub_scene 定的），点亮和呼吸乘在上面；路灯没有等级
+            let base = match heart {
+                Some(lamp) if part == LampPart::Glow => {
+                    let max =
+                        content.0.meta.nodes.iter().find(|n| n.id == lamp.id).map_or(1, |n| n.max_level);
+                    glow_alpha(lamp.level.max(1), max)
+                }
+                _ => 1.0,
             };
             m.color.w = alpha.max(0.0) * base;
         }
         // 点亮的那一下：火苗上飘余烬，光晕下荡开一圈光（每盏只放一次）
         let Some(tex) = &tex else { continue };
         let Some(u) = lit else { continue };
-        let key = (lamp.id.clone(), lamp.part);
+        let key = (id, part);
         if u < 0.1 || anim.sparked.contains(&key) {
             continue;
         }
         anim.sparked.push(key);
-        match lamp.part {
+        match part {
             LampPart::Flame => {
                 for k in 0..7 {
                     let a = ph * TAU + k as f32 * 0.9;
