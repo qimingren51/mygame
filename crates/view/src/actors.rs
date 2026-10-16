@@ -27,7 +27,7 @@ use crate::{MainCamera, layer, to_screen};
 const DIRS: [&str; 8] = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
 
 /// 光源颜色与半径（docs/PORTING-NOTES.md 第 7 节）
-pub(crate) const LANTERN_LIGHT: (Color, f32) = (Color::srgb(1.0, 0.878, 0.69), 200.0);
+pub(crate) const LANTERN_LIGHT: (Color, f32) = (crate::palette::LANTERN_LIGHT, 200.0);
 
 /// 两种颜色按比例混合（t = 0 时是 a）。
 fn mix(a: Color, b: Color, t: f32) -> Color {

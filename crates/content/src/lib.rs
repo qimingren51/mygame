@@ -472,7 +472,7 @@ mod tests {
         ];
         for when in invalid {
             let mut c = original.clone();
-            c.hub[0].lines.push(HubLineDef { once: "test_bad".into(), when, text: "灯".into() });
+            c.hub[0].lines.push(HubLineDef { once: "test_bad".into(), ask: false, when, text: "灯".into() });
             assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("hub.ron"));
         }
         for when in [
@@ -482,7 +482,7 @@ mod tests {
             HubWhen::Wins(1),
         ] {
             let mut c = original.clone();
-            c.hub[0].lines.push(HubLineDef { once: "test_ok".into(), when, text: "灯".into() });
+            c.hub[0].lines.push(HubLineDef { once: "test_ok".into(), ask: false, when, text: "灯".into() });
             c.validate(Path::new("data")).unwrap();
             c.hub[0].lines.last_mut().unwrap().once.clear();
             assert!(c.validate(Path::new("data")).is_err(), "里程碑必须有稳定 ID");
@@ -490,12 +490,13 @@ mod tests {
         // 包在 All 里的里程碑也要带 once
         let mut c = original.clone();
         let when = HubWhen::All(vec![HubWhen::Runs(3), HubWhen::WithoutStory("qingqiu_entered".into())]);
-        c.hub[0].lines.push(HubLineDef { once: String::new(), when, text: "灯".into() });
+        c.hub[0].lines.push(HubLineDef { once: String::new(), ask: false, when, text: "灯".into() });
         assert!(c.validate(Path::new("data")).is_err());
         // once 不能挂在初见上
         let mut c = original.clone();
         c.hub[0].lines.push(HubLineDef {
             once: "test_first".into(),
+            ask: false,
             when: HubWhen::First,
             text: "灯".into(),
         });
@@ -512,16 +513,21 @@ mod tests {
         c.hub[1].lines.push(duplicate);
         assert!(c.validate(Path::new("data")).unwrap_err().to_string().contains("重复"));
         let old: HubLineDef = ron::from_str("(when: Idle, text: \"灯\")").unwrap();
-        assert!(old.once.is_empty());
+        assert!(old.once.is_empty() && !old.ask);
+        // 追问必须带 once
+        let mut c = Content::load(&repo_data_dir()).unwrap();
+        c.hub[2].lines.iter_mut().find(|l| l.ask).unwrap().once.clear();
+        assert!(c.validate(Path::new("data")).is_err());
     }
 
-    /// 带故事条件的 once 台词算青丘追问（排在初见前面），积累门槛算里程碑。
+    /// 只有灯童问青丘的四句是追问（排在初见前面）；老灯匠、说书人留灯以后的话不是。积累门槛算里程碑。
     #[test]
     fn hub_conditions_classify_story_questions_and_milestones() {
         let c = Content::load(&repo_data_dir()).unwrap();
         let child = &c.hub[2];
-        let asked: Vec<_> = child.lines.iter().filter(|l| l.when.is_story() && !l.once.is_empty()).collect();
+        let asked: Vec<_> = c.hub.iter().flat_map(|p| &p.lines).filter(|l| l.ask).collect();
         assert_eq!(asked.len(), 4);
+        assert!(asked.iter().all(|l| l.once.starts_with("qingqiu_asked_") && l.when.is_story()));
         assert!(child.lines.iter().any(|l| l.when.is_milestone() && l.once == "child_three_returns"));
         assert!(!HubWhen::HasCleared(1).is_story() && !HubWhen::JournalCount(1).is_milestone());
         // 余烬那句跟着老灯匠

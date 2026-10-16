@@ -598,8 +598,7 @@ impl Profile {
         let fresh = |l: &lantern_content::HubLineDef| {
             !l.once.is_empty() && (!self.hub_lines_seen.contains(&l.once) || news.heard.contains(&l.once))
         };
-        let once =
-            |story: bool| lines.iter().rev().find(|l| fresh(l) && l.when.is_story() == story && hit(l));
+        let once = |ask: bool| lines.iter().rev().find(|l| fresh(l) && l.ask == ask && hit(l));
         once(true)
             .or_else(|| lines.iter().find(|l| first && l.when == HubWhen::First))
             .or_else(|| once(false))
@@ -970,6 +969,25 @@ mod tests {
         assert_eq!(p.journal_chapter(), 5);
         p.meta.clear();
         assert_eq!(p.journal_chapter(), 4);
+    }
+
+    /// 第一夜就在狐村留了灯：老灯匠、说书人先自我介绍（初见），留灯的话等下一趟；灯童的追问仍在初见前面。
+    #[test]
+    fn left_lantern_lines_wait_for_the_introduction() {
+        let c = content();
+        let mut p = Profile { runs: 1, ..Default::default() };
+        p.events.insert("qingqiu_entered".into());
+        p.events.insert("qingqiu_left_lantern".into());
+        let mut news = HubNews::default();
+        for who in [0, 3] {
+            let first = c.hub[who].lines.iter().find(|l| l.when == HubWhen::First).unwrap();
+            assert_eq!(p.hub_line(&c, who, &news), Some(first.text.as_str()), "{}", c.hub[who].id);
+            p.met.insert(c.hub[who].id.clone());
+        }
+        assert!(p.hub_line(&c, 0, &news).unwrap().contains("灯芯短了一截"));
+        assert!(p.hub_line(&c, 3, &news).unwrap().contains("没下手"));
+        p.saw_hub(&c, 0, &mut news);
+        assert!(p.hub_lines_seen.contains("smith_left_lantern"));
     }
 
     /// 没听过的追问先说；说出口就记进存档，这一趟里照样说（重画不换句），下一趟不再说。

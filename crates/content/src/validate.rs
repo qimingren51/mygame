@@ -1177,9 +1177,9 @@ impl Content {
                 return c.fail("hub.ron", format!("{} 至少要有一句“平时”（Idle）", person.id));
             }
             for l in &person.lines {
-                // 积累里程碑必须带 once；once 不能有首尾空白，也不能挂在“平时”“初见”上。
+                // 积累里程碑和追问必须带 once；once 不能有首尾空白，也不能挂在“平时”“初见”上。
                 let bad = !valid_when(&l.when, self)
-                    || (l.when.is_milestone() && l.once.trim().is_empty())
+                    || ((l.when.is_milestone() || l.ask) && l.once.trim().is_empty())
                     || (!l.once.is_empty()
                         && (l.once.trim() != l.once
                             || matches!(l.when, crate::HubWhen::Idle | crate::HubWhen::First)));

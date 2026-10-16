@@ -18,6 +18,8 @@ pub(crate) struct ToastStack;
 pub(crate) struct Toast {
     t: f32,
     life: f32,
+    /// “燃灯已满”：燃灯放出去就撤掉，不挂到超时
+    ult_ready: bool,
 }
 
 pub(crate) fn register(app: &mut App) {
@@ -93,6 +95,15 @@ fn read_events(
         }
         if muted.0 {
             continue;
+        }
+        if matches!(ev, SimEvent::Ult) {
+            for (e, t) in &toasts {
+                if t.ult_ready && oldest.iter().any(|&(o, _)| o == e) {
+                    commands.entity(e).despawn();
+                    oldest.retain(|&(o, _)| o != e);
+                    count -= 1;
+                }
+            }
         }
         let m = match *ev {
             SimEvent::Elite { kind, count } => {
@@ -199,7 +210,7 @@ fn read_events(
         let life = if m.big { 3.6 } else { 2.6 };
         let toast = commands
             .spawn((
-                Toast { t: 0.0, life },
+                Toast { t: 0.0, life, ult_ready: matches!(ev, SimEvent::UltReady) },
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,

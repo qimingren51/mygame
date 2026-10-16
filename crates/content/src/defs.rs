@@ -1446,11 +1446,15 @@ pub struct HubLineDef {
     /// 空串表示可重复的台词。同一个人的几句可以共用一个 ID（同一问的几种说法）。
     #[serde(default)]
     pub once: String,
+    /// 追问（灯童问青丘的几句）：没听过时排在初见前面。必须带 once。
+    #[serde(default)]
+    pub ask: bool,
     pub when: HubWhen,
     pub text: String,
 }
 
-/// 台词的条件。挑哪句见 `Profile::hub_dialogue`：未听过的青丘追问 > 初见 > 未听过的积累回应 > 即时回应 > 平时；
+/// 台词的条件。挑哪句见 `Profile::hub_dialogue`：未听过的追问（`ask`）> 初见 > 未听过的其他 once 台词
+/// （积累回应、留灯以后的话）> 即时回应 > 平时；
 /// 同一档里几条同时满足时取排在最后的那条。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum HubWhen {
@@ -1499,7 +1503,7 @@ pub enum HubWhen {
 }
 
 impl HubWhen {
-    /// 条件里有故事事件：带 once 时算青丘追问，排在初见前面。
+    /// 条件里有故事事件（亲历过或没亲历过）。
     pub fn is_story(&self) -> bool {
         match self {
             Self::Story(_) | Self::WithoutStory(_) => true,
