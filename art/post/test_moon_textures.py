@@ -404,8 +404,13 @@ def test_previews():
         m = pv[k]
         assert m["ground_luma_median"]["月下 r>260"] >= 70, f"{k} 月下地面太暗"
         assert 195 <= m["ground_luma_median"]["灯下 r<60"] <= 235, f"{k} 灯下地面 {m['ground_luma_median']['灯下 r<60']}"
-        foes = [v for kk, v in m["enemy_vs_ground_dL"].items() if "月下" in kk]
-        assert min(foes) >= 15, f"{k} 月下的妖物和地面 L* 只差 {min(foes)}"
+        # 月下的妖物都比现状拉开至少 8；墨色的影妖、石妖至少差 15。赤面狐重画后（master e001d59）身上是浅的赭红，
+        # 和月下的纸面本来就近，只要求 10。
+        for kk, v in m["enemy_vs_ground_dL"].items():
+            if "月下" not in kk:
+                continue
+            assert v - now["enemy_vs_ground_dL"][kk] >= 8, f"{k} {kk} 只比现状多拉开 {v - now['enemy_vs_ground_dL'][kk]:.1f}"
+            assert v >= (10 if kk.startswith("fox") else 15), f"{k} 月下的 {kk} 和地面 L* 只差 {v:.1f}"
 
 
 def test_report():
