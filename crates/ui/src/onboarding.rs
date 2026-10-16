@@ -209,7 +209,7 @@ fn update(
         prompt.0 = match guide.shown {
             Some(Lesson::Move) => "初入长夜　·　{move} 移动，法器会自动迎敌",
             Some(Lesson::Dash) => "借一步风　·　{dash} 闪避，穿过包围",
-            Some(Lesson::Ult) => "灯火已满　·　{ult} 燃灯，驱散近身妖物",
+            Some(Lesson::Ult) => "灯焰蓄满　·　{ult} 燃灯，驱散近身妖物",
             Some(Lesson::Upgrade) => "拾光成术　·　{nav} 看卡，{confirm} 选一门法器或心法",
             None => "",
         }

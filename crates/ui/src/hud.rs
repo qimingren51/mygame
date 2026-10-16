@@ -288,7 +288,7 @@ pub(crate) fn spawn_hud(
                             margin: UiRect::left(px(12)),
                             ..default()
                         },
-                        text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "灯火未满"),
+                        text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "燃灯未满"),
                     ),
                 ],
             ),
