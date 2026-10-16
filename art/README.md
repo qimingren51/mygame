@@ -132,7 +132,7 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 ## 界面图标、地面装饰与一键生成（post/ui_icons.py、post/ground_decor.py、post/make_2d.py）
 
 ```bash
-art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图（约 6 分钟）
+art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图，2 倍另出逐帧特效（约 7 分钟）
 art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 LANTERN_ART_DENSITY 时会 1 倍、2 倍各跑一遍
 ```
 
@@ -154,7 +154,7 @@ art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out as
 art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
-art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
 mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
@@ -273,6 +273,21 @@ art/.venv/bin/python art/post/test_fx_extras.py   # 自检 13 项（尺寸、白
 - `vfx/bamboo_leaf_0..3`：竹丛打碎时飞的竹叶；
 - `screens/scroll_roller.png`：开场卷轴展开时跟着那道边走的轴头。
 格式和用法见 `docs/DESIGN.md` 第 15 节。打包时 `ui_wash` 跟 ui 一起用 `--no-trim`，`vfx_leaves` 跟 vfx 一起打。
+
+## 逐帧特效（post/vfx_frames.py）
+
+```bash
+art/.venv/bin/python art/post/vfx_frames.py        # → out/assets@2x/vfx_frames/，审图 review@2x/vfx_frames_b1.png、vfx_frames_b1_ingame.png（约 70 秒）
+art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 17 项（清单、meta、颜色、四边、亮度 0.8、淡出、朝向、压扁、确定性、只写自己的文件、图集）；--quick 跳过确定性，--regen 强制重画
+```
+
+只出 2 倍，Pillow + numpy，不用 Blender。质感会话的逐帧特效清单（`docs/FEEL.md`“逐帧特效图”一节）一批一批做，现在是第一批：
+五行命中 `hit_{metal,wood,water,fire,earth}_0..4`、暴击 `crit_0..3`、刀光 `slash_0..5`、击杀墨花 `kill_ink_0..5`、冲击波 `shockwave_0..5`。
+帧名 `vfx/<名字>_<帧号>`，跟 vfx 一起打包（`$A/vfx_frames`）。meta、画布、锚点和游戏里的用法见 `docs/DESIGN.md` 第 15 节“逐帧特效”。
+
+- 叠加帧在超采样的亮度场里画（笔毛纹理的飞白、干笔断续），最后软饱和到 alpha 0.8、蓝噪声抖动；可染的 RGB 恒为白。
+- `slash` 的画布从清单的 256×128 改成 256×448（锚点在弧心 (16, 224)，外沿半径 200 像素），放大到铜钱剑的扫击半径时不糊。
+- 审图：每组一条纸色底、一条夜色底（宣纸 × 月夜底色）的帧条；`_ingame` 是 1080p 的近似游戏画面（月夜底色 + 灯笼光照池），特效按实际大小摆。
 
 ## 灯驿长卷（post/hub_scroll.py）
 
