@@ -65,10 +65,14 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
                 bg = paper_lin[(i * 37) % 300 : (i * 37) % 300 + ch, (i * 53) % 300 : (i * 53) % 300 + cw]
                 bg = np.tile(bg, (math.ceil(ch / bg.shape[0]), math.ceil(cw / bg.shape[1]), 1))[:ch, :cw]
                 light = None
+                tint = tint_of(name, spec)
                 if band == "night":
-                    light = np.broadcast_to(night, bg.shape)
                     bg = bg * night
-                strip[:, x0 : x0 + cw] = composite(bg, im, spec[3], tint_of(name, spec), light)
+                    if not (spec[3] == "normal" and spec[4]):  # 可染的普通混合小粒子（羽毛、纸屑）画在暗层之上看形状
+                        light = np.broadcast_to(night, bg.shape)
+                elif spec[3] == "normal" and spec[4]:
+                    tint = M.lin(S.INK["jiao"])  # 纸色底上白的看不见，染焦墨看剪影
+                strip[:, x0 : x0 + cw] = composite(bg, im, spec[3], tint, light)
             strips.append(np.round(M.to_srgb(np.clip(strip, 0, 1)) * 255).astype(np.uint8))
         rows.append((name, spec, imgs, sc, strips))
     width = label_w + max(r[4][0].shape[1] for r in rows) + 2 * pad
@@ -95,7 +99,7 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
 
 
 # 1080p 合成：(特效, 帧, 世界坐标 x, y（模拟坐标，y 向下）, 摆法, 想要的半径（世界单位，按 meta 的 radius_px 缩放；None 是原大）)
-# 摆法：hero 放在主角腰上（刀光、旋风的弧心），body 打在妖物身上（脚底往上约 22），ground / feet 在脚底。
+# 摆法：hero 放在主角腰上（刀光、旋风的弧心），body 打在妖物身上（脚底往上约 22），ground / feet 在脚底，over 在脚底但画在角色之上。
 # 普通混合的帧：ground / feet 画在角色之下（贴地），hero / body 画在角色之上（空中的烟、碎纸）；都受光照。
 INGAME_B1 = [
     ("slash", 2, (0.0, 12.0), "hero", 85.0),  # 铜钱剑 Lv8 的扫击半径，朝 +X（右边那只）
@@ -108,25 +112,22 @@ INGAME_B1 = [
     ("kill_ink", 5, (-322.0, -46.0), "ground", None),
     ("shockwave", 2, (-90.0, 150.0), "ground", None),
 ]
-LIFT = {"hero": 10.0, "body": 22.0, "ground": 0.0, "feet": 0.0}  # 往上抬多少世界单位
+LIFT = {"hero": 10.0, "body": 22.0, "ground": 0.0, "feet": 0.0, "over": 0.0}  # 往上抬多少世界单位；over 是脚底、但画在角色之上（烟）
 INGAME = {
     "b1": INGAME_B1,
     "b2": [
         ("evolve", 3, (0.0, 12.0), "hero", None),
         ("evolve_pillar", 2, (0.0, 12.0), "feet", None),
-        ("fire_burst", 2, (125.0, 72.0), "body", None),
-        ("fire_burst", 5, (-238.0, 58.0), "body", None),
-        ("fire_burst_smoke", 0, (-238.0, 58.0), "body", None),
+        ("fire_burst", 2, (125.0, 72.0), "feet", 56.0),  # 孔明灯 Lv6–8 的爆燃半径
+        ("fire_burst", 5, (-238.0, 58.0), "feet", 46.0),  # 火的死亡爆炸
+        ("fire_burst_smoke", 0, (-238.0, 58.0), "over", 46.0),
         ("ice_shatter", 2, (-168.0, -100.0), "body", None),
         ("ice_shatter", 4, (288.0, -128.0), "body", None),
-        ("feather", 0, (250.0, 140.0), "ground", None),
-        ("feather", 1, (262.0, 118.0), "ground", None),
-        ("feather", 2, (238.0, 112.0), "ground", None),
-        ("feather", 3, (270.0, 146.0), "ground", None),
-    ],
+    ],  # 羽毛纸屑是染色的粒子，纸白在纸上看不出来，只看帧条
 }
 NOTES = {
-    "b2": "叠加帧审图染色：冰碎按建议色 #CDEBFF，火爆、进化自带颜色；羽毛纸屑染纸白 #EDE6D6、普通混合；墨烟是焦墨、普通混合",
+    "b2": "叠加帧审图染色：冰碎按建议色 #CDEBFF，火爆、进化自带颜色；墨烟是焦墨、普通混合；"
+          "羽毛纸屑（普通混合、可染）纸色底上染焦墨看剪影，夜色底上染纸白 #EDE6D6、画在暗层之上",
 }
 
 

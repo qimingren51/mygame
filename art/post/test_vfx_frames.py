@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""vfx_frames.py（逐帧特效图）的自检：纯 assert，不依赖 pytest。只有 2 倍（桌面版）。
+"""vfx_frames.py（逐帧特效图，第一批、第二批）的自检：纯 assert，不依赖 pytest。只有 2 倍（桌面版）。
 
-产物缺失或比脚本旧时先重新生成（约 1 分钟）。--regen 强制重新生成，并核对只写了 art/out/assets@2x/vfx_frames/
+产物缺失或比脚本旧时先重新生成（约 4 分钟）。--regen 强制重新生成，并核对只写了 art/out/assets@2x/vfx_frames/
 和 review@2x/vfx_frames_*，别的产物（assets/atlas、art/out/assets@2x 的其他目录）一个字节都没动。
---quick 跳过确定性检查（另画一遍逐像素比对，约 50 秒）。
+--quick 跳过确定性检查（另画一遍逐像素比对，约 4 分钟）。
 
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/test_vfx_frames.py
@@ -45,6 +45,17 @@ SPEC = {
     "kill_ink": (6, (192, 192), "normal", False),
     "shockwave": (6, (512, 320), "add", True),
 }
+# 第二批（FEEL.md 第 12 节）。火爆按 1080p 下约一比一放大到 384²（清单写 256²，见 vfx_frames.py）。
+SPEC2 = {
+    "fire_burst": (7, (384, 384), "add", False),
+    "fire_burst_smoke": (2, (384, 384), "normal", False),
+    "ice_shatter": (6, (192, 192), "add", True),
+    "feather": (4, (32, 16), "normal", True),
+    "evolve": (8, (512, 512), "add", False),
+    "evolve_pillar": (6, (128, 512), "add", False),
+}
+ALL = {**SPEC, **SPEC2}
+VARIANTS = {"feather"}  # 几种挑着用的粒子，不是动画
 PEAK8 = round(F.PEAK * 255)
 
 WRITTEN: list[Path] = []
@@ -56,9 +67,10 @@ SNAPSHOT: dict[str, tuple[int, int]] = {}
 
 def outputs() -> list[Path]:
     out = [F.OUT / "meta.json"]
-    for name, (n, *_rest) in SPEC.items():
+    for name, (n, *_rest) in ALL.items():
         out += [F.OUT / f"{name}_{i}.png" for i in range(n)]
-    out += [F.REVIEW / "vfx_frames_b1.png", F.REVIEW / "vfx_frames_b1_ingame.png"]
+    for key in F.BATCHES:
+        out += [F.REVIEW / f"vfx_frames_{key}.png", F.REVIEW / f"vfx_frames_{key}_ingame.png"]
     return out
 
 
@@ -119,11 +131,15 @@ def alpha(name: str, i: int) -> np.ndarray:
 
 
 def frames_of(name: str) -> list[int]:
-    return list(range(SPEC[name][0]))
+    return list(range(ALL[name][0]))
 
 
 def additive() -> list[str]:
-    return [n for n, s in SPEC.items() if s[2] == "add"]
+    return [n for n, s in ALL.items() if s[2] == "add"]
+
+
+def animations() -> list[str]:
+    return [n for n in ALL if n not in VARIANTS]
 
 
 def centroid(a: np.ndarray) -> tuple[float, float]:
@@ -141,36 +157,47 @@ def bbox(a: np.ndarray) -> tuple[int, int, int, int]:
 
 
 def test_spec_matches_list():
-    """生成清单和质感会话的清单一致：组名、帧数、画布、混合、可染。"""
-    assert set(F.BATCH1) == set(SPEC), f"组名不一致：{sorted(set(F.BATCH1) ^ set(SPEC))}"
-    for name, (n, size, blend, tint) in SPEC.items():
-        _, size_, _, blend_, tint_, _, _ = F.BATCH1[name]
-        assert (tuple(size_), blend_, tint_) == (size, blend, tint), f"{name}: {size_} {blend_} {tint_}"
-        assert len([k for k in meta()["files"] if k.rsplit("_", 1)[0] == name]) == n, f"{name} 帧数不是 {n}"
+    """生成清单和质感会话的清单一致：组名、帧数、画布、混合、可染（第一批、第二批分开对）。"""
+    for batch, spec in ((F.BATCH1, SPEC), (F.BATCH2, SPEC2)):
+        assert set(batch) == set(spec), f"组名不一致：{sorted(set(batch) ^ set(spec))}"
+        for name, (n, size, blend, tint) in spec.items():
+            _, size_, _, blend_, tint_, _, _ = batch[name]
+            assert (tuple(size_), blend_, tint_) == (size, blend, tint), f"{name}: {size_} {blend_} {tint_}"
+            assert len([k for k in meta()["files"] if k.rsplit("_", 1)[0] == name]) == n, f"{name} 帧数不是 {n}"
+    assert set(F.BATCHES) == {"b1", "b2"}
 
 
 def test_meta_fields():
-    """meta.json：name = vfx、4 像素 / 世界单位；每帧有尺寸、锚点、混合、可染、anim/frame/frames、fps 24、不循环；帧号一位数、从 0 连续。"""
+    """meta.json：name = vfx、4 像素 / 世界单位；每帧有尺寸、锚点、混合、可染、anim/frame/frames、fps 24、不循环；帧号一位数、从 0 连续。
+    几种挑着用的粒子（羽毛）没有 anim，写 variant / variants。火爆的墨烟写明跟着火爆的第几帧播、同缩放。"""
     m = meta()
     assert m["name"] == "vfx" and m["px_per_unit"] == 4 and m["generator"] == F.GENERATOR
-    for name, (n, size, blend, tint) in SPEC.items():
+    for name, (n, size, blend, tint) in ALL.items():
         anchors = set()
         for i in range(n):
             info = m["files"][f"{name}_{i}.png"]
             assert info["size"] == list(size) and info["blend"] == blend and info["tint"] is tint, f"{name}_{i}: {info}"
-            assert info["anim"] == name and info["frame"] == i and info["frames"] == n, f"{name}_{i} 的 anim/frame/frames 不对"
-            assert info["fps"] == 24 and info["loop"] is False and info["kind"] == "fx", f"{name}_{i}: fps {info['fps']} loop {info['loop']}"
+            if name in VARIANTS:
+                assert info["variant"] == i and info["variants"] == n and "anim" not in info, f"{name}_{i} 的 variant 不对"
+            else:
+                assert info["anim"] == name and info["frame"] == i and info["frames"] == n, f"{name}_{i} 的 anim/frame/frames 不对"
+                assert info["fps"] == 24 and info["loop"] is False, f"{name}_{i}: fps {info['fps']} loop {info['loop']}"
+            assert info["kind"] == "fx", f"{name}_{i} 的 kind"
             assert 0 <= info["anchor"][0] <= 1 and 0 <= info["anchor"][1] <= 1 and info["note"], f"{name}_{i} 锚点或说明不对"
             anchors.add(tuple(info["anchor"]))
         assert len(anchors) == 1, f"{name} 各帧锚点不一样：{anchors}"
         assert n <= 10, f"{name} 帧号要一位数"
+    fire, smoke = m["files"]["fire_burst_0.png"], m["files"]["fire_burst_smoke_0.png"]
+    assert fire["radius_px"] == F.FIRE_R and smoke["radius_px"] == F.FIRE_R and smoke["anchor"] == fire["anchor"], (fire, smoke)
+    assert smoke["follows"] == "fire_burst" and smoke["start_frame"] == 5 and smoke["hold_last"] is True, smoke
+    assert m["files"]["ice_shatter_0.png"]["tint_hint"] == "#CDEBFF" and m["files"]["feather_0.png"]["points"] == "+x"
     pngs = {p.name for p in F.OUT.glob("*.png")}
     assert pngs == set(m["files"]), f"目录里的 PNG 和 meta 对不上：{sorted(pngs ^ set(m['files']))[:6]}"
 
 
 def test_png_format():
     """PNG 是 RGBA，尺寸和 meta 一致；每帧都有内容。"""
-    for name, (n, size, *_r) in SPEC.items():
+    for name, (n, size, *_r) in ALL.items():
         for i in range(n):
             im = Image.open(F.OUT / f"{name}_{i}.png")
             assert im.mode == "RGBA" and im.size == size, f"{name}_{i}: {im.mode} {im.size}"
@@ -178,24 +205,49 @@ def test_png_format():
 
 
 def test_colors():
-    """可染的帧 RGB 恒为白；暴击是白金 #FFF3D6；墨花是焦墨 #17140F（看得见的像素都是这个颜色）。"""
-    want = {"crit": tuple(round(c * 255) for c in F.CRIT_RGB), "kill_ink": tuple(round(c * 255) for c in F.JIAO)}
+    """可染的帧 RGB 恒为白；暴击是白金 #FFF3D6；墨花、火爆的墨烟是焦墨 #17140F（看得见的像素都是这个颜色）。
+    火爆、进化自带暖色（R ≥ G ≥ B）：火爆第 0 帧的芯近白、末帧往红退；进化偏金。"""
+    jiao = tuple(round(c * 255) for c in F.JIAO)
+    want = {"crit": tuple(round(c * 255) for c in F.CRIT_RGB), "kill_ink": jiao, "fire_burst_smoke": jiao}
     assert want["crit"] == (255, 243, 214) and want["kill_ink"] == (23, 20, 15), want
-    for name, (n, _s, _b, tint) in SPEC.items():
-        c = (255, 255, 255) if tint else want[name]
+    warm = {"fire_burst", "evolve", "evolve_pillar"}
+    for name, (n, _s, _b, tint) in ALL.items():
         for i in range(n):
             px = rgba(name, i)
             vis = px[..., 3] > 0
-            assert (px[..., :3][vis] == np.array(c, np.uint8)).all(), f"{name}_{i} 的颜色不是 {c}"
+            rgb = px[..., :3][vis].astype(int)
+            if name in warm:
+                assert (rgb[:, 0] >= rgb[:, 1]).all() and (rgb[:, 1] >= rgb[:, 2]).all(), f"{name}_{i} 不是暖色"
+                continue
+            c = (255, 255, 255) if tint else want[name]
+            assert (rgb == np.array(c)).all(), f"{name}_{i} 的颜色不是 {c}"
+
+    def mean_rgb(name, i):
+        px = rgba(name, i)
+        w = px[..., 3].astype(float)
+        return (px[..., :3].astype(float) * w[..., None]).sum((0, 1)) / w.sum()
+
+    w, h = SPEC2["fire_burst"][1]
+    ax, ay = (np.array(meta()["files"]["fire_burst_0.png"]["anchor"]) * [w, h]).astype(int)
+    core = rgba("fire_burst", 0)[ay - 5 : ay + 5, ax - 5 : ax + 5, :3].reshape(-1, 3).mean(0)
+    assert core[1] > 210 and core[2] > 160, f"火爆第 0 帧的芯不够白（应接近 #FFF1C2）：{core.round()}"
+    late = mean_rgb("fire_burst", 6)
+    assert late[0] - late[2] > 120, f"火爆末帧应该退到红：{late.round()}"
+    gold = mean_rgb("evolve", 3)
+    assert gold[0] - gold[2] > 30 and gold[2] > 120, f"进化应该是淡金：{gold.round()}"
 
 
 def test_borders_and_clipping():
-    """四边一圈全透明；靠边 4 像素里只有很淡的东西（没有被画布边切掉的形状）。"""
-    for name, (n, *_r) in SPEC.items():
+    """四边一圈全透明；靠边 4 像素里只有很淡的东西（没有被画布边切掉的形状）。羽毛这种小粒子只要求四边一圈全透明。"""
+    for name, (n, *_r) in ALL.items():
         for i in range(n):
             a = alpha(name, i)
             assert a[0].max() == a[-1].max() == a[:, 0].max() == a[:, -1].max() == 0, f"{name}_{i} 四边不透明"
+            if name in VARIANTS:
+                continue
             band = np.concatenate([a[:4].ravel(), a[-4:].ravel(), a[:, :4].ravel(), a[:, -4:].ravel()])
+            if name == "evolve_pillar":  # 光柱的根贴着底边，底边那几行不算
+                band = np.concatenate([a[:4].ravel(), a[:-8, :4].ravel(), a[:-8, -4:].ravel()])
             assert band.max() <= 16, f"{name}_{i} 靠边还有 alpha {band.max():.0f}，形状被画布切了"
 
 
@@ -210,11 +262,13 @@ def test_peak_alpha():
         assert max(peaks) >= PEAK8 - 12, f"{name} 最亮只有 {max(peaks):.0f}，不到 0.8 附近"
     peaks = [alpha("kill_ink", i).max() for i in frames_of("kill_ink")]
     assert min(peaks[1:]) >= 225, f"墨花不够浓：{peaks}"
+    smoke = [alpha("fire_burst_smoke", i).max() for i in frames_of("fire_burst_smoke")]
+    assert smoke[0] >= 150 and smoke[1] < smoke[0], f"墨烟：第 0 帧要浓、第 1 帧淡一些：{smoke}"
 
 
 def test_frames_change():
-    """相邻两帧不一样（是动画，不是重复帧）。"""
-    for name in SPEC:
+    """相邻两帧不一样（是动画，不是重复帧）；几种挑着用的粒子互相也不一样。"""
+    for name in ALL:
         for i in frames_of(name)[1:]:
             d = np.abs(alpha(name, i) - alpha(name, i - 1)).mean()
             assert d > 0.05, f"{name}_{i - 1} 和 {name}_{i} 几乎一样（平均差 {d:.3f}）"
@@ -321,6 +375,85 @@ def test_groups_distinct():
             assert d > 2.0, f"{a} 和 {b} 太像了（平均差 {d:.2f}）"
 
 
+# ---------------------------------------------------------------- 第二批
+
+
+def test_fire_burst_rises():
+    """火爆：第 0 帧在爆点（锚点）一闪；之后火往上窜（质心一路往上）；末两帧芯空了（锚点附近比第 2 帧淡得多）；
+    墨烟在火舌尖上方（比爆点高 radius_px 的六成以上）。"""
+    w, h = SPEC2["fire_burst"][1]
+    ax, ay = (np.array(meta()["files"]["fire_burst_0.png"]["anchor"]) * [w, h]).tolist()
+    cx0, cy0 = centroid(alpha("fire_burst", 0))
+    assert math.hypot(cx0 - ax, cy0 - ay) <= 12, f"火爆第 0 帧不在爆点：({cx0:.0f}, {cy0:.0f}) vs ({ax:.0f}, {ay:.0f})"
+    ys = [centroid(alpha("fire_burst", i))[1] for i in frames_of("fire_burst")]
+    assert ys[1] < ys[0] and ys[3] < ys[1] - 8 and ys[6] < ys[1] - 10, f"火应该往上窜：质心 y {[round(y) for y in ys]}"
+    hole = [alpha("fire_burst", i)[int(ay) - 6 : int(ay) + 6, int(ax) - 6 : int(ax) + 6].mean() for i in (2, 5, 6)]
+    assert hole[1] < 0.3 * hole[0] and hole[2] < 0.3 * hole[0], f"末两帧芯应该空了：{[round(v) for v in hole]}"
+    for i in frames_of("fire_burst_smoke"):
+        _, sy = centroid(alpha("fire_burst_smoke", i))
+        assert sy < ay - 0.6 * F.FIRE_R, f"墨烟 {i} 不在火舌尖上方：质心 y {sy:.0f}，爆点 {ay:.0f}"
+
+
+def test_ice_shards_fly_out():
+    """冰碎：在中心裂开，碎片一帧比一帧往外飞（亮度按半径加权的平均半径变大），不出画布。"""
+    w, h = SPEC2["ice_shatter"][1]
+    ys, xs = np.mgrid[0:h, 0:w] + 0.5
+    r = np.hypot(xs - w / 2, ys - h / 2)
+    mean_r = [float((alpha("ice_shatter", i) * r).sum() / alpha("ice_shatter", i).sum()) for i in frames_of("ice_shatter")]
+    assert mean_r[0] < 30 and all(a < b for a, b in zip(mean_r[1:5], mean_r[2:5])), f"碎片应该往外飞：平均半径 {[round(v) for v in mean_r]}"
+    for i in frames_of("ice_shatter"):
+        cx, cy = centroid(alpha("ice_shatter", i))
+        assert math.hypot(cx - w / 2, cy - h / 2) <= 8, f"ice_shatter_{i} 偏心"
+
+
+def test_feathers_are_particles():
+    """羽毛纸屑：4 种互不相同，都是横着的长条（尖 / 长边朝 +X），在画布中间；小图不抖动（看得见的 alpha 没有孤立的噪点）。"""
+    for i in frames_of("feather"):
+        a = alpha("feather", i)
+        x0, y0, x1, y1 = bbox(a > 40)
+        assert (x1 - x0 + 1) >= 2.2 * (y1 - y0 + 1), f"feather_{i} 不够长：{x1 - x0 + 1}×{y1 - y0 + 1}"
+        cx, cy = centroid(a)
+        assert abs(cx - 16) <= 3 and abs(cy - 8) <= 2, f"feather_{i} 不在中间：({cx:.1f}, {cy:.1f})"
+        lone = (a > 0) & (np.roll(a, 1, 0) == 0) & (np.roll(a, -1, 0) == 0) & (np.roll(a, 1, 1) == 0) & (np.roll(a, -1, 1) == 0)
+        assert not lone.any(), f"feather_{i} 有孤立的噪点"
+    for i in (0, 1):  # 羽毛比纸片细：最宽处不到 8 像素
+        a = alpha("feather", i)
+        assert (a > 60).sum(0).max() <= 8, f"feather_{i} 太宽，像叶子"
+
+
+def test_evolve_radial():
+    """进化爆发：在画布中心炸开（每帧质心离中心不超过 10 像素），0–3 帧越开越大、之后不收回，末两帧散成光点、淡到一成五以下。"""
+    w, h = SPEC2["evolve"][1]
+    ys, xs = np.mgrid[0:h, 0:w] + 0.5
+    r = np.hypot(xs - w / 2, ys - h / 2)
+    rms = []
+    for i in frames_of("evolve"):
+        a = alpha("evolve", i)
+        cx, cy = centroid(a)
+        assert math.hypot(cx - w / 2, cy - h / 2) <= 10, f"evolve_{i} 偏心：({cx:.0f}, {cy:.0f})"
+        rms.append(float(np.sqrt((a * r * r).sum() / a.sum())))
+    assert all(a < b for a, b in zip(rms[:4], rms[1:4])) and min(rms[4:]) >= 0.9 * rms[3], f"进化应该开到第 3 帧、之后不收回：{[round(v) for v in rms]}"
+    sums = [alpha("evolve", i).sum() for i in frames_of("evolve")]
+    assert sums[-1] <= 0.15 * max(sums), f"进化末帧还有 {sums[-1] / max(sums):.2f}"
+
+
+def test_pillar_from_ground():
+    """进化光柱：锚点在底边中点；第 0 帧只到三分之一高，1–2 帧冲到顶；整根光柱在中线附近；之后从下往上淡（质心一路往上）。"""
+    w, h = SPEC2["evolve_pillar"][1]
+    assert meta()["files"]["evolve_pillar_0.png"]["anchor"] == [0.5, 1.0]
+
+    def top(i):
+        rows = np.nonzero(alpha("evolve_pillar", i).max(1) > 0.25 * PEAK8)[0]
+        return int(rows.min())
+
+    assert top(0) > h * 0.55 and top(2) < h * 0.1, f"光柱高度：第 0 帧顶到 {top(0)}，第 2 帧顶到 {top(2)}"
+    for i in frames_of("evolve_pillar"):
+        a = alpha("evolve_pillar", i)
+        assert a[:, w // 2 - 36 : w // 2 + 36].sum() >= 0.85 * a.sum(), f"evolve_pillar_{i} 太散"
+    ys = [centroid(alpha("evolve_pillar", i))[1] for i in frames_of("evolve_pillar")]
+    assert all(a > b for a, b in zip(ys, ys[1:])), f"光柱应该从下往上：质心 y {[round(y) for y in ys]}"
+
+
 # ---------------------------------------------------------------- 其他
 
 
@@ -328,6 +461,9 @@ def test_review_images():
     sheet = Image.open(F.REVIEW / "vfx_frames_b1.png")
     assert sheet.width >= 2000 and sheet.height >= 3000, f"帧条审图尺寸 {sheet.size}"
     assert Image.open(F.REVIEW / "vfx_frames_b1_ingame.png").size == (1920, 1080)
+    sheet = Image.open(F.REVIEW / "vfx_frames_b2.png")
+    assert sheet.width >= 2000 and sheet.height >= 2000, f"第二批帧条审图尺寸 {sheet.size}"
+    assert Image.open(F.REVIEW / "vfx_frames_b2_ingame.png").size == (1920, 1080)
 
 
 def test_deterministic():
@@ -335,10 +471,10 @@ def test_deterministic():
     if "--quick" in sys.argv:
         print("      （--quick：跳过）")
         return
-    frames = F.build(F.BATCH1)
-    for name, imgs in frames.items():
-        for i, img in enumerate(imgs):
-            assert (np.asarray(img) == rgba(name, i)).all(), f"{name}_{i} 和磁盘上的不一样"
+    for batch in F.BATCHES.values():
+        for name, imgs in F.build(batch).items():
+            for i, img in enumerate(imgs):
+                assert (np.asarray(img) == rgba(name, i)).all(), f"{name}_{i} 和磁盘上的不一样"
 
 
 def test_writes_only_own_outputs():
@@ -372,7 +508,13 @@ def test_atlas_packed():
     if "vfx/hit_metal_0" not in frames:
         print("      （assets/atlas 里还没有逐帧特效，跳过）")
         return
-    for name, (n, size, blend, tint) in SPEC.items():
+    packed = dict(SPEC)
+    if "vfx/fire_burst_0" in frames:
+        packed.update(SPEC2)
+    else:
+        print("      （图集里还没有第二批，只查第一批）")
+    for name, (n, size, blend, tint) in packed.items():
+        seq = ("variant", "variants") if name in VARIANTS else ("anim", "frame", "frames", "fps", "loop")
         for i in range(n):
             key = f"vfx/{name}_{i}"
             assert key in frames, f"图集里缺 {key}"
@@ -380,7 +522,7 @@ def test_atlas_packed():
             src = meta()["files"][f"{name}_{i}.png"]
             assert (f["sourceSize"]["w"], f["sourceSize"]["h"]) == size, f"{key} 原画布 {f['sourceSize']}"
             assert [f["anchor"]["x"], f["anchor"]["y"]] == src["anchor"], f"{key} 锚点 {f['anchor']}"
-            for k in ("blend", "tint", "anim", "frame", "frames", "fps", "loop"):
+            for k in ("blend", "tint") + seq:
                 assert li[k] == src[k], f"{key} 的 {k}：图集 {li[k]}，产物 {src[k]}"
             r, s = f["frame"], f["spriteSourceSize"]
             can = np.zeros((size[1], size[0], 4), np.uint8)

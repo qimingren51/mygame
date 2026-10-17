@@ -11,6 +11,12 @@
 第一批：hit_metal / hit_wood / hit_water / hit_fire / hit_earth（各 5 帧 128²）、crit（4 帧 192²，白金 #FFF3D6，不染）、
 slash（6 帧，月牙刀光，弧心是锚点，扇形朝 +X 张开 120°）、kill_ink（6 帧 192²，焦墨，普通混合，末帧留着）、
 shockwave（6 帧 512×320，贴地亮环，已压扁）。
+第二批：fire_burst（7 帧 384²，自带火色，叠加）+ fire_burst_smoke（2 帧，墨烟，普通混合，接在火爆第 5 帧上）、
+ice_shatter（6 帧 192²，可染）、feather（4 种 32×16 的粒子，不是动画，普通混合、可染）、
+evolve（8 帧 512²，金 #FFE7A8）、evolve_pillar（6 帧 128×512，锚点在底边中点）。
+火爆尾巴的“墨烟”在叠加帧里画不出来（叠加只能加亮），所以单独出一组普通混合的墨烟帧，和火爆同画布、同锚点。
+火爆按爆燃半径缩放（火的死亡爆炸 46–69、孔明灯 44–64），清单的 256² 在 1080p 下要放大一倍半；按 1080p 下约一比一改成 384²，
+radius_px 144（56 世界单位一比一）。
 
 slash 的画布：清单写的 256×128 只放得下半径约 70 像素的 120° 扇形，放大了会糊；这里改成 256×448、弧心在左边 (16, 224)、
 外沿半径 200 像素，meta 照扇形预警 weapons/sector 的写法：points: "+x"、radius_px（外沿半径）、angle_deg。
@@ -707,6 +713,424 @@ def make_shockwave() -> list[Image.Image]:
     return out
 
 
+# ============================================================== 第二批：火爆（自带颜色）和它的墨烟
+
+FIRE = [(0.0, "#C2361E"), (0.45, "#FF8A3D"), (0.78, "#FFC27A"), (1.0, "#FFF1C2")]  # 热度 0 → 1：边 → 芯
+FIRE_SIZE = 384  # 清单写 256²；按 1080p 下约一比一放大到 384²（爆燃半径 44–69 在 1080p 下是 113–177 像素）
+FS = FIRE_SIZE / 256  # 下面的像素量按 256² 的画布写，乘 FS
+FIRE_C = (192.0, 240.0)  # 爆点（锚点）：偏下，火往上窜、墨烟往上飘，上面留的地方多
+FIRE_R = 144  # 火团加火舌的有效半径（像素）= 爆燃半径；1080p 下 56 世界单位一比一
+FIRE_LEN = [0.3, 0.75, 1.0, 1.04, 1.0, 0.9, 0.76]  # 火舌长度（× L）
+FIRE_WID = [1.0, 1.0, 0.95, 0.8, 0.6, 0.42, 0.28]  # 火舌粗细
+FIRE_RISE = [FS * v for v in (0.0, 2.0, 5.0, 9.0, 14.0, 19.0, 24.0)]  # 火舌整体往上飘（像素）
+
+
+def fire_tongues() -> list[dict]:
+    """火爆的大火舌（火爆和墨烟共用）：八条朝上半圈散开、两条短的往下两边。"""
+    rng = np.random.default_rng(9921)
+    out = []
+    for k in range(8):
+        phi = math.radians(-90 + (k - 3.5) * 34 + rng.uniform(-8, 8))
+        out.append(dict(phi=phi, L=FS * rng.uniform(72, 90), Wd=FS * rng.uniform(9.0, 12.5), curl=float(rng.choice([-1.0, 1.0]) * rng.uniform(0.5, 1.0)),
+                        seed=int(rng.integers(1 << 30))))
+    for k in range(2):
+        phi = math.radians(90 + (1 if k else -1) * rng.uniform(35, 55))
+        out.append(dict(phi=phi, L=FS * rng.uniform(40, 48), Wd=FS * rng.uniform(7.0, 9.0), curl=0.6 * (1 if k else -1), seed=int(rng.integers(1 << 30))))
+    return out
+
+
+def tongue_points(tg: dict, i: int, cx: float, cy: float) -> np.ndarray:
+    """第 i 帧这条火舌的中线：从爆点往外冲，再往上卷。"""
+    L = tg["L"] * FIRE_LEN[i]
+    ux, uy = math.cos(tg["phi"]), math.sin(tg["phi"])
+    b = np.array([cx + 8 * FS * ux, cy + 8 * FS * uy - FIRE_RISE[i]])
+    up = np.array([0.0, -1.0])
+    side = np.array([-uy, ux]) * tg["curl"]
+    ctrl = [b, b + np.array([ux, uy]) * L * 0.45, b + np.array([ux, uy]) * L * 0.6 + up * L * 0.42, b + up * L * 0.8 + side * L * 0.32]
+    return V.bezier(ctrl, 90)
+
+
+def make_fire_burst() -> list[Image.Image]:
+    """火爆：第 0 帧爆点一团烧白的闪；1–3 帧炸开成一团火——十八条短火苗从芯里往四面舔出去（尖往上翘；朝下的短、钝，
+    像火团底下鼓出来的一圈），八条大火舌冲得更远、再往上卷（钉头鼠尾、尖上飞白），火星往上飘；4–6 帧芯先空、
+    火苗往外散成一圈，火舌越卷越细往上飘。颜色按热度：芯 #FFF1C2 → #FF8A3D → 边和火舌尖 #C2361E。叠加，自带颜色，不染。
+    尾巴两帧火舌尖上的墨烟是普通混合，单独在 fire_burst_smoke_0..1。"""
+    w = h = FIRE_SIZE
+    cx, cy = FIRE_C
+    rng = np.random.default_rng(9920)
+    tongues = fire_tongues()
+    licks = [(2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 18, rng.uniform(1.0, 1.35), FS * rng.uniform(6.0, 9.0), int(rng.integers(1 << 30))) for k in range(18)]
+    embers = [(rng.uniform(-1, 1), FS * rng.uniform(50, 100), FS * rng.uniform(0.9, 1.5), rng.uniform(0, 6)) for _ in range(12)]
+    Rb = [FS * v for v in (20.0, 38.0, 50.0, 56.0, 58.0, 56.0, 50.0)]  # 火团（短火苗）的半径
+    R0 = [FS * v for v in (3.0, 6.0, 9.0, 13.0, 19.0, 24.0, 28.0)]  # 短火苗的根（芯空出来）
+    RC = [FS * v for v in (14.0, 22.0, 26.0, 26.0, 24.0, 1.0, 1.0)]  # 芯的半径
+    lick_env = [0.9, 1.0, 1.0, 0.9, 0.7, 0.48, 0.26]
+    core = [1.0, 0.95, 0.8, 0.5, 0.2, 0.0, 0.0]
+    cool = [0.0, 0.04, 0.1, 0.2, 0.32, 0.45, 0.58]  # 越往后越冷（颜色往边上的红退）
+    out = []
+    for i in range(7):
+        X, Y = grid(w, h)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        r = np.hypot(X - cx, Y - cy)
+        if core[i] > 0:  # 芯：一团烧白，碎成放射的细纹
+            spokes = np.clip(0.55 + V.angular_noise(np.random.default_rng(9923), np.arctan2(Y - cy, X - cx), harmonics=(7, 11, 13, 17, 23), amp=1.4), 0, 1)
+            acc.add(full, core[i] * np.exp(-((r / RC[i]) ** 2)) * (0.6 + 0.4 * spokes), 1.0 - cool[i])
+        for ang, lf, wd, sd in licks:  # 短火苗：从芯里往外舔，尖往上翘；朝下的短、钝
+            down = max(0.0, math.sin(ang))
+            L = Rb[i] * lf * (1.0 - 0.45 * down)
+            r0 = R0[i]
+            if L <= r0 + 4 * FS:
+                continue
+            u = np.array([math.cos(ang), math.sin(ang)])
+            b = np.array([cx, cy]) + u * r0
+            tip = np.array([cx, cy]) + u * L + np.array([0.0, -(0.28 + 0.3 * down) * L - FIRE_RISE[i] * 0.5])
+            pts = V.bezier([b, b + (tip - b) * 0.5 + u * 4 * FS, tip], 60)
+            tt = np.linspace(0, 1, len(pts))
+            hw = wd * (1.0 - 0.25 * i / 6) * np.sin(np.pi * np.clip(0.15 + 0.85 * tt, 0, 1)) ** 0.5 * (1 - tt) ** (0.7 - 0.35 * down) + 0.15
+            lo, hi = pts.min(0) - wd * 2.5, pts.max(0) + wd * 2.5
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            cov, _ = V.brush_stroke(X[sl], Y[sl], pts, hw, np.random.default_rng(sd + i // 2), dry=0.2 + 0.08 * i, dry_start=0.5, ss=SS)
+            heat = np.clip(0.95 - 0.7 * np.clip((r[sl] - r0) / max(L - r0, 1.0), 0, 1) - cool[i], 0, 1)
+            acc.add(sl, lick_env[i] * cov, heat)
+        for tg in tongues:  # 大火舌
+            if i == 0:
+                continue
+            pts = tongue_points(tg, i, cx, cy)
+            tt = np.linspace(0, 1, len(pts))
+            hw = tg["Wd"] * FIRE_WID[i] * (0.6 + 0.4 * np.sin(np.pi * np.clip(tt / 0.3, 0, 1) * 0.5)) * (1 - tt) ** 0.8
+            lo, hi = pts.min(0) - tg["Wd"] * 2.5, pts.max(0) + tg["Wd"] * 2.5
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            cov, _ = V.brush_stroke(X[sl], Y[sl], pts, np.maximum(hw, 0.05), np.random.default_rng(tg["seed"]), dry=0.3 + 0.08 * i, dry_start=0.45, ss=SS)
+            dist = np.hypot(X[sl] - pts[0][0], Y[sl] - pts[0][1]) / max(tg["L"] * FIRE_LEN[i], 1.0)
+            acc.add(sl, min(1.0, 1.15 - 0.12 * i) * cov, np.clip(0.85 - 0.75 * dist - cool[i] * 0.6, 0, 1))
+        for x0, d1, sz, ph in embers:
+            if i < 2:
+                continue
+            t = (i - 1) / 5
+            px = cx + x0 * 70 * FS + 6 * FS * math.sin(4 * t + ph)
+            py = cy - 20 * FS - d1 * ease_out(t, 1.3)
+            sl = acc.window(px - 4 * sz, py - 4 * sz, px + 4 * sz, py + 6 * FS + 4 * sz)
+            acc.add(sl, 0.85 * (1 - 0.8 * t) * streak(X[sl], Y[sl], px, py + 6 * FS, px, py, sz), 0.75 - 0.4 * t)
+        out.append(frame_color(acc.a, acc.heat(), 9925 + i, FIRE))
+    return out
+
+
+def make_fire_smoke() -> list[Image.Image]:
+    """火爆最后两帧（fire_burst 的第 5、6 帧）火舌尖上冒的墨烟：六缕焦墨从火舌尖往上 S 形地卷，起笔浓、往上变细变干，
+    第二帧更高、更散、更淡。普通混合，焦墨，不染；和 fire_burst 同画布、同锚点，从它的第 5 帧开始一起播。"""
+    w = h = FIRE_SIZE
+    cx, cy = FIRE_C
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(9940)
+    tongues = fire_tongues()[1:7]  # 两边最外的两条不冒烟，免得一圈太满
+    wisps = [(FS * rng.uniform(26, 36), float(rng.choice([-1.0, 1.0])), FS * rng.uniform(1.8, 2.6), int(rng.integers(1 << 30))) for _ in tongues]
+    out = []
+    for j, i in enumerate((5, 6)):
+        a = np.zeros_like(X)
+        for tg, (L, turn, wd, sd) in zip(tongues, wisps):
+            tip = tongue_points(tg, i, cx, cy)[-1]
+            rise = FS * (3.0 + 9.0 * j)
+            ctrl = [tip + np.array([0.0, -rise * 0.4]), tip + np.array([turn * L * 0.3, -L * 0.35 - rise]),
+                    tip + np.array([-turn * L * 0.25, -L * 0.7 - rise]), tip + np.array([turn * L * 0.1, -L - rise])]
+            pts = V.bezier(ctrl, 90)
+            tt = np.linspace(0, 1, len(pts))
+            hw = wd * (1.0 + 0.4 * j) * (1.0 - 0.6 * tt) * np.sin(np.clip(tt * 3.0, 0, 1) * np.pi / 2) ** 0.6 + 0.12
+            cov = V.brush_stroke(X, Y, pts, hw, np.random.default_rng(sd + j), dry=0.4 + 0.2 * j, dry_start=0.3 - 0.1 * j, ss=SS)[0]
+            a = np.maximum(a, [0.72, 0.5][j] * cov)
+        out.append(frame_ink(a, 9945 + j))
+    return out
+
+
+# ============================================================== 第二批：冰碎
+
+
+def make_ice_shatter() -> list[Image.Image]:
+    """冰碎：第 0 帧一块六角冰晶，边亮、里面几道裂纹闪亮；第 1 帧裂开（碎片刚分开一条缝，裂缝最亮）；
+    2–5 帧七片尖碎片往外飞散、打转、变小变淡，碎片边亮、里面淡，后面拖一点冰尘。白色可染（建议 #CDEBFF）。"""
+    w = h = 192
+    cx = cy = 96.0
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(9931)
+    Rb = 30.0
+    hexv = np.array([(cx + Rb * 0.86 * math.cos(math.radians(60 * k + 30)), cy + Rb * math.sin(math.radians(60 * k + 30))) for k in range(6)])
+    p0 = np.array([cx + rng.uniform(-4, 4), cy + rng.uniform(-4, 4)])
+    # 沿六角形的周长挑 7 个点，和里面的 p0 连起来，切成 7 片扇形的尖碎片
+    seglen = np.hypot(*(np.roll(hexv, -1, 0) - hexv).T)
+    cum = np.concatenate([[0.0], np.cumsum(seglen)])
+    per = cum[-1]
+    cuts = np.sort((np.arange(7) + rng.uniform(-0.3, 0.3, 7)) / 7 * per + rng.uniform(0, per))
+    cuts = np.mod(cuts, per)
+    cuts.sort()
+
+    def at(sv):
+        k = int(np.searchsorted(cum, sv, side="right") - 1) % 6
+        f = (sv - cum[k]) / seglen[k]
+        return hexv[k] + f * (hexv[(k + 1) % 6] - hexv[k]), k
+
+    shards = []
+    for k in range(7):
+        s0, s1 = cuts[k], cuts[(k + 1) % 7] + (per if k == 6 else 0.0)
+        pa, ka = at(s0)
+        pb, kb = at(s1 % per)
+        poly = [p0, pa]
+        j = ka
+        steps = int(round((s1 - s0) / per * 6)) + 2
+        for _ in range(steps):  # 中间经过的六角形顶点
+            j = (j + 1) % 6
+            vs = cum[j] if cum[j] >= s0 else cum[j] + per
+            if s0 < vs < s1:
+                poly.append(hexv[j])
+        poly.append(pb)
+        poly = np.array(poly)
+        c = poly.mean(0)
+        d = c - p0
+        d = d / (np.linalg.norm(d) + 1e-9)
+        shards.append(dict(poly=poly, c=c, d=d, speed=rng.uniform(48, 66), spin=rng.uniform(-1.4, 1.4)))
+    dust = [(rng.uniform(0, 2 * math.pi), rng.uniform(20, 62), rng.uniform(0.6, 1.1)) for _ in range(16)]
+    tex = W.ptex(rng, ns=12, nt=512, along=9.0, across=0.8)
+    off = [0.0, 3.5, 16.0, 30.0, 40.0, 46.0]
+    env = [0.95, 1.0, 0.92, 0.72, 0.48, 0.24]
+    out = []
+    for i in range(6):
+        t = i / 5
+        a = []
+        for sh in shards:
+            ang = sh["spin"] * ease_out(t, 1.6) if i >= 2 else 0.0
+            k = off[i] * sh["speed"] / 57.0
+            ca, sa = math.cos(ang), math.sin(ang)
+            sc_ = 1.0 - 0.18 * t
+            rel = (sh["poly"] - sh["c"]) * sc_
+            rot = np.stack([rel[:, 0] * ca - rel[:, 1] * sa, rel[:, 0] * sa + rel[:, 1] * ca], -1)
+            poly = rot + sh["c"] + sh["d"] * k + np.array([0.0, 6.0 * t * t])
+            cov, dd = poly_cover(X, Y, poly)
+            rim = smoothstep(1.5, 0.0, np.abs(dd)) * (dd < 0.8)
+            a.append(env[i] * np.clip(0.3 * cov + 0.9 * rim, 0, 1))
+        if i <= 1:  # 裂纹闪亮、冰芯一亮
+            a.append([0.55, 0.85][i] * np.exp(-((np.hypot(X - p0[0], Y - p0[1]) / [7.0, 10.0][i]) ** 2)))
+        if 1 <= i <= 3:  # 一圈碎霜往外扩
+            R = [0, 36, 58, 76][i]
+            q = (np.hypot(X - cx, Y - cy) - R) / 3.0
+            a.append([0, 0.5, 0.36, 0.18][i] * np.exp(-(q**2)) * dry(tex, np.clip(q / 2, -1, 1), (np.arctan2(Y - cy, X - cx) / (2 * math.pi)) % 1, 0.45))
+        for ang, d1, sz in dust:
+            if i == 0:
+                continue
+            d = 8 + d1 * ease_out(t, 1.5)
+            x1, y1 = cx + d * math.cos(ang), cy + d * math.sin(ang) + 5 * t * t
+            x0, y0 = cx + (d - 6) * math.cos(ang), cy + (d - 6) * math.sin(ang)
+            a.append(0.7 * (1 - 0.8 * t) * streak(X, Y, x0, y0, x1, y1, sz))
+        out.append(frame_white(soft_union(*a), 9935 + i))
+    return out
+
+
+# ============================================================== 第二批：羽毛、纸屑粒子（4 种，不是动画）
+
+FEATHER_W, FEATHER_H = 32, 16
+
+
+def make_feather() -> list[Image.Image]:
+    """散开用的小粒子（4 种，不是动画）：0、1 是羽毛（羽轴一线浅，羽片两边不对称、有一两道开叉，根上一小截光羽管），
+    2 是对折过的纸片（折痕一线浅，折过去的一半淡一点），3 是撕下的纸屑（一边毛边）。尖 / 长边朝 +X，锚点居中；
+    白色可染（建议纸白 #EDE6D6），浓淡在 alpha 里；小图不抖动，边缘干净（同 vfx/bamboo_leaf）。"""
+    ss = 8
+    X, Y = V.grid(FEATHER_H, FEATHER_W, ss)
+    out = []
+    rng = np.random.default_rng(9951)
+
+    def finish(a):
+        a = V.downsample(np.clip(a, 0, 1), ss)
+        a[0, :] = a[-1, :] = a[:, 0] = a[:, -1] = 0.0
+        a8 = np.clip(np.round(a * 255.0), 0, 255).astype(np.uint8)
+        return Image.fromarray(np.dstack([np.full(a8.shape + (3,), 255, np.uint8), a8]), "RGBA")
+
+    # 0、1：羽毛。细长（长宽比约 5），羽轴微弯；羽片从根上很快鼓起、到尖收成圆头，边上一排羽枝的细锯齿，
+    # 有一两道斜的开叉；根上一小撮绒羽（淡、毛），再往下一截光的羽管
+    for k, (L, wu, wl, bend, splits) in enumerate(((28.0, 3.4, 2.5, 0.9, (0.6,)), (26.0, 3.0, 2.2, -1.1, (0.42, 0.74)))):
+        x0 = (FEATHER_W - L) / 2
+        s = (X - x0) / L  # 沿羽轴 0（根）..1（尖）
+        sc = np.clip(s, 0, 1)
+        yc = FEATHER_H / 2 + bend * (4 * (sc - 0.5) ** 2 - 0.5) + 0.5 * k
+        perp = Y - yc
+        vs = np.clip((s - 0.14) / 0.86, 0, 1)  # 羽片段 0..1
+        rise = smoothstep(0.0, 0.22, vs) ** 0.6
+        tip = np.sqrt(np.clip(1 - (np.clip(vs - 0.3, 0, None) / 0.7) ** 2.2, 0, 1))  # 尖上收成圆头
+        barb = s * L - np.abs(perp) * 1.2  # 羽枝从羽轴斜着往尖那边长
+        serr = 1 - 0.16 * np.clip(np.cos(2 * np.pi * barb / 2.0), 0, 1)  # 边上的细锯齿
+        prof = np.where(perp < 0, wu, wl) * rise * tip * serr
+        vane = smoothstep(prof + 0.2, prof - 0.2, np.abs(perp)) * (s > 0.14) * (s < 1.0)
+        for sp_ in splits:  # 开叉：顺着羽枝方向的一道空，只在外半边
+            gap = np.abs(barb - (sp_ * L + 1.5)) < 0.4
+            vane = vane * (1 - gap * (np.abs(perp) > 0.7))
+        down = smoothstep(0.32, 0.12, vs) * (s > 0.14)  # 根上的绒羽：淡、毛
+        fuzz = 0.55 + 0.45 * (V.fft_blur(rng.standard_normal(X.shape), (0.6 * ss, 0.25 * ss)) > 0)
+        vane = vane * (1 - down * (1 - 0.6 * fuzz))
+        shaft = smoothstep(0.55, 0.25, np.abs(perp)) * (s > 0.02) * (s < 0.97)
+        quill = shaft * (s < 0.16)
+        stripes = 0.5 + 0.5 * np.cos(2 * np.pi * barb / 1.4)
+        a = np.maximum(vane * (0.82 + 0.1 * stripes - 0.12 * sc), 0.95 * quill)
+        a = a - 0.28 * smoothstep(0.35, 0.1, np.abs(perp)) * (s > 0.16) * (s < 0.93)  # 羽轴浅一线
+        out.append(finish(a))
+    # 2：对折过的纸片（四边形，斜的折痕）
+    poly = np.array([(4.0, 5.0), (27.5, 3.2), (29.0, 11.0), (5.5, 12.8)])
+    cov, dd = poly_cover(X, Y, poly, aa=0.15)
+    crease = np.abs((X - 15.0) * 0.55 - (Y - 8.0) * 1.0)
+    folded = (X - 15.0) * 0.55 - (Y - 8.0) > 0
+    a = cov * np.where(folded, 0.72, 0.92) - 0.35 * cov * smoothstep(0.5, 0.15, crease)
+    out.append(finish(a))
+    # 3：撕下的纸屑（右边是毛边）
+    xs = np.linspace(0, FEATHER_H, 24)
+    jag = 25.0 + rng.uniform(-1.6, 1.6, len(xs)) + 1.2 * np.sin(xs * 1.3)
+    right = np.interp(Y, xs, jag)
+    body = smoothstep(4.6, 5.0, X) * smoothstep(right + 0.3, right - 0.3, X) * smoothstep(3.6, 4.0, Y) * smoothstep(12.6, 12.2, Y)
+    # 尖朝 +X：上下两条边往右收一点
+    taper = smoothstep(0.0, 1.0, (12.4 - Y) - (X - 5) * 0.08) * smoothstep(0.0, 1.0, (Y - 3.8) - (X - 5) * 0.06)
+    fibre = smoothstep(right - 2.2, right, X) * (0.4 + 0.6 * (V.fft_blur(rng.standard_normal(X.shape), (0.3 * ss, 2.0 * ss)) > 0))
+    a = body * taper * (0.9 - 0.45 * fibre)
+    out.append(finish(a))
+    return out
+
+
+# ============================================================== 第二批：进化爆发（日轮 / 莲花）与光柱
+
+GOLD = [(0.0, "#E3B05A"), (0.55, "#FFE7A8"), (1.0, "#FFF8E8")]  # 进化：外边偏暖、主色 #FFE7A8、芯偏白
+EVOLVE_SIZE = 512
+
+
+def make_evolve() -> list[Image.Image]:
+    """进化爆发：中心一朵放射状的光，像莲花也像日轮——八片尖瓣从里往外开（瓣边亮、瓣心淡），里圈八片小瓣错开；
+    九道笔锋光芒从中心射出去（起笔饱满、收笔尖、带飞白），一圈短的日芒；中心一点烧白。
+    0–3 帧开花、光芒伸长，4–5 帧开到最大、往外散、变干，末两帧光芒断成一截截、散成光点往外飘。叠加，自带金色 #FFE7A8，不染。"""
+    size = EVOLVE_SIZE
+    c = size / 2
+    X, Y = grid(size, size)
+    rng = np.random.default_rng(9961)
+    tex = W.ptex(rng, ns=24, nt=1024, along=24.0, across=0.6)
+    petal_len = [40.0, 92.0, 122.0, 136.0, 142.0, 144.0, 140.0, 132.0]
+    petal_env = [0.9, 1.0, 1.0, 0.95, 0.78, 0.55, 0.3, 0.12]
+    ray_len = [76.0, 150.0, 192.0, 210.0, 216.0, 216.0, 212.0, 206.0]
+    ray_w = [9.0, 10.0, 9.5, 8.0, 6.5, 5.0, 3.6, 2.6]
+    ray_env = [0.9, 1.0, 1.0, 0.92, 0.75, 0.55, 0.35, 0.18]
+    rays = [(math.radians(20 + 40 * k + rng.uniform(-6, 6)), rng.uniform(0.85, 1.0), rng.uniform(-0.06, 0.06), int(rng.integers(1 << 30))) for k in range(9)]
+    motes = [(rng.uniform(0, 2 * math.pi), rng.uniform(60, 200), rng.uniform(1.0, 2.2), rng.uniform(16, 44)) for _ in range(90)]
+    out = []
+    for i in range(8):
+        t = i / 7
+        acc = Acc(X, Y)
+        spin = math.radians(3.0 * i)
+        for layer, (n, a0, scale, env_k, heat_k) in enumerate(((8, 0.0, 1.0, 1.0, 0.62), (8, math.pi / 8, 0.62, 0.8, 0.75))):
+            for k in range(n):
+                ang = a0 + 2 * math.pi * k / n + spin * (1 if layer == 0 else -1)
+                L = petal_len[i] * scale
+                u = np.array([math.cos(ang), math.sin(ang)])
+                base = np.array([c, c]) + 10 * u
+                tip = base + L * u
+                lo, hi = np.minimum(base, tip) - 0.25 * L - 4, np.maximum(base, tip) + 0.25 * L + 4
+                sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+                cov, dd, along = almond_field(X[sl], Y[sl], base, tip, 0.42 * L, bulge=0.42)
+                rim = smoothstep(2.2, 0.0, np.abs(dd)) * (dd < 1.0)
+                fill = 0.28 * cov * (1 - 0.5 * along)
+                # 笔毛纹顺着花瓣走：横跨花瓣的坐标是到中线的距离 ÷ 半宽（原来用到边的距离，瓣里是一个值，干了就成了横的条纹）
+                vperp = (-(X[sl] - base[0]) * u[1] + (Y[sl] - base[1]) * u[0]) / (0.21 * L)
+                m = dry(tex, np.clip(vperp, -1, 1), along * 0.15 + 0.13 * k + 0.5 * layer, 0.1 + 0.5 * t * t)
+                acc.add(sl, petal_env[i] * env_k * np.clip(fill + 0.85 * rim, 0, 1) * m, heat_k)
+        for ang, lf, bend, sd in rays:
+            L = ray_len[i] * lf
+            tt = np.linspace(0, 1, 100)
+            r0 = 22.0 + 10 * t
+            rr = r0 + tt * L
+            aa = ang + bend * tt**2
+            pts = np.stack([c + rr * np.cos(aa), c + rr * np.sin(aa)], -1)
+            hw = ray_w[i] * np.sin(np.pi * np.clip(tt * 0.95 + 0.05, 0, 1)) ** 0.5 * (1 - tt) ** 0.6 + 0.2
+            lo, hi = pts.min(0) - 14, pts.max(0) + 14
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            Xs, Ys = X[sl], Y[sl]
+            cov = V.brush_stroke(Xs, Ys, pts, hw, np.random.default_rng(sd + i // 3), dry=0.3 + 0.55 * t, dry_start=0.35 - 0.25 * t, ss=SS)[0]
+            rs = np.hypot(Xs - c, Ys - c)
+            if i >= 6:  # 光芒干成一截截（长短不齐，沿光芒的笔毛纹断开）
+                brk = W.sample_ptex(tex, 0.0, rs / 900.0 + (sd % 997) / 997.0)
+                cov = cov * smoothstep(0.3 + 0.1 * (i - 6), 0.42 + 0.1 * (i - 6), brk)
+            acc.add(sl, ray_env[i] * cov, np.clip(0.95 - 0.55 * rs / 240.0, 0, 1))
+        if 1 <= i <= 4:  # 日芒：一圈短的放射细光
+            R0 = [0, 58, 72, 82, 88][i]
+            for k in range(36):
+                ang = 2 * math.pi * (k + 0.5) / 36 + 0.02 * i
+                L = (10 + 8 * ((k * 7) % 5) / 4) * (1 - 0.15 * i)
+                x0, y0 = c + R0 * math.cos(ang), c + R0 * math.sin(ang)
+                x1, y1 = x0 + L * math.cos(ang), y0 + L * math.sin(ang)
+                sl = acc.window(min(x0, x1) - 4, min(y0, y1) - 4, max(x0, x1) + 4, max(y0, y1) + 4)
+                cv, _ = needle(X[sl], Y[sl], x0, y0, ang, L, 1.2, taper=1.0)
+                acc.add(sl, [0, 0.55, 0.5, 0.36, 0.2][i] * cv, 0.8)
+        core = [1.0, 0.95, 0.85, 0.7, 0.5, 0.3, 0.12, 0.0][i]
+        if core > 0:
+            rc = 20.0 + 6 * i
+            sl = acc.window(c - 3 * rc, c - 3 * rc, c + 3 * rc, c + 3 * rc)
+            Xs, Ys = X[sl], Y[sl]
+            spokes = np.clip(0.55 + V.angular_noise(np.random.default_rng(9962), np.arctan2(Ys - c, Xs - c), harmonics=(9, 13, 17, 23), amp=1.2), 0, 1)
+            acc.add(sl, core * np.exp(-((np.hypot(Xs - c, Ys - c) / rc) ** 2)) * (0.6 + 0.4 * spokes), 1.0)
+        if i >= 5:  # 散成光点往外飘
+            k_ = (i - 4) / 3
+            for ang, d1, sz, drift in motes:
+                d = d1 + drift * k_
+                if d > 236:
+                    continue
+                x, y = c + d * math.cos(ang), c + d * math.sin(ang)
+                sl = acc.window(x - 4, y - 4, x + 4, y + 4)
+                acc.add(sl, (1.0 - 0.55 * k_) * 0.9 * dot(X[sl], Y[sl], x, y, sz * (1 - 0.3 * k_)), 0.7)
+        out.append(frame_color(acc.a, acc.heat(), 9965 + i, GOLD))
+    return out
+
+
+PILLAR_W, PILLAR_H = 128, 512
+
+
+def make_evolve_pillar() -> list[Image.Image]:
+    """进化光柱：从地面升起的一道光。第 0 帧地上一团压扁的亮（光从地里冒出来），光柱只到三分之一；1–2 帧冲到顶，
+    竖着的笔毛飞白，中心一线最亮，两边几缕细光丝往上飘；3–5 帧从下往上收细、变淡，光点往上飘。
+    锚点在底边中点（光柱的根贴着地面）。叠加，自带金色 #FFE7A8，不染。"""
+    w, h = PILLAR_W, PILLAR_H
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(9971)
+    tex = W.ptex(rng, ns=20, nt=1024, along=40.0, across=0.6)
+    cx, gy = w / 2, float(h)
+    dx = X - cx
+    up = gy - Y  # 离地多高
+    top = [170.0, 420.0, 500.0, 500.0, 500.0, 500.0]
+    half = [17.0, 18.0, 17.0, 13.5, 9.5, 6.0]
+    env = [1.0, 1.0, 0.95, 0.75, 0.5, 0.26]
+    cut = [0.0, 0.0, 0.0, 50.0, 150.0, 270.0]  # 从下往上淡掉
+    wisps = [(rng.choice([-1.0, 1.0]) * rng.uniform(12, 30), rng.uniform(60, 140), rng.uniform(0.7, 1.2), rng.uniform(0, 200)) for _ in range(8)]
+    motes = [(rng.uniform(-36, 36), rng.uniform(0, 260), rng.uniform(1.0, 1.8)) for _ in range(22)]
+    out = []
+    for i in range(6):
+        t = i / 5
+        parts = []
+        hw = half[i] * (1.0 - 0.3 * np.clip(up / 500.0, 0, 1))
+        vert = smoothstep(top[i] + 6, top[i] - 50, up) * smoothstep(cut[i] - 30, cut[i] + 30, up) * (up >= 0)
+        q = dx / np.maximum(hw, 1.0)
+        body = np.exp(-(q**2) * 1.2) * vert
+        m = dry(tex, np.clip(q / 1.6, -1, 1), up / 1024.0 + 0.05 * i, 0.08 + 0.25 * np.abs(np.clip(q, -1, 1)) + 0.35 * t)
+        parts.append((env[i] * 0.85 * body * m, 0.6))
+        core = smoothstep(2.6, 0.8, np.abs(dx)) * vert
+        parts.append((env[i] * core * dry(tex, 0.0, up / 1024.0 + 0.3, 0.1 + 0.4 * t), 1.0))
+        for xo, L, wd, y0 in wisps:
+            yb = y0 + 160 * t
+            c1 = smoothstep(yb - 4, yb + 10, up) * smoothstep(yb + L, yb + L - 30, up)
+            parts.append((env[i] * 0.45 * np.exp(-(((dx - xo * (0.9 + 0.2 * t)) / wd) ** 2)) * c1 * smoothstep(top[i] + 4, top[i] - 34, up), 0.55))
+        flare = [1.0, 0.8, 0.55, 0.35, 0.2, 0.1][i]  # 地上那一团：压扁的上半边，放射的细纹
+        gq = np.hypot(dx / (34 + 10 * t), up / ((34 + 10 * t) * FLAT))
+        spokes = np.clip(0.5 + V.angular_noise(np.random.default_rng(9972), np.arctan2(-up, dx), harmonics=(7, 11, 13, 17), amp=1.4), 0, 1)
+        parts.append((flare * smoothstep(1.0, 0.25, gq) * (0.45 + 0.55 * spokes) * (up >= 0), 0.8))
+        if i >= 1:
+            for xo, y0, sz in motes:
+                y = y0 + 260 * t * (0.6 + 0.4 * (sz - 1.0) / 0.8)
+                if y > 490:
+                    continue
+                parts.append((0.85 * (1 - 0.6 * t) * dot(X, Y, cx + xo, gy - y, sz), 0.75))
+        a, heat = union_heat(parts)
+        out.append(frame_color(a, heat, 9975 + i, GOLD))
+    return out
+
+
 # ============================================================== 清单与输出
 
 # 名字: (生成函数, 画布 (w, h), 锚点, blend, tint, 颜色说明, 附加 meta)
@@ -725,7 +1149,25 @@ BATCH1 = {
     "shockwave": (make_shockwave, (SHOCK_W, SHOCK_H), (0.5, 0.5), "add", True, "white", {"flat": FLAT, "radius_px": int(SHOCK_R), "tint_hint": SHOCK_TINT,
                                                                                         "note": "冲击波：贴地亮环由小扩大，越扩越碎越淡；已压扁，radius_px 是末帧的横向半径；建议染 #FFE2A8"}),
 }
-BATCHES = {"b1": BATCH1}
+BATCH2 = {
+    "fire_burst": (make_fire_burst, (FIRE_SIZE, FIRE_SIZE), (FIRE_C[0] / FIRE_SIZE, FIRE_C[1] / FIRE_SIZE), "add", False, "full",
+                   {"radius_px": FIRE_R, "note": "火爆：火的死亡爆炸、孔明灯落地、残灯爆燃。锚点是爆点（偏下，火往上窜）；radius_px 是火团加火舌的有效半径，"
+                                                "按爆燃半径缩放（1080p 下 56 单位一比一）；自带颜色（芯 #FFF1C2 → #FF8A3D → 边 #C2361E），不染。"
+                                                "第 5、6 帧火舌尖上的墨烟见 fire_burst_smoke"}),
+    "fire_burst_smoke": (make_fire_smoke, (FIRE_SIZE, FIRE_SIZE), (FIRE_C[0] / FIRE_SIZE, FIRE_C[1] / FIRE_SIZE), "normal", False, "jiao",
+                         {"follows": "fire_burst", "start_frame": 5, "hold_last": True, "radius_px": FIRE_R,
+                          "note": "火爆尾巴的墨烟：焦墨、普通混合，和 fire_burst 同画布、同锚点、同缩放，从 fire_burst 的第 5 帧开始一起播；末帧可以留一下再淡出"}),
+    "ice_shatter": (make_ice_shatter, (192, 192), (0.5, 0.5), "add", True, "white",
+                    {"tint_hint": "#CDEBFF", "note": "冰碎：一块六角冰晶裂开，七片尖碎片飞散，碎片边亮；建议染 #CDEBFF"}),
+    "feather": (make_feather, (FEATHER_W, FEATHER_H), (0.5, 0.5), "normal", True, "white",
+                {"_variants": True, "points": "+x", "tint_hint": "#EDE6D6",
+                 "note": "散开用的粒子，4 种挑着用（不是动画）：0、1 羽毛，2 对折的纸片，3 撕下的纸屑；尖朝 +X，锚点居中；白色可染，建议纸白 #EDE6D6"}),
+    "evolve": (make_evolve, (EVOLVE_SIZE, EVOLVE_SIZE), (0.5, 0.5), "add", False, "full",
+               {"note": "进化爆发：莲花 / 日轮一样的放射光，九道笔锋光芒，末两帧散成光点；自带金色 #FFE7A8，不染"}),
+    "evolve_pillar": (make_evolve_pillar, (PILLAR_W, PILLAR_H), (0.5, 1.0), "add", False, "full",
+                      {"note": "进化光柱：从地面升起，锚点在底边中点（光柱的根贴着地面）；自带金色 #FFE7A8，不染"}),
+}
+BATCHES = {"b1": BATCH1, "b2": BATCH2}
 
 
 def build(batch: dict) -> dict[str, list[Image.Image]]:
