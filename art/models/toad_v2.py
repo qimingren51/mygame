@@ -195,8 +195,9 @@ def build_toad():
                                    rim_hex=RIM, rim=0.3, value_var=0.06, edge=0.26, bias=-0.22)
     m_coin = V2.paint_material("TDCoin", COIN_STOPS, wash=0.2, wash_scale=4.0, seed=83.0, shade_attr="zone",
                                rim_hex="#FFF0C0", rim=0.45, value_var=0.05, edge=0.2, bias=0.05)
+    V2.add_glow_const(m_coin, 0.3)  # 铜钱：夜里泛一层金光（追的就是它）
     m_hole = B.flat_material("TDHole", I["jiao"])
-    m_eye = V2.paint_material("TDEyeBall", EYE_STOPS, wash=0.1, seed=84.0, edge=0.1, bias=0.2)
+    m_eye = B.emissive_material("TDEyeBall", "#F6DE86", 1.0)  # 眼珠：夜里两点金光
     m_lid = V2.paint_material("TDLid", LID_STOPS, wash=0.15, seed=85.0, edge=0.15, rim_hex=RIM, rim=0.4, bias=0.1)
     m_pupil = B.flat_material("TDPupil", I["jiao"])
     m_glint = B.emissive_material("TDGlint", EYE, 1.0)

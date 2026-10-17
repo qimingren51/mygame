@@ -62,3 +62,42 @@
   霜天剑雨（近处整把冰剑 + 远处四角攒尖钟亭）、莲子（莲蓬顶面朝镜头）、灯油（深褐釉壶、镜头退后）——都待试渲。
 - card_weapons.py 新增：wind_bell（霜铃的铃，build_bell 改用它，结果不变）、mat_puff、mat_snake_smoke、mat_hot_steel(L)、
   mat_flame_feather、feather_width、pavilion_roof_build、low_spec、mat_sheath；crane_build 加 wings 参数（默认不变）。
+
+### 第 3 批进展（2026-10-17 下午）
+- 协调：第 2 批用户满意；锐目必须重画（不要写实皮肤、睫毛；暗处只一道月光照亮眼睛这一条，铜金放射纹虹膜，瞳孔里方孔七钱排北斗）
+  → 已重写（card_passives：mat_iris + 真的小方孔钱 coin_build，眼睑只是暗影），跟第 3 批一起推，审图里标“重画”。折纸不改（已还原）。
+- 三轮试渲后定稿的场景改动：铁鹤改回纸鹤的形（crane_build 带翅）+ 翼后缘一排三角铁羽 + 三支射出的铁羽；竹印印飞得更高、碎石；
+  万剑冢镜头放进剑林里（剑都比人高）；莲子荷叶 UV 一圈 12 道叶脉（原来一道中脉像一束光）；灯油釉面高光收。
+- 正式渲染队列：lamp_mut sword_mut bell_mut sword_grove phoenix frost_rain seal_mut lotus oil ruimu（l2/b3_final.log），之后 crane_mut。
+
+### 第 4 批（新法器）准备
+- 图标：art/post/ui_icons_new.py（新文件）→ art/out/assets@2x/ui_new（meta name "ui"，帧名 ui/icon_<id>、ui/icon_<id>_evo），
+  10 个已出，审过（l2/new_icons*.png）；小孔明灯的火心太小会把整张填满 → 小灯不画火心，并加了“圆底外必须透明”的检查。
+- 卡面：card_weapons 新增 青藤、万木春、镇妖塔、玲珑塔（mat_vine、mat_life_stream、helix_path、eave_build、pagoda、mat_vortex、spiral_in）；
+  铜钱剑镜头近、剑更斜；天罡旋风亮；孔明灯挪开右上角；沧浪、北冥潮水面毛一点、白沫多、北冥潮更俯。WOOD_GRADE 挪到 card_weapons。
+  10 张试渲排在铁鹤正式渲染之后（l2/b4_draft.log）。
+
+### 进阶属性图标（20 个，ui_lacquer.py 的 ADV_KEYS，原 19 个逐字节不变）
+| 属性（stat_labels.ron） | icon |
+| --- | --- |
+| Knockback | knockback |
+| BurnDamage、BurnStacks、TrailDamage | burn |
+| FrozenVuln、FreezeTime、ThornFreeze | freeze |
+| SlowPower、SlowTime | slow |
+| ProjSpeed | proj_speed |
+| ProjLife | duration |
+| ReactionDamage、ShengReaction、KeReaction | reaction |
+| StunCrit | stun |
+| DashCooldown、DashCharges、DashDistance、DashStrike | dash |
+| ShieldCooldown、ShieldMult、OverhealShield | shield |
+| Healing、LotusHeal | heal |
+| Reveal | reveal |
+| RevealVuln | reveal_vuln |
+| Light | light |
+| FlameBand | flame_band |
+| UltCharge | ult |
+| XpGain、FrozenXp | soul |
+| OilGain | oil |
+| GoldGain | coin |
+| ChestMin、ChestLuck | chest |
+可沿用原有的：Regen → regen，ArmorToDamage → armor，SummonMult → count，MovingDamage → speed。其余不写 icon。

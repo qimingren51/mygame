@@ -63,3 +63,8 @@
   cargo test -p lantern_ui layout（读真图集）通过。审图 art/out/review@2x/redo_b3_*、redo_{bamboo_wraith,taofeng_fox,ghoul}_*.gif。
 - v2kit 新增（第四批起用）：sd_box、wave_noise、rot_y、d3m（设计稿三维 → 模型）、sdf_arrays、merge_arrays、prism_arrays。
 - 第四批：石将 stonelord（SDF 方块 + 刻槽属性 + 青苔 + 掉石屑；3/4 侧面 YAW）、金蟾 toad（SDF 圆胖身子 + 铜钱）。
+- 第四批已推送（2026-10-17 11:3x UTC）：提交 d916438（石将、金蟾），合 origin/master（6ba6142）为 c894ea0，推到 playtest-r1-enemies。
+  contact_radius：石将 13.4、金蟾 14（前沿 17.1）。金蟾帧 160→192、整体往后挪 3.5；石将 move 加 vertical_motion。
+  actors 仍一页，没换的 512 帧逐像素相同；check_asset、check_atlas 通过。审图 redo_b4_*、redo_{stonelord,toad}_move.gif。
+- 省额度：出整套用 b2/render_to.py（EV.render 直接渲到 art/out/assets@2x），别用 produce.py（会把全部素材自检一遍，8 分钟）。
+- 下一步：九尾 boss（boss 图集，帧 640²，move 8、sweep 6（2 帧蓄力）、summon 4），然后收尾三项。

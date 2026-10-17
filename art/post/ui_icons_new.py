@@ -63,7 +63,7 @@ def paint_coin_sword(P, fr: Fr):
     """铜钱剑：六枚铜钱一枚压一枚串成剑身（剑尖朝 +u），红绳从钱孔里穿过；剑格是两枚竖着的钱，剑柄缠红绳，柄尾垂红穗。"""
     s = fr.s
     tail = fr.pt(-17.5, 0.0)
-    cord_tassel(P, *tail, math.degrees(math.atan2(fr.sa, fr.ca)) + 180 - 20, 7.5 * s, s)
+    cord_tassel(P, *tail, 72.0, 5.6 * s, s)  # 穗子往下垂（不出圆底）
     grip = fr([(-17.0, -1.7), (-9.0, -1.7), (-9.0, 1.7), (-17.0, 1.7)])
     d, m = shape(P, grip, mixc(ZHUSHA, ZHUSHA_DK, 0.3), ol=0.8 * s, ol_rgb=mixc(ZHUSHA_DK, JIAO, 0.5), pool=0.3, pool_rgb=ZHUSHA_DK)
     for k in range(5):  # 缠绳：斜的几道深红

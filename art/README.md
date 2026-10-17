@@ -101,6 +101,16 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 
 名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
 
+**月夜（第 1 轮试玩，只在 2 倍；1 倍网页版的产物冻结、逐字节不变）**：`vfx/` 追加 `light_pool`（主角灯笼专用的光照池：0.4R 内平的 1.0，
+外圈半个余弦收到 0；其余光源仍用 `light`）；2 倍的 `ground/paper` 换成月夜版宣纸（亮度标准差 0.040，均值同第一版）；
+`grass_0..3`、`leaves_0..1`、`pebbles_0..1`、`qq_bamboo_leaves_0..2`、`qq_moss_0..1`、`qq_fox_tracks` 在生成处调浓一次（对纸面的 L* 反差目标 +12%）。
+候选和对比图（另两种灯光、另一种纸、1920×1080 模拟画面）：
+
+```bash
+art/.venv/bin/python art/post/moon_textures.py        # → out/moon/、review@2x/moon_compare.png、moon_light_curves.png
+art/.venv/bin/python art/post/test_moon_textures.py   # 管线产物 = 候选、只调浓一次、图集里也是这些
+```
+
 ## 法器、法术特效与拾取物贴图（post/weapon_textures.py）
 
 同样只用 Pillow + numpy，笔刷、噪声、直通 alpha 输出等工具直接复用 `vfx_textures.py`（只 import，不改它的产物）。
@@ -122,7 +132,7 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 ## 界面图标、地面装饰与一键生成（post/ui_icons.py、post/ground_decor.py、post/make_2d.py）
 
 ```bash
-art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图（约 6 分钟）
+art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图，2 倍另出逐帧特效和新法器（约 9 分钟）
 art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 LANTERN_ART_DENSITY 时会 1 倍、2 倍各跑一遍
 ```
 
@@ -144,7 +154,7 @@ art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out as
 art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns $A/fox_shrine_grand $A/fox_gate $A/fox_eave_lamp $A/fox_eave_lamp_lit
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
-art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
 mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
@@ -178,6 +188,45 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 
 只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
 格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
+
+重新生成时，panel_dark、overlay_vignette、pill、pip、pip_on、toast、toast_big、menu_hl 和仓库里的有细微差别（生成器早就有的漂移，master 上的脚本也一样）。
+只换改过的件时按名字拷，不要整个目录覆盖。
+
+### 黑漆描金：升级卡与状态栏（post/ui_lacquer.py）
+
+试玩第 1 轮选定，升级卡和状态栏整套用黑漆描金。`ui_skin.py` 从 `ui_lacquer.py` 取这些件，每件的显示尺寸写在 skin.json 的 note 里：
+
+- 卡框 `card_fan/ling/xuan/tian/yi/he`：600×920（显示 300×460），切片 64，中间和四边平铺，漆面按 64 像素的周期做成无缝；`card_focus`：624×944。
+- 卡上的字要用纸色或淡金（skin.json 的 `text` 是 `#ede4cf`），不能再用墨色。
+- 状态栏 `hud_portrait`：208²，中间直径 156 的窗口透明，主角胸像画在下面；`hud_ult_tick`、`hud_ult_tick_on`、`hud_ult_tick_full`：34×20，十二格绕头像章；
+  `hud_level_seal`：60²；`hud_hp_track`：256×60；`hud_xp_track`：128×20；`bar_fill_trail`：掉血残影。
+- 法器格 `slot_l*`：128²（显示 64）；心法格 `slot_s*`：88²（显示 44）。`bar_track`、`bar_fill_hp/xp/shield`、`chip_dark` 也换成了漆面。
+
+```bash
+art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
+art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
+```
+
+数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
+帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
+
+### 卡面插画（render/card_art.py）
+
+升级卡上半张的插画：一件物件的特写，Blender（Cycles CPU）精细材质，配夜色水墨底。题材见 `docs/LORE-TEXT.md` 第 7 节。
+
+- 原图 480×360（4:3，不透明、满幅），界面铺满 268×201 的插画区、按圆角 6 裁切；左上压五行印、右上压品阶签，两个上角（原图约 70×70）不放主体。
+- 帧名：法器 `ui/card_<法器 id>`、`_evo`（进化）、`_mut`（异化）；合璧 `ui/card_<合璧 id>`；心法 `ui/card_<心法 id>`；补给 `ui/card_lotus`、`ui/card_oil`。
+- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器、合璧）、`card_passives.py`（心法）；共用的道具和材质在 `card_props.py`。
+  每张用 `@scene` 注册 3D 场景、`@background` 注册水墨底；渲染缓存在 `out/_card_tmp/`，后期只用 numpy / Pillow。
+- 最终渲染包在 `bstyle.render_lock()` 里（几个代理同时出图时排队）。一张 960×720、128 采样约 0.5–2 分钟。
+
+```bash
+art/.venv/bin/python art/render/card_art.py sword --draft     # 半分辨率、少采样试渲 → out/_card_tmp/draft_card_art_sword.png
+art/.venv/bin/python art/render/card_art.py sword sword_evo    # 正式渲染 + 后期 → out/review@2x/card_art_<id>.png 和 out/assets@2x/ui_cards/card_<id>.png
+art/.venv/bin/python art/render/card_art.py --post sword       # 只重做后期（读缓存）
+```
+
+打包时 `ui_cards` 和 `ui_stats` 一起打进 `cards` 页（上面的命令）。
 
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
@@ -279,6 +328,39 @@ art/.venv/bin/python art/post/test_fx_extras.py   # 自检 13 项（尺寸、白
 - `screens/scroll_roller.png`：开场卷轴展开时跟着那道边走的轴头。
 格式和用法见 `docs/DESIGN.md` 第 15 节。打包时 `ui_wash` 跟 ui 一起用 `--no-trim`，`vfx_leaves` 跟 vfx 一起打。
 
+## 逐帧特效（post/vfx_frames.py）
+
+```bash
+art/.venv/bin/python art/post/vfx_frames.py        # → out/assets@2x/vfx_frames/，审图 review@2x/vfx_frames_<批>.png、vfx_frames_<批>_ingame.png（约 4 分钟；后面跟 b1 / b2 只画那一批）
+art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 22 项（清单、meta、颜色、四边、亮度 0.8、淡出、朝向、压扁、火往上窜、冰碎飞散、羽毛、进化、光柱、确定性、只写自己的文件、图集）；--quick 跳过确定性，--regen 强制重画
+```
+
+只出 2 倍，Pillow + numpy，不用 Blender。质感会话的逐帧特效清单（`docs/FEEL.md`“逐帧特效图”一节）一批一批做：
+- 第一批：五行命中 `hit_{metal,wood,water,fire,earth}_0..4`、暴击 `crit_0..3`、刀光 `slash_0..5`、击杀墨花 `kill_ink_0..5`、冲击波 `shockwave_0..5`。
+- 第二批：火爆 `fire_burst_0..6`（384²，按 1080p 约一比一放大了清单的 256²）和它的墨烟 `fire_burst_smoke_0..1`（普通混合）、
+  冰碎 `ice_shatter_0..5`、羽毛纸屑粒子 `feather_0..3`（4 种，不是动画）、进化爆发 `evolve_0..7`、进化光柱 `evolve_pillar_0..5`。
+帧名 `vfx/<名字>_<帧号>`，跟 vfx 一起打包（`$A/vfx_frames`）。meta、画布、锚点和游戏里的用法见 `docs/DESIGN.md` 第 15 节“逐帧特效”。
+
+- 叠加帧在超采样的亮度场里画（笔毛纹理的飞白、干笔断续），最后软饱和到 alpha 0.8、蓝噪声抖动；可染的 RGB 恒为白。
+- `slash` 的画布从清单的 256×128 改成 256×448（锚点在弧心 (16, 224)，外沿半径 200 像素），放大到铜钱剑的扫击半径时不糊。
+- 审图：每组一条纸色底、一条夜色底（宣纸 × 月夜底色）的帧条；`_ingame` 是 1080p 的近似游戏画面（月夜底色 + 灯笼光照池），特效按实际大小摆。
+
+## 抢先体验的新法器（post/weapon_textures_ea.py）
+
+```bash
+art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>[_<场面>]_ingame.png（约 2 分钟）
+art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 16 项（清单、meta、单帧不超过 1024²、1080p 下约一比一、颜色、四边、亮度、淡出、朝向、扇形扫满且从上往下、旋风是一整圈且顺时针转、十字两道、确定性、只写自己的文件、图集）
+```
+
+只出 2 倍，Pillow + numpy；画法、帧的约定和审图都沿用 `vfx_frames.py`。`docs/BALANCE.md` 6.3 节五件新法器的“画面”一件一件做，
+帧名 `weapons/<名字>_<帧号>`（meta 的 name 是 weapons），跟 vfx 一起打包（`$A/weapons_ea`）。格式见 `docs/DESIGN.md` 第 15 节“抢先体验的新法器”。
+
+- 跟玩法半径走的大帧按 1080p 下约一比一出图（1 世界单位 ≈ 2.57 屏幕像素），单帧不超过 1024²，meta 写 `radius_px`；
+  大画布按行分条算（`tiled`），只在有东西的像素上算（掩码），省内存也快。
+- 铜钱剑（扫击半径 140–170，天罡 200）：挥击的扇形剑气 `coin_slash_0..5`（512×896，`radius_px` 440，刃口闪出铜钱影子）、
+  命中的铜钱火星 `coin_spark_0..4`（自带铜金色）、天罡的旋风 `coin_whirl_0..5`（1024²，`radius_px` 464）和再斩的十字斩痕
+  `coin_cross_0..3`；除火星外都是白色可染，建议铜金 #F2C46A。
+
 ## 灯驿长卷（post/hub_scroll.py）
 
 ```bash
@@ -318,7 +400,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul  # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
@@ -337,6 +419,8 @@ art/.venv/bin/python art/post/check_atlas.py
 | `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带） |
 | `models/bamboo_v2.py` | 竹魅：一节节竹段（段间墨色竹节）拼成的细长人形，头是一蓬披下来的竹叶（叶缝里焦墨的空、两点眼），手是三根挂竹叶的细竹枝；射刺像拉弓，竹节裂开、节缝透光 |
 | `models/taofeng_v2.py` | 讨封狐：扮人是斗笠（顶上三片竹叶）、三层蓑衣、竹杖，蓑衣底下露一截尾巴；现形是穿旧靛蓝袍、长袖的直立狐狸，斗笠挂在背上，眯眼笑（头、耳、尾借用赤面狐） |
+| `models/stonelord_v2.py` | 石将：隐式曲面凿出来的石翁仲（3/4 侧面），圆顶盔、护心镜、披膊、鱼鳞甲裙（刻槽走 zone 属性）、双手拄长刀；风化起伏、雨痕、青苔从脚往上爬（moss 属性），落脚两帧崩石屑 |
+| `models/toad_v2.py` | 金蟾：圆胖的金身子（一身小疙瘩）、背上嵌七枚铜钱、嘴里衔一枚、三条腿（一条后腿），耷拉眼皮斜眼瞟（贼）；一蹦一蹦，身后掉钱；夜里眼珠和铜钱泛金光 |
 | `models/ghoul_v2.py` | 青面鬼：隐式曲面捏出来的驼背大鬼（躯干、大肚子、四肢、头各一块），肚皮发白、透着魂光（AOV），獠牙、黑爪、铁箍、焦墨乱发、暗红破布 |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
@@ -347,8 +431,11 @@ art/.venv/bin/python art/post/check_atlas.py
 - 竹魅：帧 320²、锚点 (0.5, 0.875)，挂点 eyes、muzzle（蓄力时在竹刺尖上）。讨封狐：帧 256²（原 224²），reveal 写了 `vertical_motion`
   （一跳、蓑衣掀起，身高一帧一个样）。青面鬼：帧 320²、锚点 (0.5, 0.8)，身子整体往后挪，锚点在身子中心底下；move、charge 都写了
   `vertical_motion`（一步一沉）。
+- 石将：帧 320²、锚点 (0.5, 0.8)，move 写了 `vertical_motion`（落脚一沉，盔顶跟着上下）。金蟾：帧 192²（原 160²），整体往后（离镜头远）挪 3.5 单位，
+  近镜头那只手才不出画；`vertical_motion`（蹦）。
 - `v2kit.sdf_mesh`：隐式曲面网格化（surface nets，纯 numpy），配 `smin`、`sd_round_cone`、`sd_ellipsoid` 捏肌肉、肚子这种圆滚滚的形体；
-  设计稿三维（x 前、y 上、z 左右，单位）里建，换到模型坐标时注意左右手互换（面要翻过来，见 ghoul_v2._sdf_arrays）。
+  设计稿三维（x 前、y 上、z 左右，单位）里建，`d3m` 换到模型坐标、`sdf_arrays` 换坐标时把面翻过来（左右手互换）；
+  还有 `sd_box`（圆角长方体）、`wave_noise`（几道正弦叠的起伏，风化、疙瘩用）、`prism_arrays`（轮廓挤出的薄片：刀）。
 - 疾影、狐火：帧 224²（原 160²），锚点 (0.5, 0.875)，悬浮。石妖：帧 224²、锚点 (0.5, 0.8)，`register_x_only`
   （锚点正上方是驼背的斜坡，不是头顶）。赤面狐 move 一步一起伏 1.7 单位，写了 `vertical_motion`（自检不查逐帧身高；游戏不读）。
 - `contact_radius`：量法同 `docs/PLAYTEST.md` 的表（朝东的帧，锚点往上 52 单位内每行最靠前的点，取第 90 百分位，各帧取中位数），

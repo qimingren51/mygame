@@ -99,9 +99,18 @@ V2 = {
                   "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
     # 金蟾：三足、衔钱、一蹦一蹦（vertical_motion）；帧 192²（原 160²）、锚点 (0.5, 0.875)
     "toad": {"module": "toad_v2", "build": "build_toad", "pose": "pose_toad", "size_1x": 96, "anchor": S.ANCHOR,
-             "anims": [("move", 6, 10, {})], "radius": 14, "eye": "#FFF1C2", "glow": "#FFF1C2", "lines": (1.6, 1.0, 0.75),
+             "anims": [("move", 6, 10, {})], "radius": 14, "eye": "#FFF1C2", "glow": "#FFD36B", "lines": (1.6, 1.0, 0.75),
              "sockets": ("eyes",), "shadow_units": 11.25,
              "meta": {"category": "enemy", "vertical_motion": True, "default_anim": "move"}},
+    # 九尾：夜主，白狐九尾、尾尖青火；帧 640²、锚点 (0.5, 0.8)；扫尾 2 帧蓄力；尾火走发光层（发光材质 + AOV）
+    "boss": {"module": "boss_v2", "build": "build_boss", "pose": "pose_boss", "size_1x": 320,
+             "anchor": S.BIG_ENEMY_ANCHOR,
+             "anims": [("move", 8, 8, {}),
+                       ("sweep", 6, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True}),
+                       ("summon", 4, 6, {"loop": False, "vertical_motion": True})],
+             "radius": 44, "eye": "#5FE8D6", "glow": "#6FF2D8", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
+             "shadow_units": 35.25,
+             "meta": {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy", "default_anim": "move"}},
     # 赤面狐：精英，帧 320²、锚点 (0.5, 0.8)；扑击 2 帧蓄力
     "fox": {"module": "fox_v2", "build": "build_fox", "pose": "pose_fox", "size_1x": 160, "anchor": S.BIG_ENEMY_ANCHOR,
             "anims": [("move", 8, 12, {"vertical_motion": True}),  # 小跑一步一起伏 1.7 单位（自检不查逐帧身高）

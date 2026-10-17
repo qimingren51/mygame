@@ -14,6 +14,11 @@ shockwave（6 帧 512×320，贴地亮环，已压扁）。
 第二批：fire_burst（7 帧 384²，自带火色，叠加）+ fire_burst_smoke（2 帧，墨烟，普通混合，接在火爆第 5 帧上）、
 ice_shatter（6 帧 192²，可染）、feather（4 种 32×16 的粒子，不是动画，普通混合、可染）、
 evolve（8 帧 512²，金 #FFE7A8）、evolve_pillar（6 帧 128×512，锚点在底边中点）。
+第三批：十种五行反应 react_*，都自带颜色、不染。叠加的：燎原 liaoyuan（6 帧 384²）、赤地 rongyan（6 帧 384×240 地面）、
+铸兵 zhubing（5 帧 256²）、凝霜 ningshuang（6 帧 384×240 地面）、熔金 rongjin（6 帧 128²，循环 10 帧/秒）、断木 duanmu（5 帧 256²）；
+普通混合的：滋生 zisheng（6 帧 320×288，焦墨勾边）、蒸腾 zhengteng（7 帧 448²）、裂土 lietu（6 帧 352×320，焦墨勾边）、
+淤泥 yuni（6 帧 416×272 地面）。有范围的按 BALANCE 7.2 的反应范围在 1080p 下约一比一定画布，写 radius_px（看得见的横向半径），
+清单的 256² / 256×192 装不下的放大了；长在地上的（滋生、裂土）锚点是地面点，下面留出前排和地缝的地方；能留着的写 hold_last。
 火爆尾巴的“墨烟”在叠加帧里画不出来（叠加只能加亮），所以单独出一组普通混合的墨烟帧，和火爆同画布、同锚点。
 火爆按爆燃半径缩放（火的死亡爆炸 46–69、孔明灯 44–64），清单的 256² 在 1080p 下要放大一倍半；按 1080p 下约一比一改成 384²，
 radius_px 144（56 世界单位一比一）。
@@ -23,7 +28,7 @@ slash 的画布：清单写的 256×128 只放得下半径约 70 像素的 120°
 弧心左边那一大块是空的，打包时会裁掉，不占图集。铜钱剑的扇形半径翻倍（140–170）以后另画了 weapons/coin_slash（weapon_textures_ea.py）。
 
 产物：art/out/assets@2x/vfx_frames/*.png + meta.json（name: vfx）
-审图：art/out/review@2x/vfx_frames_<批>.png（纸色底 / 夜色底的帧条）、vfx_frames_<批>_ingame.png（1080p 合成）
+审图：art/out/review@2x/vfx_frames_<批>.png（纸色底 / 夜色底的帧条）、vfx_frames_<批>_ingame*.png（1080p 合成；第三批两张）
 打包：pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 
 用法（仓库根目录）：
@@ -1201,12 +1206,13 @@ def polyline_dist(X, Y, pts):
 
 
 REACT_FIRE = [(0.0, "#B8321C"), (0.45, "#FF7A2A"), (0.8, "#FFC27A"), (1.0, "#FFF1C2")]
+LY_SIZE = 384  # 燎原的画布：火舌够到 150 像素，舌尖的火团再往外、往上一点
 
 
 def make_react_liaoyuan() -> list[Image.Image]:
     """燎原：一团火炸开，三条火舌朝三个方向窜出去（120° 散开、带一点弯，像去点着旁边的妖物），舌尖各爆一小团火；
     火星顺着火舌飞，末两帧火舌变细、断成一截截往上飘。叠加，主色 #FF7A2A，不染；radius_px 是火舌够到的半径。"""
-    size = 352
+    size = LY_SIZE
     c = size / 2
     R = 150.0
     rng = np.random.default_rng(9901)
@@ -1336,9 +1342,9 @@ def make_react_zhubing() -> list[Image.Image]:
     c = size / 2
     rng = np.random.default_rng(9921)
     blades = [math.radians(-90 + 120 * k + rng.uniform(-6, 6)) for k in range(3)]
-    L = [26.0, 64.0, 86.0, 90.0, 88.0]
-    off = [6.0, 12.0, 20.0, 34.0, 52.0]
-    env = [0.9, 1.0, 1.0, 0.75, 0.4]
+    L = [26.0, 60.0, 80.0, 84.0, 82.0]
+    off = [5.0, 10.0, 15.0, 22.0, 30.0]
+    env = [0.9, 1.0, 1.0, 0.65, 0.2]
     spin = [0.0, 0.05, 0.1, 0.16, 0.22]
     out = []
     for i in range(5):
@@ -1362,7 +1368,7 @@ def make_react_zhubing() -> list[Image.Image]:
             vperp = -(X[sl] - base[0]) * u[1] + (Y[sl] - base[1]) * u[0]
             edge = smoothstep(1.4, 0.2, np.abs(dd)) * (vperp > 0)  # 一侧刃口亮
             ridge = smoothstep(0.9, 0.2, np.abs(vperp)) * (along < 0.95)
-            acc.add(sl, env[i] * np.clip(0.4 * cov + 0.9 * edge + 0.6 * ridge * cov, 0, 1), np.clip(0.3 + 0.4 * along + 0.25 * edge, 0, 1))
+            acc.add(sl, env[i] * np.clip(0.4 * cov + 0.9 * edge + 0.6 * ridge * cov, 0, 1), np.clip(0.15 + 0.35 * along + 0.25 * edge, 0, 1))
             if i >= 2:  # 身后拖的细光
                 t0 = base - u * (12 + 10 * i)
                 sl2 = acc.window(min(t0[0], base[0]) - 6, min(t0[1], base[1]) - 6, max(t0[0], base[0]) + 6, max(t0[1], base[1]) + 6)
@@ -1431,16 +1437,17 @@ def smooth_stroke(X, Y, pts, hw, aa=0.45):
 
 
 def curl_blade(root, ang0, L, bend, curl, curl_len, n=90):
-    """卷草的中线：从 root 朝 ang0 出发走 L，整体弯 bend（弧度）；最后 curl_len 像素越卷越紧，一共再转 curl（弧度，正 = 顺时针）。"""
+    """卷草的中线：从 root 朝 ang0 出发走 L，整体弯 bend（弧度）；最后 curl_len 像素曲率线性变大（羊角螺线），
+    一共再转 curl（弧度，正 = 顺时针），卷成蕨菜芽那样的螺旋。"""
     s = np.linspace(0.0, L, n)
     k = np.clip((s - (L - curl_len)) / max(curl_len, 1e-6), 0, 1)
-    theta = ang0 + bend * s / max(L, 1e-6) + curl * k**1.7
+    theta = ang0 + bend * s / max(L, 1e-6) + curl * k**2
     steps = np.stack([np.cos(theta), np.sin(theta)], -1) * (L / (n - 1))
     return np.asarray(root, dtype=np.float64) + np.concatenate([[[0.0, 0.0]], np.cumsum(steps[:-1], 0)])
 
 
-ZS_W, ZS_H = 320, 256
-ZS_ROOT = (160.0, 200.0)  # 锚点：草丛中心的地面点（下面留给前排的根和土渣）
+ZS_W, ZS_H = 320, 288
+ZS_ROOT = (160.0, 196.0)  # 锚点：草丛中心的地面点（下面留给前排的根、土渣和地上那片淡绿）
 GRASS = [(0.0, "#2F7D57"), (0.45, "#6FD6A0"), (1.0, "#C6F4DC")]  # 根 → 主色 → 尖
 GRASS_LIGHT = "#E2FAEC"
 
@@ -1458,7 +1465,7 @@ def make_react_zisheng() -> list[Image.Image]:
         side = 1.0 if gx > 6 else (-1.0 if gx < -6 else float(rng.choice([-1.0, 1.0])))
         L = rng.uniform(104, 132) * (1 - 0.32 * abs(gx) / 92)
         blades.append(dict(root=(ax + gx, ay + rng.uniform(-22, 18) * FLAT), ang=-math.pi / 2 + 0.55 * gx / 92 + rng.uniform(-0.08, 0.08),
-                           L=L, side=side, bend=side * rng.uniform(0.12, 0.3), curl=side * rng.uniform(5.0, 5.7),
+                           L=L, side=side, bend=side * rng.uniform(0.12, 0.3), curl=side * rng.uniform(7.2, 8.2),
                            w0=3.4 + 2.4 * L / 132, speed=rng.uniform(0.88, 1.12), seed=int(rng.integers(1 << 30))))
     leaves = []
     for k in range(4):
@@ -1507,9 +1514,9 @@ def make_react_zisheng() -> list[Image.Image]:
             b = it  # 卷草：先画一笔焦墨（宽 1 像素多一点，尾巴干笔断开），再在上面填绿
             g = min(1.0, grow[i] * b["speed"])
             L = b["L"] * g
-            pts = curl_blade(b["root"], b["ang"] + b["side"] * sway[i], L, b["bend"], b["curl"] * (1.15 - 0.15 * g), float(np.clip(0.4 * L, 14, 34)))
+            pts = curl_blade(b["root"], b["ang"] + b["side"] * sway[i], L, b["bend"], b["curl"] * (1.1 - 0.1 * g), float(np.clip(0.45 * L, 18, 52)))
             tt = np.linspace(0, 1, len(pts))
-            hw = b["w0"] * (0.65 + 0.35 * g) * (1 - 0.86 * tt**0.75) + 0.45
+            hw = b["w0"] * (0.65 + 0.35 * g) * (1 - 0.8 * tt**0.75) + 0.6
             lo, hi = pts.min(0) - 9, pts.max(0) + 9
             sl = pt.window(lo[0], lo[1], hi[0], hi[1])
             r0 = b["root"]
@@ -1533,8 +1540,8 @@ def make_react_zisheng() -> list[Image.Image]:
 
 ZT_SIZE = 448
 ZT_C = (224.0, 280.0)  # 炸开的点（锚点）：偏下，汽往上翻
-ZT_R = 180  # 汽团的横向半径（蒸腾范围 70，1080p 下一比一）
-STEAM = [(0.0, "#8F9CA8"), (0.55, "#E8EEF2"), (1.0, "#FFFFFF")]  # 背光 → 主色 → 受光
+ZT_R = 160  # 汽团看得见的横向半径（蒸腾范围 70 在 1080p 下是 180 像素，游戏放大约一成）
+STEAM = [(0.0, "#7F8C99"), (0.55, "#E8EEF2"), (1.0, "#FFFFFF")]  # 背光 → 主色 → 受光
 
 
 def make_react_zhengteng() -> list[Image.Image]:
@@ -1560,7 +1567,7 @@ def make_react_zhengteng() -> list[Image.Image]:
     streaks = 0.5 + 0.2 * V.noise(nrng, (h + 96, w), (9.0, 5.0), angle=math.pi / 2)  # 略竖着拉长的噪声，跟着汽往上走
     blobs = V.noise(nrng, (h, w), 6.0)
     lx, ly = -0.45, -0.89  # 光从左上来
-    rim_c = V.col("#76838F")
+    rim_c = V.col("#66737F")  # 背光那边的灰边：夜里汽团靠它和暗面认出来
     out = []
     for i in range(7):
         X, Y = grid(w, h)
@@ -1582,7 +1589,7 @@ def make_react_zhengteng() -> list[Image.Image]:
             shade = np.clip((dx * lx + dy * ly) / r, -1, 1)
             colr = lerp_col(0.55 + 0.45 * shade, STEAM)
             rim = smoothstep(-6.0, -0.5, d) * smoothstep(0.1, -0.5, shade)
-            colr = colr + (rim_c - colr) * (0.5 * rim)[..., None]
+            colr = colr + (rim_c - colr) * (0.6 * rim)[..., None]
             keep = smoothstep(tear[sl] - 0.16, tear[sl] + 0.16, ns[sl] + 0.4 * np.clip(-d / r, 0, 1))  # 边上先散
             pt.over(sl, colr, smoothstep(1.5, -1.5, d) * OP[i] * (0.86 + 0.07 * nb[sl]) * keep)
         if i <= 1:  # 往外喷的汽柱
@@ -1675,7 +1682,7 @@ def make_react_duanmu() -> list[Image.Image]:
     xc, yc = (curves[0][0][k0] + curves[1][0][k1]) / 2  # 交叉点
     chips = [(rng.uniform(0, 2 * math.pi), rng.uniform(0.6, 1.0), rng.uniform(1.4, 2.3), float(rng.choice([0.25, 0.75]))) for _ in range(14)]
     reveal = [(0.72, 0.0), (1.0, 0.7), (1.0, 1.0), (1.0, 1.0), (1.0, 1.0)]  # 每帧两刀各斩到哪
-    env = [(1.0, 0.0), (0.92, 1.0), (0.95, 1.0), (0.6, 0.62), (0.28, 0.3)]
+    env = [(1.0, 0.0), (0.92, 1.0), (0.95, 1.0), (0.6, 0.62), (0.18, 0.2)]
     split = [0.0, 0.0, 0.0, 4.5, 9.0]  # 断开后错开的距离
     flash = [0.0, 0.55, 1.0, 0.35, 0.0]
     tt = np.linspace(0, 1, 120)
@@ -1710,13 +1717,13 @@ def make_react_duanmu() -> list[Image.Image]:
                 x0, y0 = xc + d0 * math.cos(a0), yc + d0 * math.sin(a0) + 0.004 * d0 * d0
                 x1, y1 = xc + d1 * math.cos(a0), yc + d1 * math.sin(a0) + 0.004 * d1 * d1
                 sl = acc.window(min(x0, x1) - 6, min(y0, y1) - 6, max(x0, x1) + 6, max(y0, y1) + 6)
-                acc.add(sl, [0, 0, 0.9, 0.7, 0.4][i] * streak(X[sl], Y[sl], x0, y0, x1, y1, sz), heat)
+                acc.add(sl, [0, 0, 0.9, 0.7, 0.3][i] * streak(X[sl], Y[sl], x0, y0, x1, y1, sz), heat)
         out.append(frame_color(acc.a, acc.heat(), 9985 + i, DM_PAL))
     return out
 
 
-LT_W, LT_H = 352, 256
-LT_ROOT = (176.0, 220.0)  # 锚点：地刺根部的地面中心（底边往上 36 像素，下面留给地缝和土渣）
+LT_W, LT_H = 352, 320
+LT_ROOT = (176.0, 228.0)  # 锚点：地刺根部的地面中心（底边往上 92 像素，下面留给地缝和翻开的土）
 LT_R = 150  # 地刺丛的横向半径（裂土范围 60，1080p 下一比一）
 EARTH = {"lit": "#B08B60", "mid": "#8B6A47", "dark": "#5E4630", "hole": "#3E3227", "dust": "#A08462", "chip": "#4A3826"}
 
@@ -1891,7 +1898,7 @@ def make_react_yuni() -> list[Image.Image]:
         colr = lerp_col(0.5 + 0.12 * mt, [(0.0, MUD["deep"]), (0.5, MUD["body"]), (1.0, MUD["hi"])])
         rim = smoothstep(-6.0, -1.0, d)
         colr = colr + (rim_c - colr) * (0.85 * rim)[..., None]
-        pt.over(full, colr, smoothstep(1.0, -1.0, d) * (0.9 + 0.08 * rim))
+        pt.over(full, colr, smoothstep(1.0, -1.0, d) * (0.82 + 0.14 * rim))  # 面上透一点地，边上积泥浓
         for a0, df, sz in drops:
             dist = YN_R * df * DR[i]
             x, y = cx + dist * math.cos(a0), cy + dist * math.sin(a0) * FLAT
@@ -1911,7 +1918,7 @@ def make_react_yuni() -> list[Image.Image]:
                 sl = pt.window(lo[0], lo[1], hi[0], hi[1])
                 dd, tpar = polyline_dist(X[sl], Y[sl], arc)
                 wid = 1.6 * np.sin(np.pi * tpar) + 0.3
-                pt.over(sl, hi_c, [0, 0, 0.5, 0.75, 0.75, 0.75][i] * smoothstep(wid + 0.5, wid - 0.5, dd))
+                pt.over(sl, hi2_c, [0, 0, 0.55, 0.85, 0.85, 0.85][i] * smoothstep(wid + 0.5, wid - 0.5, dd))
         if 3 <= i <= 4:  # 涟漪
             rr = R * [0, 0, 0, 0.42, 0.68][i]
             pt.over(full, hi2_c, [0, 0, 0, 0.5, 0.28][i] * smoothstep(1.6, 0.3, np.abs(r - rr)) * (d < -4))
@@ -1964,11 +1971,11 @@ BATCH2 = {
 }
 # 第三批：十种五行反应，都自带颜色、不染。有范围的写 radius_px（按反应范围缩放，1080p 下约一比一）；地面的已压扁（flat）。
 BATCH3 = {
-    "react_liaoyuan": (make_react_liaoyuan, (352, 352), (0.5, 0.5), "add", False, "full",
+    "react_liaoyuan": (make_react_liaoyuan, (LY_SIZE, LY_SIZE), (0.5, 0.5), "add", False, "full",
                        {"radius_px": 150, "note": "燎原：一团火炸开，三条火舌朝三个方向窜出去、舌尖各爆一小团火；radius_px 是火舌够到的半径，"
                                                   "按燎原范围缩放（60，1080p 下一比一）；自带火色，主色 #FF7A2A，不染"}),
     "react_rongyan": (make_react_rongyan, (GROUND_W, GROUND_H), (0.5, 0.5), "add", False, "full",
-                      {"flat": FLAT, "radius_px": 150, "hold_last": True,
+                      {"flat": FLAT, "radius_px": 135, "hold_last": True,
                        "note": "赤地：地面从中心爆开一圈发红的裂缝，缝里透出熔岩光；已压扁，radius_px 是裂缝的横向半径（赤地范围 50）；"
                                "末帧缝里只剩暗红，可以留着（持续 3 秒，游戏淡出）；主色 #FF5A2A，不染"}),
     "react_zhubing": (make_react_zhubing, (256, 256), (0.5, 0.5), "add", False, "full",
@@ -1993,7 +2000,7 @@ BATCH3 = {
                               "金 #E9D9A6 + 木 #6FD6A0，不染"}),
     "react_lietu": (make_react_lietu, (LT_W, LT_H), (LT_ROOT[0] / LT_W, LT_ROOT[1] / LT_H), "normal", False, "full",
                     {"radius_px": LT_R, "note": "裂土：一簇尖石刺破土而出，焦墨勾边、带皴，碎石蹦出、扬土，末两帧裂开塌回去；锚点是地刺根部的地面中心"
-                                               "（底边往上 36 像素，下面留给地缝），radius_px 是地刺丛的横向半径（裂土范围 60）；主色 #8B6A47，不染"}),
+                                               "（底边往上 92 像素，前面的地缝在锚点下面），radius_px 是地刺丛的横向半径（裂土范围 60）；主色 #8B6A47，不染"}),
     "react_yuni": (make_react_yuni, (YN_W, YN_H), (0.5, 0.5), "normal", False, "full",
                    {"flat": FLAT, "radius_px": YN_R, "hold_last": True,
                     "note": "淤泥：一团泥浆砸开、泥舌甩出去、摊成一滩，边上一圈深色积泥、面上反光和气泡；已压扁，radius_px 是泥滩的横向半径"

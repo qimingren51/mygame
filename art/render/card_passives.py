@@ -13,9 +13,7 @@ import numpy as np
 import card_art as K
 import card_props as P
 from card_art import background, lin, make_obj, scene
-from card_weapons import COLD_GRADE, EARTH_GRADE, WARM_GRADE, ScreenCam, bg_clouds, sky_gradient
-
-WOOD_GRADE = dict(exposure=1.08, shadow="#142224", high="#EEF6E4", sat=1.02, bloom=0.30, contrast=1.05)
+from card_weapons import COLD_GRADE, EARTH_GRADE, WARM_GRADE, WOOD_GRADE, ScreenCam, bg_clouds, sky_gradient
 
 
 def bez(ctrl, n=60):
