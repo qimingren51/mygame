@@ -53,6 +53,10 @@ pub struct Actions {
     pub meta: bool,
     /// 这一帧鼠标动过。菜单弹出时光标恰好停在某一项上，不算悬停，免得抢走键盘的选择
     pub pointer_moved: bool,
+    /// 按住 Tab：局内属性面板（不暂停）
+    pub stats_held: bool,
+    /// 这一帧按下 Tab：属性面板里切换“只看变化 / 全部”
+    pub stats_toggle: bool,
 }
 
 /// 跑分时自动绕圈走，代替玩家输入。存在这个资源时，键盘和手柄的移动不交给模拟。

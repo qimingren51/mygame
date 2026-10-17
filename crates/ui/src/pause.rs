@@ -1,4 +1,4 @@
-//! 暂停：继续、设置项（四类音量、画面、按键）、回到标题。
+//! 暂停：继续、属性（`stats_panel.rs`）、设置项（四类音量、画面、按键）、回到标题。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
@@ -10,8 +10,10 @@ use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, overlay_vignette, text};
 
-/// 菜单行：继续、设置项、回到标题。
-const ROWS: usize = ITEMS.len() + 2;
+/// 菜单行：继续、属性、设置项、回到标题。
+const ROWS: usize = ITEMS.len() + 3;
+/// 第一个设置项的行号
+const FIRST_ITEM: usize = 2;
 
 #[derive(Resource, Default)]
 pub(crate) struct PauseUi {
@@ -22,6 +24,10 @@ pub(crate) struct PauseUi {
 
 #[derive(Component)]
 pub(crate) struct PauseFocus(usize);
+
+/// 暂停菜单的根节点；属性面板打开时藏起来。
+#[derive(Component)]
+struct PauseRoot;
 
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<PauseUi>()
@@ -69,6 +75,7 @@ fn spawn(
     *ui = PauseUi::default();
     commands
         .spawn((
+            PauseRoot,
             DespawnOnExit(RunState::Paused),
             GlobalZIndex(30),
             Node {
@@ -105,13 +112,28 @@ fn spawn(
                     r.spawn(text(&fonts.title, 28.0, INK, "继续"));
                 });
                 hook(&mut resume, 0);
+                let mut stats = p.spawn(row_node());
+                stats.with_children(|r| {
+                    r.spawn(focus(&skin, 1));
+                    r.spawn(text(&fonts.title, 28.0, INK, "属性"));
+                    r.spawn((
+                        text(&fonts.body, 14.0, INK_DIM, "Tab"),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: px(18),
+                            top: px(12),
+                            ..default()
+                        },
+                    ));
+                });
+                hook(&mut stats, 1);
                 for (k, &item) in ITEMS.iter().enumerate() {
                     let mut row = p.spawn(row_node());
                     row.with_children(|r| {
-                        r.spawn(focus(&skin, k + 1));
+                        r.spawn(focus(&skin, k + FIRST_ITEM));
                         settings_ui::spawn_row(r, &fonts, &settings, item);
                     });
-                    hook(&mut row, k + 1);
+                    hook(&mut row, k + FIRST_ITEM);
                 }
                 let mut quit = p.spawn(row_node());
                 quit.with_children(|r| {
@@ -137,12 +159,13 @@ pub(crate) fn input(
     mut ui: ResMut<PauseUi>,
     mut settings: ResMut<Settings>,
     mut controls: ResMut<crate::controls::Controls>,
+    mut stats: ResMut<crate::stats_panel::StatsPanel>,
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
     mut cues: MessageWriter<UiCue>,
 ) {
-    if controls.is_open() || transition.active() {
+    if controls.is_open() || transition.active() || stats.open {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -165,24 +188,34 @@ pub(crate) fn input(
         next_app.set(AppState::Title);
     } else if actions.pause || actions.back || ((actions.confirm || clicked.is_some()) && sel == 0) {
         next_run.set(RunState::Playing);
-    } else if (1..=ITEMS.len()).contains(&sel) {
+    } else if actions.stats_toggle || ((actions.confirm || clicked.is_some()) && sel == 1) {
+        stats.show();
+    } else if (FIRST_ITEM..FIRST_ITEM + ITEMS.len()).contains(&sel) {
         let mut a = *actions;
         // 点击设置项等同回车（全屏切换），音量用左右键
         a.confirm |= clicked.is_some();
-        settings_ui::adjust(ITEMS[sel - 1], &a, &mut settings, &mut window, &mut controls);
+        settings_ui::adjust(ITEMS[sel - FIRST_ITEM], &a, &mut settings, &mut window, &mut controls);
     }
     if actions.pause || actions.back || actions.quit_to_title {
         cues.write(UiCue::Back);
-    } else if actions.confirm || clicked.is_some() {
+    } else if actions.confirm || clicked.is_some() || actions.stats_toggle {
         cues.write(UiCue::Confirm);
     } else if before_selected != ui.selected || actions.nav.x != 0 {
         cues.write(UiCue::Move);
     }
 }
 
-fn highlight(ui: Res<PauseUi>, mut q: Query<(&PauseFocus, &mut Visibility)>) {
+fn highlight(
+    ui: Res<PauseUi>,
+    stats: Res<crate::stats_panel::StatsPanel>,
+    mut q: Query<(&PauseFocus, &mut Visibility), Without<PauseRoot>>,
+    mut root: Query<&mut Visibility, With<PauseRoot>>,
+) {
     for (f, mut v) in &mut q {
         v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
+    }
+    for mut v in &mut root {
+        v.set_if_neq(if stats.open { Visibility::Hidden } else { Visibility::Inherited });
     }
 }
 
@@ -197,18 +230,29 @@ mod tests {
             .init_resource::<PauseUi>()
             .init_resource::<Settings>()
             .init_resource::<crate::controls::Controls>()
+            .init_resource::<crate::stats_panel::StatsPanel>()
             .init_resource::<crate::transition::InkTransition>()
             .init_resource::<NextState<RunState>>()
             .init_resource::<NextState<AppState>>()
             .add_message::<UiCue>()
             .add_systems(Update, input);
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
+        // 第二行是属性：确认打开属性面板，面板开着时暂停菜单不动
         app.world_mut().resource_mut::<Actions>().nav = IVec2::Y;
+        app.update();
+        *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+        app.update();
+        assert!(app.world().resource::<crate::stats_panel::StatsPanel>().open);
+        *app.world_mut().resource_mut::<Actions>() = Actions { back: true, ..default() };
+        app.update();
+        assert!(matches!(app.world().resource::<NextState<RunState>>(), NextState::Unchanged));
+        app.world_mut().resource_mut::<crate::stats_panel::StatsPanel>().open = false;
+        *app.world_mut().resource_mut::<Actions>() = Actions { nav: IVec2::Y, ..default() };
         for _ in 0..ITEMS.len() {
             app.update();
         }
         // 最后一项是手柄按键
-        assert_eq!(app.world().resource::<PauseUi>().selected, ITEMS.len());
+        assert_eq!(app.world().resource::<PauseUi>().selected, ITEMS.len() + 1);
         *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
         app.update();
         assert!(app.world().resource::<crate::controls::Controls>().is_open());

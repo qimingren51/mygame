@@ -186,8 +186,13 @@ fn evolution_offer_needs_max_level_and_passive() {
 
 #[test]
 fn when_everything_is_maxed_only_supplies_remain() {
-    let c = content();
-    let mut sim = fresh(1);
+    // 合璧另有测试（同五行的新法器一多，共鸣到 2 层就会出合璧卡），这里只看升级和进化都满了
+    let mut c = content();
+    c.run.transformations = false;
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.god = true;
+    let mut sim = SimHarness::with_setup(c.clone(), setup);
+    sim.quiet();
     let weapons: Vec<(&str, u32, bool)> = c.weapons.iter().map(|w| (w.id.as_str(), 8, true)).collect();
     let passives: Vec<(&str, u32)> = c.passives.iter().take(6).map(|p| (p.id.as_str(), 5)).collect();
     sim.set_build(&weapons, &passives);
@@ -266,4 +271,73 @@ fn elites_drop_a_chest_that_opens_when_picked_up() {
         sim.step(input, &cmds);
     }
     assert!(opened, "精英死后应该掉宝箱并打开");
+}
+
+#[test]
+fn stat_sources_add_up_to_the_final_value() {
+    use lantern_sim::{StatSource, stats};
+    let c = content();
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.attributes.insert("health".into(), 2);
+    let mut build = lantern_sim::Build::default();
+    let houde = c.passive_index("houde").unwrap();
+    build.passives.push(lantern_sim::build::PassiveSlot { def: houde, level: 2 });
+    for stat in [Stat::MaxHp, Stat::Armor, Stat::Reveal] {
+        let (all, _) = stats::collect(&c, &setup, &build, None, 5);
+        let found = stats::sources(&c, &setup, &build, None, 5, stat);
+        let d = c.stat(stat);
+        let add: f32 = found.iter().map(|s| s.add).sum();
+        let mul: f32 = found.iter().map(|s| s.mul).sum();
+        let v = ((d.base + add) * (1.0 + mul)).clamp(d.min, d.max);
+        let v = if stat == Stat::MaxHp { v.round() } else { v };
+        assert!((v - all.get(stat)).abs() < 1e-4, "{stat:?}: {v} vs {}", all.get(stat));
+        // 同一来源合成一条
+        assert!(found.windows(2).all(|w| w[0].from != w[1].from));
+    }
+    let hp = stats::sources(&c, &setup, &build, None, 5, Stat::MaxHp);
+    assert!(hp.iter().any(|s| s.from == StatSource::Passive(houde)));
+    assert!(hp.iter().any(|s| matches!(s.from, StatSource::Attribute(_))));
+    let reveal = stats::sources(&c, &setup, &build, None, 5, Stat::Reveal);
+    assert!(reveal.iter().any(|s| s.from == StatSource::Level));
+}
+
+#[test]
+fn codex_keys_cover_forms_fusion_materials_and_passives() {
+    use lantern_sim::weapons::{Form, WeaponSlot};
+    let c = content();
+    let mut arsenal = lantern_sim::Arsenal::default();
+    let mut lamp = WeaponSlot::new(c.weapon_index("lamp").unwrap());
+    lamp.form = Form::Mutated;
+    arsenal.0.push(lamp);
+    let phoenix = c.fusions.iter().position(|f| f.id == "phoenix").unwrap();
+    let mut fused = WeaponSlot::new(c.weapon_index(&c.fusions[phoenix].weapons[0]).unwrap());
+    fused.form = Form::Fused(phoenix);
+    arsenal.0.push(fused);
+    let mut build = lantern_sim::Build::default();
+    build
+        .passives
+        .push(lantern_sim::build::PassiveSlot { def: c.passive_index("jianyi").unwrap(), level: 1 });
+    let keys = lantern_sim::flow::codex_keys(&c, &arsenal, &build);
+    for k in ["w:lamp", "w:lamp_mut", "f:phoenix", "w:crane", "w:crane_evo", "w:lamp_evo", "p:jianyi"] {
+        assert!(keys.contains(k), "{k}: {keys:?}");
+    }
+}
+
+#[test]
+fn locked_weapons_stay_out_of_the_pool_until_unlocked() {
+    let mut c = content();
+    let locked: Vec<usize> = c.run.choices.locked.iter().map(|id| c.weapon_index(id).unwrap()).collect();
+    assert!(!locked.is_empty(), "v0.3 的新法器先锁着");
+    let sim = fresh(1);
+    let new = |c: &lantern_content::Content| -> Vec<usize> {
+        lantern_sim::build::offers(c, sim.arsenal(), sim.build(), 0.0)
+            .iter()
+            .filter_map(|(o, _)| if let Offer::NewWeapon(d) = *o { Some(d) } else { None })
+            .collect()
+    };
+    assert!(locked.iter().all(|d| !new(&c).contains(d)), "锁着的不进卡池");
+    let hash = c.hash;
+    c.unlock(None);
+    assert!(locked.iter().all(|d| new(&c).contains(d)), "解锁后进卡池");
+    assert_ne!(c.hash, hash, "解锁改变内容哈希，回放不会混用");
 }

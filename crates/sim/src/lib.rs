@@ -33,6 +33,7 @@ mod movement;
 pub mod omens;
 pub mod pickups;
 pub mod player;
+mod ranged;
 pub mod reactions;
 pub mod replay;
 pub mod reveal;
@@ -53,7 +54,7 @@ pub use harness::SimHarness;
 pub use io::{HitKind, HurtBy, InputFrame, SimCommand, SimCommands, SimEvent, SimOutbox};
 pub use replay::{Replay, ReplayLog, ReplayPlayback};
 pub use run::{Director, Progress, RunMode, SimView};
-pub use stats::{Effects, Stats};
+pub use stats::{Effects, StatContribution, StatSource, Stats};
 pub use tick::{HashCheckpoint, HashLog, SimRng, Tick};
 pub use weapons::Arsenal;
 
@@ -261,12 +262,15 @@ impl Plugin for SimPlugin {
                         .chain()
                         .in_set(SimSet::Director),
                     movement::build_grid.in_set(SimSet::Spatial),
-                    (boss::boss_attacks, boss::elite_summons).chain().in_set(SimSet::Ai),
+                    (boss::boss_attacks, boss::elite_summons, ranged::enemy_shots).chain().in_set(SimSet::Ai),
                     (movement::update_enemies, crowd::separate).chain().in_set(SimSet::Move),
                     (
                         combat::run_actions,
                         weapons::update_weapons,
                         weapons::drop::update_seals,
+                        weapons::sky_lantern::update_sky_lanterns,
+                        weapons::wave::update_waves,
+                        weapons::tower::update_towers,
                         weapons::drop::update_ground,
                         player::dash_strike,
                         reveal::flame_band,

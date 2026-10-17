@@ -50,6 +50,15 @@ pub(crate) struct Slots;
 #[derive(Component)]
 pub(crate) struct ElementChip(Element);
 
+/// 五行计数前面的图标（`ui/icon_el_*`），和点数一起变淡变亮。
+#[derive(Component)]
+pub(crate) struct ElementIcon(Element);
+
+/// 五行图标的帧名后缀，按 `Element::index` 排
+const ELEMENT_ICONS: [&str; 5] = ["metal", "wood", "water", "fire", "earth"];
+/// 共鸣阶数的记号：一阶到三阶、极境
+const TIER_MARKS: [&str; 5] = ["", "·一", "·二", "·三", "·极"];
+
 #[derive(Component)]
 pub(crate) struct BossBar;
 
@@ -73,7 +82,6 @@ pub(crate) struct HudFooter;
 
 pub(crate) const FOOTER_BOTTOM: f32 = 14.0;
 
-const BAR_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
 
 fn abs(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f32>) -> Node {
@@ -107,105 +115,121 @@ pub(crate) fn spawn_hud(
     fonts: Res<Fonts>,
     skin: Res<Skin>,
     setup: Res<RunSetup>,
+    db: Option<Res<AtlasDb>>,
 ) {
     let c = &content.0;
+    let db = db.as_deref();
     let run = DespawnOnExit(AppState::Run);
-    // 顶端经验条
-    commands.spawn((
-        run.clone(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(0),
-            right: px(0),
-            top: px(0),
-            height: px(7),
-            ..default()
-        },
-        BackgroundColor(BAR_BG),
-        children![(
-            XpFill,
-            Node { width: percent(0), height: percent(100), ..default() },
-            skin.image("bar_fill_xp")
-        )],
-    ));
-    // 左上：用时、击杀、夜签；种子号收进性能面板。
-    let omen = setup
-        .omen
-        .as_ref()
-        .map_or(String::new(), |o| format!("夜签 · {}", lantern_sim::omens::omen_name(c, o)));
-    commands.spawn((
-        run.clone(),
-        Node { flex_direction: FlexDirection::Column, ..abs(Some(20.0), None, Some(14.0), None) },
-        children![
-            (Clock, text(&fonts.body, 28.0, PAPER, "00:00")),
-            (Kills, UiTransform::default(), text(&fonts.body, 18.0, PAPER, "击杀 0")),
-            text(&fonts.body, 14.0, DIM, &omen),
-            (BuffLabel, text(&fonts.body, 16.0, GOLD, "")),
-        ],
-    ));
-    // 右上：等级、法器与心法、五行共鸣
+    // 顶部三块放在同一张画布里：窗口比 1280×720 小时一起等比缩小，不互相压住
     commands
         .spawn((
             run.clone(),
-            Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::End,
-                row_gap: px(6),
-                ..abs(None, Some(20.0), Some(14.0), None)
-            },
+            crate::responsive::FitViewport::default(),
+            Pickable::IGNORE,
+            Node { position_type: PositionType::Absolute, ..default() },
         ))
-        .with_children(|p| {
-            p.spawn((LevelLabel, UiTransform::default(), text(&fonts.body, 22.0, PAPER, "等级 1")));
-            p.spawn((
-                Slots,
+        .with_children(|canvas| {
+            // 左上：头像章（燃灯刻度、等级印）；右边血条、经验条、法器格、心法格
+            canvas
+                .spawn(Node {
+                    column_gap: px(10),
+                    align_items: AlignItems::Start,
+                    ..abs(Some(16.0), None, Some(12.0), None)
+                })
+                .with_children(|p| {
+                    p.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        width: px(PORTRAIT),
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        portrait(col, db, &fonts, &skin);
+                        col.spawn((
+                            UltLabel,
+                            UiTransform::default(),
+                            Node { margin: UiRect::top(px(4)), ..default() },
+                            text(&fonts.body, 15.0, GOLD, ""),
+                        ));
+                        col.spawn((
+                            crate::hud_fx::UltHint,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                top: px(PORTRAIT + 4.0),
+                                width: px(120),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            TextLayout::justify(Justify::Center),
+                            text(&fonts.body, 15.0, GOLD.with_alpha(0.0), "燃灯未满"),
+                        ));
+                    });
+                    p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(4), ..default() })
+                        .with_children(|col| {
+                            col.spawn(hp_bar(&fonts, &skin));
+                            col.spawn((
+                                Node {
+                                    width: px(BAR_WIDTH),
+                                    height: px(10),
+                                    padding: UiRect::all(px(2)),
+                                    ..default()
+                                },
+                                skin.image("hud_xp_track"),
+                                children![(
+                                    XpFill,
+                                    Node { width: percent(0), height: percent(100), ..default() },
+                                    skin.image("bar_fill_xp")
+                                )],
+                            ));
+                            col.spawn((
+                                Slots,
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: px(4),
+                                    margin: UiRect::top(px(6)),
+                                    ..default()
+                                },
+                            ));
+                        });
+                });
+            // 顶部中间：用时
+            canvas.spawn((
                 Node {
+                    justify_content: JustifyContent::Center,
+                    ..abs(Some(0.0), Some(0.0), Some(10.0), None)
+                },
+                children![(Clock, text(&fonts.body, 30.0, PAPER, "00:00"))],
+            ));
+            // 右上：五行共鸣；下面击杀与收获、夜签、古灯增益
+            canvas
+                .spawn(Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::End,
-                    row_gap: px(4),
-                    ..default()
-                },
+                    row_gap: px(6),
+                    ..abs(None, Some(16.0), Some(12.0), None)
+                })
+                .with_children(|p| {
+                    element_chips(p, c, db, &fonts, &skin);
+                    p.spawn((Kills, UiTransform::default(), text(&fonts.body, 16.0, PAPER, "击杀 0")));
+                    if let Some(o) = &setup.omen {
+                        p.spawn(Node { align_items: AlignItems::Center, column_gap: px(6), ..default() })
+                            .with_children(|row| {
+                                if let Some(db) = db {
+                                    let icon = format!("ui/icon_omen_{}", o.id);
+                                    spawn_icon(row, db, &fonts, Some(&icon), "签", DIM, 26.0);
+                                }
+                                row.spawn(text(&fonts.body, 15.0, DIM, &lantern_sim::omens::omen_name(c, o)));
+                            });
+                    }
+                    p.spawn((BuffLabel, text(&fonts.body, 16.0, GOLD, "")));
+                });
+            // 右侧：连斩
+            canvas.spawn((
+                abs(None, Some(28.0), Some(260.0), None),
+                children![(ComboLabel, text(&fonts.title, 36.0, GOLD, ""))],
             ));
-            p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
-                for e in Element::ALL {
-                    row.spawn((
-                        Node { padding: UiRect::axes(px(10), px(3)), ..default() },
-                        skin.image("chip_dark"),
-                    ))
-                    .with_child((
-                        ElementChip(e),
-                        text(
-                            &fonts.body,
-                            15.0,
-                            element_color(c, e).with_alpha(0.35),
-                            &format!("{} 0", c.element(e).name),
-                        ),
-                    ));
-                }
-            });
         });
-    // 顶部中间：夜主血条
-    commands.spawn((
-        run.clone(),
-        BossBar,
-        Visibility::Hidden,
-        Node {
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: px(4),
-            ..abs(Some(0.0), Some(0.0), Some(16.0), None)
-        },
-        children![
-            (BossName, text(&fonts.title, 26.0, hex("#FF6B5A"), "")),
-            bar(&skin, 560.0, 18.0, BossFill, "bar_fill_boss"),
-        ],
-    ));
-    // 右侧：连斩
-    commands.spawn((
-        run.clone(),
-        abs(None, Some(28.0), Some(260.0), None),
-        children![(ComboLabel, text(&fonts.title, 36.0, GOLD, ""))],
-    ));
-    // 底部共用纵向布局：提示换行时向上让位，不与生命、燃灯相互覆盖。
+    // 底部共用纵向布局：夜主血条、操作提示；提示换行时向上让位，边缘箭头按它的高度让开。
     commands.spawn((
         run,
         HudFooter,
@@ -217,58 +241,9 @@ pub(crate) fn spawn_hud(
             ..abs(Some(0.0), Some(0.0), None, Some(FOOTER_BOTTOM))
         },
         children![
-            (HpLabel, text(&fonts.body, 14.0, DIM, "生命 100 / 100")),
             (
-                crate::hud_fx::HpBar,
-                UiTransform::default(),
-                Node { width: px(280), height: px(18), padding: UiRect::all(px(2)), ..default() },
-                skin.image("bar_track"),
-                children![
-                    // 掉血的残影：只画掉掉的那一截，比血条慢半拍缩回（hud_fx.rs）
-                    (
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(2),
-                            right: px(2),
-                            top: px(2),
-                            bottom: px(2),
-                            ..default()
-                        },
-                        children![(
-                            crate::hud_fx::HpTrail,
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: percent(100),
-                                width: percent(0),
-                                height: percent(100),
-                                border_radius: BorderRadius::all(px(4)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(1.0, 0.93, 0.84, 0.85)),
-                        )],
-                    ),
-                    (
-                        HpFill,
-                        Node { width: percent(100), height: percent(100), ..default() },
-                        skin.image("bar_fill_hp")
-                    ),
-                    (
-                        ShieldFill,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(2),
-                            top: px(1),
-                            width: percent(0),
-                            height: px(6),
-                            ..default()
-                        },
-                        skin.image("bar_fill_shield")
-                    ),
-                ],
-            ),
-            (
-                crate::hud_fx::UltBar::default(),
-                UiTransform::default(),
+                BossBar,
+                Visibility::Hidden,
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
@@ -276,20 +251,8 @@ pub(crate) fn spawn_hud(
                     ..default()
                 },
                 children![
-                    bar(&skin, 200.0, 12.0, UltFill, "bar_fill_xp"),
-                    (UltLabel, UiTransform::default(), text(&fonts.body, 13.0, DIM, "燃灯")),
-                    (
-                        crate::hud_fx::UltHint,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: percent(100),
-                            top: px(-4),
-                            width: px(100),
-                            margin: UiRect::left(px(12)),
-                            ..default()
-                        },
-                        text(&fonts.body, 16.0, GOLD.with_alpha(0.0), "燃灯未满"),
-                    ),
+                    (BossName, text(&fonts.title, 26.0, hex("#FF6B5A"), "")),
+                    bar(&skin, 560.0, 18.0, BossFill, "bar_fill_boss"),
                 ],
             ),
             (
@@ -310,6 +273,162 @@ pub(crate) fn spawn_hud(
             ),
         ],
     ));
+}
+
+/// 头像章的边长；燃灯刻度沿圆环排一圈，等级印压在右下角。
+const PORTRAIT: f32 = 104.0;
+/// 燃灯刻度的个数和尺寸（长边沿着圆周）
+const TICKS: usize = 12;
+const TICK: Vec2 = Vec2::new(17.0, 10.0);
+/// 血条、经验条的宽度
+const BAR_WIDTH: f32 = 460.0;
+/// 血条底槽的内边距：填充画在里面
+const HP_INSET: f32 = 7.0;
+
+/// 法器格、心法格的边长
+const SLOT_L: f32 = 64.0;
+const SLOT_S: f32 = 44.0;
+
+/// 燃灯刻度：第 k 个在燃灯到 (k+1)/12 时点亮，蓄满时整圈换成满格。
+#[derive(Component)]
+pub(crate) struct UltTick(usize);
+
+fn portrait(p: &mut ChildSpawnerCommands, db: Option<&AtlasDb>, fonts: &Fonts, skin: &Skin) {
+    p.spawn((
+        crate::hud_fx::UltBar::default(),
+        UiTransform::default(),
+        Node { width: px(PORTRAIT), height: px(PORTRAIT), ..default() },
+    ))
+    .with_children(|seal| {
+        // 胸像画在圆章底下，自带的毛笔圈藏在漆环后面
+        let hero = 92.0;
+        let inset = (PORTRAIT - hero) / 2.0;
+        if let Some(f) = db.and_then(|db| db.find("ui/portrait_hero").map(|f| db.ui_image(f))) {
+            seal.spawn((
+                Node { width: px(hero), height: px(hero), ..abs(Some(inset), None, Some(inset), None) },
+                f,
+            ));
+        }
+        seal.spawn((
+            Node { width: percent(100), height: percent(100), ..abs(Some(0.0), None, Some(0.0), None) },
+            skin.image("hud_portrait"),
+        ));
+        let r = PORTRAIT / 2.0 - TICK.y / 2.0 - 3.5;
+        for k in 0..TICKS {
+            let a = k as f32 / TICKS as f32 * std::f32::consts::TAU;
+            let at = Vec2::new(PORTRAIT / 2.0 + r * a.sin(), PORTRAIT / 2.0 - r * a.cos()) - TICK / 2.0;
+            seal.spawn((
+                UltTick(k),
+                UltFill,
+                Node { width: px(TICK.x), height: px(TICK.y), ..abs(Some(at.x), None, Some(at.y), None) },
+                UiTransform { rotation: Rot2::radians(a), ..default() },
+                skin.image("hud_ult_tick"),
+            ));
+        }
+        seal.spawn((
+            Node {
+                width: px(30),
+                height: px(30),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..abs(None, Some(-2.0), None, Some(0.0))
+            },
+            skin.image("hud_level_seal"),
+            children![(LevelLabel, UiTransform::default(), text(&fonts.title, 17.0, PAPER, "1"))],
+        ));
+    });
+}
+
+/// 大血条：填充在底槽里面，掉血残影画在填充后面，护盾一道细线压在上沿，数字写在右端。
+fn hp_bar(fonts: &Fonts, skin: &Skin) -> impl Bundle {
+    let inner = || Node {
+        position_type: PositionType::Absolute,
+        left: px(HP_INSET),
+        right: px(HP_INSET),
+        top: px(HP_INSET),
+        bottom: px(HP_INSET),
+        ..default()
+    };
+    (
+        crate::hud_fx::HpBar,
+        UiTransform::default(),
+        Node { width: px(BAR_WIDTH), height: px(30), padding: UiRect::all(px(HP_INSET)), ..default() },
+        skin.image("hud_hp_track"),
+        children![
+            // 掉血的残影：只画掉掉的那一截，比血条慢半拍缩回（hud_fx.rs）
+            (
+                inner(),
+                children![(
+                    crate::hud_fx::HpTrail,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: percent(100),
+                        width: percent(0),
+                        height: percent(100),
+                        ..default()
+                    },
+                    skin.image("bar_fill_trail"),
+                )],
+            ),
+            (
+                HpFill,
+                Node { width: percent(100), height: percent(100), ..default() },
+                skin.image("bar_fill_hp")
+            ),
+            (
+                inner(),
+                children![(
+                    ShieldFill,
+                    Node { width: percent(0), height: px(5), ..default() },
+                    skin.image("bar_fill_shield")
+                )],
+            ),
+            (
+                Node { position_type: PositionType::Absolute, right: px(16), top: px(5), ..default() },
+                children![(HpLabel, text(&fonts.body, 15.0, PAPER, "100 / 100"))],
+            ),
+        ],
+    )
+}
+
+/// 五行：图标加点数（图集里没有图标时写字）
+fn element_chips(
+    p: &mut ChildSpawnerCommands,
+    c: &lantern_content::Content,
+    db: Option<&AtlasDb>,
+    fonts: &Fonts,
+    skin: &Skin,
+) {
+    p.spawn(Node { column_gap: px(6), ..default() }).with_children(|row| {
+        for e in Element::ALL {
+            let icon = db.and_then(|db| {
+                db.find(&format!("ui/icon_el_{}", ELEMENT_ICONS[e.index()])).map(|f| db.ui_image(f))
+            });
+            let label = if icon.is_some() { "0".to_string() } else { format!("{} 0", c.element(e).name) };
+            row.spawn((
+                Node {
+                    padding: UiRect::new(px(6), px(10), px(2), px(2)),
+                    align_items: AlignItems::Center,
+                    column_gap: px(4),
+                    ..default()
+                },
+                skin.image("chip_dark"),
+            ))
+            .with_children(|chip| {
+                if let Some(img) = icon {
+                    chip.spawn((
+                        ElementIcon(e),
+                        Node { width: px(22), height: px(22), ..default() },
+                        img.with_color(Color::WHITE.with_alpha(0.35)),
+                    ));
+                }
+                chip.spawn((
+                    ElementChip(e),
+                    text(&fonts.body, 15.0, element_color(c, e).with_alpha(0.35), &label),
+                ));
+            });
+        }
+    });
 }
 
 /// 结算的底部收益区不再透出战斗按键；模拟结束的当帧就收起，无须等状态切换。
@@ -364,7 +483,6 @@ pub(crate) fn update_hud(
         Query<&mut Node, With<XpFill>>,
         Query<&mut Node, With<HpFill>>,
         Query<&mut Node, With<ShieldFill>>,
-        Query<&mut Node, With<UltFill>>,
         Query<&mut Node, With<BossFill>>,
     )>,
     mut boss_bar: Query<&mut Visibility, With<BossBar>>,
@@ -394,7 +512,7 @@ pub(crate) fn update_hud(
         );
     }
     for mut t in &mut texts.p2() {
-        set(&mut t, format!("等级 {}", progress.level));
+        set(&mut t, progress.level.to_string());
     }
     let need = c.run.xp_need.at(progress.level as f32).max(1.0);
     for mut n in &mut fills.p0() {
@@ -402,7 +520,7 @@ pub(crate) fn update_hud(
     }
     if let Ok((h, p)) = player.single() {
         for mut t in &mut texts.p3() {
-            set(&mut t, format!("生命 {} / {}", h.hp.ceil() as i32, h.max.round() as i32));
+            set(&mut t, format!("{} / {}", h.hp.ceil() as i32, h.max.round() as i32));
         }
         for mut n in &mut fills.p1() {
             n.width = percent((h.hp / h.max * 100.0).clamp(0.0, 100.0));
@@ -415,9 +533,7 @@ pub(crate) fn update_hud(
             });
         }
     }
-    for mut n in &mut fills.p3() {
-        n.width = percent(progress.ult * 100.0);
-    }
+    // 燃灯的进度画在头像章的刻度上（update_ult_ticks），蓄满了才写按键
     for (mut t, mut color) in &mut texts.p4() {
         let ready = progress.ult >= 1.0;
         set(
@@ -425,10 +541,10 @@ pub(crate) fn update_hud(
             if ready {
                 crate::prompts::render("燃灯 {ult}", &s.active, &s.settings)
             } else {
-                format!("燃灯 {}%", (progress.ult * 100.0) as u32)
+                String::new()
             },
         );
-        color.0 = if ready { GOLD } else { DIM };
+        color.0 = GOLD;
     }
     for mut t in &mut texts.p5() {
         set(&mut t, if progress.combo >= 10 { format!("连斩 {}", progress.combo) } else { String::new() });
@@ -455,38 +571,77 @@ pub(crate) fn update_hud(
                 // 标题字体没有“·”
                 set(&mut t, def.name.replace('·', "•"));
             }
-            for mut n in &mut fills.p4() {
+            for mut n in &mut fills.p3() {
                 n.width = percent((en.hp[i] / en.max_hp[i] * 100.0).clamp(0.0, 100.0));
             }
         }
     }
 }
 
-/// 五行共鸣的点数和阶数。
+/// 燃灯刻度：到了第 k 格的进度就点亮，蓄满整圈换成满格；只换图，不碰颜色（蓄满时的呼吸在 hud_fx.rs）。
+pub(crate) fn update_ult_ticks(
+    skin: Res<Skin>,
+    progress: Option<Res<Progress>>,
+    mut ticks: Query<(&UltTick, &mut ImageNode)>,
+) {
+    let Some(progress) = progress else { return };
+    for (tick, mut img) in &mut ticks {
+        let name = tick_skin(tick.0, progress.ult);
+        let want = skin.image(name);
+        if img.image != want.image {
+            img.image = want.image;
+            img.image_mode = want.image_mode;
+        }
+    }
+}
+
+fn tick_skin(k: usize, ult: f32) -> &'static str {
+    if ult >= 1.0 {
+        "hud_ult_tick_full"
+    } else if ult * TICKS as f32 >= (k + 1) as f32 {
+        "hud_ult_tick_on"
+    } else {
+        "hud_ult_tick"
+    }
+}
+
+/// 五行共鸣的点数和阶数：没有点数的淡，有点数没到一阶的半亮，到了一阶全亮。
 pub(crate) fn update_chips(
     content: Res<GameContent>,
     build: Option<Res<Build>>,
     mut chips: Query<(&ElementChip, &mut Text, &mut TextColor)>,
+    mut icons: Query<(&ElementIcon, &mut ImageNode)>,
 ) {
     let Some(build) = build else { return };
     if !build.is_changed() {
         return;
     }
     let c = &content.0;
-    for (chip, mut t, mut color) in &mut chips {
-        let i = chip.0.index();
-        let pts = build.points[i];
-        let tier = build.tiers[i];
-        let name = &c.element(chip.0).name;
-        let stars = ["", "·一", "·二", "·三"][tier as usize];
-        t.0 = format!("{name} {pts}{stars}");
-        color.0 = element_color(c, chip.0).with_alpha(if pts == 0 {
+    let alpha = |e: Element| {
+        let (pts, tier) = (build.points[e.index()], build.tiers[e.index()]);
+        if pts == 0 {
             0.35
         } else if tier == 0 {
             0.7
         } else {
             1.0
-        });
+        }
+    };
+    let iconed: Vec<Element> = icons.iter().map(|(i, _)| i.0).collect();
+    for (chip, mut t, mut color) in &mut chips {
+        let i = chip.0.index();
+        let marks = TIER_MARKS[(build.tiers[i] as usize).min(TIER_MARKS.len() - 1)];
+        let pts = build.points[i];
+        // 有图标的只写点数
+        t.0 = if iconed.contains(&chip.0) {
+            format!("{pts}{marks}")
+        } else {
+            format!("{} {pts}{marks}", c.element(chip.0).name)
+        };
+        color.0 = element_color(c, chip.0).with_alpha(alpha(chip.0));
+    }
+    for (icon, mut img) in &mut icons {
+        img.color = Color::WHITE.with_alpha(alpha(icon.0));
     }
 }
 
@@ -504,11 +659,17 @@ pub(crate) fn update_slots(
 ) {
     let (Some(arsenal), Some(build)) = (arsenal, build) else { return };
     let c = &content.0;
+    // 空格子画到上限：法器栏会被灯坠改，合璧可能腾出一格
+    let free_weapons = lantern_sim::build::weapon_slots(c, &build)
+        .saturating_sub(lantern_sim::build::occupied_slots(c, &arsenal, &build))
+        as usize;
+    let free_passives = (c.run.choices.slots as usize).saturating_sub(build.passives.len());
     let now: Vec<(u8, usize, u32, lantern_sim::weapons::Form)> = arsenal
         .0
         .iter()
         .map(|w| (0, w.def, w.level, w.form))
         .chain(build.passives.iter().map(|p| (1, p.def, p.level, lantern_sim::weapons::Form::Base)))
+        .chain([(2, free_weapons, free_passives as u32, lantern_sim::weapons::Form::Base)])
         .collect();
     if *shown == now {
         return;
@@ -516,7 +677,7 @@ pub(crate) fn update_slots(
     *shown = now;
     commands.entity(*slots).despawn_related::<Children>();
     commands.entity(*slots).with_children(|p| {
-        p.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
+        p.spawn(Node { column_gap: px(8), ..default() }).with_children(|row| {
             for w in &arsenal.0 {
                 let def = &c.weapons[w.def];
                 let color = element_color(c, def.element);
@@ -533,15 +694,17 @@ pub(crate) fn update_slots(
                 .with_children(|cell| {
                     cell.spawn((
                         Node {
-                            width: px(48),
-                            height: px(48),
+                            width: px(SLOT_L),
+                            height: px(SLOT_L),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             ..default()
                         },
                         skin.image(if w.transformed() { "slot_l_evo" } else { "slot_l" }),
                     ))
-                    .with_children(|slot| spawn_icon(slot, &db, &fonts, Some(&name), &def.icon, color, 38.0));
+                    .with_children(|slot| {
+                        spawn_icon(slot, &db, &fonts, Some(&name), &def.icon, color, SLOT_L * 0.78)
+                    });
                     let lv = match w.form {
                         lantern_sim::weapons::Form::Base => w.level.to_string(),
                         // 异化与合璧关着时只有正统进化一种，照旧画星
@@ -565,11 +728,17 @@ pub(crate) fn update_slots(
                     };
                     let badge =
                         if w.form == lantern_sim::weapons::Form::Mutated { hex("#CF8CDB") } else { GOLD };
-                    cell.spawn(text(&fonts.body, 12.0, if w.transformed() { badge } else { PAPER }, &lv));
+                    cell.spawn(text(&fonts.body, 13.0, if w.transformed() { badge } else { PAPER }, &lv));
                 });
             }
+            for _ in 0..free_weapons {
+                row.spawn((
+                    Node { width: px(SLOT_L), height: px(SLOT_L), ..default() },
+                    skin.image("slot_l_empty"),
+                ));
+            }
         });
-        p.spawn(Node { column_gap: px(4), ..default() }).with_children(|row| {
+        p.spawn(Node { column_gap: px(8), ..default() }).with_children(|row| {
             for s in &build.passives {
                 let def = &c.passives[s.def];
                 let color = passive_color(c, def.element);
@@ -583,17 +752,25 @@ pub(crate) fn update_slots(
                 .with_children(|cell| {
                     cell.spawn((
                         Node {
-                            width: px(34),
-                            height: px(34),
+                            width: px(SLOT_S),
+                            height: px(SLOT_S),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             ..default()
                         },
                         skin.image("slot_s"),
                     ))
-                    .with_children(|slot| spawn_icon(slot, &db, &fonts, Some(&name), &glyph, color, 26.0));
-                    cell.spawn(text(&fonts.body, 11.0, PAPER, &format!("{}", s.level)));
+                    .with_children(|slot| {
+                        spawn_icon(slot, &db, &fonts, Some(&name), &glyph, color, SLOT_S * 0.78)
+                    });
+                    cell.spawn(text(&fonts.body, 12.0, PAPER, &format!("{}", s.level)));
                 });
+            }
+            for _ in 0..free_passives {
+                row.spawn((
+                    Node { width: px(SLOT_S), height: px(SLOT_S), ..default() },
+                    skin.image("slot_s_empty"),
+                ));
             }
         });
     });
@@ -635,5 +812,48 @@ mod hint_tests {
         app.insert_resource(RunSetup::new(1, RunMode::Bench { enemies: 250 }));
         app.update();
         assert!(!shown(&app));
+    }
+}
+
+#[cfg(test)]
+mod chip_tests {
+    use super::*;
+
+    /// 五行计数：有图标的只写点数，极境不越界，图标跟着点数变淡变亮。
+    #[test]
+    fn element_chips_show_points_and_every_tier_including_the_peak() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+        let content = lantern_content::Content::load(&path).unwrap();
+        let mut app = App::new();
+        app.insert_resource(GameContent(content.into()))
+            .insert_resource(Build { points: [12, 3, 0, 0, 0], tiers: [4, 0, 0, 0, 0], ..default() })
+            .add_systems(Update, update_chips);
+        let metal =
+            app.world_mut().spawn((ElementChip(Element::Metal), Text::default(), TextColor::default())).id();
+        app.world_mut().spawn((ElementIcon(Element::Metal), ImageNode::default()));
+        let wood =
+            app.world_mut().spawn((ElementChip(Element::Wood), Text::default(), TextColor::default())).id();
+        let water = app.world_mut().spawn((ElementIcon(Element::Water), ImageNode::default())).id();
+        app.update();
+        assert_eq!(app.world().get::<Text>(metal).unwrap().0, "12·极");
+        // 没有图标的照旧写字
+        assert!(app.world().get::<Text>(wood).unwrap().0.ends_with(" 3"));
+        assert_eq!(app.world().get::<ImageNode>(water).unwrap().color.alpha(), 0.35);
+    }
+}
+
+#[cfg(test)]
+mod tick_tests {
+    use super::*;
+
+    /// 燃灯刻度：到第 k 格的进度才亮，差一点不亮；蓄满整圈换满格。
+    #[test]
+    fn ticks_light_one_by_one_and_all_turn_full_when_ready() {
+        assert_eq!(tick_skin(0, 0.0), "hud_ult_tick");
+        assert_eq!(tick_skin(0, 1.0 / 12.0), "hud_ult_tick_on");
+        assert_eq!(tick_skin(1, 1.0 / 12.0), "hud_ult_tick");
+        assert_eq!(tick_skin(10, 0.99), "hud_ult_tick_on");
+        assert_eq!(tick_skin(11, 0.99), "hud_ult_tick");
+        assert!((0..TICKS).all(|k| tick_skin(k, 1.0) == "hud_ult_tick_full"));
     }
 }

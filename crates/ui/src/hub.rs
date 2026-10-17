@@ -218,7 +218,7 @@ fn frame(
                 skin.image("btn_focus"),
             ));
             clickable(&mut back, 0);
-            back.with_child(crate::prompts::hint(&fonts.body, 18.0, INK, "{confirm} / {back} 返回"));
+            back.with_child(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} / {back} 返回"));
         } else {
             p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, hint));
         }
@@ -447,82 +447,263 @@ fn mmss(secs: f64) -> String {
     }
 }
 
-/// 说书人：见过的反应和累计统计（P0 的图鉴先做五行谱里的反应）。
+/// 图鉴的页：五行谱（反应和累计统计）、法器（本体、进化、异化、合璧）、心法。
+pub(crate) const CODEX_PAGES: [&str; 3] = ["五行谱", "法器", "心法"];
+/// 页签的点击序号从这里起，和“点一下返回”分开
+pub(crate) const CODEX_TAB: usize = 100;
+
+/// 图鉴里的一格：拿到过的写名字、短句和背景故事，没拿到过的只留个空位。
+struct CodexEntry {
+    key: String,
+    icon: String,
+    glyph: String,
+    color: Color,
+    name: String,
+    short: String,
+    flavor: String,
+}
+
+/// 法器页：每件法器一行（本体、进化、异化），最后一行合璧；异化与合璧关着时不列。
+/// 还锁着的法器（`run.ron` 的 `choices.locked`）拿到过才列，免得满页都是拿不到的空位。
+fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
+    let mut rows = Vec::new();
+    for (d, w) in c.weapons.iter().enumerate() {
+        if c.weapon_locked(d) && !profile.codex.contains(&format!("w:{}", w.id)) {
+            continue;
+        }
+        let color = element_color(c, w.element);
+        let mut row = vec![CodexEntry {
+            key: format!("w:{}", w.id),
+            icon: format!("ui/icon_{}", w.id),
+            glyph: w.icon.clone(),
+            color,
+            name: w.name.clone(),
+            short: w.short.clone(),
+            flavor: w.flavor.clone(),
+        }];
+        if let Some(e) = &w.evolution {
+            row.push(CodexEntry {
+                key: format!("w:{}_evo", w.id),
+                icon: format!("ui/icon_{}_evo", w.id),
+                glyph: w.icon.clone(),
+                color,
+                name: e.name.clone(),
+                short: e.short.clone(),
+                flavor: e.flavor.clone(),
+            });
+        }
+        if let Some(m) = w.mutation.as_ref().filter(|_| c.run.transformations) {
+            row.push(CodexEntry {
+                key: format!("w:{}_mut", w.id),
+                icon: format!("ui/icon_{}_evo", w.id),
+                glyph: "异".into(),
+                color: crate::describe::Rarity::Yi.color(),
+                name: m.name.clone(),
+                short: m.short.clone(),
+                flavor: m.flavor.clone(),
+            });
+        }
+        rows.push(row);
+    }
+    if c.run.transformations && !c.fusions.is_empty() {
+        rows.push(
+            c.fusions
+                .iter()
+                .map(|f| CodexEntry {
+                    key: format!("f:{}", f.id),
+                    icon: format!("ui/icon_{}_evo", f.weapons[0]),
+                    glyph: "合".into(),
+                    color: crate::describe::Rarity::He.color(),
+                    name: f.name.clone(),
+                    short: f.short.clone(),
+                    flavor: f.flavor.clone(),
+                })
+                .collect(),
+        );
+    }
+    rows
+}
+
+/// 心法页：三个一行。
+fn passive_entries(c: &Content) -> Vec<Vec<CodexEntry>> {
+    let all: Vec<CodexEntry> = c
+        .passives
+        .iter()
+        .map(|p| CodexEntry {
+            key: format!("p:{}", p.id),
+            icon: format!("ui/icon_{}", p.id),
+            glyph: p.name.chars().next().map(String::from).unwrap_or_default(),
+            color: crate::describe::passive_color(c, p.element),
+            name: p.name.clone(),
+            short: p.short.clone(),
+            flavor: p.flavor.clone(),
+        })
+        .collect();
+    let mut rows = Vec::new();
+    let mut it = all.into_iter().peekable();
+    while it.peek().is_some() {
+        rows.push(it.by_ref().take(3).collect());
+    }
+    rows
+}
+
+fn codex_cell(p: &mut ChildSpawnerCommands, fonts: &Fonts, db: &AtlasDb, e: &CodexEntry, known: bool) {
+    p.spawn(Node {
+        width: px(336),
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::axes(px(10), px(4)),
+        row_gap: px(2),
+        ..default()
+    })
+    .with_children(|cell| {
+        cell.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() }).with_children(
+            |head| {
+                let color = if known { on_paper(e.color) } else { INK_DIM.with_alpha(0.4) };
+                spawn_icon(head, db, fonts, Some(&e.icon), &e.glyph, color, 36.0);
+                let name = if known { e.name.as_str() } else { "？？？" };
+                head.spawn(text(&fonts.title, 22.0, if known { on_paper(e.color) } else { INK_DIM }, name));
+            },
+        );
+        if known {
+            cell.spawn(para(fonts, 14.0, INK, &e.short, 316.0));
+            if !e.flavor.is_empty() {
+                cell.spawn(para(fonts, 13.0, INK_DIM, &e.flavor, 316.0));
+            }
+        } else {
+            cell.spawn(para(fonts, 14.0, INK_DIM, "还没拿到过", 316.0));
+        }
+    });
+}
+
+/// 说书人的图鉴：页签加一页内容。五行谱页另有累计统计和手记入口。
 pub(crate) fn codex_panel(
     commands: &mut Commands,
     c: &Content,
     fonts: &Fonts,
     skin: &Skin,
+    db: &AtlasDb,
     profile: &Profile,
+    page: usize,
 ) {
-    let seen = (0..c.elements.reactions.len()).filter(|&k| profile.reactions & (1 << k) != 0).count();
-    let sub = format!("五行谱 · 见过的反应 {seen} / {}", c.elements.reactions.len());
-    frame(
+    let page = page.min(CODEX_PAGES.len() - 1);
+    let rows = match page {
+        1 => weapon_entries(c, profile),
+        2 => passive_entries(c),
+        _ => Vec::new(),
+    };
+    let count = |rows: &[Vec<CodexEntry>]| {
+        let all: Vec<&CodexEntry> = rows.iter().flatten().collect();
+        (all.iter().filter(|e| profile.codex.contains(&e.key)).count(), all.len())
+    };
+    let sub = match page {
+        0 => {
+            let seen = (0..c.elements.reactions.len()).filter(|&k| profile.reactions & (1 << k) != 0).count();
+            format!("见过的反应 {seen} / {}", c.elements.reactions.len())
+        }
+        _ => {
+            let (seen, all) = count(&rows);
+            format!("拿到过 {seen} / {all}")
+        }
+    };
+    // 每行格子约 84 高（图标名字、短句、一两行背景故事）；行多时画布变高、整页等比缩小
+    let height = 300.0 + rows.len() as f32 * 84.0;
+    let root = frame(
         commands,
         fonts,
         skin,
         1120.0,
         "说书人 · 图鉴",
         &sub,
-        "{hub} 手记　{back} 返回",
+        "{nav} 翻页　{hub} 手记　{back} 返回",
         |panel| {
-            panel
-                .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
-                .with_children(|g| {
-                    for (k, r) in c.elements.reactions.iter().enumerate() {
-                        let known = profile.reactions & (1 << k) != 0;
-                        g.spawn(Node {
-                            width: percent(50),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::axes(px(12), px(3)),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            let color = if known { on_paper(element_color(c, r.b)) } else { INK_DIM };
-                            let pair = format!(
-                                "{}{} · {}",
-                                c.element(r.a).name,
-                                c.element(r.b).name,
-                                if known { r.name.as_str() } else { "？？？" }
-                            );
-                            row.spawn(text(&fonts.title, 22.0, color, &pair));
-                            let desc = if known { r.desc.as_str() } else { "还没见过" };
-                            row.spawn(para(fonts, 13.0, INK_DIM, desc, 500.0));
-                        });
+            panel.spawn(Node { column_gap: px(28), ..default() }).with_children(|tabs| {
+                for (k, name) in CODEX_PAGES.iter().enumerate() {
+                    let on = k == page;
+                    let mut tab = tabs.spawn((
+                        Node { padding: UiRect::axes(px(16), px(4)), ..default() },
+                        skin.image(if on { "pill_on" } else { "pill" }),
+                    ));
+                    tab.with_child(text(&fonts.title, 24.0, if on { INK } else { INK_DIM }, name));
+                    clickable(&mut tab, CODEX_TAB + k);
+                }
+            });
+            if page == 0 {
+                reactions_page(panel, c, fonts, skin, profile);
+                return;
+            }
+            for row in &rows {
+                panel.spawn(Node { width: percent(100), ..default() }).with_children(|r| {
+                    for e in row {
+                        codex_cell(r, fonts, db, e, profile.codex.contains(&e.key));
                     }
                 });
-            panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
-            let t = &profile.totals;
-            let lines = [
-                format!(
-                    "夜行 {} 次　·　天明 {} 次　·　通关到 {}",
-                    profile.runs,
-                    profile.wins,
-                    tier_name(c, profile.cleared)
-                ),
-                format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
-                endless_line(c, profile),
-                format!(
-                    "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
-                    t.gold, t.oil, t.lanterns, t.evolutions
-                ),
-            ];
-            for l in lines.iter().filter(|l| !l.is_empty()) {
-                panel.spawn(text(&fonts.body, 16.0, INK, l));
             }
-            panel
-                .spawn((
-                    Node { padding: UiRect::all(px(10)), ..default() },
-                    text(&fonts.body, 20.0, INK, "翻看手记"),
-                ))
-                .observe(
-                    |_: On<bevy::picking::events::PointerClick>,
-                     mut reader: ResMut<crate::journals::Reader>| {
-                        reader.open = true;
-                    },
-                );
         },
     );
+    if height > 720.0 {
+        commands.entity(root).insert(crate::responsive::FitViewport::Fixed(Vec2::new(1280.0, height)));
+    }
+}
+
+/// 五行谱：见过的反应和累计统计。
+fn reactions_page(
+    panel: &mut ChildSpawnerCommands,
+    c: &Content,
+    fonts: &Fonts,
+    skin: &Skin,
+    profile: &Profile,
+) {
+    panel
+        .spawn(Node { width: percent(100), flex_wrap: FlexWrap::Wrap, row_gap: px(6), ..default() })
+        .with_children(|g| {
+            for (k, r) in c.elements.reactions.iter().enumerate() {
+                let known = profile.reactions & (1 << k) != 0;
+                g.spawn(Node {
+                    width: percent(50),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::axes(px(12), px(3)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    let color = if known { on_paper(element_color(c, r.b)) } else { INK_DIM };
+                    let pair = format!(
+                        "{}{} · {}",
+                        c.element(r.a).name,
+                        c.element(r.b).name,
+                        if known { r.name.as_str() } else { "？？？" }
+                    );
+                    row.spawn(text(&fonts.title, 22.0, color, &pair));
+                    let desc = if known { r.desc.as_str() } else { "还没见过" };
+                    row.spawn(para(fonts, 13.0, INK_DIM, desc, 500.0));
+                });
+            }
+        });
+    panel.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
+    let t = &profile.totals;
+    let lines = [
+        format!(
+            "夜行 {} 次　·　天明 {} 次　·　通关到 {}",
+            profile.runs,
+            profile.wins,
+            tier_name(c, profile.cleared)
+        ),
+        format!("累计击杀 {}　·　累计时长 {}", t.kills, mmss(t.seconds)),
+        endless_line(c, profile),
+        format!(
+            "累计铜钱 {}　·　累计灯油 {}　·　点亮石灯笼 {}　·　进化 {}",
+            t.gold, t.oil, t.lanterns, t.evolutions
+        ),
+    ];
+    for l in lines.iter().filter(|l| !l.is_empty()) {
+        panel.spawn(text(&fonts.body, 16.0, INK, l));
+    }
+    panel
+        .spawn((Node { padding: UiRect::all(px(10)), ..default() }, text(&fonts.body, 20.0, INK, "翻看手记")))
+        .observe(
+            |_: On<bevy::picking::events::PointerClick>, mut reader: ResMut<crate::journals::Reader>| {
+                reader.open = true;
+            },
+        );
 }
 
 fn tier_name(c: &Content, tier: u8) -> &str {

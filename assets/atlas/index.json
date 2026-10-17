@@ -2,6 +2,7 @@
  "atlases": [
   "actors",
   "boss",
+  "cards",
   "ground",
   "lanterns",
   "ui",
@@ -10,7 +11,8 @@
  "paper": true,
  "pages": {
   "actors": [
-   "actors.json"
+   "actors_0.json",
+   "actors_1.json"
   ],
   "vfx": [
    "vfx.json"
@@ -26,6 +28,9 @@
   ],
   "lanterns": [
    "lanterns.json"
+  ],
+  "cards": [
+   "cards.json"
   ]
  }
 }

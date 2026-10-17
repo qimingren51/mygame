@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Effect;
+use crate::{Effect, Stat};
 
 /// 二次曲线 a + b·x + c·x²。x 通常是分钟数或等级。
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
@@ -320,6 +320,9 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
+    /// 还没解锁的法器（ID）：不进卡池。新法器按局解锁之前先锁着（docs/BALANCE.md 第 6.3 节）
+    #[serde(default)]
+    pub locked: Vec<String>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -389,6 +392,21 @@ pub struct SpawnDef {
     pub base: String,
     pub mix: Vec<MixDef>,
     pub packs: PackDef,
+    /// 从地形里冒出来的妖物（竹魅从竹丛里钻出）
+    #[serde(default)]
+    pub ambush: Vec<AmbushDef>,
+}
+
+/// 伏击：开局 from 秒起每 every 秒，在离主角 dist 以内一丛立着的竹子里冒出一只 enemy；
+/// 场上已有 max 只时这一次不出。附近没有竹子就 2 秒后再找。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AmbushDef {
+    pub enemy: String,
+    pub from: f32,
+    pub every: f32,
+    pub dist: (f32, f32),
+    pub max: u32,
 }
 
 /// 混进常规刷怪的其他妖物。每局开局时在 share 范围内随机取一个比例。
@@ -465,6 +483,10 @@ pub enum Movement {
     Chase,
     /// 背着玩家逃，路线左右摇摆
     Flee,
+    /// 在 `band` 的距离带里绕着玩家转（狐火）；带外先靠近或退开
+    Circle,
+    /// 停在 `band` 的距离带里，带里慢慢横移（竹魅）
+    Keep,
 }
 
 /// 妖物（`enemies.ron`）。
@@ -504,6 +526,37 @@ pub struct EnemyDef {
     /// 冲锋（扑击、冲撞）
     #[serde(default)]
     pub charge: Option<ChargeDef>,
+    /// 绕圈（Circle）、守距（Keep）的距离带：(近, 远)
+    #[serde(default)]
+    pub band: Option<(f32, f32)>,
+    /// 远程：预警之后射一根弹（竹魅的竹刺）
+    #[serde(default)]
+    pub shot: Option<ShotDef>,
+    /// 伪装：照见圈外不能被自动瞄准锁定，进了照见圈现形并换成这个速度（讨封狐）
+    #[serde(default)]
+    pub disguise: Option<DisguiseDef>,
+}
+
+/// 妖物的远程弹（docs/BALANCE.md 第 12.1 节）：离主角 range 以内、冷却好了就锁定方向预警 warn 秒，
+/// 然后朝那个方向射一根弹（速度 speed、半径 radius、存活 life 秒）。伤害和接触伤害一样吃曲线和更的倍率。
+/// 冻住、击晕、定身、晕头会打断预警。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ShotDef {
+    pub every: f32,
+    pub warn: f32,
+    pub range: f32,
+    pub speed: f32,
+    pub damage: f32,
+    pub radius: f32,
+    pub life: f32,
+}
+
+/// 伪装（讨封狐）：现形以后的移速（基础值，同样乘难度和随机浮动）。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DisguiseDef {
+    pub speed: f32,
 }
 
 impl EnemyDef {
@@ -528,6 +581,9 @@ pub struct ChargeDef {
     pub duration: f32,
     pub damage_mult: f32,
     pub recover: f32,
+    /// 每只的冷却在 every ± jitter 里错开（按妖物的随机相位，固定不变）
+    #[serde(default)]
+    pub jitter: f32,
 }
 
 /// 夜主的招式（docs/BALANCE.md 第 12.2 节）：一阶段放狐火环、召唤小妖；
@@ -787,6 +843,83 @@ pub enum WeaponBehavior {
         #[serde(default)]
         escort: Option<EscortDef>,
     },
+    /// 挥一道扇形剑气（铜钱剑 / 天罡，docs/BALANCE.md 第 6.3 节）。arc 是整个扇形的张角（弧度，
+    /// 一整圈就是一周）；方向朝 radius + aim 以内最近的妖物，没有就朝面向；扇形里按距离从近到远
+    /// 最多打 count 只（数量加成照加）。
+    Sweep {
+        arc: f32,
+        aim: f32,
+        knockback: f32,
+        /// 这把剑的命中额外加的暴击率
+        crit_bonus: f32,
+        /// 天罡：暴击的那一下对同一只再斩一次，伤害倍率（0 表示没有）；再斩不再触发
+        #[serde(default)]
+        echo: f32,
+    },
+    /// 放飞孔明灯（孔明灯 / 万灯升，docs/BALANCE.md 第 6.3 节）：每次放 count 盏，各自飘向妖物最密的地方，
+    /// 放飞 fuse 秒后落地爆燃（半径 radius、点 1 层灼烧），落点留下一块火海（zone）。
+    /// 落点：在 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只；同一次放的几盏落点至少隔开 spread。
+    /// 灯以 speed 飘过去，每 retarget 秒在落点附近重新找一次。
+    SkyLantern {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        speed: f32,
+        fuse: f32,
+        retarget: f32,
+        zone: FissureDef,
+    },
+    /// 推浪（沧浪 / 北冥潮，docs/BALANCE.md 第 6.3 节）：朝面向（站着不动时朝最近的妖物）推出一道浪，
+    /// 宽 2 × radius，以 speed 走 travel 远后散掉；数量加成多一道，左右轮流再偏 spread（弧度）。
+    /// 浪碰到的妖物受一次伤害、减速，被浪推着走最多 push（精英一半，夜主不推）。
+    /// ring：以主角为圆心一圈往外扩，扩到 radius；这时 travel 不用，freeze 是命中冻结的秒数。
+    Wave {
+        speed: f32,
+        travel: f32,
+        push: f32,
+        slow: f32,
+        slow_time: f32,
+        spread: f32,
+        #[serde(default)]
+        ring: bool,
+        #[serde(default)]
+        freeze: f32,
+    },
+    /// 连藤（青藤 / 万木春，docs/BALANCE.md 第 6.3 节）：和 radius 以内最近的 count 只各连一根藤，
+    /// 每 cooldown 秒对连着的每只造成 damage；主角回复伤害的 lifesteal，每秒最多 heal_cap + heal_per_level × 等级。
+    /// 目标离开 radius + leash 或死了就断，relink 秒后接新目标。
+    /// bind_every 大于 0 时，每隔这么久把连着的妖物定身 bind 秒（精英减半，夜主免疫）。
+    Vine {
+        leash: f32,
+        relink: f32,
+        lifesteal: f32,
+        heal_cap: f32,
+        heal_per_level: f32,
+        #[serde(default)]
+        bind_every: f32,
+        #[serde(default)]
+        bind: f32,
+    },
+    /// 落塔（镇妖塔 / 玲珑塔，docs/BALANCE.md 第 6.3 节）：每次落 count 座，落点和孔明灯一样挑（range、pick、cluster、spread）。
+    /// 预警 warn 秒后落地，对 radius 以内造成 damage、击晕 stun 秒；之后立 life 秒：把 pull × radius 以内的妖物
+    /// 往塔下吸，每秒 pull_speed（精英一半，夜主不吸），每 tick 秒对 radius 以内造成 damage × tick_scale。
+    /// burst：到时间炸开（玲珑塔）。
+    Tower {
+        range: f32,
+        pick: u32,
+        cluster: f32,
+        spread: f32,
+        warn: f32,
+        stun: f32,
+        life: f32,
+        pull: f32,
+        pull_speed: f32,
+        tick: f32,
+        tick_scale: f32,
+        #[serde(default)]
+        burst: Option<TowerBurstDef>,
+    },
     /// 从天而降的范围伤害（山印）；fissure 是进化后留下的地裂。
     Drop {
         /// 从 range 内最近的 candidates 只里随机选落点
@@ -850,6 +983,15 @@ pub enum GroundKind {
     Fire,
     Bamboo,
     Sword,
+}
+
+/// 玲珑塔到时间炸开：半径、伤害、击晕秒数。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TowerBurstDef {
+    pub radius: f32,
+    pub damage: f32,
+    pub stun: f32,
 }
 
 /// 赤霄：命中熔金（易伤），击杀时分剑。
@@ -1557,6 +1699,116 @@ impl HubWhen {
             Self::MetaLevels(_) | Self::MetaLevel(..) | Self::Runs(_) | Self::Wins(_) => true,
             Self::All(ws) => ws.iter().any(Self::is_milestone),
             _ => false,
+        }
+    }
+}
+
+/// 局内属性面板的一组（`stat_labels.ron`，docs/LORE-TEXT.md 第 8 节）。只有文字，不计入内容哈希。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StatGroupDef {
+    pub name: String,
+    /// 组的图标：图集里的 `ui/stat_group_<icon>`；不写就只写名字
+    #[serde(default)]
+    pub icon: String,
+    /// 总是全部列出（基础）；其余组默认只列和基础值不同的
+    #[serde(default)]
+    pub always: bool,
+    pub stats: Vec<StatLabelDef>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StatLabelDef {
+    pub stat: Stat,
+    /// 2–4 个字
+    pub label: String,
+    /// 悬停说明，不超过 16 个字
+    pub hint: String,
+    pub format: StatFormat,
+    /// 图标：图集里的 `ui/stat_<icon>`（属性面板、心法卡的收益行）；不写就只写字
+    #[serde(default)]
+    pub icon: String,
+    /// 并进来一起显示的倍率（灯焰带的 FlameBandMult）
+    #[serde(default)]
+    pub times: Option<Stat>,
+}
+
+/// 属性面板上数值的写法（docs/LORE-TEXT.md 第 8 节：倍率写成百分比加减，次数、格数写整数）。
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum StatFormat {
+    /// 120、2、0.5
+    Number,
+    /// 0.2/秒
+    PerSecond,
+    /// 倍率，写和 1 的差：+20%、-6%
+    Multiplier,
+    /// 5%
+    Percent,
+    /// 带符号：+10%、-10%
+    PercentChange,
+    /// 每秒回复生命上限的比例：1%/秒
+    PercentPerSecond,
+    /// ×2.0
+    Times,
+    /// 3
+    Count,
+    /// +1
+    CountChange,
+    /// 2.4 秒
+    Seconds,
+    /// 2 级；0 写“无”
+    Rank,
+    /// 有、无
+    Flag,
+}
+
+/// 去掉末尾多余的 0：1.50 → 1.5，2.0 → 2。
+fn trim(v: f32, decimals: usize) -> String {
+    let s = format!("{v:.decimals$}");
+    if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
+}
+
+/// 带符号；四舍五入后是 0 的写 +0。
+fn signed(v: f32, decimals: usize) -> String {
+    let s = trim(v, decimals);
+    match s.strip_prefix('-') {
+        Some(rest) if rest.trim_start_matches(['0', '.']).is_empty() => "+0".into(),
+        Some(_) => s,
+        None => format!("+{s}"),
+    }
+}
+
+impl StatFormat {
+    /// 属性的当前值。
+    pub fn show(self, v: f32) -> String {
+        match self {
+            // 照见圈、拾取这类大数不写小数
+            Self::Number => trim(v, if v.abs() >= 10.0 { 0 } else { 1 }),
+            Self::PerSecond => format!("{}/秒", trim(v, 2)),
+            Self::Multiplier => format!("{}%", signed((v - 1.0) * 100.0, 1)),
+            Self::Percent => format!("{}%", trim(v * 100.0, 1)),
+            Self::PercentChange => format!("{}%", signed(v * 100.0, 1)),
+            Self::PercentPerSecond => format!("{}%/秒", trim(v * 100.0, 2)),
+            Self::Times => format!("×{}", trim(v, 2)),
+            Self::Count => trim(v.round(), 0),
+            Self::CountChange => signed(v.round(), 0),
+            Self::Seconds => format!("{} 秒", trim(v, 2)),
+            Self::Rank if v < 1.0 => "无".into(),
+            Self::Rank => format!("{} 级", trim(v.round(), 0)),
+            Self::Flag => if v > 0.0 { "有" } else { "无" }.into(),
+        }
+    }
+
+    /// 一项来源加上的值（加值部分）：+20、+5%、-0.24 秒。
+    pub fn delta(self, v: f32) -> String {
+        match self {
+            Self::Number | Self::Rank | Self::Count | Self::CountChange | Self::Flag => signed(v, 1),
+            Self::PerSecond => format!("{}/秒", signed(v, 2)),
+            Self::Multiplier | Self::Percent | Self::PercentChange => format!("{}%", signed(v * 100.0, 1)),
+            Self::PercentPerSecond => format!("{}%/秒", signed(v * 100.0, 2)),
+            Self::Times => format!("×{}", signed(v, 2)),
+            Self::Seconds => format!("{} 秒", signed(v, 2)),
         }
     }
 }

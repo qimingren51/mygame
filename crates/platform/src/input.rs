@@ -215,6 +215,8 @@ fn gather(
         pointer_moved: pointer_moved && active.device == InputDevice::Keyboard,
         toggle_fullscreen,
         toggle_perf: keys.just_pressed(KeyCode::F3),
+        stats_held: keys.pressed(KeyCode::Tab),
+        stats_toggle: keys.just_pressed(KeyCode::Tab),
     };
 }
 

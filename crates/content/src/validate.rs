@@ -5,12 +5,15 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::{
-    Action, Content, ContentError, Effect, Element, Rank, ReactionEffect, Stat, WeaponBehavior, When,
+    Action, Content, ContentError, Effect, Element, Movement, Rank, ReactionEffect, Stat, WeaponBehavior,
+    When,
 };
 
 /// 卡面一行、提示条正文的字数上限（docs/LORE-TEXT.md 第 6 节）
 pub const CARD_SHORT: usize = 12;
 pub const TOAST_SHORT: usize = 8;
+/// 属性面板悬停说明的字数上限（docs/LORE-TEXT.md 第 8 节）
+pub const STAT_HINT: usize = 16;
 
 struct Checker<'a> {
     dir: &'a Path,
@@ -243,7 +246,14 @@ impl Checker<'_> {
                 && lv.cooldown <= 0.0)
             || (matches!(
                 b,
-                WeaponBehavior::Orbit { .. } | WeaponBehavior::Pulse { .. } | WeaponBehavior::Drop { .. }
+                WeaponBehavior::Orbit { .. }
+                    | WeaponBehavior::Pulse { .. }
+                    | WeaponBehavior::Drop { .. }
+                    | WeaponBehavior::Sweep { .. }
+                    | WeaponBehavior::SkyLantern { .. }
+                    | WeaponBehavior::Wave { .. }
+                    | WeaponBehavior::Vine { .. }
+                    | WeaponBehavior::Tower { .. }
             ) && lv.radius <= 0.0)
             || (matches!(b, WeaponBehavior::Volley { .. }) && lv.pierce == 0)
         {
@@ -384,6 +394,109 @@ impl Checker<'_> {
                 self.positive(file, &[("Seeker.range", *range), ("Seeker.steer", *steer)])?;
                 self.non_negative(file, &[("Seeker.rest", *rest)])
             }
+            WeaponBehavior::Sweep { arc, aim, knockback, crit_bonus, echo } => {
+                self.positive(file, &[("Sweep.arc", *arc)])?;
+                if *arc > std::f32::consts::TAU + 1e-3 {
+                    return self.fail(file, format!("\"{id}\"：Sweep.arc 不能超过一整圈"));
+                }
+                self.non_negative(
+                    file,
+                    &[("Sweep.aim", *aim), ("Sweep.knockback", *knockback), ("Sweep.echo", *echo)],
+                )?;
+                self.fraction(file, "Sweep.crit_bonus", *crit_bonus)
+            }
+            WeaponBehavior::SkyLantern { range, pick, cluster, spread, speed, fuse, retarget, zone } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：SkyLantern.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[
+                        ("SkyLantern.range", *range),
+                        ("SkyLantern.speed", *speed),
+                        ("SkyLantern.fuse", *fuse),
+                        ("SkyLantern.retarget", *retarget),
+                    ],
+                )?;
+                self.non_negative(file, &[("SkyLantern.cluster", *cluster), ("SkyLantern.spread", *spread)])?;
+                self.fissure(file, zone)
+            }
+            WeaponBehavior::Wave { speed, travel, push, slow, slow_time, spread, ring, freeze } => {
+                self.positive(file, &[("Wave.speed", *speed)])?;
+                if !ring {
+                    self.positive(file, &[("Wave.travel", *travel)])?;
+                }
+                self.non_negative(
+                    file,
+                    &[
+                        ("Wave.push", *push),
+                        ("Wave.slow_time", *slow_time),
+                        ("Wave.spread", *spread),
+                        ("Wave.freeze", *freeze),
+                    ],
+                )?;
+                self.fraction(file, "Wave.slow", *slow)
+            }
+            WeaponBehavior::Vine { leash, relink, lifesteal, heal_cap, heal_per_level, bind_every, bind } => {
+                self.non_negative(
+                    file,
+                    &[
+                        ("Vine.leash", *leash),
+                        ("Vine.relink", *relink),
+                        ("Vine.heal_cap", *heal_cap),
+                        ("Vine.heal_per_level", *heal_per_level),
+                        ("Vine.bind_every", *bind_every),
+                        ("Vine.bind", *bind),
+                    ],
+                )?;
+                if (*bind_every > 0.0) != (*bind > 0.0) {
+                    return self
+                        .fail(file, format!("\"{id}\"：Vine.bind_every 和 bind 要么都写，要么都不写"));
+                }
+                self.fraction(file, "Vine.lifesteal", *lifesteal)
+            }
+            WeaponBehavior::Tower {
+                range,
+                pick,
+                cluster,
+                spread,
+                warn,
+                stun,
+                life,
+                pull,
+                pull_speed,
+                tick,
+                tick_scale,
+                burst,
+            } => {
+                if *pick == 0 || *pick > 64 {
+                    return self.fail(file, format!("\"{id}\"：Tower.pick 要在 1 到 64 之间"));
+                }
+                self.positive(
+                    file,
+                    &[("Tower.range", *range), ("Tower.life", *life), ("Tower.tick", *tick)],
+                )?;
+                self.non_negative(
+                    file,
+                    &[
+                        ("Tower.cluster", *cluster),
+                        ("Tower.spread", *spread),
+                        ("Tower.warn", *warn),
+                        ("Tower.stun", *stun),
+                        ("Tower.pull", *pull),
+                        ("Tower.pull_speed", *pull_speed),
+                        ("Tower.tick_scale", *tick_scale),
+                    ],
+                )?;
+                if let Some(b) = burst {
+                    self.positive(
+                        file,
+                        &[("Tower.burst.radius", b.radius), ("Tower.burst.damage", b.damage)],
+                    )?;
+                    self.non_negative(file, &[("Tower.burst.stun", b.stun)])?;
+                }
+                Ok(())
+            }
             WeaponBehavior::Drop { range, candidates, delay, stagger, amount_div, fissure, .. } => {
                 if *candidates == 0 || *amount_div == 0 {
                     return self.fail(file, format!("\"{id}\"：Drop.candidates 和 amount_div 至少为 1"));
@@ -519,6 +632,15 @@ impl Content {
             c.range("run.ron", "spawn.mix.share", m.share)?;
         }
         c.range("run.ron", "spawn.packs.interval", s.packs.interval)?;
+        for a in &s.ambush {
+            enemy_ref("run.ron", "spawn.ambush", &a.enemy)?;
+            c.non_negative("run.ron", &[("spawn.ambush.from", a.from)])?;
+            c.positive("run.ron", &[("spawn.ambush.every", a.every)])?;
+            c.range("run.ron", "spawn.ambush.dist", a.dist)?;
+            if a.max == 0 {
+                return c.fail("run.ron", format!("spawn.ambush 的 \"{}\" max 至少为 1", a.enemy));
+            }
+        }
         for m in &s.packs.mix {
             enemy_ref("run.ron", "spawn.packs.mix", &m.enemy)?;
             if !s.mix.iter().any(|x| x.enemy == m.enemy) {
@@ -665,6 +787,14 @@ impl Content {
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
         }
+        for id in &ch.locked {
+            if self.weapon_index(id).is_none() {
+                return c.fail("run.ron", format!("choices.locked 引用了不存在的法器 \"{id}\""));
+            }
+            if *id == self.player.start_weapon || self.lamps.iter().any(|l| l.start_weapon == *id) {
+                return c.fail("run.ron", format!("choices.locked 里的 \"{id}\" 是起手法器，不能锁"));
+            }
+        }
         c.positive(
             "run.ron",
             &[
@@ -728,6 +858,45 @@ impl Content {
                 if ch.lock > ch.windup {
                     return c.fail("enemies.ron", format!("{} 的 charge.lock 不能超过 windup", e.id));
                 }
+                c.non_negative("enemies.ron", &[("charge.jitter", ch.jitter)])?;
+                if ch.jitter >= ch.every {
+                    return c.fail("enemies.ron", format!("{} 的 charge.jitter 要小于 every", e.id));
+                }
+            }
+            // 绕圈、守距要写距离带，别的移动方式不写
+            match (e.movement, e.band) {
+                (Movement::Circle | Movement::Keep, Some((near, far))) => {
+                    if !(near > 0.0 && far > near) {
+                        return c.fail("enemies.ron", format!("{} 的 band 要满足 0 < 近 < 远", e.id));
+                    }
+                }
+                (Movement::Circle | Movement::Keep, None) => {
+                    return c.fail("enemies.ron", format!("{} 绕圈或守距，要写 band", e.id));
+                }
+                (_, Some(_)) => {
+                    return c.fail("enemies.ron", format!("{} 不绕圈也不守距，不用写 band", e.id));
+                }
+                _ => {}
+            }
+            if let Some(sh) = &e.shot {
+                c.positive(
+                    "enemies.ron",
+                    &[
+                        ("shot.every", sh.every),
+                        ("shot.warn", sh.warn),
+                        ("shot.range", sh.range),
+                        ("shot.speed", sh.speed),
+                        ("shot.damage", sh.damage),
+                        ("shot.radius", sh.radius),
+                        ("shot.life", sh.life),
+                    ],
+                )?;
+                if sh.warn >= sh.every {
+                    return c.fail("enemies.ron", format!("{} 的 shot.warn 要短于 every", e.id));
+                }
+            }
+            if let Some(d) = &e.disguise {
+                c.positive("enemies.ron", &[("disguise.speed", d.speed)])?;
             }
             if let Some(b) = &e.boss {
                 c.positive(
@@ -1183,6 +1352,53 @@ impl Content {
                 .any(|j| j.text.trim().is_empty() || (!(13..=18).contains(&j.page) && !j.clue.is_empty()))
         {
             return c.fail("journals.ron", "手记须完整覆盖 1–30 页，正文不能为空，谜语仅在卷三".into());
+        }
+        // ---- stat_labels.ron ----
+        // 每项属性恰好出现一次（灯焰带倍率写在 times 里），基础一组总是显示。
+        let mut listed = Vec::new();
+        for g in &self.stat_labels {
+            if g.name.trim().is_empty() || g.stats.is_empty() {
+                return c.fail("stat_labels.ron", "每组要有名字和至少一项属性".into());
+            }
+            // 图标名拼进帧名，只许小写字母、数字和下划线
+            let bad_icon =
+                |i: &str| !i.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
+            if bad_icon(&g.icon) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{} 的图标名“{}”只能用小写字母、数字和下划线", g.name, g.icon),
+                );
+            }
+            if let Some(l) = g.stats.iter().find(|l| bad_icon(&l.icon)) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{:?} 的图标名“{}”只能用小写字母、数字和下划线", l.stat, l.icon),
+                );
+            }
+            for l in &g.stats {
+                listed.push(l.stat);
+                listed.extend(l.times);
+                let n = l.label.chars().count();
+                if !(2..=4).contains(&n) {
+                    return c.fail("stat_labels.ron", format!("{:?} 的标签“{}”要 2–4 个字", l.stat, l.label));
+                }
+                let n = l.hint.chars().filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c)).count();
+                if l.hint.trim().is_empty() || n > STAT_HINT {
+                    return c.fail(
+                        "stat_labels.ron",
+                        format!("{:?} 的说明“{}”要有，最多 {STAT_HINT} 个字", l.stat, l.hint),
+                    );
+                }
+            }
+        }
+        for s in crate::Stat::ALL {
+            let n = listed.iter().filter(|&&x| x == s).count();
+            if n != 1 {
+                return c.fail("stat_labels.ron", format!("{s:?} 要出现一次，现在出现 {n} 次"));
+            }
+        }
+        if !self.stat_labels.iter().any(|g| g.always) {
+            return c.fail("stat_labels.ron", "要有一组 always: true（基础）".into());
         }
         fn valid_when(w: &crate::HubWhen, content: &Content) -> bool {
             use crate::HubWhen;

@@ -45,6 +45,8 @@ pub struct Content {
     pub regions: Vec<RegionDef>,
     /// 守灯人手记（纯文字，不计入内容哈希）。
     pub journals: Vec<JournalDef>,
+    /// 局内属性面板的分组和标签（只有文字，不计入哈希）
+    pub stat_labels: Vec<StatGroupDef>,
     /// 玩法数据文件原文的哈希（FNV-1a）。回放只能在玩法内容相同的版本上重放。
     pub hash: u64,
 }
@@ -114,11 +116,51 @@ impl Content {
             hub: read(data_dir, "hub.ron", &mut 0)?,
             regions: read(data_dir, "regions.ron", &mut 0)?,
             journals: read(data_dir, "journals.ron", &mut 0)?,
+            stat_labels: read(data_dir, "stat_labels.ron", &mut 0)?,
             hash: 0,
         };
         content.hash = hash;
         content.validate(data_dir)?;
         Ok(content)
+    }
+
+    /// 属性的图标名（`stat_labels.ron` 的 icon，帧名是 `ui/stat_<icon>`）；没写的是 None。
+    pub fn stat_icon(&self, stat: Stat) -> Option<&str> {
+        self.stat_labels
+            .iter()
+            .flat_map(|g| &g.stats)
+            .find(|l| l.stat == stat && !l.icon.is_empty())
+            .map(|l| l.icon.as_str())
+    }
+
+    /// 解锁法器（`choices.locked` 里的 ID；`None` 是全部）。工具、测试用；内容哈希跟着变。
+    pub fn unlock(&mut self, ids: Option<&[&str]>) {
+        let before = self.run.choices.locked.len();
+        self.run.choices.locked.retain(|id| ids.is_some_and(|ids| !ids.contains(&id.as_str())));
+        if self.run.choices.locked.len() != before {
+            self.hash = (self.hash ^ 0x756e_6c6f_636b_0000 ^ self.run.choices.locked.len() as u64)
+                .wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    /// 命令行的 `--unlock all|<法器 ID>,…`：kite 跑局和游戏看回放共用，同样的参数得到同样的内容哈希，
+    /// kite 带 `--unlock` 录的回放在游戏里带同样的参数就能看。
+    pub fn unlock_arg(&mut self, arg: &str) -> Result<(), String> {
+        if arg == "all" {
+            self.unlock(None);
+            return Ok(());
+        }
+        let ids: Vec<&str> = arg.split(',').map(str::trim).collect();
+        if let Some(bad) = ids.iter().find(|id| !self.run.choices.locked.iter().any(|l| l == *id)) {
+            return Err(format!("--unlock：\"{bad}\" 不在 run.ron 的 choices.locked 里"));
+        }
+        self.unlock(Some(&ids));
+        Ok(())
+    }
+
+    /// 法器 d 是否还锁着。
+    pub fn weapon_locked(&self, d: usize) -> bool {
+        self.run.choices.locked.iter().any(|id| *id == self.weapons[d].id)
     }
 
     /// 打开异化与合璧（EA 内容，`run.ron` 里默认关闭）。工具、测试用；内容哈希跟着变，
@@ -247,6 +289,60 @@ mod tests {
         c.enemies.push(dup);
         let err = c.validate(Path::new("data")).unwrap_err().to_string();
         assert!(err.contains("enemies.ron") && err.contains("重复"), "{err}");
+    }
+
+    #[test]
+    fn stat_labels_cover_every_stat_once_and_format_values() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let listed: usize = c.stat_labels.iter().map(|g| g.stats.len()).sum();
+        // 灯焰带倍率并进灯焰带
+        assert_eq!(listed + 1, Stat::COUNT);
+        assert!(c.stat_labels[0].always && c.stat_labels[0].stats.len() == 12);
+        let mut bad = c.clone();
+        bad.stat_labels[1].stats.pop();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].hint = "一二三四五六七八九十一二三四五六七".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].label = "命".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        // 基础 12 项和每组都有图标；图标名不能带路径
+        assert!(c.stat_labels[0].stats.iter().all(|l| !l.icon.is_empty()));
+        assert!(c.stat_labels.iter().all(|g| !g.icon.is_empty()));
+        assert_eq!(c.stat_icon(Stat::Speed), Some("speed"));
+        assert_eq!(c.stat_icon(Stat::LotusHeal), None);
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].icon = "../health".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        use StatFormat::*;
+        for (f, v, shown) in [
+            (Number, 120.0, "120"),
+            (Number, 2.5, "2.5"),
+            (PerSecond, 0.2, "0.2/秒"),
+            (Multiplier, 1.2, "+20%"),
+            (Multiplier, 0.94, "-6%"),
+            (Multiplier, 1.0, "+0%"),
+            (Multiplier, 1.005, "+0.5%"),
+            (Number, 131.3, "131"),
+            (PercentChange, -0.0001, "+0%"),
+            (Percent, 0.05, "5%"),
+            (PercentChange, 0.1, "+10%"),
+            (PercentChange, -0.1, "-10%"),
+            (PercentPerSecond, 0.01, "1%/秒"),
+            (Times, 2.2, "×2.2"),
+            (Count, 3.0, "3"),
+            (CountChange, 1.0, "+1"),
+            (Seconds, 2.4, "2.4 秒"),
+            (Rank, 0.0, "无"),
+            (Rank, 2.0, "2 级"),
+            (Flag, 1.0, "有"),
+        ] {
+            assert_eq!(f.show(v), shown, "{f:?} {v}");
+        }
+        assert_eq!(Number.delta(20.0), "+20");
+        assert_eq!(Multiplier.delta(0.1), "+10%");
+        assert_eq!(Seconds.delta(-0.24), "-0.24 秒");
     }
 
     #[test]

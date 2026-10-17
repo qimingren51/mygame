@@ -90,8 +90,15 @@ pub(crate) struct FxFrames {
     gem: Option<FrameId>,
     /// 地上的铜钱（普通）和它的微光（叠加）
     coin: Option<(FrameId, Option<FrameId>)>,
-    /// 冲锋预警：车道、箭头
+    /// 冲锋预警：车道、箭头（竹魅瞄准也用它）
     charge: Option<(FrameId, FrameId)>,
+    /// 竹魅的竹刺：刺身（普通混合）、拖尾（叠加，染色）
+    spike: Option<(FrameId, FrameId)>,
+    /// 五件新法器的持续部分（美术的图到之前借现成的帧，见 `build_fx_frames`）
+    sky_lantern: Option<FrameId>,
+    wave_front: FrameId,
+    vine: FrameId,
+    tower: FrameId,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
     zone_lava: Option<(FrameId, Option<FrameId>)>,
     zone_mud: Option<FrameId>,
@@ -151,6 +158,12 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         gem: db.find("vfx/gem_0"),
         coin: db.find("vfx/coin").map(|f| (f, db.find("vfx/coin_emit"))),
         charge: db.find("weapons/charge_line").zip(db.find("weapons/charge_line_head")),
+        spike: db.find("weapons/bamboo_spike").zip(db.find("weapons/bamboo_spike_trail")),
+        // 美术的图到之前：孔明灯借红纸灯的灯头，浪头借寒波的圈，藤借剑光拖尾，塔借山印
+        sky_lantern: db.find("weapons/sky_lantern").or_else(|| db.find("lantern_red/idle_S_00")),
+        wave_front: db.find("weapons/wave_front").unwrap_or_else(|| need("fx/wave")),
+        vine: db.find("weapons/vine").unwrap_or_else(|| need("weapons/sword_trail")),
+        tower: db.find("weapons/tower").unwrap_or_else(|| need("weapons/seal")),
         ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
         zone_mud: db.find("ground/zone_mud"),
@@ -1011,6 +1024,45 @@ pub(crate) fn collect_fx(
         }
     }
 
+    // ---- 竹魅瞄准：方向在预警开始时就锁定，沿竹刺要飞的路画车道，越接近出手越亮
+    if let (Some(en), Some((line, head))) = (&res.enemies, f.charge) {
+        let c = &content.0;
+        let red = rgb(0xff4a3a);
+        for i in en.iter_alive() {
+            if en.aim_t[i] <= 0.0 {
+                continue;
+            }
+            let Some(sh) = &c.enemies[en.kind[i] as usize].shot else { continue };
+            let u = (1.0 - en.aim_t[i] / sh.warn).clamp(0.0, 1.0);
+            let at = Vec2::new(en.x[i], en.y[i]);
+            let dir = Vec2::new(en.aim_dx[i], en.aim_dy[i]);
+            // 和真实危险区一致：竹刺飞 speed × life，宽度 2 ×（竹刺半径 + 主角半径）
+            let reach = sh.radius + c.player.radius;
+            let len = sh.speed * sh.life;
+            let start = to_screen(at);
+            let screen_dir = to_screen(at + dir * len) - start;
+            foreground.protect(start + screen_dir * 0.5, len * 0.5);
+            let rot = screen_dir.y.atan2(screen_dir.x);
+            let (line_a, glow_a) = (0.35 + 0.6 * u, 0.15 + 0.5 * u);
+            let (lf, hf) = (db.frame(line), db.frame(head));
+            let k = reach * 2.0 / lf.width.unwrap_or(lf.size.y);
+            let head_len = hf.head_len.unwrap_or(hf.size.x) * k;
+            let body = (screen_dir.length() - head_len).max(0.0);
+            let tip = start + screen_dir.normalize_or_zero() * body;
+            for (id, pos, scale) in
+                [(line, start, Vec2::new(body / lf.size.x, k)), (head, tip, Vec2::splat(k))]
+            {
+                pools.fx.push(Draw {
+                    scale,
+                    rot,
+                    color: red.with_alpha(line_a),
+                    ..Draw::new(id, pos.extend(layer::DANGER))
+                });
+                glow.add(id, pos.extend(layer::DANGER + 0.01), scale, rot, red.with_alpha(glow_a));
+            }
+        }
+    }
+
     // ---- 精英词缀：头顶一排小图标。画在妖物这一层的最上面、夜色之下，暗处和妖物一起看不见；“隐”着的不画
     if let Some(en) = &res.enemies
         && f.affix.iter().any(Option::is_some)
@@ -1381,6 +1433,8 @@ pub(crate) fn collect_fx(
         }
     }
 
+    draw_new_weapons(&res, &f, &frames, &db, (now, a, hero), &mut pools, &mut glow);
+
     // ---- 飞剑
     if let Some(shots) = &res.shots {
         for s in &shots.0 {
@@ -1528,6 +1582,16 @@ pub(crate) fn collect_fx(
                 ..Draw::new(frames.shadow, ground.extend(layer::SHADOW))
             });
             let p = ground + Vec2::new(0.0, FOXFIRE_HEIGHT);
+            // 竹魅的竹刺：刺身朝飞行方向，拖尾接在后面（DESIGN 第 15 节“竹刺”）
+            if fo.kind.is_some()
+                && let Some((spike, trail)) = f.spike
+            {
+                let dir = to_screen(fo.pos + fo.vel) - to_screen(fo.pos);
+                let rot = dir.y.atan2(dir.x);
+                glow.add(trail, p.extend(layer::EMISSIVE), Vec2::ONE, rot, rgb(0xa8e6b8).with_alpha(0.8));
+                pools.fx.push(Draw { rot, ..Draw::new(spike, p.extend(sort_z(layer::WEAPONS, fo.pos.y))) });
+                continue;
+            }
             glow.add(
                 f.glow,
                 p.extend(layer::EMISSIVE),
@@ -1674,6 +1738,10 @@ pub(crate) struct FxSources<'w> {
     boss: Option<Res<'w, BossState>>,
     director: Option<Res<'w, Director>>,
     enemies: Option<Res<'w, lantern_sim::Enemies>>,
+    sky_lanterns: Option<Res<'w, lantern_sim::weapons::sky_lantern::SkyLanterns>>,
+    waves: Option<Res<'w, lantern_sim::weapons::wave::Waves>>,
+    vines: Option<Res<'w, lantern_sim::weapons::vine::Vines>>,
+    towers: Option<Res<'w, lantern_sim::weapons::tower::Towers>>,
 }
 
 pub(crate) fn hex(s: &str) -> Color {
@@ -1969,6 +2037,148 @@ mod tests {
             fx.priority = Priority::Death;
             fx.flash(Color::WHITE, 0.18);
             assert_eq!(fx.flash, Color::WHITE.with_alpha(0.18));
+        }
+    }
+}
+
+/// 五件新法器每帧读资源画的部分：孔明灯、浪头、藤、塔（一次性的爆燃、落塔等在 particles.rs，归质感会话）。
+fn draw_new_weapons(
+    res: &FxSources,
+    f: &FxFrames,
+    frames: &ActorFrames,
+    db: &AtlasDb,
+    (now, a, hero): (f32, f32, Vec2),
+    pools: &mut Pools,
+    glow: &mut GlowRequests,
+) {
+    let px = |frame: FrameId, world: f32| world / db.frame(frame).size.x;
+    let lerp = |prev: Vec2, cur: Vec2| to_screen(prev.lerp(cur, a));
+
+    // 孔明灯：飘在半空，地上一团影子；落地前一秒往下沉，落点亮一圈
+    if let Some(sl) = &res.sky_lanterns {
+        let fire = rgb(0xffa060);
+        for (k, l) in sl.0.iter().enumerate() {
+            let ground = lerp(l.prev, l.pos);
+            let left = (l.fuse - l.t).max(0.0);
+            let height = 10.0 + 44.0 * left.min(1.0) + (now * 2.0 + k as f32).sin() * 2.0;
+            pools.fx.push(Draw {
+                scale: Vec2::splat(px(frames.shadow, 22.0)),
+                color: Color::srgba(1.0, 1.0, 1.0, 0.35),
+                ..Draw::new(frames.shadow, ground.extend(layer::SHADOW))
+            });
+            let p = ground + Vec2::new(0.0, height);
+            if let Some(frame) = f.sky_lantern {
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(if l.evolved { 0.8 } else { 0.65 }),
+                    ..Draw::new(frame, p.extend(sort_z(layer::WEAPONS, l.pos.y - 1.0)))
+                });
+            }
+            glow.add(f.glow, p.extend(layer::EMISSIVE), Vec2::splat(0.45), 0.0, fire.with_alpha(0.85));
+            glow.light(frames, db, p, (fire.with_alpha(0.5), 70.0));
+            if left < 1.0 {
+                let k = px(f.ring, l.radius * 2.0);
+                glow.add(
+                    f.ring,
+                    ground.extend(layer::DANGER),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    fire.with_alpha(0.25 + 0.5 * (1.0 - left)),
+                );
+            }
+        }
+    }
+
+    // 浪：直线浪画一道横着的浪头（垂直于前进方向），环形浪画一圈往外扩
+    if let Some(ws) = &res.waves {
+        let water = rgb(0x7cc8ff);
+        for w in &ws.0 {
+            let s = w.prev + (w.s - w.prev) * a;
+            let fade = (1.0 - s / w.reach.max(1.0)).clamp(0.0, 1.0).sqrt();
+            let color = if w.evolved { rgb(0xb8e6ff) } else { water };
+            if w.ring {
+                let k = px(f.ring, s * 2.0);
+                glow.add(
+                    f.ring,
+                    to_screen(w.origin).extend(layer::EMISSIVE),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    color.with_alpha(0.75 * fade),
+                );
+                continue;
+            }
+            let front = to_screen(w.origin + w.dir * s);
+            let d = to_screen(w.origin + w.dir) - to_screen(w.origin);
+            let rot = d.y.atan2(d.x) + std::f32::consts::FRAC_PI_2;
+            let k = px(f.wave_front, w.half * 2.0);
+            glow.add(
+                f.wave_front,
+                front.extend(layer::EMISSIVE),
+                Vec2::new(k, k * 0.35),
+                rot,
+                color.with_alpha(0.85 * fade),
+            );
+        }
+    }
+
+    // 藤：从主角连到缠着的妖物，微微晃
+    if let (Some(vs), Some(en)) = (&res.vines, &res.enemies) {
+        let green = rgb(0x8fe07a);
+        let w = db.frame(f.vine).size;
+        for v in &vs.0 {
+            for (k, link) in v.links.iter().enumerate() {
+                let Some(i) = link.target.and_then(|h| en.resolve(h)) else { continue };
+                let target = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
+                let d = target - hero;
+                let len = d.length();
+                if len < 1.0 {
+                    continue;
+                }
+                let sway = (now * 3.0 + k as f32 * 1.7).sin() * 0.04;
+                let scale = Vec2::new(len / w.x, 10.0 / w.y);
+                // 拖尾的锚点在右端：放在妖物身上、朝主角拉
+                glow.add(
+                    f.vine,
+                    target.extend(layer::EMISSIVE - 0.3),
+                    scale,
+                    d.y.atan2(d.x) + sway,
+                    green.with_alpha(0.7),
+                );
+            }
+        }
+    }
+
+    // 塔：落地前画预警圈，越接近落地越亮；立着时画塔身和吸妖的范围，快收走时淡出
+    if let Some(ts) = &res.towers {
+        let earth = rgb(0xc9925a);
+        for t in &ts.0 {
+            let p = to_screen(t.pos);
+            if t.warn > 0.0 {
+                let u = 1.0 - (t.warn / 0.8).min(1.0);
+                let k = px(f.ring, t.radius * 2.0);
+                glow.add(
+                    f.ring,
+                    p.extend(layer::DANGER),
+                    Vec2::new(k, k * FLAT),
+                    0.0,
+                    earth.with_alpha(0.3 + 0.6 * u),
+                );
+                continue;
+            }
+            let fade = (t.life / 0.4).min(1.0);
+            let k = px(f.ring, t.pull * 2.0);
+            glow.add(
+                f.ring,
+                p.extend(layer::EMISSIVE - 1.0),
+                Vec2::new(k, k * FLAT),
+                now * 0.6,
+                earth.with_alpha(0.35 * fade),
+            );
+            let sk = (t.radius / if t.evolved { 60.0 } else { 45.0 }).max(0.8);
+            pools.fx.push(Draw {
+                scale: Vec2::splat(sk),
+                color: Color::WHITE.with_alpha(fade),
+                ..Draw::new(f.tower, p.extend(sort_z(layer::WEAPONS, t.pos.y)))
+            });
         }
     }
 }

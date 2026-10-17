@@ -145,6 +145,7 @@ fn advance_volley(volley: &mut Option<Volley>, illusion: bool, foes: &mut Foes, 
             radius: v.radius,
             damage: v.damage,
             life: v.life,
+            kind: None,
         });
     }
     outbox.0.push(SimEvent::BossVolley { pos: v.origin, illusion });
@@ -159,6 +160,8 @@ pub struct Foe {
     pub radius: f32,
     pub damage: f32,
     pub life: f32,
+    /// 谁射的：None 是夜主的狐火，Some 是小妖（`enemies.ron` 的下标，竹魅的竹刺）
+    pub kind: Option<u16>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -171,6 +174,7 @@ impl Foes {
             for v in [f.pos.x, f.pos.y, f.vel.x, f.vel.y, f.life] {
                 h.write_f32(v);
             }
+            h.write_u32(f.kind.map_or(u32::MAX, u32::from));
         }
     }
 }
@@ -557,8 +561,9 @@ pub(crate) fn update_foes(
         let rr = f.radius + reach;
         if f.pos.distance_squared(pos.0) < rr * rr {
             let (dmg, from) = (f.damage, f.pos);
+            let by = f.kind.map_or(HurtBy::Shot, |kind| HurtBy::Spike { kind });
             foes.0.remove(k);
-            hurt_player(&mut player, &mut health, pos.0, dmg, (HurtBy::Shot, from), &mut ctx);
+            hurt_player(&mut player, &mut health, pos.0, dmg, (by, from), &mut ctx);
             continue;
         }
         if f.life <= 0.0 {

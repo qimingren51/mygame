@@ -33,6 +33,7 @@ mod results;
 mod scroll;
 mod settings_ui;
 mod skin;
+mod stats_panel;
 mod story;
 mod title;
 mod title_fx;
@@ -101,7 +102,13 @@ impl Plugin for UiPlugin {
                     playing_input.run_if(in_state(RunState::Playing)),
                     settings_ui::refresh_values,
                     settings_ui::sync_feel,
-                    (hud::update_hud, hud::update_slots, hud::update_chips, hud::update_control_hints)
+                    (
+                        hud::update_hud,
+                        hud::update_ult_ticks,
+                        hud::update_slots,
+                        hud::update_chips,
+                        hud::update_control_hints,
+                    )
                         .run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
@@ -127,6 +134,7 @@ impl Plugin for UiPlugin {
         journals::register(app);
         story::register(app);
         pause::register(app);
+        stats_panel::register(app);
         controls::register(app);
         onboarding::register(app);
         app.add_systems(PostUpdate, prompts::refresh.before(bevy::ui::UiSystems::Prepare));

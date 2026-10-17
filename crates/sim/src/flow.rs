@@ -10,7 +10,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use bevy_state::prelude::*;
 
-use lantern_content::Stat;
+use lantern_content::{Content, Stat};
 use lantern_core::Stream;
 
 use crate::boss::Foes;
@@ -186,6 +186,37 @@ pub struct Feats {
     /// 掉过几次血、一共掉了多少
     pub hurts: u32,
     pub taken: f32,
+    /// 图鉴：这一局拿到过的法器（含进化、异化、合璧）和心法，键见 [`codex_keys`]
+    pub codex: std::collections::BTreeSet<String>,
+}
+
+/// 图鉴的键：法器 `w:<id>`，进化 `w:<id>_evo`，异化 `w:<id>_mut`，合璧 `f:<合璧 id>`，心法 `p:<id>`。
+/// 按局末的法器栏和心法算：合璧的两件材料都进化过，一并记上。
+pub fn codex_keys(c: &Content, arsenal: &Arsenal, build: &Build) -> std::collections::BTreeSet<String> {
+    use crate::weapons::Form;
+    let mut keys = std::collections::BTreeSet::new();
+    for w in &arsenal.0 {
+        let id = &c.weapons[w.def].id;
+        keys.insert(format!("w:{id}"));
+        match w.form {
+            Form::Base => {}
+            Form::Evolved => {
+                keys.insert(format!("w:{id}_evo"));
+            }
+            Form::Mutated => {
+                keys.insert(format!("w:{id}_mut"));
+            }
+            Form::Fused(f) => {
+                keys.insert(format!("f:{}", c.fusions[f].id));
+                for m in &c.fusions[f].weapons {
+                    keys.insert(format!("w:{m}"));
+                    keys.insert(format!("w:{m}_evo"));
+                }
+            }
+        }
+    }
+    keys.extend(build.passives.iter().map(|p| format!("p:{}", c.passives[p.def].id)));
+    keys
 }
 
 /// 一局之内的流程状态。
@@ -577,6 +608,7 @@ impl FlowParams<'_, '_> {
                 flawless_elites: self.survival.flawless,
                 hurts: self.survival.hurts,
                 taken: self.survival.taken,
+                codex: codex_keys(c, &self.arsenal, &self.build),
             },
             endless: endless.is_some(),
             bosses: endless.map_or(u32::from(won), |e| e.downs),

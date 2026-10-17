@@ -80,6 +80,8 @@ pub enum HurtBy {
     Sweep,
     /// 狐火雨
     Rain,
+    /// 小妖的远程弹（竹魅的竹刺）
+    Spike { kind: u16 },
 }
 
 /// 等待下一步处理的命令。
@@ -251,6 +253,62 @@ pub enum SimEvent {
     },
     BossArrived {
         kind: u16,
+    },
+    /// 远程小妖开始瞄准：方向已锁定，预警线从 pos 沿 dir 画出去
+    EnemyAim {
+        pos: Vec2,
+        dir: Vec2,
+        kind: u16,
+    },
+    /// 远程小妖出手
+    EnemyShot {
+        pos: Vec2,
+        kind: u16,
+    },
+    /// 伪装的妖物进了照见圈，现形
+    Unmasked {
+        pos: Vec2,
+        kind: u16,
+    },
+    /// 扇形挥击（铜钱剑）：从 pos 朝 dir，张角 arc、半径 radius；evolved 是天罡的一整圈
+    Sweep {
+        pos: Vec2,
+        dir: Vec2,
+        arc: f32,
+        radius: f32,
+        weapon: u16,
+        evolved: bool,
+    },
+    /// 孔明灯落地爆燃（evolved：万灯升）
+    LanternBurst {
+        pos: Vec2,
+        radius: f32,
+        evolved: bool,
+    },
+    /// 推出一道浪（沧浪）：从 pos 朝 dir，半宽 radius；ring 是北冥潮的一圈，扩到 radius
+    Wave {
+        pos: Vec2,
+        dir: Vec2,
+        radius: f32,
+        ring: bool,
+        evolved: bool,
+    },
+    /// 青藤跳了一下：绿光从 pos（目标）沿藤流回主角；bind：这一跳顺带缠住（万木春）
+    VineDrain {
+        pos: Vec2,
+        bind: bool,
+        evolved: bool,
+    },
+    /// 镇妖塔落地（预警圈和立着的塔画面直接读 `Towers`）
+    TowerLand {
+        pos: Vec2,
+        radius: f32,
+        evolved: bool,
+    },
+    /// 玲珑塔到时间炸开
+    TowerBurst {
+        pos: Vec2,
+        radius: f32,
     },
     /// 狐火环出手；施法者标记只供音画消费，不进入玩法状态哈希。
     BossVolley {

@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use lantern_content::{Content, Element, WeaponLevel};
+use lantern_content::{Content, Effect, Element, PassiveDef, WeaponLevel};
 use lantern_sim::{Arsenal, Build, Offer};
 
 /// 品阶。
@@ -58,15 +58,34 @@ pub(crate) fn passive_color(c: &Content, e: Option<Element>) -> Color {
 pub(crate) struct OfferInfo {
     pub rarity: Rarity,
     pub kind: String,
-    /// 图集里的图标名；补给没有图标，用 glyph
+    /// 图集里的图标名；图集里没有就用 glyph
     pub icon: Option<String>,
     pub glyph: String,
     pub color: Color,
     pub name: String,
+    /// 卡面那一行收益（LORE-TEXT 第 6 节，≤ 12 字）
+    pub gain: String,
+    /// 收益前面的数值图标（`ui/stat_*`）：心法按它第一条属性效果取，其余没有
+    pub gain_icon: Option<String>,
+    /// 完整说明：聚焦时卡片下方显示一行，图鉴里也是它
     pub desc: String,
-    /// 一句话描述（LORE-TEXT 3.5、3.6 节）；只在头一回见到时写，升级和补给留空
-    pub flavor: String,
+    /// 卡面插画的帧名（`ui/card_<id>`）；图集里没有就放大图标
+    pub art: String,
+    /// 选完以后的等级和满级，画成等级点；进化、合璧、补给没有
+    pub level: Option<(u32, u32)>,
+    /// 配对：法器卡画它的进化心法，心法卡画它能让哪件法器进化
+    pub pair: Option<Pair>,
     pub element: Option<Element>,
+}
+
+/// 进化配对的另一半。
+pub(crate) struct Pair {
+    pub icon: String,
+    pub glyph: String,
+    pub color: Color,
+    pub name: String,
+    /// 已经有了：亮着画
+    pub owned: bool,
 }
 
 pub(crate) struct OfferNote {
@@ -76,7 +95,7 @@ pub(crate) struct OfferNote {
     pub body: String,
 }
 
-/// 法器升一级时数值的变化，例如“数量 +1，伤害 +4。”
+/// 法器升一级时数值的变化，例如“伤害 +4　冷却 -0.1 秒”（LORE-TEXT 6.1 节：不带句号，冷却一位小数）。
 pub(crate) fn weapon_upgrade_text(a: &WeaponLevel, b: &WeaponLevel) -> String {
     let mut parts = Vec::new();
     if b.count != a.count {
@@ -92,31 +111,91 @@ pub(crate) fn weapon_upgrade_text(a: &WeaponLevel, b: &WeaponLevel) -> String {
         parts.push(format!("穿透 +{}", b.pierce as i64 - a.pierce as i64));
     }
     if b.cooldown != a.cooldown {
-        parts.push(format!("冷却 -{:.2} 秒", a.cooldown - b.cooldown));
+        let d = a.cooldown - b.cooldown;
+        // 一位小数会写成 0 时多留一位，免得看着像没变
+        let d = if (d * 10.0).round() == 0.0 { format!("{d:.2}") } else { format!("{d:.1}") };
+        parts.push(format!("冷却 -{d} 秒"));
     }
-    if parts.is_empty() { "全面提升。".into() } else { format!("{}。", parts.join("，")) }
+    if parts.is_empty() { "全面提升".into() } else { parts.join("　") }
+}
+
+/// 短句没写时退回说明的第一句。
+fn short_or(short: &str, desc: &str) -> String {
+    if short.is_empty() {
+        desc.split(['，', '。', '；', '\n']).next().unwrap_or(desc).to_string()
+    } else {
+        short.to_string()
+    }
+}
+
+/// 法器的进化心法。
+fn weapon_pair(c: &Content, build: &Build, w: usize) -> Option<Pair> {
+    let p = c.passive_index(&c.weapons[w].evolution.as_ref()?.passive)?;
+    let def = &c.passives[p];
+    Some(Pair {
+        icon: format!("ui/icon_{}", def.id),
+        glyph: def.name.chars().next().map(String::from).unwrap_or_default(),
+        color: passive_color(c, def.element),
+        name: def.name.clone(),
+        owned: build.passive_level(p) > 0,
+    })
+}
+
+/// 心法能让哪件法器进化：先找身上还没变过的，没有就取内容里第一件。
+fn passive_pair(c: &Content, arsenal: &Arsenal, p: usize) -> Option<Pair> {
+    let id = &c.passives[p].id;
+    let keyed = |w: usize| c.weapons[w].evolution.as_ref().is_some_and(|e| &e.passive == id);
+    let owned = arsenal.0.iter().find(|w| !w.transformed() && keyed(w.def)).map(|w| w.def);
+    let w = owned.or_else(|| (0..c.weapons.len()).find(|&w| keyed(w)))?;
+    let def = &c.weapons[w];
+    Some(Pair {
+        icon: format!("ui/icon_{}", def.id),
+        glyph: def.icon.clone(),
+        color: element_color(c, def.element),
+        name: def.name.clone(),
+        owned: owned.is_some(),
+    })
 }
 
 pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -> OfferInfo {
-    let supply = |glyph: &str, name: &str, desc: String, color: Color| OfferInfo {
+    let supply = |id: &str, glyph: &str, name: &str, gain: String, desc: String, color: Color| OfferInfo {
         rarity: Rarity::Fan,
         kind: "补给".into(),
-        icon: None,
+        icon: Some(format!("ui/icon_{id}")),
         glyph: glyph.into(),
         color,
         name: name.into(),
+        gain,
         desc,
-        flavor: String::new(),
+        art: format!("ui/card_{id}"),
+        level: None,
+        pair: None,
+        gain_icon: None,
         element: None,
     };
     match offer {
-        Offer::Heal => supply(
-            "莲",
-            "莲子",
-            format!("回复 {}% 生命。", (c.run.choices.heal * 100.0).round()),
-            hex("#6FD6A0"),
-        ),
-        Offer::Oil => supply("油", "灯油", format!("本局结算灯油 +{}。", c.run.choices.oil), hex("#FFD98A")),
+        Offer::Heal => {
+            let pct = (c.run.choices.heal * 100.0).round();
+            supply(
+                "heal",
+                "莲",
+                "莲子",
+                format!("回复 {pct}% 生命"),
+                format!("回复 {pct}% 生命。"),
+                hex("#6FD6A0"),
+            )
+        }
+        Offer::Oil => {
+            let oil = c.run.choices.oil;
+            supply(
+                "oil",
+                "油",
+                "灯油",
+                format!("灯油 +{oil}"),
+                format!("本局结算灯油 +{oil}。"),
+                hex("#FFD98A"),
+            )
+        }
         Offer::Evolve(k) => {
             let def = &c.weapons[arsenal.0[k].def];
             let evo = def.evolution.as_ref().expect("能进化的法器有进化数据");
@@ -127,8 +206,12 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 glyph: def.icon.clone(),
                 color: element_color(c, def.element),
                 name: evo.name.clone(),
+                gain: short_or(&evo.short, &evo.desc),
                 desc: evo.desc.clone(),
-                flavor: evo.flavor.clone(),
+                art: format!("ui/card_{}_evo", def.id),
+                level: None,
+                pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -142,23 +225,37 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 glyph: "异".into(),
                 color: Rarity::Yi.color(),
                 name: m.name.clone(),
+                gain: short_or(&m.short, &m.desc),
                 desc: m.desc.clone(),
-                flavor: m.flavor.clone(),
+                art: format!("ui/card_{}_mut", def.id),
+                level: None,
+                pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
         Offer::Fuse { fusion_id, .. } => {
             let f = &c.fusions[fusion_id];
             let def = &c.weapons[c.weapon_index(&f.weapons[0]).expect("合璧材料")];
+            // 灯坠“断剑”在身时合璧不腾格子
+            let kind = if build.charms.iter().any(|&k| c.charms[k].max_weapons.is_some()) {
+                "合璧 · 仍占两格"
+            } else {
+                "合璧 · 腾出一格"
+            };
             OfferInfo {
                 rarity: Rarity::He,
-                kind: "合璧".into(),
+                kind: kind.into(),
                 icon: Some(format!("ui/icon_{}_evo", def.id)),
                 glyph: "合".into(),
                 color: Rarity::He.color(),
                 name: f.name.clone(),
+                gain: short_or(&f.short, &f.desc),
                 desc: f.desc.clone(),
-                flavor: f.flavor.clone(),
+                art: format!("ui/card_{}", f.id),
+                level: None,
+                pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -166,13 +263,17 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
             let def = &c.weapons[d];
             OfferInfo {
                 rarity: Rarity::Xuan,
-                kind: "法器 · 新".into(),
+                kind: "新法器".into(),
                 icon: Some(format!("ui/icon_{}", def.id)),
                 glyph: def.icon.clone(),
                 color: element_color(c, def.element),
                 name: def.name.clone(),
+                gain: short_or(&def.short, &def.desc),
                 desc: def.desc.clone(),
-                flavor: def.flavor.clone(),
+                art: format!("ui/card_{}", def.id),
+                level: Some((1, def.levels.len() as u32)),
+                pair: weapon_pair(c, build, d),
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -180,68 +281,63 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
             let w = &arsenal.0[k];
             let def = &c.weapons[w.def];
             let lv = w.level as usize;
+            let gain = weapon_upgrade_text(&def.levels[lv - 1], &def.levels[lv.min(def.levels.len() - 1)]);
             OfferInfo {
                 rarity: Rarity::Ling,
-                kind: format!("法器 · Lv{} → {}", lv, lv + 1),
+                kind: "法器".into(),
                 icon: Some(format!("ui/icon_{}", def.id)),
                 glyph: def.icon.clone(),
                 color: element_color(c, def.element),
                 name: def.name.clone(),
-                desc: weapon_upgrade_text(&def.levels[lv - 1], &def.levels[lv.min(def.levels.len() - 1)]),
-                flavor: String::new(),
+                desc: format!("{gain}。"),
+                gain,
+                art: format!("ui/card_{}", def.id),
+                level: Some((w.level + 1, def.levels.len() as u32)),
+                pair: weapon_pair(c, build, w.def),
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
         Offer::NewPassive(d) | Offer::PassiveUp(d) => {
-            let (def, kind, rarity, new) = match offer {
-                Offer::NewPassive(_) => (&c.passives[d], "心法 · 新".to_string(), Rarity::Ling, true),
+            let (p, kind, rarity, level) = match offer {
+                Offer::NewPassive(_) => (d, "新心法", Rarity::Ling, 1),
                 _ => {
                     let p = build.passives[d];
-                    (
-                        &c.passives[p.def],
-                        format!("心法 · Lv{} → {}", p.level, p.level + 1),
-                        Rarity::Fan,
-                        false,
-                    )
+                    (p.def, "心法", Rarity::Fan, p.level + 1)
                 }
             };
+            let def = &c.passives[p];
             OfferInfo {
                 rarity,
-                kind,
+                kind: kind.into(),
                 icon: Some(format!("ui/icon_{}", def.id)),
                 glyph: def.name.chars().next().map(String::from).unwrap_or_default(),
                 color: passive_color(c, def.element),
                 name: def.name.clone(),
+                gain: short_or(&def.short, &def.desc),
                 desc: format!("{}。", def.desc),
-                flavor: if new { def.flavor.clone() } else { String::new() },
+                art: format!("ui/card_{}", def.id),
+                level: Some((level, def.max_level)),
+                pair: passive_pair(c, arsenal, p),
+                gain_icon: passive_stat_icon(c, def),
                 element: def.element,
             }
         }
     }
 }
 
-/// 共鸣、进化优先；普通升级把首项收益提到卡面中心，完整描述仍由卡片保留。
-pub(crate) fn offer_note(
-    c: &Content,
-    arsenal: &Arsenal,
-    build: &Build,
-    offer: Offer,
-    desc: &str,
-) -> OfferNote {
-    emphasize_note(offer, desc, resonance_note(c, arsenal, build, offer))
+/// 心法的主属性图标：每级效果（或第一级效果）里第一条加减属性的那一项，`stat_labels.ron` 给了图标才有。
+fn passive_stat_icon(c: &Content, def: &PassiveDef) -> Option<String> {
+    let first = def.per_level.iter().chain(def.levels.iter().flatten()).find_map(|e| match e {
+        Effect::Add(s, _) | Effect::Mul(s, _) => Some(*s),
+        _ => None,
+    })?;
+    c.stat_icon(first).map(|i| format!("ui/stat_{i}"))
 }
 
-fn emphasize_note(offer: Offer, desc: &str, note: Option<OfferNote>) -> OfferNote {
-    let note = match note {
-        Some(n) if n.color.is_some() || matches!(offer, Offer::NewWeapon(_)) => return n,
-        note => note,
-    };
-    // 保留首项里的等级条件（如折纸），不把条件收益误写成每级必得。
-    let title = desc.split(['，', '。', '；', '\n']).next().unwrap_or(desc).to_string();
-    let body = note.map_or_else(String::new, |n| {
-        if n.body.is_empty() { n.title } else { format!("{}\n{}", n.title, n.body) }
-    });
-    OfferNote { color: None, title, body }
+/// 卡面收益下面那一行：共鸣、进化、异化、合璧亮色写；普通的只写五行点数变化，细节放进聚焦说明。
+pub(crate) fn offer_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -> Option<OfferNote> {
+    resonance_note(c, arsenal, build, offer)
 }
 
 /// 共鸣进度、相生与进化线索，只读取当前构筑。
@@ -256,15 +352,10 @@ fn resonance_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -
         });
     }
     if let Offer::Fuse { a, b, .. } = offer {
-        let slots = if build.charms.iter().any(|&k| c.charms[k].max_weapons.is_some()) {
-            "断剑在身，仍占两格"
-        } else {
-            "两器合一，腾出一格"
-        };
         return Some(OfferNote {
             color: Some(Rarity::He.color()),
-            title: slots.into(),
-            body: format!("{} + {}；两系各计四点", arsenal.0[a].name(c), arsenal.0[b].name(c)),
+            title: format!("{} + {}", arsenal.0[a].name(c), arsenal.0[b].name(c)),
+            body: "两器合一；两系各计四点".into(),
         });
     }
     if let Offer::Evolve(k) = offer {
@@ -374,45 +465,33 @@ fn resonance_note(c: &Content, arsenal: &Arsenal, build: &Build, offer: Offer) -
 mod tests {
     use super::*;
 
-    #[test]
-    fn resonance_and_evolution_take_priority_over_numeric_gain() {
-        for title in ["金 2 → 3 · 共鸣激活", "满级 · 下次升级可进化"] {
-            let note = emphasize_note(
-                Offer::WeaponUp(0),
-                "伤害 +4，冷却 -0.10 秒。",
-                Some(OfferNote {
-                    color: Some(Color::WHITE), title: title.into(), body: "进化线索".into()
-                }),
-            );
-            assert_eq!(note.title, title);
-            assert_eq!(note.body, "进化线索");
-        }
+    fn level(cooldown: f32, damage: f32, count: u32) -> WeaponLevel {
+        WeaponLevel { cooldown, damage, count, ..WeaponLevel::default() }
     }
 
     #[test]
-    fn ordinary_upgrade_emphasizes_gain_and_keeps_resonance_hint() {
-        let note = emphasize_note(
-            Offer::WeaponUp(0),
-            "伤害 +4，冷却 -0.10 秒。",
-            Some(OfferNote {
-                color: None, title: "金 1".into(), body: "进化需心法「剑意」".into()
-            }),
-        );
-        assert_eq!(note.title, "伤害 +4");
-        assert_eq!(note.body, "金 1\n进化需心法「剑意」");
-        assert!(note.color.is_none());
+    fn upgrade_line_has_no_period_and_one_decimal_cooldown() {
+        assert_eq!(weapon_upgrade_text(&level(1.0, 10.0, 1), &level(0.9, 14.0, 1)), "伤害 +4　冷却 -0.1 秒");
+        assert_eq!(weapon_upgrade_text(&level(1.0, 10.0, 1), &level(1.0, 10.0, 2)), "数量 +1");
+        // 太小的冷却变化多留一位，不写成 -0.0
+        assert_eq!(weapon_upgrade_text(&level(1.0, 10.0, 1), &level(0.96, 10.0, 1)), "冷却 -0.04 秒");
+        assert_eq!(weapon_upgrade_text(&level(1.0, 10.0, 1), &level(1.0, 10.0, 1)), "全面提升");
     }
 
     #[test]
-    fn conditional_and_neutral_gains_keep_their_meaning() {
-        for (offer, desc, expected) in [
-            (Offer::PassiveUp(0), "1 / 3 / 5 级时数量 +1。", "1 / 3 / 5 级时数量 +1"),
-            (Offer::NewPassive(0), "魂火价值 +6%，升级时 5% 概率多一个选项。", "魂火价值 +6%"),
-            (Offer::Heal, "回复 30% 生命。", "回复 30% 生命"),
-            (Offer::Oil, "本局结算灯油 +15。", "本局结算灯油 +15"),
-        ] {
-            let note = emphasize_note(offer, desc, None);
-            assert_eq!(note.title, expected);
-        }
+    fn missing_short_falls_back_to_the_first_clause() {
+        assert_eq!(short_or("暴击率 +5%", "暴击率 +5%，别的"), "暴击率 +5%");
+        assert_eq!(short_or("", "魂火价值 +6%，升级时 5% 概率多一个选项。"), "魂火价值 +6%");
+    }
+
+    /// 心法卡的收益图标取第一条属性效果：每级都加的、逐级写的都算；没画图标的属性不画。
+    #[test]
+    fn passive_gain_icon_follows_its_first_stat() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+        let c = Content::load(&root).unwrap();
+        let icon = |id: &str| passive_stat_icon(&c, &c.passives[c.passive_index(id).unwrap()]);
+        assert_eq!(icon("jixing").as_deref(), Some("ui/stat_speed"));
+        assert_eq!(icon("zhezhi").as_deref(), Some("ui/stat_count"));
+        assert_eq!(icon("xunfeng"), None);
     }
 }

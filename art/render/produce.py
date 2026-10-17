@@ -1,5 +1,7 @@
 """提灯夜行 · 正式出图（T6）：主角、影妖、疾影、三块山石、石灯笼。
 
+重做过的妖物（精修三维，render/enemies_v2.py 的 V2 表：影妖、赤面狐……）走 enemies_v2.render，素材名不变。
+
 运行（在仓库根目录下）：
     art/.venv/bin/python art/render/produce.py                    # 全部（约 3 分钟）
     art/.venv/bin/python art/render/produce.py --only shade,wisp  # 只重渲部分素材（审图仍用全部）
@@ -152,12 +154,16 @@ def _enemy_jobs(anims, only_anims=None, only_frames=None):
 
 
 def produce(name: str, timings: dict, out_root: Path = ASSETS, only_frames: dict | None = None):
+    import enemies_v2 as EV
     import shade as GHOST
     import rock as ROCK
     import stone_lantern as SL
 
     ASSETS = out_root  # noqa: N806 - 下面沿用原来的名字
-    if name.startswith("hero"):  # "hero" 全部；"hero:dash+death" 只重渲这些动画（其它帧和 meta 保留）
+    if name.split(":")[0] in EV.V2:  # 重做过的妖物（精修三维）：render/enemies_v2.py；"fox:pounce" 只重渲这几个动作
+        nm, only_anims = _split_only(name)
+        EV.render(nm, ASSETS, only_anims=only_anims, timings=timings, only_frames=only_frames)
+    elif name.startswith("hero"):  # "hero" 全部；"hero:dash+death" 只重渲这些动画（其它帧和 meta 保留）
         only_anims = name.split(":", 1)[1].split("+") if ":" in name else None
         render_hero(hero_jobs(only_anims), ASSETS, merge=bool(only_anims), timings=timings)
     elif name in ("shade", "wisp"):

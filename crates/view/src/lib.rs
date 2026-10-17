@@ -59,8 +59,8 @@ pub mod layer {
     pub const NUMBERS: f32 = 300.0;
 }
 
-/// 夜色，也是画面清屏色。
-pub const NIGHT: Color = Color::srgb(0.086, 0.106, 0.173);
+/// 夜色，也是画面清屏色（和光照图的底色同值）。
+pub const NIGHT: Color = palette::NIGHT_AMBIENT;
 
 pub struct ViewPlugin {
     /// 资源根目录（图集 JSON 在 `<asset_root>/atlas/`）

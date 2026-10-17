@@ -48,10 +48,9 @@ fn spawn_status(mut commands: Commands, fonts: Res<Fonts>, playback: Option<Res<
         DespawnOnExit(AppState::Run),
         Node {
             position_type: PositionType::Absolute,
-            left: px(0),
-            right: px(0),
-            top: px(14),
-            justify_content: JustifyContent::Center,
+            // 左下角：顶部和底部中间留给信息栏
+            left: px(16),
+            bottom: px(12),
             ..default()
         },
         children![(ReplayStatus, text(&fonts.body, 18.0, PAPER, "回放中"))],
