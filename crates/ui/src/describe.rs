@@ -177,7 +177,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
         Offer::Heal => {
             let pct = (c.run.choices.heal * 100.0).round();
             supply(
-                "heal",
+                "lotus",
                 "莲",
                 "莲子",
                 format!("回复 {pct}% 生命"),
