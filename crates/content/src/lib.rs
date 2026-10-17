@@ -316,7 +316,9 @@ mod tests {
         assert!(c.stat_labels[0].stats.iter().all(|l| !l.icon.is_empty()));
         assert!(c.stat_labels.iter().all(|g| !g.icon.is_empty()));
         assert_eq!(c.stat_icon(Stat::Speed), Some("speed"));
-        assert_eq!(c.stat_icon(Stat::LotusHeal), None);
+        assert_eq!(c.stat_icon(Stat::LotusHeal), Some("heal"));
+        // 没画图标的属性不写
+        assert_eq!(c.stat_icon(Stat::DarkDamage), None);
         let mut bad = c.clone();
         bad.stat_labels[0].stats[0].icon = "../health".into();
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
