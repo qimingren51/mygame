@@ -74,6 +74,24 @@ pub struct Sfx {
     pub spike: StaticSoundData,
     /// 讨封狐现形：“噗”的一团烟，一声短的狐叫（往上挑再落下），一点亮的铃
     pub unmask: StaticSoundData,
+    /// 铜钱剑挥一下：“唰”的一声金属风，尾巴上两枚铜钱叮的一下
+    pub coin_sweep: StaticSoundData,
+    /// 天罡绕身一圈：风声转一圈（先往上再往下），铜钱一串叮当
+    pub coin_whirl: StaticSoundData,
+    /// 孔明灯落地：一记闷响，呼地着起来，纸灯烧得噼啪
+    pub lantern_burst: StaticSoundData,
+    /// 沧浪推浪：浪声涌起来再落下，起头一下水花
+    pub wave_push: StaticSoundData,
+    /// 北冥潮：低的潮声涌出去，长一些，带一声冷的低铃
+    pub wave_ring: StaticSoundData,
+    /// 青藤吸血：很轻的一声往上滑的“咝”（一秒好几下，几乎听不出来，只是有）
+    pub vine_drain: StaticSoundData,
+    /// 万木春缠住：藤一勒的木响，叶子沙沙
+    pub vine_bind: StaticSoundData,
+    /// 镇妖塔落地：石头砸地的重响，一声寺钟似的低铃
+    pub tower_land: StaticSoundData,
+    /// 玲珑塔炸开：锣、鼓、碎石
+    pub tower_burst: StaticSoundData,
     // 下面四个是界面上的事（卷轴、灯驿），界面发 UiCue 来播
     /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
     pub scroll_unroll: StaticSoundData,
@@ -263,6 +281,15 @@ impl Sfx {
             &self.enemy_aim,
             &self.spike,
             &self.unmask,
+            &self.coin_sweep,
+            &self.coin_whirl,
+            &self.lantern_burst,
+            &self.wave_push,
+            &self.wave_ring,
+            &self.vine_drain,
+            &self.vine_bind,
+            &self.tower_land,
+            &self.tower_burst,
             &self.scroll_unroll,
             &self.scroll_line,
             &self.lamp_lit,
@@ -546,6 +573,154 @@ impl Sfx {
                 b.osc(Wave::Triangle, 1150.0, 0.14, 0.26, 0.04, Some((520.0, 0.24)), 0.01);
                 b.bell(jiao(17), 0.02, 0.03, 0.5);
             }),
+            // 铜钱剑一秒左右挥一下，比符剑的出鞘声厚一点、低一点；铜钱用角调的高音，轻
+            coin_sweep: render(0.6, |b| {
+                b.noise(
+                    0.0,
+                    0.15,
+                    0.1,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1800.0,
+                        slide: Some(5200.0),
+                        q: 1.6,
+                        attack: 0.015,
+                    },
+                );
+                b.noise(0.03, 0.08, 0.04, noise(FilterKind::High, 6500.0));
+                b.bell(jiao(19) * 2.0, 0.07, 0.022, 0.25);
+                b.bell(jiao(22) * 2.0, 0.11, 0.016, 0.22);
+            }),
+            coin_whirl: render(1.0, |b| {
+                b.noise(
+                    0.0,
+                    0.22,
+                    0.09,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1400.0,
+                        slide: Some(4800.0),
+                        q: 1.4,
+                        attack: 0.03,
+                    },
+                );
+                b.noise(
+                    0.2,
+                    0.2,
+                    0.07,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 4800.0,
+                        slide: Some(1600.0),
+                        q: 1.4,
+                        attack: 0.01,
+                    },
+                );
+                for (k, d) in [17, 19, 20, 22].into_iter().enumerate() {
+                    b.bell(jiao(d) * 2.0, 0.06 + k as f32 * 0.06, 0.018, 0.25);
+                }
+            }),
+            // 孔明灯三秒一盏：落地那下要比灯火的小爆炸厚，但比燃灯、落印轻
+            lantern_burst: render(0.9, |b| {
+                b.osc(Wave::Sine, 120.0, 0.0, 0.22, 0.12, Some((48.0, 0.2)), 0.004);
+                b.noise(
+                    0.0,
+                    0.5,
+                    0.1,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 400.0,
+                        slide: Some(2600.0),
+                        attack: 0.04,
+                        ..Default::default()
+                    },
+                );
+                for k in 0..6 {
+                    let t = 0.08 + k as f32 * 0.07 + (k * 29 % 5) as f32 * 0.011;
+                    b.noise(t, 0.012, 0.06 - k as f32 * 0.008, noise(FilterKind::High, 3400.0));
+                }
+            }),
+            wave_push: render(0.9, |b| {
+                b.noise(0.0, 0.05, 0.08, noise(FilterKind::High, 4200.0));
+                b.noise(
+                    0.0,
+                    0.7,
+                    0.13,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 300.0,
+                        slide: Some(1400.0),
+                        attack: 0.18,
+                        ..Default::default()
+                    },
+                );
+            }),
+            wave_ring: render(2.0, |b| {
+                b.noise(
+                    0.0,
+                    1.4,
+                    0.16,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 200.0,
+                        slide: Some(1000.0),
+                        attack: 0.3,
+                        ..Default::default()
+                    },
+                );
+                b.noise(0.0, 0.08, 0.08, noise(FilterKind::High, 3800.0));
+                b.bell(jiao(5), 0.05, 0.08, 1.6);
+            }),
+            vine_drain: render(0.3, |b| {
+                b.osc(Wave::Sine, jiao(17), 0.0, 0.16, 0.018, Some((jiao(20), 0.14)), 0.03);
+                b.noise(0.0, 0.1, 0.012, noise(FilterKind::Band, 2600.0));
+            }),
+            vine_bind: render(0.6, |b| {
+                b.wood(0.0, 0.12, 380.0);
+                b.wood(0.03, 0.08, 560.0);
+                b.noise(
+                    0.0,
+                    0.35,
+                    0.05,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 3000.0,
+                        slide: Some(1800.0),
+                        q: 1.2,
+                        ..Default::default()
+                    },
+                );
+            }),
+            tower_land: render(2.0, |b| {
+                b.drum(0.0, 0.6, 58.0);
+                b.noise(
+                    0.0,
+                    0.4,
+                    0.18,
+                    NoiseOpts { kind: FilterKind::Low, freq: 700.0, slide: Some(90.0), ..Default::default() },
+                );
+                b.wood(0.0, 0.1, 260.0);
+                b.bell(jiao(3), 0.06, 0.07, 1.5);
+            }),
+            tower_burst: render(2.6, |b| {
+                b.gong(65.0, 0.0, 0.2);
+                b.drum(0.0, 0.7, 62.0);
+                b.noise(
+                    0.0,
+                    0.6,
+                    0.2,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 1200.0,
+                        slide: Some(120.0),
+                        ..Default::default()
+                    },
+                );
+                for k in 0..8 {
+                    let t = 0.1 + k as f32 * 0.06 + (k * 31 % 7) as f32 * 0.009;
+                    b.wood(t, 0.05 - k as f32 * 0.004, 700.0 + (k * 97 % 5) as f32 * 120.0);
+                }
+            }),
             scroll_unroll: render(3.4, |b| {
                 b.pluck(jiao(5), 0.0, 0.11, 2.6);
                 b.pluck(jiao(10), 0.02, 0.05, 2.2);
@@ -726,6 +901,15 @@ mod tests {
             ("enemy_aim", &s.enemy_aim),
             ("spike", &s.spike),
             ("unmask", &s.unmask),
+            ("coin_sweep", &s.coin_sweep),
+            ("coin_whirl", &s.coin_whirl),
+            ("lantern_burst", &s.lantern_burst),
+            ("wave_push", &s.wave_push),
+            ("wave_ring", &s.wave_ring),
+            ("vine_drain", &s.vine_drain),
+            ("vine_bind", &s.vine_bind),
+            ("tower_land", &s.tower_land),
+            ("tower_burst", &s.tower_burst),
             ("scroll_unroll", &s.scroll_unroll),
             ("scroll_line", &s.scroll_line),
             ("lamp_lit", &s.lamp_lit),
