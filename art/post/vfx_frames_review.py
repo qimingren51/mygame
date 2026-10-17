@@ -138,22 +138,55 @@ def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = 
     img = M.paper_layer(paper)
     placements = INGAME_B1 if placements is None else placements
 
-    def place(name, fi, x, y, how, want_r, mode="over", gain=1.0):
+    def place(name, fi, x, y, how, want_r, opt=None, mode="over", gain=1.0):
+        """opt（可选）：
+        size_units = (宽, 高)：整张画布拉成这么大（世界单位，可以不等比；泡沫痕用）；
+        to = (x, y), h_units：锚点在右端、沿 X 拉到这一点（藤），整张高 h_units；
+        face = (x, y)：转过去让 +X 朝着这一点（流回主角的绿光）。目标点和锚点用同一个摆法抬高。"""
         spec = batch[name]
         im, anc = frames[name][fi], spec[2]
         px, py = M.to_screen(x, y)
-        scale = sc if want_r is None else want_r * M.PPU / spec[6]["radius_px"] * sc
-        M.blit(img, M.premul(im, tint=tint_of(name, spec)), px, py - LIFT[how] * M.K, anc, scale, mode=mode, gain=gain)
+        py -= LIFT[how] * M.K
+        opt = opt or {}
+        if "size_units" in opt:
+            wu, hu = opt["size_units"]
+            im = im.resize((max(1, round(wu * M.K)), max(1, round(hu * M.K))), Image.LANCZOS)
+            scale = 1.0
+        elif "to" in opt:
+            tx, ty = M.to_screen(*opt["to"])
+            ty -= LIFT[how] * M.K
+            im = im.resize((max(1, round(math.hypot(px - tx, py - ty))), max(1, round(opt["h_units"] * M.K))), Image.LANCZOS)
+            scale = 1.0
+        elif want_r is None:
+            scale = sc
+        else:
+            r_px = spec[6].get("radius_px") or spec[6]["half_width_px"]
+            scale = want_r * M.PPU / r_px * sc
+        rot = None
+        if "to" in opt:
+            rot = math.atan2(py - ty, px - tx)  # +X 从目标指向锚点
+        elif "face" in opt:
+            fx, fy = M.to_screen(*opt["face"])
+            rot = math.atan2(fy - LIFT[how] * M.K - py, fx - px)
+        if rot is not None:  # 绕锚点转：先把锚点放到一张大方图的正中，转完锚点还在正中
+            if scale != 1.0:
+                im = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.LANCZOS)
+                scale = 1.0
+            side = 2 * math.ceil(math.hypot(im.width, im.height)) + 4
+            big = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+            big.paste(im, (round(side / 2 - anc[0] * im.width), round(side / 2 - anc[1] * im.height)))
+            im, anc = big.rotate(-math.degrees(rot), resample=Image.BICUBIC, center=(side / 2, side / 2)), (0.5, 0.5)
+        M.blit(img, M.premul(im, tint=tint_of(name, spec)), px, py, anc, scale, mode=mode, gain=gain)
 
     def normal_layer(on_ground: bool):
-        for name, fi, (x, y), how, want_r in placements:
+        for name, fi, (x, y), how, want_r, *opt in placements:
             if name in frames and batch[name][3] == "normal" and (how in ("ground", "feet")) == on_ground:
-                place(name, fi, x, y, how, want_r)
+                place(name, fi, x, y, how, want_r, *opt)
 
     # 地上的墨花、落羽（画在角色之下，受光照）
     normal_layer(True)
     # 角色（死掉的那只不画，只留墨花）
-    dead = {(x, y) for name, _, (x, y), how, _r in placements if name == "kill_ink"}
+    dead = {(x, y) for name, _, (x, y), how, _r, *_o in placements if name == "kill_ink"}
     items = [(y, f, x) for f, x, y, _ in M.ENEMIES if (x, y) not in dead] + [(M.HERO_POS[1], "hero", M.HERO_POS[0])]
     for y, f, x in sorted(items):
         if f == "hero":
@@ -176,16 +209,16 @@ def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = 
     big = np.asarray(Image.fromarray(np.round(M.to_srgb(lmq) * 255).astype(np.uint8)).resize((M.SW, M.SH), Image.BILINEAR), dtype=np.float64) / 255.0
     img = img * M.to_lin(big).astype(np.float32)
     # 叠加特效（暗层之上，× 1.5）
-    for name, fi, (x, y), how, want_r in placements:
+    for name, fi, (x, y), how, want_r, *opt in placements:
         if name in frames and batch[name][3] == "add":
-            place(name, fi, x, y, how, want_r, mode="add", gain=EMIT_HDR)
+            place(name, fi, x, y, how, want_r, *opt, mode="add", gain=EMIT_HDR)
     out = Image.fromarray(np.round(M.to_srgb(np.clip(img, 0, 1)) * 255).astype(np.uint8), "RGB")
     d = ImageDraw.Draw(out)
     head = title or f"逐帧特效 {key}"
     d.text((16, 12), f"{head}：1080p 游戏大小（1 世界单位 = 2.57 像素），月夜底色 {NIGHT} + 灯笼光照池；叠加特效画在暗层之上 × 1.5，墨花画在地上",
            fill=(240, 239, 236), font=M.font(20))
     labelled = set()
-    for name, fi, (x, y), how, _r in placements:
+    for name, fi, (x, y), how, _r, *_o in placements:
         if name not in frames or (x, y) in labelled:
             continue
         labelled.add((x, y))
