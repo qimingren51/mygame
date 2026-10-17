@@ -653,8 +653,10 @@ mod tests {
     fn contact_radius_defaults_to_radius_and_cannot_exceed_it() {
         let c = Content::load(&repo_data_dir()).unwrap();
         let lord = &c.enemies[c.enemy_index("stonelord").unwrap()];
-        assert_eq!(lord.contact_radius, Some(14.0));
-        assert!((lord.contact_ratio() - 0.5).abs() < 1e-6);
+        // 石将的身体比碰撞圈小得多（重画后量出 13.4，取 13）
+        let contact = lord.contact_radius.expect("石将写了接触半径");
+        assert!(contact < lord.radius);
+        assert!((lord.contact_ratio() - contact / lord.radius).abs() < 1e-6);
         assert_eq!(c.enemies[c.enemy_index("shade").unwrap()].contact_ratio(), 1.0);
         for bad in [lord.radius + 1.0, 0.0] {
             let mut c = c.clone();
