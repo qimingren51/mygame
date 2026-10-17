@@ -78,10 +78,14 @@ pub(crate) enum Fx {
     IceShatter,
     Evolve,
     Pillar,
+    CoinSlash,
+    CoinWhirl,
+    CoinSpark,
+    CoinCross,
 }
 
 impl Fx {
-    const ALL: [Fx; 15] = [
+    const ALL: [Fx; 19] = [
         Fx::None,
         Fx::HitMetal,
         Fx::HitWood,
@@ -97,6 +101,10 @@ impl Fx {
         Fx::IceShatter,
         Fx::Evolve,
         Fx::Pillar,
+        Fx::CoinSlash,
+        Fx::CoinWhirl,
+        Fx::CoinSpark,
+        Fx::CoinCross,
     ];
 
     /// 图集里的帧名前缀（后面接 `_0`、`_1`……）
@@ -117,6 +125,10 @@ impl Fx {
             Fx::IceShatter => "vfx/ice_shatter",
             Fx::Evolve => "vfx/evolve",
             Fx::Pillar => "vfx/evolve_pillar",
+            Fx::CoinSlash => "weapons/coin_slash",
+            Fx::CoinWhirl => "weapons/coin_whirl",
+            Fx::CoinSpark => "weapons/coin_spark",
+            Fx::CoinCross => "weapons/coin_cross",
         }
     }
 
@@ -1300,7 +1312,37 @@ pub(crate) fn particle_events(
                     fallback
                 });
                 let rot = d.y.atan2(d.x);
-                if crit {
+                // 铜钱剑：命中飞出铜钱影子 weapons/coin_spark（颜色画在图里），暴击一个铜钱十字 coin_cross
+                let coin = weapon
+                    .and_then(|i| content.0.weapons.get(i as usize))
+                    .is_some_and(|w| w.id == "coin_sword");
+                let coin_art = coin
+                    && if crit {
+                        parts.anim(
+                            Fx::CoinCross,
+                            at,
+                            1.0,
+                            rot,
+                            hdr(COIN, 1.4),
+                            layer::EMISSIVE + 1.3,
+                            0.0,
+                            0.0,
+                        )
+                    } else {
+                        parts.anim(
+                            Fx::CoinSpark,
+                            at,
+                            1.0,
+                            rot,
+                            hdr(Color::WHITE, 1.2),
+                            layer::EMISSIVE + 1.2,
+                            0.0,
+                            0.0,
+                        )
+                    };
+                if coin_art {
+                    // 铜钱剑用自己的命中图
+                } else if crit {
                     let big = damage >= 1000.0;
                     parts.anim(
                         Fx::Crit,
@@ -1559,7 +1601,37 @@ pub(crate) fn particle_events(
             // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
             SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
                 let d = (to_screen(pos + dir) - to_screen(pos)).normalize_or(Vec2::X);
-                parts.sweep(to_screen(pos) + Vec2::Y * 12.0, d, arc, radius, evolved, frames.ring);
+                let at = to_screen(pos) + Vec2::Y * 12.0;
+                // 美术的铜钱剑刀光：锚点在弧心（主角腰间），radius_px 440 = 110 个世界单位；
+                // 天罡的旋风 radius_px 464 = 116，冷却短、一圈很大，整体压到七成（美术的建议）。
+                // 图集里没有时照旧用笔触拼
+                let art = if evolved {
+                    let spin = parts.rng.range_f32(0.0, TAU);
+                    parts.anim(
+                        Fx::CoinWhirl,
+                        at,
+                        radius / 116.0,
+                        spin,
+                        hdr(COIN, 1.2).with_alpha(0.7),
+                        layer::EMISSIVE + 1.2,
+                        0.0,
+                        0.0,
+                    )
+                } else {
+                    parts.anim(
+                        Fx::CoinSlash,
+                        at,
+                        radius / 110.0,
+                        d.y.atan2(d.x),
+                        hdr(COIN, 1.3),
+                        layer::EMISSIVE + 1.2,
+                        0.0,
+                        0.0,
+                    )
+                };
+                if !art {
+                    parts.sweep(at, d, arc, radius, evolved, frames.ring);
+                }
             }
             SimEvent::SweepStrike { pos, dir } => {
                 let at = to_screen(pos);
@@ -1722,6 +1794,8 @@ const BAMBOO_BUDGET: u32 = 6;
 const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
 /// 冲击波环的颜色（美术建议的染色）
 const SHOCK: Color = Color::srgb(1.0, 0.886, 0.659);
+/// 铜钱剑的铜金（美术建议的染色 #F2C46A）
+const COIN: Color = Color::srgb(0.949, 0.769, 0.416);
 
 /// 在线性空间里推亮（超过 1 的部分过辉光阈值、晕开）。
 fn hdr(c: Color, k: f32) -> Color {
