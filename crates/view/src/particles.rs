@@ -465,14 +465,18 @@ impl Particles {
         }
     }
 
-    pub fn spawn(&mut self, mut p: P) {
+    /// 放一个粒子；本帧预算用完、池满又挤不掉别的时丢掉，返回 false。
+    pub fn spawn(&mut self, mut p: P) -> bool {
         let divisor = if self.lite { 2 } else { 1 };
         let priority = self.priority;
         let used = &mut self.spawned[priority as usize];
+        // 核心（命中的接触核心、美术的逐帧图）不受每帧预算限制：它们的数量已经由仲裁按事件限住，
+        // 丢了就只剩火星；照样计数，挤占后面装饰粒子的预算
         if self.category == Category::Decorative
+            && !p.core
             && *used >= FRAME_BUDGET[priority as usize].div_ceil(divisor as u32)
         {
-            return;
+            return false;
         }
         let cap = CAP / divisor;
         let limit = if self.category == Category::Decorative && priority < Priority::Critical {
@@ -496,11 +500,12 @@ impl Particles {
             self.list.swap_remove(index);
             self.list.push(p);
         } else {
-            return;
+            return false;
         }
         if self.category == Category::Decorative {
             *used += 1;
         }
+        true
     }
 
     /// 一团粒子的个数：精简特效时减半（至少留一个）。
@@ -1037,7 +1042,7 @@ impl Particles {
     }
 
     /// 播一段美术的逐帧特效：`scale` 相对美术原尺寸，`hold` 是播完以后停在最后一帧、慢慢淡掉的秒数，
-    /// `delay` 秒后才开始。图集里没有这段时返回 false，调用处画代码的粒子。
+    /// `delay` 秒后才开始。图集里没有这段、或者这一帧的预算用完了，返回 false，调用处画代码的粒子。
     #[allow(clippy::too_many_arguments)]
     pub fn anim(
         &mut self,
@@ -1054,6 +1059,7 @@ impl Particles {
         let len = self.anims[fx as usize].len() as f32 / ANIM_FPS;
         // 地上的墨溅随机左右镜像，一片片不重样
         let flip = fx == Fx::KillInk && self.rng.chance(0.5);
+        // 算作核心：池满时可以挤掉同级的装饰粒子；预算用完被丢掉时返回 false，调用处退回代码画的
         self.spawn(P {
             size: (scale, scale),
             color,
@@ -1062,9 +1068,9 @@ impl Particles {
             anim: fx,
             delay,
             flip,
+            core: true,
             ..P::new(first, at, len + hold, z)
-        });
-        true
+        })
     }
 
     /// 地上一圈扩开的光（升级、点灯）。
@@ -1252,14 +1258,7 @@ pub(crate) fn particle_events(
             let l = c.to_linear();
             Color::linear_rgba(l.red * k, l.green * k, l.blue * k, 1.0)
         };
-        parts.halo(frames.ring, hero_at, 0.2, 8.0, 0.9, bright(GOLD, 1.8).with_alpha(0.95));
-        parts.halo(frames.ring, hero_at, 0.1, 5.0, 0.7, bright(color, 1.6).with_alpha(0.9));
-        parts.sparks(hero_at + Vec2::Y * 14.0, bright(color, 1.5), 36, 520.0, Vec2::ZERO);
-        parts.sparks(hero_at + Vec2::Y * 14.0, bright(GOLD, 1.5), 18, 380.0, Vec2::new(0.0, 0.6));
-        parts.embers(hero_at, 40.0, GOLD, 30);
-        parts.ink(hero_at + Vec2::Y * 6.0, 20, 2.2);
-        parts.dust(hero_at, 8, 1.6, INK.with_alpha(0.5));
-        // 美术的进化爆发（一朵放射的光，512 像素 = 128 个世界单位）和脚下升起的光柱（锚点在底边）
+        // 美术的进化爆发（一朵放射的光，512 像素 = 128 个世界单位）和脚下升起的光柱（锚点在底边），先占预算
         parts.anim(
             Fx::Evolve,
             hero_at + Vec2::Y * 16.0,
@@ -1271,6 +1270,13 @@ pub(crate) fn particle_events(
             0.0,
         );
         parts.anim(Fx::Pillar, hero_at, 1.2, 0.0, hdr(Color::WHITE, 1.2), layer::EMISSIVE + 1.25, 0.0, 0.0);
+        parts.halo(frames.ring, hero_at, 0.2, 8.0, 0.9, bright(GOLD, 1.8).with_alpha(0.95));
+        parts.halo(frames.ring, hero_at, 0.1, 5.0, 0.7, bright(color, 1.6).with_alpha(0.9));
+        parts.sparks(hero_at + Vec2::Y * 14.0, bright(color, 1.5), 36, 520.0, Vec2::ZERO);
+        parts.sparks(hero_at + Vec2::Y * 14.0, bright(GOLD, 1.5), 18, 380.0, Vec2::new(0.0, 0.6));
+        parts.embers(hero_at, 40.0, GOLD, 30);
+        parts.ink(hero_at + Vec2::Y * 6.0, 20, 2.2);
+        parts.dust(hero_at, 8, 1.6, INK.with_alpha(0.5));
     }
     for &index in &feedback.selected {
         let Some(ev) = outbox.0.get(index) else { continue };
@@ -1466,8 +1472,6 @@ pub(crate) fn particle_events(
                     }
                     StrikeFx::Blast(b) => {
                         let c = if b == BlastKind::Ice { element_glow(Some(Element::Water)) } else { FIRE };
-                        parts.sparks(at, c, 8, 200.0, Vec2::ZERO);
-                        parts.embers(at, radius * 0.4, c, 4);
                         // 美术的火爆（radius_px 144 = 36 个世界单位，颜色画在图里），第 5 帧起墨烟跟上、留一会儿；
                         // 冰爆是冰碎（192 像素 = 48 个世界单位，染冰蓝）
                         if b == BlastKind::Ice {
@@ -1503,6 +1507,9 @@ pub(crate) fn particle_events(
                                 5.0 / ANIM_FPS,
                             );
                         }
+                        // 逐帧图先占本帧的预算，火星、余烬在后
+                        parts.sparks(at, c, 8, 200.0, Vec2::ZERO);
+                        parts.embers(at, radius * 0.4, c, 4);
                     }
                     StrikeFx::Quake => {
                         parts.dust(at, 18, radius / 40.0, DUST);
@@ -1643,11 +1650,7 @@ pub(crate) fn particle_events(
             SimEvent::TowerBurst { pos, radius } => {
                 parts.priority = Priority::Impact;
                 let at = to_screen(pos);
-                parts.sparks(at, GOLD, 28, 320.0, Vec2::ZERO);
-                parts.embers(at, radius * 0.6, GOLD, 16);
-                parts.dust(at, 22, radius / 25.0, DUST);
-                parts.ink(at, 16, 2.0);
-                // 美术的冲击波染金，按炸开的半径缩放（radius_px 220 = 55 个世界单位）；没有时一圈金光
+                // 美术的冲击波染金，按炸开的半径缩放（radius_px 220 = 55 个世界单位），先占预算；没有时一圈金光
                 if !parts.anim(
                     Fx::Shockwave,
                     at,
@@ -1660,6 +1663,10 @@ pub(crate) fn particle_events(
                 ) {
                     parts.halo(frames.ring, at, 0.3, radius * 2.4 / 64.0, 0.6, GOLD.with_alpha(0.8));
                 }
+                parts.sparks(at, GOLD, 28, 320.0, Vec2::ZERO);
+                parts.embers(at, radius * 0.6, GOLD, 16);
+                parts.dust(at, 22, radius / 25.0, DUST);
+                parts.ink(at, 16, 2.0);
             }
             // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
             SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
@@ -2017,6 +2024,26 @@ mod tests {
             },
             anims: Vec::new(),
         }
+    }
+
+    /// 每帧预算用完以后，装饰粒子放不进去，核心（命中核心、逐帧图）照样放得进去。
+    #[test]
+    fn cores_are_not_dropped_by_the_frame_budget() {
+        let mut parts = pool();
+        parts.begin_frame(false);
+        parts.priority = Priority::Normal;
+        let budget = FRAME_BUDGET[Priority::Normal as usize];
+        for _ in 0..budget {
+            assert!(parts.spawn(P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0)));
+        }
+        assert!(!parts.spawn(P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0)));
+        assert!(parts.spawn(P { core: true, ..P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0) }));
+    }
+
+    /// `load_anims` 按 `fx as usize` 取帧：`Fx::ALL` 必须和枚举的声明顺序一致。
+    #[test]
+    fn fx_table_follows_the_enum_order() {
+        assert!(Fx::ALL.iter().enumerate().all(|(i, f)| *f as usize == i));
     }
 
     /// 逐帧特效 24 帧换一帧，播完停在最后一帧；停的那段里淡掉，没有停的不淡。
