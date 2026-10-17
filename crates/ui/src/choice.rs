@@ -75,6 +75,8 @@ struct BanishLabel;
 /// 聚焦时在卡片下方显示一行。
 const CARD_NAME_SIZE: f32 = 30.0;
 const CARD_GAIN_SIZE: f32 = 22.0;
+/// 收益前的数值图标
+const GAIN_ICON: f32 = 30.0;
 const CARD_NOTE_SIZE: f32 = 15.0;
 const CARD_LABEL_SIZE: f32 = 12.0;
 const CARD_CAPTION_SIZE: f32 = 16.0;
@@ -579,17 +581,35 @@ fn card(
         });
         body.with_children(|card| {
             card.spawn(text(&fonts.title, CARD_NAME_SIZE, PAPER, &info.name));
-            card.spawn((
-                Text::new(&info.gain),
-                // 毛笔字体缺少箭头、百分号等字形，用正文补齐
-                TextFont {
-                    font: bevy::text::FontSource::list([fonts.title.clone(), fonts.body.clone()]),
-                    ..TextFont::from_font_size(CARD_GAIN_SIZE)
-                },
-                TextColor(info.color.mix(&PAPER, 0.3)),
-                TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
-                Node { width: percent(100), margin: UiRect::top(px(4)), ..default() },
-            ));
+            // 收益一行；心法前面画它主属性的数值图标
+            let icon = info.gain_icon.as_deref().and_then(|n| db.find(n)).map(|f| db.ui_image(f));
+            card.spawn(Node {
+                width: percent(100),
+                margin: UiRect::top(px(4)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                ..default()
+            })
+            .with_children(|row| {
+                if let Some(img) = icon {
+                    row.spawn((
+                        Node { width: px(GAIN_ICON), height: px(GAIN_ICON), flex_shrink: 0.0, ..default() },
+                        img,
+                    ));
+                }
+                row.spawn((
+                    Text::new(&info.gain),
+                    // 毛笔字体缺少箭头、百分号等字形，用正文补齐
+                    TextFont {
+                        font: bevy::text::FontSource::list([fonts.title.clone(), fonts.body.clone()]),
+                        ..TextFont::from_font_size(CARD_GAIN_SIZE)
+                    },
+                    TextColor(info.color.mix(&PAPER, 0.3)),
+                    TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
+                    Node { flex_shrink: 1.0, ..default() },
+                ));
+            });
             if let Some((lv, max)) = level {
                 card.spawn(Node { column_gap: px(6), margin: UiRect::top(px(10)), ..default() })
                     .with_children(|dots| {

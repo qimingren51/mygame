@@ -29,6 +29,9 @@ const LEAD_RATE: f32 = 2.2;
 const KICK_OMEGA: f32 = 15.0;
 /// 攻击顿帧至少隔这么久（现实秒）；受伤和死亡不走这个冷却。
 const STOP_GAP: f32 = 0.18;
+/// 短于这个的是轻顿帧（暴击、打中精英），单独冷却：连着暴击也不会一卡一卡，也不挡住更重的顿帧。
+const LIGHT_STOP: f32 = 0.03;
+const LIGHT_GAP: f32 = 0.7;
 
 /// 画面手感的开关，由界面层按设置同步（画面层不依赖平台层）。
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -84,6 +87,7 @@ pub(crate) struct Rig {
     stop_ready: f32,
     stop_priority: Priority,
     stop_fresh: bool,
+    light_ready: f32,
     slow_priority: Priority,
     slow: f32,
     slow_len: f32,
@@ -113,6 +117,7 @@ impl Default for Rig {
             stop_ready: 0.0,
             stop_priority: Priority::Ambient,
             stop_fresh: false,
+            light_ready: 0.0,
             slow_priority: Priority::Ambient,
             slow: 0.0,
             slow_len: 0.0,
@@ -152,7 +157,9 @@ impl Rig {
 
     /// 顿帧：画面和模拟一起停 secs 现实秒。
     pub fn hitstop(&mut self, secs: f32, priority: Priority) {
+        let light = secs < LIGHT_STOP && !priority.protected();
         if secs <= 0.0
+            || (light && self.light_ready > 0.0)
             || (!priority.protected()
                 && !self.stop_fresh
                 && self.stop_ready > 0.0
@@ -160,7 +167,9 @@ impl Rig {
         {
             return;
         }
-        if !priority.protected() {
+        if light {
+            self.light_ready = LIGHT_GAP;
+        } else if !priority.protected() {
             self.stop_priority =
                 if self.stop_ready > 0.0 { self.stop_priority.max(priority) } else { priority };
             self.stop_ready = self.stop_ready.max(STOP_GAP + secs);
@@ -186,6 +195,7 @@ impl Rig {
         self.stop = (self.stop - dt).max(0.0);
         self.slow = (self.slow - after_stop).max(0.0);
         self.stop_ready = (self.stop_ready - dt).max(0.0);
+        self.light_ready = (self.light_ready - dt).max(0.0);
     }
 
     /// 当前的时间倍率。
@@ -235,9 +245,36 @@ pub(crate) fn camera_events(
     feedback: Res<Feedback>,
     mut rig: ResMut<Rig>,
     player: Single<(&Player, &Pos)>,
+    (content, enemies): (Res<lantern_sim::GameContent>, Option<Res<lantern_sim::Enemies>>),
+    (phase, mut evolving): (Option<Res<lantern_sim::SimPhase>>, Local<bool>),
 ) {
     let (player, pos) = *player;
-    let impulse = camera_impulse(&outbox.0, player.facing, pos.0);
+    let mut impulse = camera_impulse(&outbox.0, player.facing, pos.0);
+    // 进化：卡片收起、回到战斗的那一刻，镜头一推一震（和粒子的进化爆发同一刻）
+    *evolving |= outbox.0.iter().any(|e| matches!(e, SimEvent::Evolve { .. }));
+    if *evolving && phase.as_deref() == Some(&lantern_sim::SimPhase::Play) {
+        *evolving = false;
+        if impulse.priority <= Priority::Ultimate {
+            impulse.priority = Priority::Ultimate;
+            impulse.trauma = impulse.trauma.max(0.5);
+            impulse.zoom = impulse.zoom.max(0.08);
+            impulse.hold = impulse.hold.max(0.3);
+        }
+    }
+    // 精英、夜主挨了直接一击：一下很轻的顿帧（没有更重的顿帧时）
+    if impulse.stop == 0.0
+        && let Some(en) = &enemies
+        && outbox.0.iter().any(|e| match e {
+            SimEvent::Hit { target, kind, .. } if *kind != lantern_sim::HitKind::Dot => en
+                .resolve(*target)
+                .and_then(|i| content.0.enemies.get(usize::from(en.kind[i])))
+                .is_some_and(|d| matches!(d.rank, Rank::Elite | Rank::Boss)),
+            _ => false,
+        })
+    {
+        impulse.stop = 0.015;
+        impulse.priority = impulse.priority.max(Priority::Normal);
+    }
     apply_impulse(&mut rig, &feedback, impulse);
 }
 
@@ -296,9 +333,10 @@ fn camera_impulse(events: &[SimEvent], facing: Vec2, hero: Vec2) -> Impulse {
     for event in events {
         let mut cue = Impulse { priority: Priority::of(event), ..default() };
         match *event {
+            // 暴击都有一下轻顿帧，大暴击停 2 帧（跟着设置里的顿帧开关，0.18 秒内不连顿）
             SimEvent::Hit { damage, crit: true, .. } => {
-                cue.stop = if damage >= 1000.0 { 0.035 } else { 0.0 };
-                cue.trauma = 0.1;
+                cue.stop = if damage >= 1000.0 { 0.035 } else { 0.02 };
+                cue.trauma = 0.16;
             }
             SimEvent::Kill { rank: Rank::Elite, .. } => {
                 cue.trauma = 0.3;
@@ -468,7 +506,9 @@ pub(crate) fn update_rig(
 
     // ---- 震屏
     rig.trauma = (rig.trauma - dt * TRAUMA_DECAY).max(0.0);
-    let s = rig.trauma * rig.trauma * feel.shake;
+    // 小冲击也要抖得出来（试玩第 1 轮：暴击 0.1 按平方只抖 0.14 单位，等于没抖）：
+    // 线性和平方各占一部分，创伤为 1 时还是满幅，0.1 时约 4 倍于原来
+    let s = (0.35 * rig.trauma + 0.65 * rig.trauma * rig.trauma) * feel.shake;
     let shake = Vec2::new(rig.noise(0), rig.noise(1)) * SHAKE_MAX * s;
     let roll = rig.noise(2) * ROLL_MAX * s;
 
@@ -706,9 +746,10 @@ mod tests {
         assert_eq!(fatal.stop, 0.045);
     }
 
+    /// 暴击都有一下轻顿帧，过 1000 的停 2 帧（试玩第 1 轮：小暴击原来不顿，打起来发飘）。
     #[test]
-    fn only_large_crits_request_global_hitstop() {
-        for (damage, stop) in [(1.0, 0.0), (999.0, 0.0), (1000.0, 0.035), (2000.0, 0.035)] {
+    fn crits_request_light_hitstop_and_large_crits_two_frames() {
+        for (damage, stop) in [(1.0, 0.02), (999.0, 0.02), (1000.0, 0.035), (2000.0, 0.035)] {
             let mut rig = Rig::default();
             apply_impulse(
                 &mut rig,
@@ -716,13 +757,26 @@ mod tests {
                 camera_impulse(&[crit(damage)], Vec2::X, Vec2::ZERO),
             );
             assert_eq!(rig.stop, stop);
-            assert_eq!(rig.time_scale(), if stop > 0.0 { 0.0 } else { 1.0 });
-            assert_eq!(rig.trauma, 0.1);
-            if stop == 0.0 {
-                assert_eq!(rig.stop_ready, 0.0);
-                assert!(!rig.stop_fresh);
-            }
+            assert_eq!(rig.time_scale(), 0.0);
+            assert_eq!(rig.trauma, 0.16);
         }
+    }
+
+    /// 轻顿帧 0.7 秒内只顿一次，但不挡更重的顿帧。
+    #[test]
+    fn light_hitstops_are_rate_limited_without_blocking_heavy_ones() {
+        let mut rig = Rig::default();
+        let feedback = Feedback::default();
+        apply_impulse(&mut rig, &feedback, camera_impulse(&[crit(10.0)], Vec2::X, Vec2::ZERO));
+        assert_eq!(rig.stop, 0.02);
+        rig.advance_time(0.3);
+        apply_impulse(&mut rig, &feedback, camera_impulse(&[crit(10.0)], Vec2::X, Vec2::ZERO));
+        assert_eq!(rig.stop, 0.0, "0.3 秒后的小暴击不再顿");
+        apply_impulse(&mut rig, &feedback, camera_impulse(&[crit(2000.0)], Vec2::X, Vec2::ZERO));
+        assert_eq!(rig.stop, 0.035, "大暴击照样顿");
+        rig.advance_time(0.5);
+        apply_impulse(&mut rig, &feedback, camera_impulse(&[crit(10.0)], Vec2::X, Vec2::ZERO));
+        assert_eq!(rig.stop, 0.02);
     }
 
     #[test]

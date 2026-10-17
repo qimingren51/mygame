@@ -7,7 +7,7 @@ use lantern_content::WeaponIdentity;
 use lantern_sim::enemies::EnemyHandle;
 use lantern_sim::{Enemies, GameContent, HitKind, SimEvent, SimOutbox};
 
-use crate::actors::{ActorFrames, Draw, Pools};
+use crate::actors::{ActorFrames, Draw, GlowRequests, Pools};
 use crate::atlas::FrameId;
 use crate::{layer, to_screen};
 
@@ -29,8 +29,18 @@ impl Response {
         }
     }
 
+    /// 受击闪白多久：GAMEPLAY 第 14 节的 0.08 秒，暴击 0.1 秒（形变回弹另按 `duration`）。
+    fn flash_len(self) -> f32 {
+        if self.crit { 0.1 } else { 0.08 }
+    }
+
     pub fn flashing(self) -> bool {
-        self.age < if self.identity == Some(WeaponIdentity::Bell) { 0.04 } else { self.duration() }
+        self.age < self.flash_len()
+    }
+
+    /// 闪白的强度：起手最亮，0.08 秒里淡完（画在暗层之上的那层白影用）。
+    pub fn flash_strength(self) -> f32 {
+        (1.0 - self.age / self.flash_len()).clamp(0.0, 1.0)
     }
 
     /// 沿入射轴压缩，垂直轴拉伸；不旋转妖物本来的朝向。
@@ -162,8 +172,20 @@ pub(crate) fn read_events(
     }
 }
 
-pub(crate) fn draw_deaths(state: Res<Impacts>, mut pools: ResMut<Pools>) {
+pub(crate) fn draw_deaths(state: Res<Impacts>, mut pools: ResMut<Pools>, mut glow: ResMut<GlowRequests>) {
     for d in &state.dying {
+        // 倒下那一下的亮：叠加的白影画在暗层之上，月夜的暗处也亮得起来、发得了光（试玩第 1 轮）
+        if d.age < 0.08 {
+            let k = 1.0 - d.age / 0.08;
+            glow.add_flipped(
+                d.pose.flash,
+                (d.pose.pos + Vec2::Y * (d.age * 8.0)).extend(layer::EMISSIVE - 0.2),
+                Vec2::splat(1.0 + 0.12 * (1.0 - k)),
+                0.0,
+                Color::srgb(1.25, 1.15, 1.0).with_alpha(0.42 * k * k),
+                d.pose.flip,
+            );
+        }
         let confirm = d.age < 0.03;
         let fade = (1.0 - (d.age - 0.03).max(0.0) / (d.life - 0.03)).clamp(0.0, 1.0);
         let (deform, offset) = d
@@ -260,6 +282,8 @@ mod tests {
         }
         let bell = Response { identity: Some(WeaponIdentity::Bell), ..base };
         assert_eq!(bell.sample(), Response { age: 0.03, ..bell }.sample());
-        assert!(!Response { age: 0.04, ..bell }.flashing());
+        assert!(Response { age: 0.07, ..bell }.flashing());
+        assert!(!Response { age: 0.08, ..bell }.flashing());
+        assert!(Response { age: 0.09, crit: true, ..bell }.flashing());
     }
 }

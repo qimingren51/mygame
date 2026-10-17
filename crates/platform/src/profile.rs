@@ -16,7 +16,7 @@ use lantern_sim::{RunMode, RunResult, RunSetup};
 
 use crate::settings::{load_with_backup, write_atomic};
 
-pub const SAVE_VERSION: u32 = 3;
+pub const SAVE_VERSION: u32 = 4;
 
 /// 首夜教学的完成项；独立于模拟与回放，完成一项就保存。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +103,9 @@ pub struct Profile {
     /// 靠成就解锁的灯、灯坠（初始的不写）
     pub lamps: BTreeSet<String>,
     pub charms: BTreeSet<String>,
+    /// 靠成就或保底解锁的法器（`run.ron` 里 `choices.locked` 的 ID，docs/GAMEPLAY.md 第 13.2 节）
+    #[serde(default)]
+    pub unlocked: BTreeSet<String>,
     /// 开放到第几更
     pub tier: u8,
     /// 通关过的最高一更
@@ -155,6 +158,7 @@ impl Default for Profile {
             basics: false,
             lamps: BTreeSet::new(),
             charms: BTreeSet::new(),
+            unlocked: BTreeSet::new(),
             tier: 1,
             cleared: 0,
             achievements: BTreeSet::new(),
@@ -252,11 +256,13 @@ pub enum NewRecord {
     Endless,
 }
 
-/// 记下一局之后的结果：刷新的记录、新达成的成就（`achievements.ron` 下标）。
+/// 记下一局之后的结果：刷新的记录、新达成的成就（`achievements.ron` 下标）、
+/// 新解锁的法器（成就和保底都算，按 `choices.locked` 的顺序）。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Recorded {
     pub record: Option<NewRecord>,
     pub achievements: Vec<usize>,
+    pub unlocked: Vec<String>,
 }
 
 /// 灯驿门外的路灯：回来一回添一盏，最多这么多盏（docs/DESIGN.md 第 15 节 `road_lamps`）。
@@ -316,6 +322,18 @@ impl Profile {
         }
         if self.version < 3 && (self.runs > 0 || self.basics) {
             self.onboarding = OnboardingProgress::completed();
+        }
+        if self.version < 4 {
+            // 第四版新法器靠成就和保底解锁：图鉴里记着进化过的老法器，补发对应的成就；已经过了的保底局数补送
+            for (k, a) in content.achievements.iter().enumerate() {
+                if matches!(a.when, AchievementWhen::Evolved(_)) && self.achieved_ever(content, k) {
+                    self.grant(content, k);
+                }
+            }
+            let passed = content.run.choices.unlock_pity.iter().filter(|&&n| n <= self.runs).count();
+            for _ in 0..passed {
+                self.unlock_next(content);
+            }
         }
         // 第三版新加的 events、journals、hub_lines_seen 都有默认值（空）；旧通关不冒认亲历过护火或留灯，
         // 旧存档也不补记听过哪句。
@@ -422,6 +440,18 @@ impl Profile {
         content.lamps.iter().any(|l| l.id == id && l.initial) || self.lamps.contains(id)
     }
 
+    /// 法器能不能进卡池：数据里没锁，或者存档解锁了。
+    pub fn weapon_unlocked(&self, content: &Content, id: &str) -> bool {
+        !content.run.choices.locked.iter().any(|l| l == id) || self.unlocked.contains(id)
+    }
+
+    /// 保底：按 `choices.locked` 的顺序解锁下一件还锁着的，返回它的 ID。
+    fn unlock_next(&mut self, content: &Content) -> Option<String> {
+        let id = content.run.choices.locked.iter().find(|id| !self.unlocked.contains(*id))?.clone();
+        self.unlocked.insert(id.clone());
+        Some(id)
+    }
+
     pub fn charm_unlocked(&self, content: &Content, id: &str) -> bool {
         content.charms.iter().any(|c| c.id == id && c.initial) || self.charms.contains(id)
     }
@@ -461,6 +491,7 @@ impl Profile {
         }
         s.charm_pool = self.charm_pool(content);
         s.insight = self.last.insight.filter(|e| self.insights(content).contains(e));
+        s.unlocked = self.unlocked.clone();
         s
     }
 
@@ -490,6 +521,9 @@ impl Profile {
                     self.oil += n;
                     self.oil_total += n;
                 }
+                Reward::Weapon(id) => {
+                    self.unlocked.insert(id.clone());
+                }
             }
         }
         true
@@ -513,6 +547,17 @@ impl Profile {
             AchievementWhen::Evolution => r.evolutions > 0,
             AchievementWhen::FlawlessElite => f.flawless_elites > 0,
             AchievementWhen::ClearNoAttributes => r.won && !rec.attributes,
+            AchievementWhen::Evolved(_) => self.achieved_ever(content, k),
+        }
+    }
+
+    /// 跨局累计的成就：看存档本身（图鉴），不看这一局。
+    fn achieved_ever(&self, content: &Content, k: usize) -> bool {
+        match &content.achievements[k].when {
+            AchievementWhen::Evolved(id) => {
+                self.codex.contains(&format!("w:{id}_evo")) || self.codex.contains(&format!("w:{id}_mut"))
+            }
+            _ => false,
         }
     }
 
@@ -704,13 +749,26 @@ impl Profile {
         t.oil += u64::from(r.oil);
         t.lanterns += r.lanterns;
         t.evolutions += r.evolutions;
+        let before = self.unlocked.clone();
         let mut achievements = Vec::new();
         for k in 0..content.achievements.len() {
             if self.achieved(content, k, &rec) && self.grant(content, k) {
                 achievements.push(k);
             }
         }
-        Recorded { record, achievements }
+        // 保底：完成到这几局时还有没解锁的，按顺序送一件（这一局成就已经解锁的不算）
+        if content.run.choices.unlock_pity.contains(&self.runs) {
+            self.unlock_next(content);
+        }
+        let unlocked = content
+            .run
+            .choices
+            .locked
+            .iter()
+            .filter(|id| self.unlocked.contains(*id) && !before.contains(*id))
+            .cloned()
+            .collect();
+        Recorded { record, achievements, unlocked }
     }
 }
 
@@ -1247,5 +1305,69 @@ mod tests {
         assert_eq!((p.tier, p.cleared, p.version), (2, 1, SAVE_VERSION));
         assert!(!p.upgrade(&c));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 新法器（docs/GAMEPLAY.md 第 13.2 节）：进化或异化老法器解锁同五行的新法器；完成第 5、8……局时按顺序保底送。
+    fn evolved(ids: &[&str]) -> RunResult {
+        let mut r = result(false, 400.0, 1000, 100, 50);
+        r.evolutions = ids.len() as u32;
+        r.feats.codex = ids.iter().map(|id| format!("w:{id}_evo")).collect();
+        r
+    }
+
+    #[test]
+    fn evolving_an_old_weapon_unlocks_its_new_sibling() {
+        let c = content();
+        let mut p = Profile::default();
+        assert!(!p.weapon_unlocked(&c, "coin_sword") && p.weapon_unlocked(&c, "sword"));
+        let got = p.record(&c, RunRecord { result: &evolved(&["sword"]), tier: 1, attributes: false });
+        assert_eq!(got.unlocked, ["coin_sword"]);
+        assert!(p.weapon_unlocked(&c, "coin_sword"));
+        let k = c.achievements.iter().position(|a| a.id == "unlock_coin_sword").unwrap();
+        assert!(got.achievements.contains(&k), "斗转星移");
+        assert!(p.run_setup(&c, 1).unlocked.contains("coin_sword"), "出发时带进模拟");
+        // 异化也算
+        let mut r = evolved(&[]);
+        r.feats.codex.insert("w:bell_mut".into());
+        let got = p.record(&c, RunRecord { result: &r, tier: 1, attributes: false });
+        assert_eq!(got.unlocked, ["wave"]);
+        // 已经解锁的不再报
+        let got = p.record(&c, RunRecord { result: &evolved(&["sword"]), tier: 1, attributes: false });
+        assert!(got.unlocked.is_empty());
+    }
+
+    #[test]
+    fn the_pity_unlock_hands_out_the_next_locked_weapon() {
+        let c = content();
+        let mut p = Profile::default();
+        let plain = result(false, 300.0, 800, 100, 50);
+        for n in 1..=4 {
+            let got = p.record(&c, RunRecord { result: &plain, tier: 1, attributes: false });
+            assert!(got.unlocked.is_empty(), "第 {n} 局不送");
+        }
+        let got = p.record(&c, RunRecord { result: &plain, tier: 1, attributes: false });
+        assert_eq!(got.unlocked, ["coin_sword"], "第 5 局按顺序送第一件");
+        // 第 6 局进化了霜铃：成就送沧浪；到第 8 局保底跳过已经有的，送孔明灯
+        p.record(&c, RunRecord { result: &evolved(&["bell"]), tier: 1, attributes: false });
+        p.record(&c, RunRecord { result: &plain, tier: 1, attributes: false });
+        let got = p.record(&c, RunRecord { result: &plain, tier: 1, attributes: false });
+        assert_eq!(got.unlocked, ["sky_lantern"]);
+        // 全部解锁以后，保底什么也不送
+        p.unlocked = c.run.choices.locked.iter().cloned().collect();
+        p.runs = 10;
+        let got = p.record(&c, RunRecord { result: &plain, tier: 1, attributes: false });
+        assert!(got.unlocked.is_empty());
+    }
+
+    #[test]
+    fn old_saves_get_their_unlocks_from_the_codex_and_past_pity() {
+        let c = content();
+        let old = r#"(version: 3, runs: 6, codex: ["w:lamp", "w:lamp_evo", "w:seal"])"#;
+        let mut p: Profile = ron::from_str(old).unwrap();
+        assert!(p.upgrade(&c));
+        // 进化过灯火：火树银花送孔明灯；过了第 5 局的保底：按顺序送铜钱剑
+        assert_eq!(p.unlocked, ["sky_lantern", "coin_sword"].into_iter().map(String::from).collect());
+        assert!(p.achievements.contains("unlock_sky_lantern"));
+        assert!(!p.upgrade(&c), "只迁移一次");
     }
 }

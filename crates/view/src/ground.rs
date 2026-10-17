@@ -200,7 +200,8 @@ pub(crate) fn update_decor(
                     let (mut sprite, anchor) = db.sprite(frame);
                     sprite.flip_x = rng.chance(0.5);
                     if !kind.upright {
-                        sprite.color = Color::srgba(1.0, 1.0, 1.0, rng.range_f32(0.55, 0.9));
+                        // 月夜下装饰调浓一成（试玩第 1 轮，美术定的 0.59–0.97；贴图本身已经调过一次）
+                        sprite.color = Color::srgba(1.0, 1.0, 1.0, rng.range_f32(0.59, 0.97));
                     }
                     let z =
                         if kind.upright { sort_z(layer::ACTORS, y) } else { layer::GROUND + rng.next_f32() };

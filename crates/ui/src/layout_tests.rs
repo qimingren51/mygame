@@ -177,14 +177,24 @@ fn stats_panel_with_every_stat_fits_after_resize() {
             |mut commands: Commands,
              c: Res<lantern_sim::GameContent>,
              fonts: Res<Fonts>,
-             skin: Res<skin::Skin>| {
+             skin: Res<skin::Skin>,
+             db: Res<AtlasDb>| {
                 let c = &c.0;
                 let mut arsenal = Arsenal::default();
                 for id in ["lamp", "sword", "bell", "crane", "seal"] {
                     arsenal.0.push(lantern_sim::weapons::WeaponSlot::new(c.weapon_index(id).unwrap()));
                 }
                 let stats = lantern_sim::Stats::base(c);
-                stats_panel::spawn_preview(&mut commands, c, &fonts, &skin, &stats, &arsenal, true);
+                stats_panel::spawn_preview(
+                    &mut commands,
+                    c,
+                    &fonts,
+                    &skin,
+                    Some(&db),
+                    &stats,
+                    &arsenal,
+                    true,
+                );
             },
         )
         .unwrap();
@@ -237,13 +247,12 @@ fn codex_pages_with_everything_unlocked_fit_after_resize() {
     }
 }
 
+/// 锁着的法器照样列在图鉴里，空位上写怎么解锁；它的进化心法写“<新法器>解锁后可得”；拿到过才写名字。
 #[test]
-fn codex_hides_locked_weapons_until_obtained() {
+fn codex_shows_how_to_unlock_locked_weapons() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
     let c = Content::load(&root).unwrap();
-    let Some(locked) = (0..c.weapons.len()).find(|&d| c.weapon_locked(d)) else { return };
-    let name = c.weapons[locked].name.clone();
-    let count = |profile: &Profile| {
+    let texts = |profile: &Profile, page: usize| {
         let mut app = setup();
         let p = profile.clone();
         app.world_mut()
@@ -253,17 +262,115 @@ fn codex_hides_locked_weapons_until_obtained() {
                       fonts: Res<Fonts>,
                       skin: Res<skin::Skin>,
                       db: Res<AtlasDb>| {
-                    crate::hub::codex_panel(&mut commands, &c.0, &fonts, &skin, &db, &p, 1);
+                    crate::hub::codex_panel(&mut commands, &c.0, &fonts, &skin, &db, &p, page);
                 },
             )
             .unwrap();
         let world = app.world_mut();
-        world.query::<&Text>().iter(world).filter(|t| t.0 == name).count()
+        world.query::<&Text>().iter(world).map(|t| t.0.clone()).collect::<Vec<_>>()
     };
     let mut profile = Profile::default();
-    assert_eq!(count(&profile), 0, "锁着、没拿到过的不列");
-    profile.codex.insert(format!("w:{}", c.weapons[locked].id));
-    assert_eq!(count(&profile), 1);
+    let weapons = texts(&profile, 1);
+    assert!(!weapons.iter().any(|t| t == "铜钱剑"), "没拿到过不写名字");
+    assert!(weapons.iter().any(|t| t == "符剑进化或异化后可得"), "{weapons:?}");
+    assert!(texts(&profile, 2).iter().any(|t| t == "铜钱剑解锁后可得"));
+    // 解锁以后不再写怎么解锁；拿到过写名字
+    profile.unlocked.insert("coin_sword".into());
+    profile.codex.insert("w:coin_sword".into());
+    let weapons = texts(&profile, 1);
+    assert!(weapons.iter().any(|t| t == "铜钱剑"));
+    assert!(!weapons.iter().any(|t| t == "符剑进化或异化后可得"));
+    assert!(!texts(&profile, 2).iter().any(|t| t == "铜钱剑解锁后可得"));
+    assert_eq!(c.run.choices.locked.len(), 5);
+}
+
+/// 结算报新法器：标题“新法器 · X”，下面一行 weapons.ron 的 unlock；五件同时报也放得下。
+#[test]
+fn results_list_new_weapons_and_fit() {
+    let mut app = setup();
+    app.world_mut()
+        .run_system_once(
+            |mut commands: Commands,
+             c: Res<lantern_sim::GameContent>,
+             fonts: Res<Fonts>,
+             skin: Res<skin::Skin>,
+             db: Res<AtlasDb>| {
+                let c = &c.0;
+                let r = lantern_sim::RunResult {
+                    events: Default::default(),
+                    journals: Default::default(),
+                    won: false,
+                    seconds: 300.0,
+                    kills: 800,
+                    level: 10,
+                    best_combo: 0,
+                    evolutions: 1,
+                    oil: 100,
+                    oil_parts: [0; 5],
+                    gold: 50,
+                    lanterns: 0,
+                    lamps_complete: false,
+                    feats: Default::default(),
+                    endless: false,
+                    bosses: 0,
+                };
+                let recorded = lantern_platform::profile::Recorded {
+                    unlocked: c.run.choices.locked.clone(),
+                    ..Default::default()
+                };
+                // 和 results.rs 的结算面板一样：画布按新法器加高，面板 760 宽
+                let height = crate::results::RESULTS_HEIGHT
+                    + crate::results::UNLOCK_ROW * recorded.unlocked.len() as f32;
+                commands
+                    .spawn((
+                        responsive::FitViewport::Fixed(Vec2::new(1280.0, height)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|root| {
+                        root.spawn((
+                            Node {
+                                width: px(760),
+                                flex_direction: FlexDirection::Column,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::axes(px(56), px(40)),
+                                row_gap: px(12),
+                                ..default()
+                            },
+                            skin.image("panel"),
+                        ))
+                        .with_children(|p| {
+                            crate::results::results_body(
+                                p,
+                                c,
+                                &fonts,
+                                &db,
+                                &skin,
+                                &r,
+                                "",
+                                None,
+                                &recorded,
+                                true,
+                                &Arsenal::default(),
+                                &Build::default(),
+                                &Profile::default(),
+                            );
+                            crate::results::result_options(p, &fonts, &skin);
+                        });
+                    });
+            },
+        )
+        .unwrap();
+    let world = app.world_mut();
+    let texts: Vec<String> = world.query::<&Text>().iter(world).map(|t| t.0.clone()).collect();
+    assert!(texts.iter().any(|t| t == "新法器 · 铜钱剑"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "七枚铜钱成了剑"));
+    assert_fits_after_resize(&mut app);
 }
 
 /// 信息栏顶部三块（左上头像和血条、中间用时、右上五行和击杀）在各种窗口里都不互相压住，也不出窗口。
@@ -330,4 +437,46 @@ fn hud_top_clusters_stay_apart_in_every_window() {
 
 fn single<C: Component>(world: &mut World) -> Entity {
     world.query_filtered::<Entity, With<C>>().single(world).unwrap()
+}
+
+/// stat_labels.ron 写的图标在图集里都有（组 `ui/stat_group_*`、属性 `ui/stat_*`），法器组也是。
+#[test]
+fn stat_icons_named_in_the_data_are_in_the_atlas() {
+    let mut app = setup();
+    let world = app.world_mut();
+    let c = world.resource::<lantern_sim::GameContent>().0.clone();
+    let db = world.resource::<AtlasDb>();
+    let mut names = vec!["ui/stat_group_weapons".to_string()];
+    for g in &c.stat_labels {
+        if !g.icon.is_empty() {
+            names.push(format!("ui/stat_group_{}", g.icon));
+        }
+        names.extend(g.stats.iter().filter(|l| !l.icon.is_empty()).map(|l| format!("ui/stat_{}", l.icon)));
+    }
+    assert!(names.len() >= 19);
+    for n in names {
+        assert!(db.find(&n).is_some(), "图集里没有 {n}");
+    }
+}
+
+/// 卡面找图的名字和图集对得上：补给用 lotus、oil 的图标，五件法器本体和进化都有插画。
+#[test]
+fn offer_cards_find_their_icons_and_art_in_the_atlas() {
+    let mut app = setup();
+    let world = app.world_mut();
+    let c = world.resource::<lantern_sim::GameContent>().0.clone();
+    let db = world.resource::<AtlasDb>();
+    let (arsenal, build) = (Arsenal::default(), Build::default());
+    for offer in [Offer::Heal, Offer::Oil] {
+        let info = crate::describe::offer_info(&c, &arsenal, &build, offer);
+        let icon = info.icon.unwrap();
+        assert!(db.find(&icon).is_some(), "图集里没有 {icon}");
+    }
+    assert_eq!(crate::describe::offer_info(&c, &arsenal, &build, Offer::Heal).art, "ui/card_lotus");
+    for id in ["lamp", "sword", "bell", "crane", "seal"] {
+        let d = c.weapon_index(id).unwrap();
+        let info = crate::describe::offer_info(&c, &arsenal, &build, Offer::NewWeapon(d));
+        assert!(db.find(&info.art).is_some(), "图集里没有 {}", info.art);
+        assert!(db.find(&format!("{}_evo", info.art)).is_some(), "图集里没有 {}_evo", info.art);
+    }
 }

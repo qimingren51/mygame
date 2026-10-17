@@ -124,6 +124,15 @@ impl Content {
         Ok(content)
     }
 
+    /// 属性的图标名（`stat_labels.ron` 的 icon，帧名是 `ui/stat_<icon>`）；没写的是 None。
+    pub fn stat_icon(&self, stat: Stat) -> Option<&str> {
+        self.stat_labels
+            .iter()
+            .flat_map(|g| &g.stats)
+            .find(|l| l.stat == stat && !l.icon.is_empty())
+            .map(|l| l.icon.as_str())
+    }
+
     /// 解锁法器（`choices.locked` 里的 ID；`None` 是全部）。工具、测试用；内容哈希跟着变。
     pub fn unlock(&mut self, ids: Option<&[&str]>) {
         let before = self.run.choices.locked.len();
@@ -149,9 +158,14 @@ impl Content {
         Ok(())
     }
 
-    /// 法器 d 是否还锁着。
+    /// 法器 d 是否还锁着（只看数据；存档解锁的由调用方另外排除）。
     pub fn weapon_locked(&self, d: usize) -> bool {
         self.run.choices.locked.iter().any(|id| *id == self.weapons[d].id)
+    }
+
+    /// 法器 d 的进化心法（异化共用同一门）。
+    pub fn weapon_key(&self, d: usize) -> Option<usize> {
+        self.weapons[d].evolution.as_ref().and_then(|e| self.passive_index(&e.passive))
     }
 
     /// 打开异化与合璧（EA 内容，`run.ron` 里默认关闭）。工具、测试用；内容哈希跟着变，
@@ -297,6 +311,14 @@ mod tests {
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
         let mut bad = c.clone();
         bad.stat_labels[0].stats[0].label = "命".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        // 基础 12 项和每组都有图标；图标名不能带路径
+        assert!(c.stat_labels[0].stats.iter().all(|l| !l.icon.is_empty()));
+        assert!(c.stat_labels.iter().all(|g| !g.icon.is_empty()));
+        assert_eq!(c.stat_icon(Stat::Speed), Some("speed"));
+        assert_eq!(c.stat_icon(Stat::LotusHeal), None);
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].icon = "../health".into();
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
         use StatFormat::*;
         for (f, v, shown) in [

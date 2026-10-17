@@ -2,22 +2,23 @@
 // stats.ron 的每一项在这里出现一次（灯焰带倍率写在灯焰带的 times 里）。只有文字，不计入内容哈希。
 // 写法：Number 数值、PerSecond 每秒、Multiplier 倍率按和 1 的差写百分比、Percent 比例、PercentChange 带符号的比例、
 // PercentPerSecond 每秒的比例、Times 倍数、Count 次数格数、CountChange 带符号的个数、Seconds 秒、Rank 等级（0 写“无”）、Flag 有或无。
+// icon 是图集里的图标：组用 ui/stat_group_<icon>，属性用 ui/stat_<icon>（属性面板和心法卡的收益行）；没画的不写。
 [
-    (name: "基础", always: true, stats: [
-        (stat: MaxHp, label: "生命", hint: "生命上限，归零就倒下", format: Number),
-        (stat: Armor, label: "护甲", hint: "每次受伤减去的固定值", format: Number),
-        (stat: Reduction, label: "减伤", hint: "受到的伤害按比例减少", format: Percent),
-        (stat: RegenFlat, label: "回复", hint: "每秒回复的生命", format: PerSecond),
-        (stat: Speed, label: "移速", hint: "走动的快慢", format: Number),
-        (stat: Damage, label: "伤害", hint: "所有法器的伤害加成", format: Multiplier),
-        (stat: Cooldown, label: "冷却", hint: "法器出手的间隔，越低越快", format: Multiplier),
-        (stat: Area, label: "范围", hint: "法器的攻击范围", format: Multiplier),
-        (stat: Amount, label: "数量", hint: "法器一次多出几发、几只", format: CountChange),
-        (stat: CritChance, label: "暴击率", hint: "打出暴击的机会", format: Percent),
-        (stat: CritMult, label: "暴击伤害", hint: "暴击时伤害的倍数", format: Times),
-        (stat: Magnet, label: "拾取", hint: "魂火、铜钱自己飞来的距离", format: Number),
+    (name: "基础", icon: "base", always: true, stats: [
+        (stat: MaxHp, label: "生命", hint: "生命上限，归零就倒下", format: Number, icon: "health"),
+        (stat: Armor, label: "护甲", hint: "每次受伤减去的固定值", format: Number, icon: "armor"),
+        (stat: Reduction, label: "减伤", hint: "受到的伤害按比例减少", format: Percent, icon: "reduction"),
+        (stat: RegenFlat, label: "回复", hint: "每秒回复的生命", format: PerSecond, icon: "regen"),
+        (stat: Speed, label: "移速", hint: "走动的快慢", format: Number, icon: "speed"),
+        (stat: Damage, label: "伤害", hint: "所有法器的伤害加成", format: Multiplier, icon: "damage"),
+        (stat: Cooldown, label: "冷却", hint: "法器出手的间隔，越低越快", format: Multiplier, icon: "cooldown"),
+        (stat: Area, label: "范围", hint: "法器的攻击范围", format: Multiplier, icon: "area"),
+        (stat: Amount, label: "数量", hint: "法器一次多出几发、几只", format: CountChange, icon: "count"),
+        (stat: CritChance, label: "暴击率", hint: "打出暴击的机会", format: Percent, icon: "crit"),
+        (stat: CritMult, label: "暴击伤害", hint: "暴击时伤害的倍数", format: Times, icon: "crit_dmg"),
+        (stat: Magnet, label: "拾取", hint: "魂火、铜钱自己飞来的距离", format: Number, icon: "magnet"),
     ]),
-    (name: "输出", always: false, stats: [
+    (name: "输出", icon: "output", always: false, stats: [
         (stat: Knockback, label: "击退", hint: "把妖物打退的距离", format: Multiplier),
         (stat: BurnDamage, label: "灼烧", hint: "灼烧每秒伤害的倍数", format: Multiplier),
         (stat: BurnStacks, label: "灼烧层数", hint: "灼烧最多叠几层", format: Count),
@@ -39,7 +40,7 @@
         (stat: MovingDamage, label: "移动伤害", hint: "走动时伤害的增减", format: PercentChange),
         (stat: DashStrike, label: "闪避伤害", hint: "闪避穿过妖物时的伤害", format: Percent),
     ]),
-    (name: "生存", always: false, stats: [
+    (name: "生存", icon: "survival", always: false, stats: [
         (stat: Regen, label: "比例回复", hint: "每秒回复生命上限的几成", format: PercentPerSecond),
         (stat: ShieldCooldown, label: "护盾间隔", hint: "护盾破后多久重新长出", format: Seconds),
         (stat: ShieldMult, label: "护盾", hint: "护盾的厚度倍数", format: Multiplier),
@@ -53,14 +54,14 @@
         (stat: DashCharges, label: "闪避段数", hint: "连着能闪几次", format: Count),
         (stat: DashDistance, label: "闪避距离", hint: "一次闪多远", format: Multiplier),
     ]),
-    (name: "灯与照见", always: false, stats: [
+    (name: "灯与照见", icon: "lamp", always: false, stats: [
         (stat: Reveal, label: "照见圈", hint: "灯照见妖物的范围", format: Number),
         (stat: RevealVuln, label: "照见易伤", hint: "照见圈里的妖物多受的伤害", format: Percent),
         (stat: UltCharge, label: "燃灯充能", hint: "燃灯蓄满的快慢", format: Multiplier),
         (stat: FlameBand, label: "灯焰带", hint: "照见圈边上燃着的一圈火", format: Rank, times: Some(FlameBandMult)),
         (stat: Light, label: "灯光", hint: "灯照亮的范围，只管看得见", format: Multiplier),
     ]),
-    (name: "构筑与收益", always: false, stats: [
+    (name: "构筑与收益", icon: "build", always: false, stats: [
         (stat: XpGain, label: "魂火", hint: "每颗魂火值多少", format: Multiplier),
         (stat: Rerolls, label: "重抽", hint: "升级时还能重抽几次", format: Count),
         (stat: Banishes, label: "封印", hint: "能把不要的选项封掉几次", format: Count),
@@ -75,7 +76,7 @@
         (stat: OilGain, label: "灯油", hint: "本局结算灯油的倍数", format: Multiplier),
         (stat: GoldGain, label: "铜钱", hint: "拾到铜钱的倍数", format: Multiplier),
     ]),
-    (name: "今夜妖物", always: false, stats: [
+    (name: "今夜妖物", icon: "night", always: false, stats: [
         (stat: SpawnRate, label: "妖物数量", hint: "妖物来得多快多密", format: Multiplier),
         (stat: EnemyHp, label: "妖物生命", hint: "妖物的生命倍数", format: Multiplier),
         (stat: EnemySpeed, label: "妖物移速", hint: "妖物的移速倍数", format: Multiplier),

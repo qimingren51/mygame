@@ -19,6 +19,11 @@
                            + 青丘（ground_decor.py）：qq_bamboo_leaves_0..2 qq_shoots_0..1 qq_moss_0..1 qq_wash_0..1 qq_fox_tracks + meta.json
   art/out/review/（2 倍：review@2x/）  vfx_sheet.png  paper_tile_2x2.png  light_test.png
 
+月夜（第 1 轮试玩，只在 2 倍；1 倍网页版的产物冻结、逐字节不变，见“月夜”一节）：
+  vfx/ 追加 light_pool（主角灯笼专用的光照池）；ground/paper 换成月夜版宣纸（亮度标准差 0.040，均值不变）；
+  ground/ 的 grass_0..3 leaves_0..1 pebbles_0..1 qq_bamboo_leaves_0..2 qq_moss_0..1 qq_fox_tracks 调浓（MOON_BOOST_FRAMES）。
+  候选与对比图：moon_textures.py。
+
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/vfx_textures.py                          # 1 倍
   LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/vfx_textures.py    # 2 倍
@@ -832,8 +837,14 @@ def fibre_layer(rng, size: int, ss: int, count: int, length, amp, sigma: float, 
 
 
 def make_paper() -> Image.Image:
-    """512² 可无缝平铺的宣纸（2 倍密度为 1024²，同一块纸画得更细）：云絮状的浓淡、长短纤维、极细的纸粒、零星杂质。
-    全部在周期域里生成（FFT 噪声 + 环绕绘制的纤维），所以四边自然接缝。"""
+    """宣纸。1 倍（网页版）一直是第一版 make_paper_v1()，产物冻结、逐字节不变；
+    2 倍（桌面版）是月夜改版 make_paper_moon()（见下面“月夜”一节）。"""
+    return make_paper_moon()[0] if MOON else make_paper_v1()
+
+
+def make_paper_v1() -> Image.Image:
+    """第一版宣纸：512² 可无缝平铺（2 倍密度为 1024²，同一块纸画得更细）：云絮状的浓淡、长短纤维、极细的纸粒、零星杂质。
+    全部在周期域里生成（FFT 噪声 + 环绕绘制的纤维），所以四边自然接缝。亮度标准差约 0.013。"""
     size = dpx(512)
     rng = np.random.default_rng(1200)
     sh = (size, size)
@@ -1017,6 +1028,362 @@ def make_grass(seed: int, n: int, n_green: int, hrange, dots: bool) -> Image.Ima
     return to_rgba8(rgb, a)
 
 
+# ============================================================== 月夜（桌面版 2 倍；第 1 轮试玩“地图像蒙了一层雾”）
+#
+# 1 倍（网页版）的产物冻结、逐字节不变；MOON 为真（2 倍）时多出 / 换掉三样：
+#   light_pool：主角灯笼专用的光照池——r ≤ 0.4 平的 1.0，0.4–1.0 半个余弦收到 0，最外 3% 再羽化。
+#               其余光源（魂火、火焰、狐灯、法术……）和灯笼周围的小光晕仍用 light（换成平顶会变成一个个扁圆饼）。
+#   宣纸：细纤维与长丝、云絮、淡墨晕斑与洇痕、水渍折痕四档，亮度标准差 0.040（第一版约 0.013），逐通道均值和第一版相同。
+#   地面装饰调浓（MOON_BOOST_FRAMES）：对纸面的 L* 反差目标 +12%，在各自的生成处调一次（moon_boost）。
+# 另两种灯光、另一种纸的候选，和现状的对比、模拟画面，都在 moon_textures.py。
+
+MOON = D != 1
+
+
+def srgb_to_lin(c):
+    """sRGB（0..1）→ 线性光。"""
+    c = np.asarray(c, dtype=np.float64)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def lin_to_srgb(c):
+    c = np.clip(np.asarray(c, dtype=np.float64), 0.0, 1.0)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+def lstar(Y):
+    """线性亮度 Y → CIE L*。"""
+    Y = np.asarray(Y, dtype=np.float64)
+    return np.where(Y > 216 / 24389, 116 * np.cbrt(Y) - 16, Y * 24389 / 27)
+
+
+LUMA = np.array([0.299, 0.587, 0.114])  # sRGB 值上的亮度（宣纸的标准差按它、按 0..1 算）
+Y709 = np.array([0.2126, 0.7152, 0.0722])  # 线性光的亮度 Y
+
+# ---- 灯光池
+
+LIGHT_POOL_SEED = 7101
+
+
+def raised_cos(r, r0, r1):
+    """r ≤ r0 为 1，r ≥ r1 为 0，中间半个余弦：两端一阶导为 0。"""
+    t = np.clip((r - r0) / (r1 - r0), 0.0, 1.0)
+    return 0.5 + 0.5 * np.cos(np.pi * t)
+
+
+def curve_light_pool(r):
+    """主角灯笼的光照池（质感会话定的参数）：r ≤ 0.4 为 1；之后 0.5 + 0.5·cos(π(r−0.4)/0.6)，
+    约 0.5R 0.93、0.7R 0.5、0.85R 0.15、1.0R 0；最外 3% 再羽化。"""
+    return raised_cos(r, 0.40, 1.00) * smoothstep(1.0, 0.97, r)
+
+
+def light_texture(curve, seed: int) -> tuple[Image.Image, np.ndarray]:
+    """径向灯光贴图（尺寸同 light）：白色 RGB，alpha = curve(r/R)，±0.5 LSB 蓝噪声抖动；半径处（含最外一圈像素）严格为 0。"""
+    size = dpx(128)
+    d = radial_d(size)
+    f = curve(d)
+    a8 = dither_alpha(f, np.random.default_rng(seed))
+    a8[d >= 1.0 - 0.5 / (size / 2)] = 0
+    return to_rgba8(WHITE, None, a8), f
+
+
+def make_light_pool() -> Image.Image:
+    return light_texture(curve_light_pool, LIGHT_POOL_SEED)[0]
+
+
+# ---- 宣纸（月夜版）
+
+PAPER_MEAN_2X = (236.7757, 227.8669, 207.0813)  # 第一版宣纸 2 倍的逐通道均值（0..255）；月夜版对齐它，地面亮度不漂
+
+
+def paper_dir(target: str) -> np.ndarray:
+    """从 PAPER 指向 target 的颜色方向，归一到“亮度变化 1”（0..1 sRGB，按 LUMA）。"""
+    d = col(target) - col(S.PAPER)
+    return d / abs(float(d @ LUMA))
+
+
+DIR_SHADE = paper_dir(S.PAPER_SHADOW)  # 纸纹暗部、纸浆厚处、潮线（偏暖黄）
+DIR_LIGHT = paper_dir("#F8F2E4")  # 半透明的白丝、水洗过的纸（第一版的亮纸色）
+DIR_INK = paper_dir(S.INK["dan"])  # 淡墨晕、洇痕（发灰）
+
+
+def torus_window(n: int, cx: float, cy: float, half: int):
+    """周期画布上以 (cx, cy) 为中心、边长 2·half 的窗口：(行下标, 列下标, X, Y)。X、Y 不取模，和 cx、cy 同一坐标系。"""
+    ys = np.arange(int(cy) - half, int(cy) + half)
+    xs = np.arange(int(cx) - half, int(cx) + half)
+    X, Y = np.meshgrid(xs + 0.5, ys + 0.5)
+    return ys % n, xs % n, X, Y
+
+
+def cloud_noise(rng, n: int, sigmas, weights, cut: float, warp=(16.0, 12.0)) -> np.ndarray:
+    """纸浆的云絮：几层尺度相接的周期噪声（宽频，不会只剩一种大小的斑、看着像迷彩），坐标轻轻扭一下（絮状），
+    去掉比 cut 更大的起伏（一张纸里很多小团、没有一眼记得住的大块，256 单位一格平铺时看不出重复），
+    最后只压尾巴（超过约 2.2σ 的才收，没有一块特别亮或特别暗）。标准差归一为 1。"""
+    wx = warp[1] * noise(rng, (n, n), warp[0])
+    wy = warp[1] * noise(rng, (n, n), warp[0])
+    f = sum(w * noise(rng, (n, n), s) for s, w in zip(sigmas, weights))
+    f = wrap_sample(f, wx, wy)
+    f = f - fft_blur(f, cut, wrap=True)
+    f = f / f.std()
+    f = f / np.sqrt(1.0 + (f / 2.2) ** 2)
+    return f / f.std()
+
+
+def strands(rng, n: int, count: int, length, amp, width: float, curl: float) -> np.ndarray:
+    """一批纤维（向量化，几万根也快）：长 length 像素、方向随机、带一点弯（curl：每像素转角，弧度），两端渐隐，
+    线芯强度≈amp。双线性撒点到周期画布上再按 width 模糊，四边接得上。"""
+    L = rng.uniform(*length, count)
+    th0 = rng.uniform(0, 2 * math.pi, count)
+    k1 = rng.normal(0, curl, count)
+    k2 = rng.normal(0, curl * 0.02, count)  # 弯度沿纤维再变一点（长丝不是正圆弧）
+    x0, y0 = rng.uniform(0, n, count), rng.uniform(0, n, count)
+    a = rng.uniform(*amp, count)
+    freq, phase = rng.uniform(3, 9, count), rng.uniform(0, 2 * math.pi, count)
+    m = max(12, int(math.ceil(length[1] / 0.5)) + 1)  # 采样间距不超过半个像素
+    s = np.linspace(-0.5, 0.5, m)[None, :] * L[:, None]
+    th = th0[:, None] + k1[:, None] * s + k2[:, None] * s * s
+    ds = (L / (m - 1))[:, None]
+    dx, dy = np.cos(th) * ds, np.sin(th) * ds
+    xs = x0[:, None] + np.cumsum(dx, 1) - 0.5 * dx.sum(1, keepdims=True)
+    ys = y0[:, None] + np.cumsum(dy, 1) - 0.5 * dy.sum(1, keepdims=True)
+    t = np.linspace(0, 1, m)[None, :]
+    prof = np.sin(np.pi * t) ** 0.6 * (0.75 + 0.25 * np.cos(t * freq[:, None] + phase[:, None]))
+    w = a[:, None] * prof * math.sqrt(2 * math.pi) * width * ds
+    acc = np.zeros((n, n))
+    splat_lines(acc, xs.ravel() - 0.5, ys.ravel() - 0.5, w.ravel())
+    return fft_blur(acc, width, wrap=True)
+
+
+def blotches(rng, n: int, count: int, dia, amp, rim_frac: float, rim_amp) -> np.ndarray:
+    """淡墨晕斑：count 团，直径 dia 像素，形状不规则、中间略浓、边柔；一部分边上带一圈干后的洇痕（细的深边，断断续续）。
+    位置按抖动网格撒开，四个象限都有，平铺时不会一团独大。周期边界。"""
+    out = np.zeros((n, n))
+    wx = 5.0 * noise(rng, (n, n), 9.0)  # 边缘扭曲（像素）
+    wy = 5.0 * noise(rng, (n, n), 9.0)
+    tex = noise(rng, (n, n), 5.0)  # 晕里的浓淡
+    brk = noise(rng, (n, n), 7.0)  # 洇痕的断续
+    k = int(math.ceil(math.sqrt(count)))
+    for c in rng.permutation(k * k)[:count]:
+        cx = (c % k + rng.uniform(0.15, 0.85)) * n / k
+        cy = (c // k + rng.uniform(0.15, 0.85)) * n / k
+        R = 0.5 * rng.uniform(*dia)
+        ex, ang = rng.uniform(0.72, 1.3), rng.uniform(0, math.pi)
+        a0, rim, ra = rng.uniform(*amp), rng.random() < rim_frac, rng.uniform(*rim_amp)
+        iy, ix, X, Y = torus_window(n, cx, cy, int(R * 1.6) + 8)
+        sub = np.ix_(iy, ix)
+        dx, dy = X + wx[sub] - cx, Y + wy[sub] - cy
+        ca, sa = math.cos(ang), math.sin(ang)
+        u, v = (dx * ca + dy * sa) / (R * ex), (-dx * sa + dy * ca) / (R / ex)
+        rr = np.hypot(u, v)
+        rr = rr / (1.0 + angular_noise(rng, np.arctan2(v, u), harmonics=(2, 3, 4, 6), amp=0.14))
+        val = a0 * smoothstep(1.0, 0.15, rr) ** 1.4 * (0.8 + 0.2 * tex[sub])
+        if rim:
+            val += ra * np.exp(-((((rr - 0.96) * R) / 2.0) ** 2)) * smoothstep(-0.9, 0.6, brk[sub])
+        out[sub] += val
+    return out
+
+
+def stain(rng, n: int, cx: float, cy: float, R: float, inner: float) -> tuple[np.ndarray, np.ndarray]:
+    """水渍：一圈不规则、时断时续的潮线（干后积下的细深边），里侧再一道更淡的；里面略亮（inner>0）或略暗（inner<0）。
+    返回 (暗场, 亮场)，峰值约 1。周期边界。"""
+    dark, light = np.zeros((n, n)), np.zeros((n, n))
+    iy, ix, X, Y = torus_window(n, cx, cy, int(R * 1.5) + 10)
+    sub = np.ix_(iy, ix)
+    dx, dy = X - cx, Y - cy
+    th = np.arctan2(dy, dx)
+    rr = np.hypot(dx, dy * rng.uniform(1.1, 1.35)) / R
+    rr = rr / (1.0 + angular_noise(rng, th, harmonics=(2, 3, 4, 5, 7, 9), amp=0.16))
+    w = 2.0 / R  # 潮线宽约 2 像素
+    brk = smoothstep(-0.2, 0.9, 0.6 + angular_noise(rng, th, harmonics=(1, 2, 3, 5), amp=0.9))  # 断续
+    brk2 = smoothstep(0.0, 1.0, 0.4 + angular_noise(rng, th, harmonics=(1, 2, 4), amp=1.0))
+    line = np.exp(-(((rr - 1.0) / w) ** 2)) * (0.25 + 0.75 * brk)
+    line += 0.4 * np.exp(-(((rr - 0.84) / (1.2 * w)) ** 2)) * brk2
+    body = smoothstep(1.0, 0.9, rr)
+    dark[sub] += line
+    if inner >= 0:
+        light[sub] += inner * body
+    else:
+        dark[sub] += -inner * body
+    return dark, light
+
+
+def crease(rng, n: int, p0, p1, bend: float) -> tuple[np.ndarray, np.ndarray]:
+    """折痕：一道微弯的线，一侧细深（谷里的影）、一侧细亮（脊上的光），沿线时断时续，两端渐隐。返回 (暗场, 亮场)，峰值约 1。"""
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    t_dir = (p1 - p0) / np.linalg.norm(p1 - p0)
+    mid = 0.5 * (p0 + p1) + np.array([-t_dir[1], t_dir[0]]) * bend
+    pts = bezier([p0, mid, p1], 800)
+    pts = arc_resample(pts, int(np.hypot(*np.diff(pts, axis=0).T).sum() / 0.5))
+    tan = np.gradient(pts, axis=0)
+    tan /= np.linalg.norm(tan, axis=1, keepdims=True)
+    nrm = np.stack([-tan[:, 1], tan[:, 0]], -1)
+    t = np.linspace(0, 1, len(pts))
+    wob = fft_blur(rng.standard_normal(len(pts))[None, :], (40, 0), wrap=True)[0]
+    prof = np.sin(np.pi * t) ** 0.7 * (0.35 + 0.65 * smoothstep(-0.6, 0.8, wob / wob.std()))
+    step, sig_ = 0.5, 0.8
+    out = []
+    for off, s, wgt in ((0.9, sig_, 1.0), (-1.0, sig_, 1.0), (3.5, 3.0, 0.22)):
+        acc = np.zeros((n, n))
+        p = pts + nrm * off
+        splat_lines(acc, p[:, 0] - 0.5, p[:, 1] - 0.5, prof * wgt * math.sqrt(2 * math.pi) * s * step)
+        out.append(fft_blur(acc, s, wrap=True))
+    return out[0] + out[2], out[1]
+
+
+def specks(rng, n: int, count: int) -> np.ndarray:
+    """零星杂质：小深点和短草屑（峰值约 1）。"""
+    acc = np.zeros((n, n))
+    xs, ys = rng.uniform(0, n, count), rng.uniform(0, n, count)
+    splat_lines(acc, xs, ys, rng.uniform(0.6, 1.0, count) * 2 * math.pi)
+    return fft_blur(acc, 1.0, wrap=True) + strands(rng, n, max(count // 2, 1), (5, 12), (0.6, 1.0), 0.9, 0.08)
+
+
+# 纤维档内部的配比：(根数, 长度 px, 线芯强度, 粗细 σ px, 弯度 rad/px, 颜色方向)。整档最后归一到 spec["fibre"]
+FIBRE_MIX = [
+    (120000, (2, 6), (0.010, 0.024), 0.75, 0.05, DIR_SHADE),  # 2–6 px 的毛，铺满纸面
+    (100000, (2, 6), (0.010, 0.022), 0.8, 0.05, DIR_LIGHT),
+    (14000, (8, 28), (0.010, 0.022), 0.8, 0.03, DIR_SHADE),  # 中等纤维
+    (9000, (8, 28), (0.008, 0.018), 0.85, 0.03, DIR_LIGHT),
+    (420, (40, 150), (0.012, 0.024), 0.85, 0.006, DIR_LIGHT),  # 略带长丝
+    (200, (30, 120), (0.012, 0.026), 0.8, 0.007, DIR_SHADE),
+]
+FIBRE_GRAIN = 0.006  # 纸粒（σ 1 px）在纤维档里的份量
+
+# 月夜版宣纸的参数（moon_textures 的候选 paper_a）。fibre、cloud：这两档最后的亮度标准差（0..1 sRGB）；
+# 稀疏的东西直接给峰值强度：blot = (团数, 直径 px, 浓度, 带洇痕的比例, 洇痕浓度)；
+# stains = (中心 x, y（占纸宽）, 半径 px, 里面亮(+)/暗(-))；creases = (起点, 终点（占纸宽）, 弯 px)。
+# 最后整体微调到 std（只差几个百分点），逐通道均值对齐 PAPER_MEAN_2X
+MOON_PAPER = dict(
+    seed=7201, std=0.040, note="生宣：纤维为主，云絮淡，墨晕少；一处水渍、一道短折痕",
+    fibre=0.030, cloud=0.020, cloud_sigmas=(3.5, 8.0, 16.0, 28.0), cloud_cut=70.0,
+    blot=(10, (40, 120), (0.014, 0.030), 0.4, (0.012, 0.024)),
+    stains=[(0.27, 0.66, 70.0, 0.25)], creases=[((0.52, 0.10), (0.80, 0.40), 26.0)],
+    stain_amp=0.045, crease_amp=0.040, specks=(10, 0.06),
+)
+
+
+def paper_layers(spec: dict) -> dict[str, np.ndarray]:
+    """月夜版宣纸的四档，各是一个 RGB 偏移场（0..1 sRGB，叠在纸色上）。"""
+    rng = np.random.default_rng(spec["seed"])
+    n = dpx(512)
+    sh = (n, n)
+    # ---- 细纤维与长丝：方向随机，暗的（纸浆厚、纤维重叠）和亮的（半透明的白丝）都有
+    fib = sum(strands(rng, n, cnt, ln, amp, wd, cu)[..., None] * d for cnt, ln, amp, wd, cu, d in FIBRE_MIX)
+    fib = fib + (FIBRE_GRAIN * noise(rng, sh, 1.0))[..., None] * DIR_SHADE
+    fib = fib - fib.reshape(-1, 3).mean(0)
+    fib *= spec["fibre"] / float((fib @ LUMA).std())
+    # ---- 云絮：宽频、絮状，加一层 3–8 px 的细絮（tanh 压成一小团一小团）
+    c = cloud_noise(rng, n, spec["cloud_sigmas"], (0.2, 0.35, 0.5, 0.5), spec["cloud_cut"])
+    fl = wrap_sample(noise(rng, sh, 2.5) + 0.8 * noise(rng, sh, 5.0) + 0.5 * noise(rng, sh, 9.0),
+                     4.0 * noise(rng, sh, 8.0), 4.0 * noise(rng, sh, 8.0))
+    cl = c + 0.45 * np.tanh(1.2 * fl / fl.std())
+    cloud = (cl / cl.std())[..., None] * DIR_SHADE
+    cloud *= spec["cloud"] / float((cloud @ LUMA).std())
+    # ---- 淡墨晕斑与洇痕（几处，发灰）
+    cnt, dia, ba, rf, rim = spec["blot"]
+    blot = blotches(rng, n, cnt, dia, ba, rf, rim)[..., None] * DIR_INK
+    # ---- 水渍、折痕、杂质
+    marks = np.zeros((n, n, 3))
+    for fx, fy, R, inner in spec["stains"]:
+        d_, l_ = stain(rng, n, fx * n, fy * n, R, inner)
+        marks += spec["stain_amp"] * (d_[..., None] * DIR_SHADE + l_[..., None] * DIR_LIGHT)
+    for p0, p1, bend in spec["creases"]:
+        d_, l_ = crease(rng, n, np.array(p0) * n, np.array(p1) * n, bend)
+        marks += spec["crease_amp"] * (d_[..., None] * DIR_SHADE + 0.8 * l_[..., None] * DIR_LIGHT)
+    cnt, a = spec["specks"]
+    marks += (a * specks(rng, n, cnt))[..., None] * DIR_SHADE
+    return {"fibre": fib, "cloud": cloud, "blotch": blot, "marks": marks}
+
+
+def shoulder(v, knee: float = 248.0, top: float = 255.45):
+    """亮部软肩：超过 knee 的平滑压到 top 以下（纸色离白只有十几级，亮纤维不能顶到 255 被削平）。knee 处一阶导连续。"""
+    return np.where(v > knee, knee + (top - knee) * np.tanh((v - knee) / (top - knee)), v)
+
+
+def make_paper_moon(spec: dict | None = None) -> tuple[Image.Image, dict]:
+    """月夜版宣纸（1024² RGB，四边无缝）：四档叠到纸色上，过亮部软肩；整体增益和偏移迭代几次，
+    使取整后的亮度标准差 = spec["std"]、逐通道均值 = PAPER_MEAN_2X。返回 (图, 各档的亮度标准差等信息)。"""
+    spec = spec or MOON_PAPER
+    L = paper_layers(spec)
+    dev = sum(L.values())
+    dev = dev - dev.reshape(-1, 3).mean(0)
+    target = np.array(PAPER_MEAN_2X)
+    gain, off = spec["std"] / float((dev @ LUMA).std()), np.zeros(3)
+    for _ in range(8):
+        q = np.clip(np.round(shoulder(target + off + 255.0 * gain * dev)), 0, 255)
+        gain *= spec["std"] / float((q @ LUMA).std() / 255.0)
+        off += target - q.reshape(-1, 3).mean(0)
+    rgb8 = np.clip(np.round(shoulder(target + off + 255.0 * gain * dev)), 0, 255).astype(np.uint8)
+    info = {"seed": spec["seed"], "note": spec["note"], "gain": round(gain, 3),
+            "tier_luma_std": {k: round(float((gain * v @ LUMA).std()), 4) for k, v in L.items()}}
+    return Image.fromarray(rgb8, "RGB"), info
+
+
+# ---- 地面装饰调浓
+
+MOON_BOOST_FRAMES = (*(f"grass_{i}" for i in range(4)), "leaves_0", "leaves_1", "pebbles_0", "pebbles_1",
+                     *(f"qq_bamboo_leaves_{i}" for i in range(3)), "qq_moss_0", "qq_moss_1", "qq_fox_tracks")
+DECOR_BOOST = 0.12  # 对纸面的 L* 反差放大到 1.12 倍
+DECOR_ALPHA_MEAN = 0.725  # crates/view/src/ground.rs：平铺装饰的 alpha 在 0.55–0.9 之间随机
+DECOR_DARK_MIN = 0.7  # 颜色最多压到原来线性亮度的 70%（sRGB 约暗 14%）：本来就近焦墨的笔画不再往黑里压
+
+
+def paper_ref_lin() -> np.ndarray:
+    return srgb_to_lin(np.array(PAPER_MEAN_2X) / 255.0)
+
+
+def decor_dl(c_lin, a, p_lin, m=DECOR_ALPHA_MEAN):
+    """装饰（线性色 c、alpha a × 游戏里的 m）叠在纸色 p 上，与纸的 L* 差（正 = 比纸暗）。"""
+    comp = (a * m)[..., None] * c_lin + (1.0 - a * m)[..., None] * p_lin
+    return lstar(p_lin @ Y709) - lstar(comp @ Y709)
+
+
+def bisect_px(fn, lo, hi, it: int = 26):
+    """逐像素二分：fn(x) 随 x 单调增，找 fn(x)=0；够不着时停在端点。lo、hi 是数组。"""
+    for _ in range(it):
+        mid = 0.5 * (lo + hi)
+        up = fn(mid) > 0
+        hi = np.where(up, mid, hi)
+        lo = np.where(up, lo, mid)
+    return 0.5 * (lo + hi)
+
+
+def boost_decor(img: Image.Image, k: float = DECOR_BOOST) -> Image.Image:
+    """把地面装饰对纸面的 L* 反差放大 1+k 倍（按游戏里的平均 alpha 算）：先加 alpha（墨更多）；alpha 满了还不够，
+    再按比例压暗颜色（线性光里三通道等比，色相不变），最多压到 DECOR_DARK_MIN。近焦墨的笔画在游戏里 alpha ≤ 0.9 时
+    已经到顶，所以整帧实际 +6%–11%。全透明的像素（含往外扩的颜色）不动。"""
+    arr = np.asarray(img.convert("RGBA"))
+    a = arr[..., 3].astype(np.float64) / 255.0
+    c = srgb_to_lin(arr[..., :3] / 255.0)
+    p = paper_ref_lin()
+    m = a > 0
+    cm, am = c[m], a[m]
+    dl0 = decor_dl(cm, am, p)
+    goal = (1.0 + k) * np.abs(dl0)
+    # 1) 只加 alpha
+    a1 = bisect_px(lambda x: np.abs(decor_dl(cm, x, p)) - goal, am.copy(), np.ones_like(am))
+    reach = np.abs(decor_dl(cm, np.ones_like(am), p)) >= goal
+    a1 = np.where(reach, a1, 1.0)
+    # 2) alpha 满了还不够（只对比纸暗的颜色）：颜色按比例压暗
+    need = ~reach & (dl0 > 0)
+    s = np.ones_like(am)
+    if need.any():
+        cn, gn = cm[need], goal[need]
+        s[need] = bisect_px(lambda x: gn - decor_dl(cn * x[:, None], np.ones(len(cn)), p), np.full(len(cn), DECOR_DARK_MIN), np.ones(len(cn)))
+    out = arr.copy()
+    out[..., 3][m] = np.maximum(np.round(a1 * 255.0), arr[..., 3][m]).astype(np.uint8)
+    dark = s < 1.0
+    rgb = out[..., :3][m]
+    rgb[dark] = np.clip(np.round(lin_to_srgb(cm[dark] * s[dark, None]) * 255.0), 0, 255).astype(np.uint8)
+    out[..., :3][m] = rgb
+    return Image.fromarray(out, "RGBA")
+
+
+def moon_boost(img: Image.Image, on: bool | None = None) -> Image.Image:
+    """桌面版（2 倍）的地面装饰调浓；1 倍原样返回（网页版冻结）。on 给出时不看密度（审图要原图时用 False）。"""
+    return boost_decor(img) if (MOON if on is None else on) else img
+
+
 # ============================================================== 检查图
 
 
@@ -1178,6 +1545,11 @@ def main() -> dict:
             "note": f"迷雾（{kind}）：狐冢整夜的迷雾、平时的夜雾。四边无缝，可首尾相接铺成大片、缓慢平移，mist_0 与 mist_1 错开叠用；"
                     f"白色，画在暗层之上、正常混合，建议染 {MIST_TINT}、整体 alpha 约 {MIST_ALPHAS[i]}。"
                     "打进图集后贴边那一圈纹素会采到邻居，平铺时 UV 往里收半个纹素（或相邻两张重叠 1 纹素）"})
+    # ---- 月夜追加（只在 2 倍、只往后加）：主角灯笼专用的光照池
+    if MOON:
+        vfx["light_pool"] = (make_light_pool(), (0.5, 0.5), {
+            **white_add, "note": "主角灯笼的光照池（月夜）：r ≤ 0.4 平的 1.0，0.4–1.0 半个余弦收到 0，半径处为 0；"
+                                 "只给主角灯笼用，其余光源和灯笼周围的小光晕仍用 light（平顶贴图画小光会变成扁圆饼）"})
 
     ground: dict[str, tuple[Image.Image, tuple[float, float], dict]] = {}
     paper = make_paper()
@@ -1185,7 +1557,7 @@ def main() -> dict:
     for i, (seed, lobes, ba, kw) in enumerate(WASHES):
         ground[f"wash_{i}"] = (make_wash(seed, lobes, ba, **kw), (0.5, 0.5), {"color": "zhong", "blend": "normal", "max_alpha": 0.35})
     for i, spec in enumerate(GRASS_SPECS):
-        ground[f"grass_{i}"] = (make_grass(*spec), (0.5, 1.0), {"blend": "normal"})
+        ground[f"grass_{i}"] = (moon_boost(make_grass(*spec)), (0.5, 1.0), {"blend": "normal"})
     # 第二批地面贴图（灵泉、裂隙、芦苇、落叶、卵石、水洼、竹）由 ground_decor.py 画，
     # 追加在后面、写进同一份 meta.json：已有条目的内容与顺序不变。函数内导入，避免循环引用。
     import ground_decor  # noqa: PLC0415
@@ -1212,6 +1584,7 @@ def main() -> dict:
     # 检查图
     tints = {
         "light": col(S.LANTERN_LIGHT),
+        "light_pool": col(S.LANTERN_LIGHT),
         "glow": col(S.LANTERN_LIGHT),
         "eyes": col(S.EYE["shade"]),
         "spark": col(S.mix(S.ACCENT["tenghuang"], "#FFFFFF", 0.5)),

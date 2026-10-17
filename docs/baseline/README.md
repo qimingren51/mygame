@@ -9,7 +9,7 @@
 | `analyze.py` | 汇总上面的 JSON：成长与压力、伤害来源占比、胜负与倒下时间 | 第 2 节 |
 | `pacing.py` | 单局节奏模型：击杀≈刷怪时每分钟的等级、累计击杀、场上妖物数 | 第 4.2、4.3 节 |
 | `resonance_mc.py` | 共鸣计点规则的蒙特卡洛模拟：专精和兼修机器人各阶的达成时间 | 第 7.1 节 |
-| `pool/` | 第 9 项卡池原型：`pool_proto.patch`（基于 47f08a6：按类别给总权重、配对加权、进化最早时间，`kite --picker random`），推荐方案的数据 `run-b8.ron`、`passives-b8.ron`，跑法 `run.sh`，汇总 `sum.py` | `BALANCE.md` 第 6.4 节 |
+| `pool/` | 第 9 项卡池原型：`pool_proto.patch`（基于 47f08a6：按类别给总权重、配对加权、进化最早时间，`kite --picker random`），推荐方案的数据 `run-b8.ron`、`passives-b8.ron`，跑法 `run.sh`，汇总 `sum.py`，按局抽样估算解锁进度 `career.py` | `BALANCE.md` 第 6.4 节 |
 | `weapons.py` | 原型五件法器按公式算的理论输出 | 第 6.1 节 |
 | `m25_kite.patch` | 第一版风筝机器人和燃灯充能修正（已收进 de0af3b；它只扫了妖物池的前 count 个槽位，有 bug，留作记录） | 第 2.6 节 |
 | `m25_p0_tuning.patch` | 第一版的 P0 数据校准（已收进 de0af3b） | 第 2.6、4、9 节 |

@@ -16,6 +16,8 @@ use lantern_sim::{
     AppState, Arsenal, Build, GameContent, Progress, RunSetup, RunState, StatSource, Stats, stats,
 };
 
+use lantern_view::atlas::AtlasDb;
+
 use crate::responsive::FitViewport;
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, overlay_vignette, text};
@@ -25,8 +27,11 @@ const COLS: usize = 5;
 const CHIP_W: f32 = 200.0;
 const CHIP_H: f32 = 32.0;
 const GAP: f32 = 8.0;
-/// 左边组名那一列
-const GROUP_W: f32 = 104.0;
+/// 左边组名那一列（图标加四五个字）
+const GROUP_W: f32 = 132.0;
+/// 格子里、组名前的数值图标
+const ICON: f32 = 22.0;
+const GROUP_ICON: f32 = 26.0;
 const GRID_W: f32 = COLS as f32 * CHIP_W + (COLS - 1) as f32 * GAP;
 /// 和初始值不同的数值用泥金写
 const CHANGED: Color = Color::srgb(0.55, 0.30, 0.04);
@@ -59,8 +64,17 @@ impl StatsPanel {
     }
 }
 
+/// 一组格子：组名、组图标的帧名、格子。
+struct Group {
+    name: String,
+    icon: Option<String>,
+    items: Vec<Item>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Item {
+    /// 图标的帧名（`ui/stat_*`、法器图标）；图集里没有就不画
+    icon: Option<String>,
     label: String,
     value: String,
     changed: bool,
@@ -117,13 +131,7 @@ pub(crate) fn register(app: &mut App) {
 }
 
 /// 格子：基础一组列全，其余按 `all` 只列变了的；最后是法器。按组返回（组名、格子）。
-fn collect_items(
-    c: &Content,
-    stats: &Stats,
-    build: &Build,
-    arsenal: &Arsenal,
-    all: bool,
-) -> Vec<(String, Vec<Item>)> {
+fn collect_items(c: &Content, stats: &Stats, build: &Build, arsenal: &Arsenal, all: bool) -> Vec<Group> {
     let base = Stats::base(c);
     let mut groups = Vec::new();
     for g in &c.stat_labels {
@@ -141,6 +149,7 @@ fn collect_items(
             }
             if g.always || all || changed {
                 items.push(Item {
+                    icon: (!l.icon.is_empty()).then(|| format!("ui/stat_{}", l.icon)),
                     label: l.label.clone(),
                     value,
                     changed,
@@ -152,21 +161,26 @@ fn collect_items(
             }
         }
         if !items.is_empty() {
-            groups.push((g.name.clone(), items));
+            let icon = (!g.icon.is_empty()).then(|| format!("ui/stat_group_{}", g.icon));
+            groups.push(Group { name: g.name.clone(), icon, items });
         }
     }
     let weapons: Vec<Item> = arsenal.0.iter().map(|w| weapon_item(c, build, w)).collect();
     if !weapons.is_empty() {
-        groups.push(("法器".into(), weapons));
+        groups.push(Group {
+            name: "法器".into(),
+            icon: Some("ui/stat_group_weapons".into()),
+            items: weapons,
+        });
     }
     // 网格位置：每组从新的一行开始
     let mut row = 0;
-    for (_, items) in &mut groups {
-        for (k, item) in items.iter_mut().enumerate() {
+    for g in &mut groups {
+        for (k, item) in g.items.iter_mut().enumerate() {
             item.row = row + k / COLS;
             item.col = k % COLS;
         }
-        row += items.len().div_ceil(COLS);
+        row += g.items.len().div_ceil(COLS);
     }
     groups
 }
@@ -200,7 +214,9 @@ fn weapon_item(c: &Content, build: &Build, w: &lantern_sim::weapons::WeaponSlot)
             None => (format!("Lv{}/{max}", w.level), false, def.desc.clone()),
         },
     };
-    Item { label: w.name(c).to_string(), value, changed, hint, stat: None, row: 0, col: 0 }
+    let icon =
+        if w.transformed() { format!("ui/icon_{}_evo", def.id) } else { format!("ui/icon_{}", def.id) };
+    Item { icon: Some(icon), label: w.name(c).to_string(), value, changed, hint, stat: None, row: 0, col: 0 }
 }
 
 /// 来源的名字。
@@ -258,6 +274,7 @@ fn sync(
     actions: Res<Actions>,
     state: Option<Res<State<RunState>>>,
     data: RunData,
+    db: Option<Res<AtlasDb>>,
     mut panel: ResMut<StatsPanel>,
     roots: Query<Entity, With<PanelRoot>>,
 ) {
@@ -288,11 +305,11 @@ fn sync(
     let groups = collect_items(&data.content.0, &data.stats, &data.build, &data.arsenal, panel.all);
     // 切换全部后尽量停在同一格
     let keep = panel.items.get(panel.selected).map(|i| i.label.clone());
-    panel.items = groups.iter().flat_map(|(_, items)| items.iter().cloned()).collect();
+    panel.items = groups.iter().flat_map(|g| g.items.iter().cloned()).collect();
     panel.selected =
         if first { 0 } else { keep.and_then(|l| panel.items.iter().position(|i| i.label == l)).unwrap_or(0) };
-    let rows = groups.iter().map(|(_, items)| items.len().div_ceil(COLS)).sum::<usize>();
-    spawn(&mut commands, &fonts, &skin, &groups, rows, peek, panel.all);
+    let rows = groups.iter().map(|g| g.items.len().div_ceil(COLS)).sum::<usize>();
+    spawn(&mut commands, &fonts, &skin, db.as_deref(), &groups, rows, peek, panel.all);
 }
 
 /// 无窗口排版测试用：按给定的状态画一张面板。
@@ -302,20 +319,23 @@ pub(crate) fn spawn_preview(
     c: &Content,
     fonts: &Fonts,
     skin: &Skin,
+    db: Option<&AtlasDb>,
     stats: &Stats,
     arsenal: &Arsenal,
     all: bool,
 ) {
     let groups = collect_items(c, stats, &Build::default(), arsenal, all);
-    let rows = groups.iter().map(|(_, items)| items.len().div_ceil(COLS)).sum::<usize>();
-    spawn(commands, fonts, skin, &groups, rows, false, all);
+    let rows = groups.iter().map(|g| g.items.len().div_ceil(COLS)).sum::<usize>();
+    spawn(commands, fonts, skin, db, &groups, rows, false, all);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn(
     commands: &mut Commands,
     fonts: &Fonts,
     skin: &Skin,
-    groups: &[(String, Vec<Item>)],
+    db: Option<&AtlasDb>,
+    groups: &[Group],
     rows: usize,
     peek: bool,
     all: bool,
@@ -373,13 +393,20 @@ fn spawn(
                 });
                 p.spawn((Node { width: percent(100), height: px(12), ..default() }, skin.image("divider")));
                 let mut i = 0;
-                for (name, items) in groups {
+                for g in groups {
                     p.spawn(Node { column_gap: px(12), margin: UiRect::bottom(px(6)), ..default() })
                         .with_children(|row| {
-                            row.spawn((
-                                text(&fonts.title, 20.0, INK, name),
-                                Node { width: px(GROUP_W), padding: UiRect::top(px(3)), ..default() },
-                            ));
+                            row.spawn(Node {
+                                width: px(GROUP_W),
+                                height: px(CHIP_H),
+                                align_items: AlignItems::Center,
+                                column_gap: px(6),
+                                ..default()
+                            })
+                            .with_children(|head| {
+                                atlas_icon(head, db, g.icon.as_deref(), GROUP_ICON);
+                                head.spawn(text(&fonts.title, 20.0, INK, &g.name));
+                            });
                             row.spawn(Node {
                                 width: px(GRID_W),
                                 flex_wrap: FlexWrap::Wrap,
@@ -388,8 +415,8 @@ fn spawn(
                                 ..default()
                             })
                             .with_children(|grid| {
-                                for item in items {
-                                    chip(grid, fonts, skin, i, item);
+                                for item in &g.items {
+                                    chip(grid, fonts, skin, db, i, item);
                                     i += 1;
                                 }
                             });
@@ -402,7 +429,21 @@ fn spawn(
         });
 }
 
-fn chip(grid: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin, i: usize, item: &Item) {
+/// 图集里有这帧就画一个方形图标，没有就什么也不画。
+fn atlas_icon(p: &mut ChildSpawnerCommands, db: Option<&AtlasDb>, name: Option<&str>, size: f32) {
+    if let Some(img) = db.zip(name).and_then(|(db, n)| db.find(n).map(|f| db.ui_image(f))) {
+        p.spawn((Node { width: px(size), height: px(size), flex_shrink: 0.0, ..default() }, img));
+    }
+}
+
+fn chip(
+    grid: &mut ChildSpawnerCommands,
+    fonts: &Fonts,
+    skin: &Skin,
+    db: Option<&AtlasDb>,
+    i: usize,
+    item: &Item,
+) {
     let mut chip = grid.spawn((
         Node {
             width: px(CHIP_W),
@@ -428,7 +469,12 @@ fn chip(grid: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin, i: usize, i
             },
             skin.image("focus_ring"),
         ));
-        c.spawn(text(&fonts.body, 15.0, INK_DIM, &item.label));
+        c.spawn(Node { align_items: AlignItems::Center, column_gap: px(6), ..default() }).with_children(
+            |l| {
+                atlas_icon(l, db, item.icon.as_deref(), ICON);
+                l.spawn(text(&fonts.body, 15.0, INK_DIM, &item.label));
+            },
+        );
         c.spawn(text(&fonts.body, 16.0, if item.changed { CHANGED } else { INK }, &item.value));
     });
     chip.observe(move |_: On<PointerOver>, mut panel: ResMut<StatsPanel>| panel.hovered = Some(i));
@@ -533,9 +579,12 @@ mod tests {
         let groups = collect_items(&c, &stats, &Build::default(), &Arsenal::default(), false);
         // 什么都没变时只有基础一组
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].1.len(), 12);
+        assert_eq!(groups[0].items.len(), 12);
+        // 基础 12 项和组都带图标
+        assert!(groups[0].items.iter().all(|i| i.icon.as_deref().is_some_and(|n| n.starts_with("ui/stat_"))));
+        assert_eq!(groups[0].icon.as_deref(), Some("ui/stat_group_base"));
         let all = collect_items(&c, &stats, &Build::default(), &Arsenal::default(), true);
-        assert_eq!(all.iter().map(|g| g.1.len()).sum::<usize>(), Stat::COUNT - 1);
+        assert_eq!(all.iter().map(|g| g.items.len()).sum::<usize>(), Stat::COUNT - 1);
         // 改一项进阶属性：它所在的组出现，数值标成变了
         stats = {
             let mut setup = RunSetup::new(1, lantern_sim::RunMode::Normal);
@@ -544,16 +593,17 @@ mod tests {
             stats::collect(&c, &setup, &Build::default(), None, 1).0
         };
         let groups = collect_items(&c, &stats, &Build::default(), &Arsenal::default(), false);
-        let xp = groups.iter().flat_map(|g| &g.1).find(|i| i.label == "魂火").unwrap();
+        let xp = groups.iter().flat_map(|g| &g.items).find(|i| i.label == "魂火").unwrap();
         assert!(xp.changed);
         assert_eq!(xp.value, "+4%");
-        let magnet = groups[0].1.iter().find(|i| i.label == "拾取").unwrap();
+        let magnet = groups[0].items.iter().find(|i| i.label == "拾取").unwrap();
         assert!(magnet.changed);
     }
 
     #[test]
     fn grid_navigation_moves_between_rows_and_wraps() {
         let item = |row, col| Item {
+            icon: None,
             label: String::new(),
             value: String::new(),
             changed: false,

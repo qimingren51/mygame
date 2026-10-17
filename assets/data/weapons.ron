@@ -189,6 +189,8 @@
         id: "coin_sword", name: "铜钱剑", icon: "钱", element: Metal,
         desc: "朝最近的妖物挥出扇形剑气，自带暴击。", short: "扇形剑气，自带暴击",
         flavor: "七枚铜钱排成北斗。挥一下，斩一片。",
+        // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
+        unlock: "七枚铜钱成了剑",
         // 120° 扇形；方向朝 radius + 40 以内最近的妖物，没有就朝面向；扇形里从近到远最多打 count 只；暴击率 +15%
         behavior: Sweep(arc: 2.0944, aim: 40.0, knockback: 20.0, crit_bonus: 0.15),
         levels: [
@@ -214,6 +216,8 @@
         id: "sky_lantern", name: "孔明灯", icon: "孔", element: Fire,
         desc: "放飞孔明灯，飘向妖物最密的地方，落地爆燃，留下火海。", short: "灯飘向妖群，落地爆燃",
         flavor: "狐村的孩子还你的。它往妖最多的地方飘，再落下来。",
+        // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
+        unlock: "狐村放来一盏灯",
         // 落点：360 以内最近的 24 只里，挑 100 以内同伴最多的那只；几盏至少隔开 120。灯每秒飘 60，3 秒后落地。
         // 火海：半径 0.8 倍，3 秒，每 0.5 秒伤害 × 0.12
         behavior: SkyLantern(range: 360.0, pick: 24, cluster: 100.0, spread: 120.0, speed: 60.0, fuse: 3.0, retarget: 0.5,
@@ -242,6 +246,8 @@
         id: "wave", name: "沧浪", icon: "浪", element: Water,
         desc: "朝面向推出一道浪（站着不动时朝最近的妖物），打伤、减速并推开碰到的妖物。", short: "推浪开路，减速妖物",
         flavor: "沧浪之水，推得动船，也推得开妖。",
+        // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
+        unlock: "冻河化作了浪",
         // 浪速 320，走 260 后散掉；最多推 140（精英一半，夜主不推）；减速 40%，1.5 秒；
         // 数量加成多出来的浪左右轮流偏 25°
         behavior: Wave(speed: 320.0, travel: 260.0, push: 140.0, slow: 0.4, slow_time: 1.5, spread: 0.4363),
@@ -268,6 +274,8 @@
         id: "vine", name: "青藤", icon: "藤", element: Wood,
         desc: "和附近最近的几只妖物各连一根青藤，持续造成伤害，回复伤害的 4%。", short: "藤连妖物，吸血续命",
         flavor: "藤缠上去，就把它的力气吸给你。",
+        // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
+        unlock: "纸鹤落地生了根",
         // 目标离开连线距离 + 40 或死了就断，0.3 秒后接新目标；每秒最多回复 0.5 + 0.125 × 等级
         behavior: Vine(leash: 40.0, relink: 0.3, lifesteal: 0.04, heal_cap: 0.5, heal_per_level: 0.125),
         levels: [
@@ -293,6 +301,8 @@
         id: "tower", name: "镇妖塔", icon: "塔", element: Earth,
         desc: "在妖物最密的地方落下宝塔，砸晕一片，再把周围的妖物吸到塔下。", short: "落塔吸妖，聚成一团",
         flavor: "土伯拿它压门缝。塔一落，周围的妖都被吸到塔底。",
+        // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
+        unlock: "土伯借你一座塔",
         // 落点：300 以内最近的 24 只里，挑 100 以内同伴最多的那只（几座至少隔开 120）；预警 0.5 秒，落地击晕 0.5 秒。
         // 立 4 秒：2.2 倍半径以内往塔下吸，每秒 90（精英一半，夜主不吸）；每 0.5 秒伤害 × 0.15
         behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
