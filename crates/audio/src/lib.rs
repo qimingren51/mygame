@@ -759,6 +759,12 @@ fn play_sim_events(
                 let s = a.sfx.bamboo.clone();
                 a.play_at(&s, rate, -3.0, place(pos));
             }
+            // 铜钱剑（试玩第 1 轮的新法器）：挥一下“唰”加两枚铜钱，天罡一整圈转一圈
+            SimEvent::Sweep { pos, evolved, .. } if a.can("coin_sweep", 0.08) => {
+                let rate = a.rate(0.95, 1.06);
+                let s = if evolved { a.sfx.coin_whirl.clone() } else { a.sfx.coin_sweep.clone() };
+                a.play_at(&s, rate, -3.0, place(pos));
+            }
             // 新的三只小妖（试玩第 1 轮）：竹魅瞄准、射竹刺，讨封狐现形；都按位置放、限流，一群也不连成一片
             SimEvent::EnemyAim { pos, .. } if a.can("enemy_aim", 0.25) => {
                 let rate = a.rate(0.94, 1.06);

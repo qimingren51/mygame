@@ -6,7 +6,7 @@
 //! 软点、火线、烟、灰、墨滴、雾、笔触几张贴图在启动时用代码画好，作为图集的一页。
 //! 纯装饰，随机数是画面层自己的，不影响模拟。
 
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::math::URect;
@@ -716,6 +716,101 @@ impl Particles {
         self.spawn(p);
     }
 
+    /// 铜钱剑挥一下（`SimEvent::Sweep`）：三道月牙笔锋依次扫过扇形，墨色垫底、金色和白热的两层发光，
+    /// 像一刀挥过去留下的残影；弧上几点金火星往外迸，两头各闪一枚铜钱的光。`dir` 是画面方向的单位向量。
+    /// 天罡（`full`）是绕身一整圈：六道笔锋接连转一圈，地上荡开一圈金光。
+    pub fn sweep(&mut self, at: Vec2, dir: Vec2, arc: f32, radius: f32, full: bool, ring: FrameId) {
+        let metal = Color::srgb(0.91, 0.85, 0.65);
+        // 笔锋用偏暖的金：金系的淡金推亮以后发白，看不出是铜钱的颜色
+        let gold = Color::srgb(1.0, 0.8, 0.45);
+        let hot = |c: Color, k: f32| {
+            let l = c.to_linear();
+            Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
+        };
+        // 月牙贴图是 64 × 16 个世界单位的一道“∪”（弧心在贴图上边外面）。扇形的弦长 2r·sin(arc/2)
+        // 对上贴图宽度的九成；转到弧心朝主角、往外鼓，笔画中段离贴图中心 4.8 × 大小，摆到 0.75r 上
+        let size = |half: f32| (2.0 * radius * half.min(FRAC_PI_2 * 0.7).sin() / (64.0 * 0.9)).max(0.25);
+        let base = dir.y.atan2(dir.x);
+        let (strokes, span, half) = if full { (6, TAU, PI / 6.0) } else { (3, arc * 0.5, arc * 0.5) };
+        // 左右挥随机，连着挥不会一个方向
+        let side = if self.rng.chance(0.5) { 1.0 } else { -1.0 };
+        for k in 0..strokes {
+            let u = if strokes > 1 { k as f32 / (strokes - 1) as f32 } else { 0.5 };
+            let a = if full { base + side * u * span } else { base + side * (u - 0.5) * span };
+            let d = Vec2::from_angle(a);
+            let s = size(half);
+            let at = at + d * (radius * 0.75 - 4.8 * s);
+            let rot = a + FRAC_PI_2;
+            let delay = k as f32 * if full { 0.022 } else { 0.03 };
+            let fade = if full { 1.0 } else { 0.55 + 0.45 * u };
+            for (color, scale, glow, z) in [
+                (INK.with_alpha(0.55 * fade), 1.08, false, layer::ACTORS + 1.4),
+                (hot(gold, 1.4).with_alpha(0.85 * fade), 1.0, true, layer::EMISSIVE + 1.2),
+                (
+                    hot(Color::srgb(1.0, 0.95, 0.82), 1.6).with_alpha(0.6 * fade),
+                    0.6,
+                    true,
+                    layer::EMISSIVE + 1.25,
+                ),
+            ] {
+                self.spawn(P {
+                    size: (s * scale * 0.9, s * scale * 1.05),
+                    color,
+                    fade_in: 0.05,
+                    rot,
+                    glow,
+                    delay,
+                    ..P::new(self.f.slash, at, 0.2, z)
+                });
+            }
+        }
+        // 弧上迸出的金火星，顺着挥的方向带一点
+        let n = if full { 10 } else { 5 };
+        for _ in 0..self.n(n) {
+            let a =
+                if full { self.rng.range_f32(0.0, TAU) } else { base + self.rng.range_f32(-0.5, 0.5) * arc };
+            let d = Vec2::from_angle(a);
+            let tangent = Vec2::new(-d.y, d.x) * side;
+            let (speed, size, reach, life) = (
+                self.rng.range_f32(160.0, 280.0),
+                self.rng.range_f32(0.35, 0.5),
+                self.rng.range_f32(0.5, 0.85),
+                self.rng.range_f32(0.12, 0.22),
+            );
+            let p = P {
+                vel: (d * 0.7 + tangent * 0.5) * speed,
+                drag: 8.0,
+                size: (size, 0.1),
+                stretch: 1.8,
+                color: hot(metal, 1.6),
+                glow: true,
+                align: true,
+                ..P::new(self.f.streak, at + d * radius * reach, life, layer::EMISSIVE + 1.0)
+            };
+            self.spawn(p);
+        }
+        // 两头各闪一下铜钱的光（天罡在一圈上闪四下）
+        let glints = if full { 4 } else { 2 };
+        for k in 0..glints {
+            let a = if full {
+                base + k as f32 * TAU / 4.0
+            } else {
+                base + if k == 0 { -0.5 } else { 0.5 } * arc * 0.9
+            };
+            self.spawn(P {
+                color: hot(Color::srgb(1.0, 0.86, 0.5), 2.2),
+                size: (2.4, 0.6),
+                glow: true,
+                delay: if full { k as f32 * 0.03 } else { 0.03 + k as f32 * 0.04 },
+                ..P::new(self.f.ember, at + Vec2::from_angle(a) * radius * 0.85, 0.12, layer::EMISSIVE + 1.3)
+            });
+        }
+        if full {
+            // 光环贴图 64 个世界单位宽
+            self.halo(ring, at, 0.15, radius * 2.0 / 64.0, 0.35, hot(metal, 1.3).with_alpha(0.6));
+        }
+    }
+
     /// 地上一圈扩开的光（升级、点灯）。
     pub fn halo(&mut self, frame: FrameId, at: Vec2, from: f32, to: f32, life: f32, color: Color) {
         let p = P { size: (from, to), color, glow: true, ..P::new(frame, at, life, layer::EMISSIVE - 0.5) };
@@ -963,6 +1058,11 @@ pub(crate) fn particle_events(
                     StrikeFx::Ult => parts.ult(at, radius),
                     _ => {}
                 }
+            }
+            // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
+            SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
+                let d = (to_screen(pos + dir) - to_screen(pos)).normalize_or(Vec2::X);
+                parts.sweep(to_screen(pos) + Vec2::Y * 12.0, d, arc, radius, evolved, frames.ring);
             }
             SimEvent::SweepStrike { pos, dir } => {
                 let at = to_screen(pos);
