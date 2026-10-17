@@ -47,6 +47,10 @@ FUR_STOPS = [(0.00, S.mix(SHADOW, I["nong"], 0.3)), (0.22, SHADOW), (0.36, DARK)
 INK_STOPS = [(0.0, I["jiao"]), (0.6, I["jiao"]), (0.85, I["nong"]), (1.0, S.mix(I["nong"], I["zhong"], 0.6))]
 RIM = S.mix(CREAM, A_["huaqing"], 0.25)
 VZ = 25.0 * math.cos(math.radians(S.CAMERA_PITCH_DEG))  # 设计稿的高（单位）→ 米：除以它
+# 腿的半径（米，沿腿从根到掌）：第二批加粗两成
+LEG_R = {"front": [r * 1.2 for r in (0.11, 0.085, 0.056, 0.046, 0.042, 0.038)],
+         "hind": [r * 1.2 for r in (0.165, 0.12, 0.062, 0.05, 0.043, 0.038)]}
+PAW_R = (0.045, 0.069, 0.029)
 
 
 def d2m(x_u, y_u, lat=0.0):
@@ -309,9 +313,13 @@ def build_fox():
                               seed=12.0, edge=0.1)
     M_red = V2.paint_material("FoxRed", [(0.0, RED_DARK), (0.45, RED_DARK), (0.6, RED), (1.0, S.mix(RED, "#F06A4E", 0.4))],
                               wash=0.3, seed=13.0, edge=0.0)
-    M_mask = V2.decal_material("FoxMask", [(0.0, RED_DARK), (0.42, RED_DARK), (0.58, RED), (1.0, S.mix(RED, "#F06A4E", 0.35))],
-                               soft=0.5, seed=15.0, glow=0.18)
-    M_brow = V2.decal_material("FoxBrowInk", [(0.0, I["jiao"]), (1.0, I["nong"])], soft=0.62, seed=16.0, wash=0.1)
+    # 脸谱的红：平涂（只留一点明暗和水色），夜里在发光层里很淡地透出一层
+    M_mask = V2.paint_material("FoxMask", [(0.0, RED_DARK), (0.30, S.mix(RED_DARK, RED, 0.6)), (0.50, RED),
+                                           (1.0, S.mix(RED, "#F06A4E", 0.3))], wash=0.14, seed=15.0, edge=0.0,
+                               value_var=0.03)
+    V2.add_glow_const(M_mask, 0.18)
+    M_window = V2.paint_material("FoxEyeWindow", [(0.0, S.mix(CREAM, MID, 0.5)), (0.5, CREAM), (1.0, "#FBF6EA")],
+                                 wash=0.1, seed=16.0, edge=0.0)
     M_far = fur_material("FoxFurFar", 6.0)  # 远侧的腿：暗一档
     nodes = M_far.node_tree.nodes
     next(n for n in nodes if n.type == "MATH" and n.operation == "MULTIPLY_ADD").inputs[2].default_value -= 0.25
@@ -339,12 +347,12 @@ def build_fox():
     parts["legs"] = {}
     for far in (False, True):
         lat = 0.11 if far else -0.11
-        for name, rootp, segs, rad in (("front", DZ.FOX_SHOULDER, DZ.FOX_FRONT_LEG, [0.11, 0.085, 0.056, 0.046, 0.042, 0.038]),
-                                       ("hind", DZ.FOX_HIP, DZ.FOX_HIND_LEG, [0.165, 0.12, 0.062, 0.05, 0.043, 0.038])):
+        for name, rootp, segs, rad in (("front", DZ.FOX_SHOULDER, DZ.FOX_FRONT_LEG, LEG_R["front"]),
+                                       ("hind", DZ.FOX_HIP, DZ.FOX_HIND_LEG, LEG_R["hind"])):
             nm = f"Fox{name.title()}{'Far' if far else 'Near'}"
             pts = [d2m(x, y, lat) for x, y in DZ.fox_leg(rootp, segs)]
             ob = leg_tube(nm, pts, rad, [M_far if far else M_fur_leg, M_paw], root, zones=lambda t: 1 if t > 0.86 else 0)
-            paw = B.mesh_object(nm + "Paw", K.ellipsoid((0.040, 0.062, 0.026)), M_paw, "outer", root)
+            paw = B.mesh_object(nm + "Paw", K.ellipsoid(PAW_R), M_paw, "outer", root)
             parts["legs"][(name, far)] = (ob, paw, lat, rad)
     # 头（转轴在颈根），略朝镜头转
     neck = d2m(*DZ.FOX_NECK)
@@ -391,43 +399,23 @@ def build_fox():
     inv = head_yaw.matrix_world.inverted()
     rot3 = inv.to_3x3()
 
-    def decal(name, line, widths, mat, lift):
-        dense = K_dense(line, 6)
-        hits = V2.project_design(tree, dense)
-        pts = [(inv @ h, (rot3 @ n).normalized()) for h, n in hits if h is not None]
-        if len(pts) < 3:
-            print("  [fox_v2] 贴片没投上：", name)
-            return None
-        w = np.interp(np.linspace(0, 1, len(pts)), np.linspace(0, 1, len(widths)), widths)
-        return V2.surface_strip(name, [p for p, _ in pts], [n for _, n in pts], w / 12.5 * 1.25, mat, head_yaw, lift=lift,
-                                across=3)
-
-    decal("FoxMaskBridge", DZ.FOX_MASK_BRIDGE, [2.2, 2.0, 1.55, 1.05], M_mask, 0.004)
-    decal("FoxMaskCheek", DZ.FOX_MASK_CHEEK, [1.25, 1.6, 1.55, 1.2, 0.6], M_mask, 0.005)
-    decal("FoxBrow", DZ.FOX_BROW, [0.75, 0.85, 0.7, 0.42], M_brow, 0.008)
-    # 眼：丹凤眼的轮廓投上去做贴片（发光），眼心一点更亮，竖瞳是墨
-    (ex, ey), hl, hh, tilt = DZ.FOX_EYE
+    # 脸谱（第二批改）：整块朱砂（边缘清楚、勾一道深红边）、眼周米白、墨勾丹凤眼、发光的眼仁和竖瞳、浓眉。
+    # 都是 E 向画面上的形状，按视线投到头上；抬起的高度决定前后（后画的抬得高）。
+    M_mask_edge = B.flat_material("FoxMaskEdge", S.mix(RED_DARK, I["jiao"], 0.35))
+    V2.design_patch("FoxMask", tree, closed_smooth(DZ.FOX_MASK, 90), M_mask, head_yaw, lift=0.004, spacing=0.45)
+    V2.design_outline("FoxMaskEdge", tree, closed_smooth(DZ.FOX_MASK, 90), 0.30, M_mask_edge, head_yaw, lift=0.0045)
+    V2.design_patch("FoxEyeWindow", tree, closed_smooth(DZ.FOX_EYE_WINDOW, 48), M_window, head_yaw, lift=0.006,
+                    spacing=0.3)
+    V2.design_patch("FoxEyeInk", tree, closed_smooth(DZ.FOX_EYE_INK, 60), M_jiao, head_yaw, lift=0.007, spacing=0.3)
+    V2.design_patch("FoxEye", tree, closed_smooth(DZ.fox_eye_poly(1.0), 40), M_eye, head_yaw, lift=0.008, spacing=0.25)
+    V2.design_patch("FoxEyeHot", tree, closed_smooth(DZ.fox_eye_poly(0.5), 28), M_hot, head_yaw, lift=0.009,
+                    spacing=0.2)
+    (ex, ey), hl, hh, tilt = DZ.FOX_EYE2
     a = math.radians(tilt)
-
-    def rotp(pts_):
-        return [(ex + x * math.cos(a) - y * math.sin(a), ey + x * math.sin(a) + y * math.cos(a)) for x, y in pts_]
-    eye_poly = rotp([(hl, 0.0), (hl * 0.3, hh), (-hl * 0.5, hh * 0.9), (-hl, 0.15 * hh), (-hl * 0.4, -hh * 0.8),
-                     (hl * 0.4, -hh * 0.75)])
-    for nm, poly, mat, lift in (("FoxEye", eye_poly, M_eye, 0.008),
-                                ("FoxPupil", rotp([(0.12 * hl, 0.85 * hh), (-0.06 * hl, 0.0), (0.12 * hl, -0.85 * hh),
-                                                   (0.25 * hl, 0.0)]), M_jiao, 0.010),
-                                ("FoxEyeLine", rotp([(hl * 1.05, 0.15), (hl * 0.2, hh * 1.3), (-hl * 0.7, hh * 1.1),
-                                                     (-hl * 1.5, hh * 1.5), (-hl * 0.7, hh * 0.85), (hl * 0.2, hh * 0.95)]),
-                                 M_jiao, 0.009)):
-        ring = closed_smooth(poly, 24)
-        c = (sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly))
-        hits = V2.project_patch(tree, c, ring)
-        if hits is None:
-            print("  [fox_v2] 眼没投上：", nm)
-            continue
-        vs = [inv @ h + (rot3 @ n).normalized() * lift for h, n in hits]
-        nr = len(ring)
-        V2.mesh_from_arrays(nm, vs, [(0, 1 + i, 1 + (i + 1) % nr) for i in range(nr)], mat, "none", head_yaw, smooth=False)
+    pupil = [(ex + x * math.cos(a) - y * math.sin(a), ey + x * math.sin(a) + y * math.cos(a))
+             for x, y in ((0.10 * hl, 0.80 * hh), (-0.07 * hl, 0.0), (0.10 * hl, -0.78 * hh), (0.24 * hl, 0.0))]
+    V2.design_patch("FoxPupil", tree, closed_smooth(pupil, 24), M_jiao, head_yaw, lift=0.010, spacing=0.2)
+    V2.design_patch("FoxBrow", tree, DZ.FOX_BROW_POLY, M_jiao, head_yaw, lift=0.0075, spacing=0.3)
     (fx, fy), fl, fh, ft = DZ.FOX_EYE_FAR
     hits = V2.project_design(tree, [(fx, fy)])
     if hits[0][0] is not None:
@@ -435,7 +423,7 @@ def build_fox():
         n_ = (rot3 @ hits[0][1]).normalized()
         B.mesh_object("FoxEyeFar", K.ellipsoid((0.016, 0.016, 0.012)), M_eye, "none", head_yaw, loc=p_ + n_ * 0.004)
     sock = B.empty("FoxSocketEyes", head_yaw)
-    hits = V2.project_design(tree, [(ex * 0.65 + fx * 0.35, ey * 0.65 + fy * 0.35)])
+    hits = V2.project_design(tree, [(ex * 0.7 + fx * 0.3, ey * 0.7 + fy * 0.3)])
     if hits[0][0] is not None:
         sock.location = inv @ hits[0][0]
     B.set_direction(root, "S")
@@ -527,6 +515,8 @@ def pose_fox(parts, anim, frame, n):
         root2 = DZ.FOX_SHOULDER if name == "front" else DZ.FOX_HIP
         r3 = Mb @ d2m(*root2, lat)
         angs = [a + rot for a in pose["legs"][(name, far)]]
+        if anim == "move":  # 一步一起伏：身子压低时站地的腿收短，脚不陷进地里
+            angs = DZ.fox_leg_ground(_to2(r3), segs, angs, name)
         pts = [d2m(x, y, lat) for x, y in DZ.fox_leg(_to2(r3), segs, angs)]
         dense = []
         for a_, b_ in zip(pts[:-1], pts[1:]):

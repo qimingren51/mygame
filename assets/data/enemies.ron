@@ -7,37 +7,37 @@
     (id: "shade", name: "影妖", rank: Normal, movement: Chase,
      radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FFC46B"),
     (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
-     radius: 10.0, contact_radius: Some(6.0), hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+     radius: 10.0, contact_radius: Some(10.0), hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
     (id: "golem", name: "石妖", rank: Normal, movement: Chase,
-     radius: 19.0, contact_radius: Some(18.0), hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+     radius: 19.0, contact_radius: Some(14.0), hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
     // 青丘的三只新妖物（docs/BALANCE.md 第 12.1 节）。
     // 狐火：在离你 160–220 处绕圈，2–4 秒扑一次：预警 0.4 秒（最后 0.15 秒锁定方向），以 220 直线扑 1 秒，扑中伤害 × 0.6
     (id: "fox_wisp", name: "狐火", rank: Normal, movement: Circle, band: Some((160.0, 220.0)),
-     radius: 10.0, hp: 8.0, speed: 70.0, damage: 5.0, xp: 1.0, sprite: "fox_wisp", eye: "#FFC46B",
+     radius: 10.0, contact_radius: Some(10.0), hp: 8.0, speed: 70.0, damage: 5.0, xp: 1.0, sprite: "fox_wisp", eye: "#FFC46B",
      charge: Some((range: 240.0, every: 3.0, jitter: 1.0, windup: 0.4, lock: 0.15, speed: 220.0, duration: 1.0,
                    damage_mult: 0.6, recover: 0.4))),
     // 竹魅：停在离你 260–320 处，每 3 秒射一根竹刺：预警 0.6 秒（方向锁定），速度 160、伤害 8、存活 3 秒
     (id: "bamboo_wraith", name: "竹魅", rank: Normal, movement: Keep, band: Some((260.0, 320.0)),
-     radius: 12.0, hp: 18.0, speed: 40.0, damage: 4.0, xp: 2.0, sprite: "bamboo_wraith", eye: "#9BE07A",
+     radius: 12.0, hp: 18.0, speed: 40.0, damage: 4.0, xp: 2.0, sprite: "bamboo_wraith", eye: "#9BF5C9",
      shot: Some((every: 3.0, warn: 0.6, range: 420.0, speed: 160.0, damage: 8.0, radius: 5.0, life: 3.0))),
     // 讨封狐：照见圈外像路人，自动瞄准锁定不到；进了照见圈现形，速度从 50 升到 90
     (id: "taofeng_fox", name: "讨封狐", rank: Normal, movement: Chase,
-     radius: 13.0, contact_radius: Some(11.0), hp: 25.0, speed: 50.0, damage: 9.0, xp: 2.0, sprite: "taofeng_fox", eye: "#FFD27A",
+     radius: 13.0, contact_radius: Some(13.0), hp: 25.0, speed: 50.0, damage: 9.0, xp: 2.0, sprite: "taofeng_fox", eye: "#FFD23F",
      disguise: Some((speed: 90.0))),
     // 赤面狐扑击、青面鬼冲撞（docs/BALANCE.md 第 12.6 节）：离主角 range 以内每 every 秒一次，
     // 原地蓄力 windup 秒（转向跟着主角，出手前 lock 秒锁定方向），然后以 speed 冲 duration 秒，
     // 接触伤害 × damage_mult，冲完停 recover 秒
     (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
-     radius: 24.0, contact_radius: Some(20.0), hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
+     radius: 24.0, contact_radius: Some(21.0), hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
      charge: Some((range: 260.0, every: 4.0, windup: 0.6, lock: 0.25, speed: 320.0, duration: 0.45, damage_mult: 1.5,
                    recover: 0.5))),
     (id: "ghoul", name: "青面鬼", rank: Elite, movement: Chase,
-     radius: 30.0, contact_radius: Some(21.0), hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#C8FF6B",
+     radius: 30.0, contact_radius: Some(24.0), hp: 900.0, speed: 50.0, damage: 18.0, xp: 40.0, sprite: "ghoul", eye: "#FF4636",
      title: Some("小头目"),
      charge: Some((range: 360.0, every: 5.0, windup: 0.8, lock: 0.3, speed: 380.0, duration: 0.6, damage_mult: 2.0,
                    recover: 1.0))),
     (id: "stonelord", name: "石将", rank: Elite, movement: Chase,
-     radius: 28.0, contact_radius: Some(14.0), hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
+     radius: 28.0, contact_radius: Some(13.0), hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
     // 九尾（docs/BALANCE.md 第 12.2 节）：生命 48000（再乘更的倍率；灯阵完整时 ×0.8）。
     // 一阶段：每 2.6 秒一圈 14 发狐火（速度 115、半径 6、伤害 14、存活 6 秒），每 7 秒召唤 6 只影妖。
     // 二阶段（60%）：离你约 200 处分出 2 个幻身，打不死、没有影子，每 3.5 秒放一圈 8 发狐火，

@@ -109,6 +109,9 @@ pub struct RunSetup {
     /// 悟·五行：选中的那一系
     #[serde(default)]
     pub insight: Option<Element>,
+    /// 存档里已经解锁的法器（`weapons.ron` 的 ID）：`run.ron` 里锁着的，这些照常进卡池（docs/GAMEPLAY.md 第 13.2 节）
+    #[serde(default)]
+    pub unlocked: std::collections::BTreeSet<String>,
 }
 
 fn first_tier() -> u8 {
@@ -131,6 +134,7 @@ impl RunSetup {
             charm_pool: Vec::new(),
             attributes: BTreeMap::new(),
             insight: None,
+            unlocked: Default::default(),
         }
     }
 

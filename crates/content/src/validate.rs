@@ -787,6 +787,9 @@ impl Content {
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
         }
+        if ch.unlock_pity.windows(2).any(|w| w[0] >= w[1]) || ch.unlock_pity.first() == Some(&0) {
+            return c.fail("run.ron", "choices.unlock_pity 要从 1 起、从小到大".into());
+        }
         for id in &ch.locked {
             if self.weapon_index(id).is_none() {
                 return c.fail("run.ron", format!("choices.locked 引用了不存在的法器 \"{id}\""));
@@ -981,6 +984,11 @@ impl Content {
         // ---- 卡面和提示条的短句 ----
         for w in &self.weapons {
             c.short("weapons.ron", &w.name, &w.short, CARD_SHORT)?;
+            // 锁着的法器解锁时弹“新法器 · X”，正文写在 unlock 里
+            if self.run.choices.locked.contains(&w.id) && w.unlock.trim().is_empty() {
+                return c.fail("weapons.ron", format!("{} 锁着，要写解锁提示 unlock", w.name));
+            }
+            c.short("weapons.ron", &w.name, &w.unlock, TOAST_SHORT)?;
             if let Some(e) = &w.evolution {
                 c.short("weapons.ron", &e.name, &e.short, CARD_SHORT)?;
             }
@@ -1324,8 +1332,25 @@ impl Content {
                         return c
                             .fail("achievements.ron", format!("成就 \"{}\" 开放的第 {t} 更不存在", a.id));
                     }
+                    crate::Reward::Weapon(id) if !self.run.choices.locked.contains(id) => {
+                        return c.fail(
+                            "achievements.ron",
+                            format!(
+                                "成就 \"{}\" 解锁的法器 \"{id}\" 不在 run.ron 的 choices.locked 里",
+                                a.id
+                            ),
+                        );
+                    }
                     _ => {}
                 }
+            }
+            if let crate::AchievementWhen::Evolved(id) = &a.when
+                && self.weapon_index(id).is_none_or(|d| self.weapons[d].evolution.is_none())
+            {
+                return c.fail(
+                    "achievements.ron",
+                    format!("成就 \"{}\" 要进化的法器 \"{id}\" 不存在或没有进化", a.id),
+                );
             }
         }
 
@@ -1359,6 +1384,21 @@ impl Content {
         for g in &self.stat_labels {
             if g.name.trim().is_empty() || g.stats.is_empty() {
                 return c.fail("stat_labels.ron", "每组要有名字和至少一项属性".into());
+            }
+            // 图标名拼进帧名，只许小写字母、数字和下划线
+            let bad_icon =
+                |i: &str| !i.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
+            if bad_icon(&g.icon) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{} 的图标名“{}”只能用小写字母、数字和下划线", g.name, g.icon),
+                );
+            }
+            if let Some(l) = g.stats.iter().find(|l| bad_icon(&l.icon)) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{:?} 的图标名“{}”只能用小写字母、数字和下划线", l.stat, l.icon),
+                );
             }
             for l in &g.stats {
                 listed.push(l.stat);

@@ -37,8 +37,11 @@ fn a_normal_run_spawns_kills_and_levels_up() {
     assert!(hits >= kills && kills > 20, "法器应该命中并击杀妖物：命中 {hits}，击杀 {kills}");
     assert_eq!(sim.progress().kills, kills);
     assert!(sim.progress().level >= 3 && levels >= 2, "应该捡到魂火升级，现在 {} 级", sim.progress().level);
-    let build = sim.arsenal().0.len() + sim.build().passives.len();
-    assert!(build >= 3, "升级时应该选到了新法器或心法，现在只有 {build} 项");
+    // 选到的是新东西还是升级看卡池和种子；只看每次升级都落到了法器或心法上
+    let picked: u32 = sim.arsenal().0.iter().map(|w| w.level).sum::<u32>()
+        + sim.build().passives.iter().map(|p| p.level).sum::<u32>();
+    // 起手法器 1 级，再加至少两次升级
+    assert!(picked >= 3, "升级时应该选到了法器或心法，现在法器和心法一共 {picked} 级");
 }
 
 #[test]

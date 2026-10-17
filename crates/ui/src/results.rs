@@ -159,6 +159,11 @@ fn spawn(
         .spawn((
             DespawnOnExit(RunState::Over),
             GlobalZIndex(20),
+            // 小窗口等比缩小；新法器每件多一行
+            crate::responsive::FitViewport::Fixed(Vec2::new(
+                1280.0,
+                RESULTS_HEIGHT + UNLOCK_ROW * recorded.unlocked.len() as f32,
+            )),
             Node {
                 position_type: PositionType::Absolute,
                 width: percent(100),
@@ -221,7 +226,7 @@ fn spawn(
         });
 }
 
-fn result_options(p: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin) {
+pub(crate) fn result_options(p: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin) {
     p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));
     p.spawn(Node { column_gap: px(24), ..default() }).with_children(|row| {
         for (i, label) in ["回灯驿", "再来一夜"].into_iter().enumerate() {
@@ -261,7 +266,12 @@ fn result_options(p: &mut ChildSpawnerCommands, fonts: &Fonts, skin: &Skin) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn results_body(
+/// 结算画布的高度：窗口比它小时整页等比缩小
+pub(crate) const RESULTS_HEIGHT: f32 = 720.0;
+/// 结算里“新法器”一行的高度（画布按它加高）
+pub(crate) const UNLOCK_ROW: f32 = 56.0;
+
+pub(crate) fn results_body(
     p: &mut ChildSpawnerCommands,
     c: &lantern_content::Content,
     fonts: &Fonts,
@@ -325,6 +335,30 @@ fn results_body(
                             ));
                         }
                         row.spawn(text(&fonts.body, 20.0, CINNABAR, s));
+                    });
+            }
+            // 新法器（docs/LORE-TEXT.md 第 6.9 节）：成就和保底解锁的都在这里报，下一局起进卡池
+            for id in &recorded.unlocked {
+                let Some(d) = c.weapon_index(id) else { continue };
+                let w = &c.weapons[d];
+                p.spawn(Node { align_items: AlignItems::Center, column_gap: px(10), ..default() })
+                    .with_children(|row| {
+                        let icon = format!("ui/icon_{}", w.id);
+                        spawn_icon(
+                            row,
+                            db,
+                            fonts,
+                            Some(&icon),
+                            &w.icon,
+                            on_paper(element_color(c, w.element)),
+                            40.0,
+                        );
+                        row.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(
+                            |t| {
+                                t.spawn(text(&fonts.body, 20.0, CINNABAR, &format!("新法器 · {}", w.name)));
+                                t.spawn(text(&fonts.body, 15.0, INK_DIM, &w.unlock));
+                            },
+                        );
                     });
             }
             p.spawn((Node { width: percent(100), height: px(14), ..default() }, skin.image("divider")));

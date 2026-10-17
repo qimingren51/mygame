@@ -2,6 +2,7 @@
 """重做妖物（精修三维）的审图：读 art/out/assets@2x/ 里的新帧，和 art/out/assets@2x_old/ 里备份的现版对比。
 
     art/.venv/bin/python art/post/enemy_review.py b1 shade fox      # 第一批：影妖、赤面狐
+    art/.venv/bin/python art/post/enemy_review.py b2 fox:b1 wisp    # “素材:批”：拿 out/assets@2x_<批>/ 里那一版对比（改过的）
 输出到 art/out/review@2x/：
   redo_<批>_lineup.png   主角 + 每只妖物的现版、新版排成一排：白天纸面、月夜（灯下）、月夜（暗处）三排
   redo_<批>_ingame.png   1080p 游戏里的实际大小（1 单位 ≈ 2.57 像素）：月夜场景，主角提灯在中间，妖物围上来；下面一条白天
@@ -151,12 +152,13 @@ def col_w(meta):
 
 
 # ================================================================ 审图
-def lineup(names, tag):
+def lineup(names, tag, olds=None):
     hero = hero_frame()
     cols = [("主角", hero)]
     for n in names:
-        if (OLD / n / "meta.json").exists():
-            cols.append((f"{CN.get(n, n)} · 现版", asset(OLD / n)))
+        od, lab = (ART / "out" / f"assets@2x_{olds[n]}", f"{olds[n]} 版") if olds and olds.get(n) else (OLD, "现版")
+        if (od / n / "meta.json").exists():
+            cols.append((f"{CN.get(n, n)} · {lab}", asset(od / n)))
         cols.append((f"{CN.get(n, n)} · 新版", asset(A2 / n)))
     widths = [max(220, col_w(A["meta"])) for _, A in cols]
     Hrow = max(300, max(int(A["meta"]["size"][1] * A["meta"]["anchor"][1]) + 60 for _, A in cols))
@@ -266,9 +268,11 @@ def ingame(names, tag):
 
 
 def main(argv):
-    tag, names = argv[0], argv[1:]
+    tag = argv[0]
+    olds = {a.split(":")[0]: a.split(":")[1] for a in argv[1:] if ":" in a}
+    names = [a.split(":")[0] for a in argv[1:]]
     REVIEW.mkdir(parents=True, exist_ok=True)
-    lineup(names, tag)
+    lineup(names, tag, olds)
     zoom3(names, tag)
     gifs(names)
     ingame(names, tag)

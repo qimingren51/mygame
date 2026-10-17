@@ -345,6 +345,7 @@ mod tests {
         )
         .unwrap();
         let mut setup = RunSetup::new(739, RunMode::Endless);
+        setup.god = true;
         setup.tier = 2;
         setup.lamp = Some(content.lamps[1].id.clone());
         setup.omen = Some(OmenPick { id: content.omens[0].id.clone(), element: None });

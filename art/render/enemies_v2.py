@@ -48,9 +48,63 @@ V2 = {
               "anims": [("float", 8, 8, {})], "radius": 13, "eye": "#FFC46B", "glow": "#F7D58A",
               "lines": (1.6, 1.0, 0.8), "sockets": ("eyes",), "shadow_units": 8,
               "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
+    # 疾影：一缕被风扯长的薄墨烟（独立造型，不是小号影妖）；帧 224²（原 160²），锚点同影妖
+    "wisp": {"module": "wisp_v2", "build": "build_wisp", "pose": "pose_wisp", "size_1x": 112, "anchor": S.ANCHOR,
+             "anims": [("float", 6, 10, {})], "radius": 10, "eye": "#9FE3FF", "glow": "#8CC8E8",
+             "lines": (1.2, 0.8, 0.6), "sockets": ("eyes",), "shadow_units": 6,
+             "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
+    # 石妖：青灰山石垒成的矮胖身子；帧 224²、锚点 (0.5, 0.8)
+    "golem": {"module": "golem_v2", "build": "build_golem", "pose": "pose_golem", "size_1x": 112,
+              "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 8, {})], "radius": 19, "eye": "#FFB46B",
+              "glow": "#FFB46B", "lines": (2.0, 1.15, 0.8), "sockets": ("eyes",), "shadow_units": 15,
+              # 锚点正上方是驼背的斜坡（不是头顶），石头前后一点头那里就上下变：自检只查 x 配准
+              "meta": {"category": "enemy", "anchor_kind": "big_enemy", "default_anim": "move", "register_x_only": True}},
+    # 狐火：一团青绿冷火拖成狐尾；帧 224²（原 160²），悬浮；扑击 2 帧蓄力
+    "fox_wisp": {"module": "fox_wisp_v2", "build": "build_fox_wisp", "pose": "pose_fox_wisp", "size_1x": 112,
+                 "anchor": S.ANCHOR,
+                 "anims": [("float", 8, 10, {}),
+                           ("pounce", 4, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
+                 "radius": 10, "eye": "#F2FFFC", "glow": "#8FE3C8", "lines": (1.0, 0.7, 0.6), "sockets": ("eyes",),
+                 "shadow_units": 6, "meta": {"category": "enemy", "floating": True, "default_anim": "float"}},
+    # 竹魅：竹节拼成的细长人形；帧 320²、锚点 (0.5, 0.875)；挂点 eyes、muzzle（竹刺出手的位置）
+    "bamboo_wraith": {"module": "bamboo_v2", "build": "build_bamboo_wraith", "pose": "pose_bamboo_wraith", "size_1x": 160,
+                      "anchor": S.ANCHOR,
+                      "anims": [("idle", 4, 4, {}), ("move", 6, 8, {}),
+                                ("shoot", 5, 10, {"loop": False, "windup_frames": 2})],
+                      "radius": 12, "eye": "#9BF5C9", "glow": "#9BF5C9", "lines": (2.0, 1.15, 0.8),
+                      "sockets": ("eyes", "muzzle"), "shadow_units": 9.5,
+                      "meta": {"category": "enemy", "default_anim": "move"}},
+    # 讨封狐：扮人（斗笠蓑衣）、现形（直立的狐狸穿不合身的人衣）；帧 256²（原 224²），锚点 (0.5, 0.875)
+    "taofeng_fox": {"module": "taofeng_v2", "build": "build_taofeng_fox", "pose": "pose_taofeng_fox", "size_1x": 128,
+                    "anchor": S.ANCHOR,
+                    # reveal：一跳、蓑衣掀起，身高一帧一个样（自检不查逐帧身高；游戏不读）
+                    "anims": [("disguise", 6, 8, {}), ("move", 6, 10, {}),
+                              ("reveal", 4, 8, {"loop": False, "vertical_motion": True})],
+                    "radius": 13, "eye": "#FFD23F", "glow": "#FFD23F", "lines": (1.8, 1.1, 0.8), "sockets": ("eyes",),
+                    "shadow_units": 10.5, "meta": {"category": "enemy", "default_anim": "disguise"}},
+    # 青面鬼：精英（小头目），帧 320²、锚点 (0.5, 0.8)；冲锋 2 帧蓄力、从第 2 帧起循环；肚子里的魂光走 AOV
+    "ghoul": {"module": "ghoul_v2", "build": "build_ghoul", "pose": "pose_ghoul", "size_1x": 160,
+              "anchor": S.BIG_ENEMY_ANCHOR,
+              # move 一步一沉 1.1 单位（驼背跟着上下，自检只查 x 配准；游戏不读）
+              "anims": [("move", 8, 8, {"vertical_motion": True}),
+                        ("charge", 6, 10, {"loop": False, "windup_frames": 2, "loop_from": 2, "vertical_motion": True})],
+              "radius": 30, "eye": "#FF4636", "glow": "#F7C978", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
+              "shadow_units": 24, "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
+    # 石将：精英，石翁仲（3/4 侧面）；帧 320²、锚点 (0.5, 0.8)
+    "stonelord": {"module": "stonelord_v2", "build": "build_stonelord", "pose": "pose_stonelord", "size_1x": 160,
+                  # move 一步一沉（石头人落脚重，盔顶跟着上下，自检只查 x 配准；游戏不读）
+                  "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 6, {"vertical_motion": True})], "radius": 28,
+                  "eye": "#FFB46B",
+                  "glow": "#FFB46B", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",), "shadow_units": 22.5,
+                  "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
+    # 金蟾：三足、衔钱、一蹦一蹦（vertical_motion）；帧 192²（原 160²）、锚点 (0.5, 0.875)
+    "toad": {"module": "toad_v2", "build": "build_toad", "pose": "pose_toad", "size_1x": 96, "anchor": S.ANCHOR,
+             "anims": [("move", 6, 10, {})], "radius": 14, "eye": "#FFF1C2", "glow": "#FFD36B", "lines": (1.6, 1.0, 0.75),
+             "sockets": ("eyes",), "shadow_units": 11.25,
+             "meta": {"category": "enemy", "vertical_motion": True, "default_anim": "move"}},
     # 赤面狐：精英，帧 320²、锚点 (0.5, 0.8)；扑击 2 帧蓄力
     "fox": {"module": "fox_v2", "build": "build_fox", "pose": "pose_fox", "size_1x": 160, "anchor": S.BIG_ENEMY_ANCHOR,
-            "anims": [("move", 8, 12, {}),
+            "anims": [("move", 8, 12, {"vertical_motion": True}),  # 小跑一步一起伏 1.7 单位（自检不查逐帧身高）
                       ("pounce", 6, 12, {"loop": False, "windup_frames": 2, "vertical_motion": True})],
             "radius": 24, "eye": "#FF6B5A", "glow": "#E2553C", "lines": (2.0, 1.15, 0.8), "sockets": ("eyes",),
             "shadow_units": 19.2, "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move",

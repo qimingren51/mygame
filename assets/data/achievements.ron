@@ -1,4 +1,4 @@
-// P0 的 15 个成就（docs/GAMEPLAY.md 第 13.1 节），名字见 docs/LORE.md 第 9.12 节。
+// P0 的 15 个成就（docs/GAMEPLAY.md 第 13.1 节）和 v0.3 的 5 个法器成就（13.2 节），名字见 docs/LORE.md 第 9.12 节。
 // 达成时弹提示、立即发奖；解锁的内容下一局起能用。成就发的灯油和铜钱不乘更和夜签的倍率。
 [
     (id: "first_night", name: "秉烛夜游", desc: "完成第 1 局（倒下也算）", when: Runs(1), rewards: [Basics]),
@@ -18,4 +18,12 @@
     (id: "flawless_elite", name: "毫发无伤", desc: "不受伤击败一只精英（护盾挡下的不算受伤）", when: FlawlessElite,
      rewards: [Gold(200)]),
     (id: "no_attributes", name: "赤手空拳", desc: "通关，且所有属性都不生效", when: ClearNoAttributes, rewards: [Gold(500)]),
+    // v0.3 的法器成就（docs/GAMEPLAY.md 第 13.2 节）：进化或异化老法器，解锁同五行的新法器和它的进化心法
+    (id: "unlock_coin_sword", name: "斗转星移", desc: "第一次进化或异化符剑", when: Evolved("sword"),
+     rewards: [Weapon("coin_sword")]),
+    (id: "unlock_sky_lantern", name: "火树银花", desc: "第一次进化或异化灯火", when: Evolved("lamp"),
+     rewards: [Weapon("sky_lantern")]),
+    (id: "unlock_wave", name: "濯缨濯足", desc: "第一次进化或异化霜铃", when: Evolved("bell"), rewards: [Weapon("wave")]),
+    (id: "unlock_vine", name: "枯木逢春", desc: "第一次进化或异化纸鹤", when: Evolved("crane"), rewards: [Weapon("vine")]),
+    (id: "unlock_tower", name: "七级浮屠", desc: "第一次进化或异化山印", when: Evolved("seal"), rewards: [Weapon("tower")]),
 ]
