@@ -169,6 +169,13 @@ def paint_material(name, stops, *, wash=0.22, wash_scale=2.2, seed=0.0, shade_at
     return m
 
 
+def add_glow_const(m, value):
+    """材质往 AOV glow 写一个常数（白天颜色不变，夜里透出一层光）。"""
+    ao = m.node_tree.nodes.new("ShaderNodeOutputAOV"); ao.aov_name = GLOW_AOV
+    ao.inputs["Value"].default_value = value
+    return m
+
+
 def glow_flat(name, hex_color, glow=0.0):
     """单色（缝线、裂缝的墨边）；glow>0 时同时往 AOV glow 写这个值（白天还是这个颜色，夜里缝里透光）。"""
     m = B.flat_material(name, hex_color)
@@ -299,6 +306,270 @@ def mesh_from_arrays(name, verts, faces, mat, line="outer", parent=None, attrs=N
     return ob
 
 
+def tube_arrays(spine, prof, nu=24, nv=48, cap0=True, cap1=True, noise_amp=0.0, seed=0.0):
+    """沿脊线（模型坐标点列，在 Y-Z 平面里最好）的变截面管：prof(t) → (左右半宽, 上半厚, 下半厚)。
+    截面的“左右”是模型 X（E 向时朝镜头），“上下”在脊线所在的竖平面里。返回 (顶点, 面, 属性)，
+    属性：fade = su = t（沿长 0..1），sv = 绕一圈 0..1。cap0/cap1：两头收成一点（封口）。"""
+    from mathutils import noise as mnoise
+
+    sp = np.asarray([tuple(p) for p in spine], np.float64)
+    seg = np.linalg.norm(np.diff(sp, axis=0), axis=1)
+    s = np.concatenate([[0], np.cumsum(seg)])
+    u = np.linspace(0, s[-1], nv)
+    C = np.stack([np.interp(u, s, sp[:, k]) for k in range(3)], -1)
+    T = np.gradient(C, axis=0)
+    T /= np.linalg.norm(T, axis=1, keepdims=True) + 1e-9
+    side = np.array([1.0, 0, 0])
+    off = Vector((seed * 1.3, seed * 0.7, seed * 2.1))
+    verts, su, sv = [], [], []
+    for j in range(nv):
+        t = j / (nv - 1)
+        up = np.cross(T[j], side)
+        up /= np.linalg.norm(up) + 1e-9
+        if up[2] < 0:
+            up = -up
+        rx, r_up, r_dn = prof(t)
+        for i in range(nu):
+            th = 2 * math.pi * i / nu
+            c, sn = math.cos(th), math.sin(th)
+            p = C[j] + side * (rx * c) + up * ((r_up if sn > 0 else r_dn) * sn)
+            if noise_amp:
+                p = p + (side * c + up * sn) * mnoise.noise(Vector(p) * 6.0 + off) * noise_amp
+            verts.append(p)
+            su.append(t)
+            sv.append(i / nu)
+    faces = [(j * nu + i, j * nu + (i + 1) % nu, (j + 1) * nu + (i + 1) % nu, (j + 1) * nu + i)
+             for j in range(nv - 1) for i in range(nu)]
+    if cap0:
+        verts.append(C[0] - T[0] * 1e-4); su.append(0.0); sv.append(0.0)
+        c0 = len(verts) - 1
+        faces += [(c0, (i + 1) % nu, i) for i in range(nu)]
+    if cap1:
+        verts.append(C[-1] + T[-1] * 1e-4); su.append(1.0); sv.append(0.0)
+        c1 = len(verts) - 1
+        b0 = (nv - 1) * nu
+        faces += [(c1, b0 + i, b0 + (i + 1) % nu) for i in range(nu)]
+    return np.asarray(verts), faces, {"fade": list(su), "su": list(su), "sv": sv}
+
+
+def arrays_build(verts, faces):
+    """numpy 顶点 + 面 → kit.replace_mesh 用的 bmesh 构造函数（每帧重建网格时用）。"""
+    def build(bm):
+        vs = [bm.verts.new(tuple(v)) for v in verts]
+        for f in faces:
+            try:
+                bm.faces.new([vs[q] for q in f])
+            except ValueError:  # 退化的面（两头收成一点时可能重复）
+                pass
+    return build
+
+
+def alpha_streak(m, *, start=0.35, end=1.0, solid_until=0.25, streak=0.55, scale=(3.0, 26.0), seed=0.0,
+                 edge_noise=0.12):
+    """给材质加透明：属性 fade（0 头 → 1 尾）从 start 到 end 渐隐（噪声打散边）；fade 过了 solid_until 以后，
+    顺着笔（su 沿长、sv 横向）拉长的噪声把笔画撕出一道道缝（飞白），越往尾缝越多（streak 是尾端的阈值）。"""
+    nt = m.node_tree
+    N, Lk = nt.nodes, nt.links
+    out = next(n for n in N if n.type == "OUTPUT_MATERIAL")
+    src = out.inputs["Surface"].links[0].from_socket
+    fa = N.new("ShaderNodeAttribute"); fa.attribute_type = "GEOMETRY"; fa.attribute_name = "fade"
+    tc = N.new("ShaderNodeTexCoord")
+    n1 = N.new("ShaderNodeTexNoise"); n1.noise_dimensions = "4D"; n1.inputs["W"].default_value = seed
+    n1.inputs["Scale"].default_value = 6.0; n1.inputs["Detail"].default_value = 3.0
+    Lk.new(tc.outputs["Object"], n1.inputs["Vector"])
+    n1s = N.new("ShaderNodeMath"); n1s.operation = "MULTIPLY_ADD"
+    n1s.inputs[1].default_value = edge_noise; n1s.inputs[2].default_value = -0.5 * edge_noise
+    Lk.new(n1.outputs["Fac"], n1s.inputs[0])
+    fan = N.new("ShaderNodeMath"); fan.operation = "ADD"
+    Lk.new(fa.outputs["Fac"], fan.inputs[0]); Lk.new(n1s.outputs["Value"], fan.inputs[1])
+    ln = N.new("ShaderNodeMapRange"); ln.interpolation_type = "SMOOTHSTEP"
+    ln.inputs["From Min"].default_value = start; ln.inputs["From Max"].default_value = end
+    ln.inputs["To Min"].default_value = 1.0; ln.inputs["To Max"].default_value = 0.0
+    Lk.new(fan.outputs["Value"], ln.inputs["Value"])
+    au = N.new("ShaderNodeAttribute"); au.attribute_type = "GEOMETRY"; au.attribute_name = "su"
+    av = N.new("ShaderNodeAttribute"); av.attribute_type = "GEOMETRY"; av.attribute_name = "sv"
+    mu = N.new("ShaderNodeMath"); mu.operation = "MULTIPLY"; mu.inputs[1].default_value = scale[0]
+    mv = N.new("ShaderNodeMath"); mv.operation = "MULTIPLY"; mv.inputs[1].default_value = scale[1]
+    Lk.new(au.outputs["Fac"], mu.inputs[0]); Lk.new(av.outputs["Fac"], mv.inputs[0])
+    cmb = N.new("ShaderNodeCombineXYZ"); cmb.inputs["Z"].default_value = seed * 0.37
+    Lk.new(mu.outputs["Value"], cmb.inputs["X"]); Lk.new(mv.outputs["Value"], cmb.inputs["Y"])
+    n2 = N.new("ShaderNodeTexNoise"); n2.inputs["Scale"].default_value = 1.0
+    n2.inputs["Detail"].default_value = 2.0; n2.inputs["Roughness"].default_value = 0.55
+    Lk.new(cmb.outputs["Vector"], n2.inputs["Vector"])
+    th = N.new("ShaderNodeMapRange"); th.interpolation_type = "SMOOTHSTEP"
+    th.inputs["From Min"].default_value = solid_until; th.inputs["From Max"].default_value = 1.0
+    th.inputs["To Min"].default_value = 0.0; th.inputs["To Max"].default_value = streak
+    Lk.new(fa.outputs["Fac"], th.inputs["Value"])
+    lo = N.new("ShaderNodeMath"); lo.operation = "SUBTRACT"; lo.inputs[1].default_value = 0.06
+    hi = N.new("ShaderNodeMath"); hi.operation = "ADD"; hi.inputs[1].default_value = 0.06
+    Lk.new(th.outputs["Result"], lo.inputs[0]); Lk.new(th.outputs["Result"], hi.inputs[0])
+    sm = N.new("ShaderNodeMapRange"); sm.interpolation_type = "SMOOTHSTEP"
+    Lk.new(n2.outputs["Fac"], sm.inputs["Value"])
+    Lk.new(lo.outputs["Value"], sm.inputs["From Min"]); Lk.new(hi.outputs["Value"], sm.inputs["From Max"])
+    al = N.new("ShaderNodeMath"); al.operation = "MULTIPLY"; al.use_clamp = True
+    Lk.new(ln.outputs["Result"], al.inputs[0]); Lk.new(sm.outputs["Result"], al.inputs[1])
+    tr = N.new("ShaderNodeBsdfTransparent")
+    mx = N.new("ShaderNodeMixShader")
+    Lk.new(al.outputs["Value"], mx.inputs["Fac"])
+    Lk.new(tr.outputs["BSDF"], mx.inputs[1]); Lk.new(src, mx.inputs[2])
+    Lk.new(mx.outputs["Shader"], out.inputs["Surface"])
+    return m
+
+
+def brush_material(name, ramp, *, alpha=1.0, edge_soft=0.18, edge_dark=0.35, streak=0.6, streak_from=0.3,
+                   scale=(4.0, 14.0), fade_from=0.6, seed=0.0, glow=0.0, comb=0.0, glow_to=0.5, glow_tip=0.0):
+    """一笔墨（扁带：属性 t 沿长 0..1、edge 横向 -1..1）。颜色按 t 取色带（根浓尖淡），两边略深（水墨的边）；
+    alpha：横向的边被噪声啃毛；沿长过了 fade_from 渐淡；飞白——顺笔拉长的噪声，t 过了 streak_from 以后阈值升高
+    （越往后笔越干、缝越多，streak 是尾端的阈值）；comb > 0 时尾端散成几缕（散锋）。glow：往 AOV 写多少魂光
+    （起笔处最亮，到 t = glow_to 落到 glow_tip）。"""
+    m, nt = B._new_node_material(name)
+    N, Lk = nt.nodes, nt.links
+    at = N.new("ShaderNodeAttribute"); at.attribute_type = "GEOMETRY"; at.attribute_name = "t"
+    ae = N.new("ShaderNodeAttribute"); ae.attribute_type = "GEOMETRY"; ae.attribute_name = "edge"
+    tc = N.new("ShaderNodeTexCoord")
+
+    def math_(op, a, b=None, clamp=False, **kw):
+        n = N.new("ShaderNodeMath"); n.operation = op; n.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                n.inputs[i].default_value = v
+            else:
+                Lk.new(v, n.inputs[i])
+        return n.outputs["Value"]
+
+    def smooth(v, lo, hi, to=(0.0, 1.0)):
+        n = N.new("ShaderNodeMapRange"); n.interpolation_type = "SMOOTHSTEP"
+        for key, val in (("From Min", lo), ("From Max", hi)):
+            if isinstance(val, (int, float)):
+                n.inputs[key].default_value = val
+            else:
+                Lk.new(val, n.inputs[key])
+        n.inputs["To Min"].default_value, n.inputs["To Max"].default_value = to
+        Lk.new(v, n.inputs["Value"])
+        return n.outputs["Result"]
+
+    na = N.new("ShaderNodeTexNoise"); na.noise_dimensions = "4D"; na.inputs["W"].default_value = seed
+    na.inputs["Scale"].default_value = 28.0; na.inputs["Detail"].default_value = 4.0
+    Lk.new(tc.outputs["Object"], na.inputs["Vector"])
+    ne = math_("MULTIPLY_ADD", na.outputs["Fac"], 0.4)
+    N_ = ne.node
+    N_.inputs[2].default_value = -0.2
+    ab = math_("ABSOLUTE", ae.outputs["Fac"])
+    abn = math_("ADD", ab, ne)
+    m_e = smooth(abn, 1.0 - edge_soft, 1.0, (1.0, 0.0))
+    # 飞白
+    cmb = N.new("ShaderNodeCombineXYZ"); cmb.inputs["Z"].default_value = seed * 0.37
+    Lk.new(math_("MULTIPLY", at.outputs["Fac"], scale[0]), cmb.inputs["X"])
+    Lk.new(math_("MULTIPLY", ae.outputs["Fac"], scale[1]), cmb.inputs["Y"])
+    nb = N.new("ShaderNodeTexNoise"); nb.inputs["Scale"].default_value = 1.0
+    nb.inputs["Detail"].default_value = 3.0; nb.inputs["Roughness"].default_value = 0.6
+    Lk.new(cmb.outputs["Vector"], nb.inputs["Vector"])
+    thr = smooth(at.outputs["Fac"], streak_from, 1.0, (0.0, streak))
+    s = smooth(nb.outputs["Fac"], math_("SUBTRACT", thr, 0.05), math_("ADD", thr, 0.05))
+    f = smooth(math_("ADD", at.outputs["Fac"], math_("MULTIPLY", ne, 0.3)), fade_from, 1.0, (1.0, 0.0))
+    al = math_("MULTIPLY", math_("MULTIPLY", m_e, s), f, clamp=True)
+    if comb:  # 散锋：尾端横向按正弦分成几缕
+        sn = math_("SINE", math_("MULTIPLY", ae.outputs["Fac"], comb))
+        cm = smooth(math_("ABSOLUTE", sn), 0.25, 0.6)
+        tail = smooth(at.outputs["Fac"], 0.7, 0.9)
+        keep = math_("SUBTRACT", 1.0, math_("MULTIPLY", tail, math_("SUBTRACT", 1.0, cm)))
+        al = math_("MULTIPLY", al, keep, clamp=True)
+    al = math_("MULTIPLY", al, alpha, clamp=True)
+    cr = N.new("ShaderNodeValToRGB"); cr.color_ramp.interpolation = "LINEAR"
+    for i, (pos, h) in enumerate(ramp):
+        e = cr.color_ramp.elements[i] if i < 2 else cr.color_ramp.elements.new(pos)
+        e.position, e.color = pos, lin(h)
+    Lk.new(at.outputs["Fac"], cr.inputs["Fac"])
+    dk = smooth(ab, 0.55, 1.0, (1.0, 1.0 - edge_dark))  # 两边深一点
+    sc = N.new("ShaderNodeVectorMath"); sc.operation = "SCALE"
+    Lk.new(cr.outputs["Color"], sc.inputs[0]); Lk.new(dk, B.sock(sc.inputs, "Scale"))
+    emi = N.new("ShaderNodeEmission"); Lk.new(sc.outputs["Vector"], emi.inputs["Color"])
+    tr = N.new("ShaderNodeBsdfTransparent")
+    mx = N.new("ShaderNodeMixShader")
+    Lk.new(al, mx.inputs["Fac"]); Lk.new(tr.outputs["BSDF"], mx.inputs[1]); Lk.new(emi.outputs["Emission"], mx.inputs[2])
+    out = N.new("ShaderNodeOutputMaterial")
+    Lk.new(mx.outputs["Shader"], out.inputs["Surface"])
+    if glow:
+        ao = N.new("ShaderNodeOutputAOV"); ao.aov_name = GLOW_AOV
+        Lk.new(smooth(at.outputs["Fac"], 0.0, glow_to, (glow, glow_tip)), ao.inputs["Value"])
+    return m
+
+
+def membrane_alpha(m, center=0.5, power=1.3):
+    """薄膜：正对镜头的地方半透明（center），越到轮廓越实（Facing^power → 1）。"""
+    nt = m.node_tree
+    N, Lk = nt.nodes, nt.links
+    out = next(n for n in N if n.type == "OUTPUT_MATERIAL")
+    src = out.inputs["Surface"].links[0].from_socket
+    lw = N.new("ShaderNodeLayerWeight"); lw.inputs["Blend"].default_value = 0.5
+    pw = N.new("ShaderNodeMath"); pw.operation = "POWER"; pw.inputs[1].default_value = power
+    Lk.new(lw.outputs["Facing"], pw.inputs[0])
+    ma = N.new("ShaderNodeMath"); ma.operation = "MULTIPLY_ADD"; ma.use_clamp = True
+    ma.inputs[1].default_value = 1.0 - center; ma.inputs[2].default_value = center
+    Lk.new(pw.outputs["Value"], ma.inputs[0])
+    tr = N.new("ShaderNodeBsdfTransparent")
+    mx = N.new("ShaderNodeMixShader")
+    Lk.new(ma.outputs["Value"], mx.inputs["Fac"]); Lk.new(tr.outputs["BSDF"], mx.inputs[1]); Lk.new(src, mx.inputs[2])
+    Lk.new(mx.outputs["Shader"], out.inputs["Surface"])
+    return m
+
+
+def flat_strip(name, pts_m, widths_m, side_m, mat, parent, line="none"):
+    """模型坐标里的一条扁带：中线 pts_m，横向沿 side_m（每点一个方向，已归一）展开 widths_m（全宽）。
+    属性 t（沿长 0..1）、edge（横向 -1..1）。每帧重建时用 strip_arrays + kit.replace_mesh。"""
+    V, F, A = strip_arrays(pts_m, widths_m, side_m)
+    return mesh_from_arrays(name, V, F, mat, line, parent, attrs=A, smooth=False)
+
+
+def strip_arrays(pts_m, widths_m, side_m, k=5):
+    n = len(pts_m)
+    verts, ts, es = [], [], []
+    for i in range(n):
+        for j in range(k):
+            e = -1 + 2 * j / (k - 1)
+            verts.append(Vector(pts_m[i]) + Vector(side_m[i]) * (widths_m[i] / 2 * e))
+            ts.append(i / (n - 1))
+            es.append(e)
+    faces = [(i * k + j, i * k + j + 1, (i + 1) * k + j + 1, (i + 1) * k + j) for i in range(n - 1) for j in range(k - 1)]
+    return verts, faces, {"t": ts, "edge": es}
+
+
+# ---------------------------------------------------------------- 设计稿平面里的笔画（疾影、狐火……）
+VZ = 25.0 * math.cos(math.radians(S.CAMERA_PITCH_DEG))  # 设计稿的高（单位）→ 米：除以它
+
+
+def d2m(x, y, lat=0.0):
+    """设计稿（单位，E 向画面，x 前、y 上，锚点为原点）→ 模型坐标（米，前 = -Y）。lat：离镜头的远近（正 = 远）。
+    lat = 0 的点正好落在画面上的 (x, y)。"""
+    return Vector((lat, -x / 25.0, y / VZ))
+
+
+def wave_line(c, amp, ph, lock=0, k=1.1, power=1.2):
+    """二维中线加一道往尾传的波（第 lock 个点以前不动；越往尾摆得越大）。"""
+    n = len(c)
+    t = np.clip((np.arange(n) - lock) / max(n - 1 - lock, 1), 0, 1)
+    tan = np.gradient(c, axis=0)
+    tan /= np.linalg.norm(tan, axis=1, keepdims=True) + 1e-9
+    nrm = np.stack([-tan[:, 1], tan[:, 0]], -1)
+    return c + nrm * (amp * t ** power * np.sin(ph - 2.0 * math.pi * k * t))[:, None]
+
+
+def design_strip(c, w, lat=0.0):
+    """设计稿的中线、宽度（单位）→ 模型坐标的点、宽度（米）、横向（flat_strip / strip_arrays 用）。
+    扁带放在离镜头 lat 米的竖直平面里，正对镜头。"""
+    c = np.asarray(c, np.float64)
+    tan = np.gradient(c, axis=0)
+    tan /= np.linalg.norm(tan, axis=1, keepdims=True) + 1e-9
+    nrm = np.stack([-tan[:, 1], tan[:, 0]], -1)
+    o = d2m(0, 0)
+    pts = [d2m(x, y, lat) for x, y in c]
+    side = [(d2m(nx, ny) - o).normalized() for nx, ny in nrm]  # 设计稿的法向 → 模型竖平面里的方向
+    wm = [float(wi) * (d2m(nx, ny) - o).length for wi, (nx, ny) in zip(w, nrm)]  # 单位 → 米（竖向按 VZ 换算）
+    return pts, wm, side
+
+
 def grid_faces(nu, nv, wrap_u=True):
     """(nv 行 × nu 列) 网格的四边面索引，u 方向首尾相接。"""
     f = []
@@ -356,6 +627,97 @@ def project_patch(tree, center, ring):
             h, n = o + d * t, cn
         out.append((h, n))
     return out
+
+
+def point_in_poly(x, y, poly):
+    """点在不在闭合折线里（射线法）。"""
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % n]
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            inside = not inside
+    return inside
+
+
+def edge_dist(x, y, poly):
+    """点到闭合折线各边的最近距离。"""
+    best = 1e9
+    n = len(poly)
+    for i in range(n):
+        (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % n]
+        dx, dy = x1 - x0, y1 - y0
+        t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / max(dx * dx + dy * dy, 1e-12)))
+        best = min(best, math.hypot(x - x0 - t * dx, y - y0 - t * dy))
+    return best
+
+
+def _hit_or_plane(tree, pts_u):
+    """设计稿上的点投到表面：没命中的点落到最近一个命中点的切平面上（贴片边上一两个点出界也不会整块没了）。"""
+    hits = project_design(tree, pts_u)
+    good = [(i, h, n) for i, (h, n) in enumerate(hits) if h is not None]
+    if not good:
+        return None
+    out = []
+    for i, ((x, y), (h, n)) in enumerate(zip(pts_u, hits)):
+        if h is None:
+            j, c, cn = min(good, key=lambda g: (pts_u[g[0]][0] - x) ** 2 + (pts_u[g[0]][1] - y) ** 2)
+            o, d = screen_ray(x, y)
+            t = (c - o).dot(cn) / d.dot(cn)
+            h, n = o + d * t, cn
+        out.append((h, n))
+    return out
+
+
+def design_patch(name, tree, poly_u, mat, parent, lift=0.004, spacing=0.4, line="none"):
+    """设计稿上的一块闭合形状（单位，E 向画面上画的样子）→ 贴在表面上的网格：边界照原样，里面按 spacing 撒点
+    做约束三角剖分（凹的形状也行），每个点沿视线投到表面上、再沿法线抬起 lift（米）。parent：挂到哪个物体下（局部坐标）。
+    边界上的点（前 len(poly) 个顶点）写属性 rim=1，里面 0。"""
+    from mathutils.geometry import delaunay_2d_cdt
+
+    poly = [tuple(map(float, p)) for p in poly_u]
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    gx = np.arange(min(xs) + spacing / 2, max(xs), spacing)
+    gy = np.arange(min(ys) + spacing / 2, max(ys), spacing * 0.87)
+    pts = list(poly)
+    for j, y in enumerate(gy):
+        for x in gx + (spacing / 2 if j % 2 else 0.0):
+            if point_in_poly(x, y, poly) and edge_dist(x, y, poly) > spacing * 0.35:  # 离边太近的不要（三角形不扁）
+                pts.append((float(x), float(y)))
+    vs, _e, fs, *_ = delaunay_2d_cdt([Vector(p) for p in pts], [], [list(range(len(poly)))], 1, 1e-6)
+    pts2 = [(v.x, v.y) for v in vs]
+    hits = _hit_or_plane(tree, pts2)
+    if hits is None:
+        print(f"  [v2kit] 贴片 {name} 没投上")
+        return None
+    inv = parent.matrix_world.inverted()
+    r3 = inv.to_3x3()
+    verts = [inv @ h + (r3 @ n).normalized() * lift for h, n in hits]
+    ob = mesh_from_arrays(name, verts, [tuple(f) for f in fs], mat, line, parent, smooth=False)
+    B.set_point_attr(ob, "rim", [1.0 if i < len(poly) else 0.0 for i in range(len(verts))])
+    return ob
+
+
+def design_outline(name, tree, poly_u, width_u, mat, parent, lift=0.005, closed=True, step=0.3):
+    """设计稿上一条折线（闭合或不闭合）沿表面勾一道边（宽 width_u 单位，可以是逐点的列表）：脸谱、眼眶的墨边。"""
+    poly = [tuple(map(float, p)) for p in poly_u]
+    if closed:
+        poly = poly + [poly[0]]
+    dense = []
+    for a, b in zip(poly[:-1], poly[1:]):
+        k = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) / step))
+        for t in np.linspace(0, 1, k, endpoint=False):
+            dense.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+    dense.append(poly[-1])
+    hits = _hit_or_plane(tree, dense)
+    if hits is None:
+        return None
+    inv = parent.matrix_world.inverted()
+    r3 = inv.to_3x3()
+    w = np.broadcast_to(np.asarray(width_u, np.float64), (len(dense),)) if np.ndim(width_u) == 0 else \
+        np.interp(np.linspace(0, 1, len(dense)), np.linspace(0, 1, len(width_u)), width_u)
+    return surface_strip(name, [inv @ h for h, _ in hits], [(r3 @ n).normalized() for _, n in hits],
+                         w / S.WORLD_UNITS_PER_M, mat, parent, lift=lift, across=1)
 
 
 def decal_material(name, stops, *, soft=0.55, seed=0.0, wash=0.3, glow=0.0):

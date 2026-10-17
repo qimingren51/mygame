@@ -65,7 +65,7 @@ struct PerfWindow {
 fn spawn_panel(mut commands: Commands, fonts: Res<Fonts>) {
     commands.spawn((
         PerfText,
-        Node { position_type: PositionType::Absolute, left: px(20), top: px(120), ..default() },
+        Node { position_type: PositionType::Absolute, left: px(20), top: px(260), ..default() },
         text(&fonts.body, 14.0, PAPER, ""),
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
         Visibility::Hidden,

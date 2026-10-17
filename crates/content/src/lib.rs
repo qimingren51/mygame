@@ -134,6 +134,21 @@ impl Content {
         }
     }
 
+    /// 命令行的 `--unlock all|<法器 ID>,…`：kite 跑局和游戏看回放共用，同样的参数得到同样的内容哈希，
+    /// kite 带 `--unlock` 录的回放在游戏里带同样的参数就能看。
+    pub fn unlock_arg(&mut self, arg: &str) -> Result<(), String> {
+        if arg == "all" {
+            self.unlock(None);
+            return Ok(());
+        }
+        let ids: Vec<&str> = arg.split(',').map(str::trim).collect();
+        if let Some(bad) = ids.iter().find(|id| !self.run.choices.locked.iter().any(|l| l == *id)) {
+            return Err(format!("--unlock：\"{bad}\" 不在 run.ron 的 choices.locked 里"));
+        }
+        self.unlock(Some(&ids));
+        Ok(())
+    }
+
     /// 法器 d 是否还锁着。
     pub fn weapon_locked(&self, d: usize) -> bool {
         self.run.choices.locked.iter().any(|id| *id == self.weapons[d].id)

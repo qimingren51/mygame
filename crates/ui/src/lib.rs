@@ -97,7 +97,13 @@ impl Plugin for UiPlugin {
                     playing_input.run_if(in_state(RunState::Playing)),
                     settings_ui::refresh_values,
                     settings_ui::sync_feel,
-                    (hud::update_hud, hud::update_slots, hud::update_chips, hud::update_control_hints)
+                    (
+                        hud::update_hud,
+                        hud::update_ult_ticks,
+                        hud::update_slots,
+                        hud::update_chips,
+                        hud::update_control_hints,
+                    )
                         .run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()

@@ -15,7 +15,7 @@ use lantern_view::atlas::AtlasDb;
 use crate::describe::{OfferInfo, Rarity, element_color, hex, offer_info, offer_note};
 use crate::responsive::{CARD_GAP, CARD_HEIGHT, CARD_WIDTH, FitViewport, PANEL_WIDTH_PERCENT};
 use crate::skin::Skin;
-use crate::{DIM, Fonts, INK, INK_DIM, PAPER, on_paper, overlay_vignette, text};
+use crate::{DIM, Fonts, INK_DIM, PAPER, on_paper, overlay_vignette, text};
 
 /// 界面上现在画的是哪一个选择。变了就重画。
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -448,8 +448,10 @@ pub(crate) fn spawn_icon(
 
 fn card_skin(r: Rarity) -> &'static str {
     match r {
-        Rarity::Tian | Rarity::He => "card_tian",
-        Rarity::Xuan | Rarity::Yi => "card_xuan",
+        Rarity::He => "card_he",
+        Rarity::Yi => "card_yi",
+        Rarity::Tian => "card_tian",
+        Rarity::Xuan => "card_xuan",
         Rarity::Ling => "card_ling",
         Rarity::Fan => "card_fan",
     }
@@ -576,7 +578,7 @@ fn card(
             ..default()
         });
         body.with_children(|card| {
-            card.spawn(text(&fonts.title, CARD_NAME_SIZE, INK, &info.name));
+            card.spawn(text(&fonts.title, CARD_NAME_SIZE, PAPER, &info.name));
             card.spawn((
                 Text::new(&info.gain),
                 // 毛笔字体缺少箭头、百分号等字形，用正文补齐
@@ -584,7 +586,7 @@ fn card(
                     font: bevy::text::FontSource::list([fonts.title.clone(), fonts.body.clone()]),
                     ..TextFont::from_font_size(CARD_GAIN_SIZE)
                 },
-                TextColor(on_paper(info.color).mix(&INK, 0.25)),
+                TextColor(info.color.mix(&PAPER, 0.3)),
                 TextLayout::new(Justify::Center, bevy::text::LineBreak::AnyCharacter),
                 Node { width: percent(100), margin: UiRect::top(px(4)), ..default() },
             ));
@@ -602,7 +604,7 @@ fn card(
             // 共鸣、进化、合璧亮色写；普通的只写五行点数
             if let Some(n) = &note {
                 card.spawn((
-                    text(&fonts.body, CARD_NOTE_SIZE, n.color.map_or(INK_DIM, on_paper), &n.title),
+                    text(&fonts.body, CARD_NOTE_SIZE, n.color.unwrap_or(DIM), &n.title),
                     TextLayout::justify(Justify::Center),
                     Node { width: percent(100), margin: UiRect::top(px(8)), ..default() },
                 ));
@@ -620,19 +622,14 @@ fn card(
             ..default()
         })
         .with_children(|foot| {
-            foot.spawn(text(&fonts.body, CARD_LABEL_SIZE, INK_DIM, &info.kind));
+            foot.spawn(text(&fonts.body, CARD_LABEL_SIZE, DIM, &info.kind));
             foot.spawn(Node { align_items: AlignItems::Center, column_gap: px(8), ..default() })
                 .with_children(|right| {
                     if let Some(p) = &info.pair {
-                        let color = on_paper(p.color).with_alpha(if p.owned { 1.0 } else { 0.5 });
+                        let color = p.color.with_alpha(if p.owned { 1.0 } else { 0.4 });
                         spawn_icon(right, db, fonts, Some(&p.icon), &p.glyph, color, PAIR_ICON);
                     }
-                    right.spawn(crate::prompts::hint(
-                        &fonts.title,
-                        18.0,
-                        INK_DIM,
-                        &format!("{{pick{}}}", i + 1),
-                    ));
+                    right.spawn(crate::prompts::hint(&fonts.title, 18.0, DIM, &format!("{{pick{}}}", i + 1)));
                 });
         });
     });
@@ -787,7 +784,7 @@ pub(super) fn spawn_level_up(
                         let mut label = b.spawn(crate::prompts::hint(
                             &fonts.body,
                             16.0,
-                            if enabled { INK } else { INK_DIM },
+                            if enabled { PAPER } else { BTN_OFF },
                             label,
                         ));
                         if k == 0 {
@@ -846,15 +843,15 @@ fn plain_card(
             },
             skin.image("card_focus"),
         ));
-        let c = if enabled { on_paper(color) } else { INK_DIM };
+        let c = if enabled { color } else { DIM };
         spawn_icon(card, db, fonts, icon, glyph, c, 80.0);
         card.spawn(text(&fonts.title, 32.0, c, name));
         card.spawn((
-            text(&fonts.body, 15.0, if enabled { INK } else { INK_DIM }, desc),
+            text(&fonts.body, 15.0, if enabled { PAPER } else { DIM }, desc),
             Node { max_width: px(176), ..default() },
         ));
         card.spawn(Node { flex_grow: 1.0, ..default() });
-        card.spawn(crate::prompts::hint(&fonts.title, 22.0, INK_DIM, &format!("{{pick{}}}", i + 1)));
+        card.spawn(crate::prompts::hint(&fonts.title, 22.0, DIM, &format!("{{pick{}}}", i + 1)));
     });
     card.observe(move |_: On<PointerClick>, mut ui: ResMut<ChoiceUi>| ui.clicked = Some(i));
     card.observe(move |_: On<PointerOver>, mut ui: ResMut<ChoiceUi>| ui.hovered = Some(i));
@@ -1127,6 +1124,8 @@ fn spawn_chest(
 const CHIME_AT: f32 = 0.35;
 const CHIME_GAP: f32 = 0.28;
 const CHEST_GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
+/// 不可用按钮（淡灰横扫）上的字色，取自 skin.json
+const BTN_OFF: Color = Color::srgb(0.561, 0.529, 0.478);
 
 /// 宝箱的金光（docs/FEEL.md 第 5 节）。
 #[derive(Component)]

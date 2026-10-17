@@ -7,13 +7,13 @@
     (id: "shade", name: "影妖", rank: Normal, movement: Chase,
      radius: 13.0, hp: 10.0, speed: 46.0, damage: 5.0, xp: 1.0, sprite: "shade", eye: "#FFC46B"),
     (id: "wisp", name: "疾影", rank: Normal, movement: Chase,
-     radius: 10.0, contact_radius: Some(6.0), hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
+     radius: 10.0, contact_radius: Some(10.0), hp: 6.0, speed: 125.0, damage: 4.0, xp: 1.0, sprite: "wisp", eye: "#9FE3FF"),
     (id: "golem", name: "石妖", rank: Normal, movement: Chase,
-     radius: 19.0, contact_radius: Some(18.0), hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
+     radius: 19.0, contact_radius: Some(14.0), hp: 45.0, speed: 30.0, damage: 10.0, xp: 3.0, sprite: "golem", eye: "#FFB46B"),
     // 青丘的三只新妖物（docs/BALANCE.md 第 12.1 节）。
     // 狐火：在离你 160–220 处绕圈，2–4 秒扑一次：预警 0.4 秒（最后 0.15 秒锁定方向），以 220 直线扑 1 秒，扑中伤害 × 0.6
     (id: "fox_wisp", name: "狐火", rank: Normal, movement: Circle, band: Some((160.0, 220.0)),
-     radius: 10.0, hp: 8.0, speed: 70.0, damage: 5.0, xp: 1.0, sprite: "fox_wisp", eye: "#FFC46B",
+     radius: 10.0, contact_radius: Some(10.0), hp: 8.0, speed: 70.0, damage: 5.0, xp: 1.0, sprite: "fox_wisp", eye: "#FFC46B",
      charge: Some((range: 240.0, every: 3.0, jitter: 1.0, windup: 0.4, lock: 0.15, speed: 220.0, duration: 1.0,
                    damage_mult: 0.6, recover: 0.4))),
     // 竹魅：停在离你 260–320 处，每 3 秒射一根竹刺：预警 0.6 秒（方向锁定），速度 160、伤害 8、存活 3 秒
@@ -28,7 +28,7 @@
     // 原地蓄力 windup 秒（转向跟着主角，出手前 lock 秒锁定方向），然后以 speed 冲 duration 秒，
     // 接触伤害 × damage_mult，冲完停 recover 秒
     (id: "fox", name: "赤面狐", rank: Elite, movement: Chase,
-     radius: 24.0, contact_radius: Some(20.0), hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
+     radius: 24.0, contact_radius: Some(21.0), hp: 320.0, speed: 58.0, damage: 14.0, xp: 20.0, sprite: "fox", eye: "#FF6B5A",
      charge: Some((range: 260.0, every: 4.0, windup: 0.6, lock: 0.25, speed: 320.0, duration: 0.45, damage_mult: 1.5,
                    recover: 0.5))),
     (id: "ghoul", name: "青面鬼", rank: Elite, movement: Chase,
