@@ -51,7 +51,7 @@ WHITE = "#F6F8F8"
 FUR_STOPS = [(0.00, "#323A46"), (0.16, "#4A5564"), (0.30, "#66717F"), (0.44, "#86909C"), (0.56, "#A4AEB8"),
              (0.68, "#C2CAD0"), (0.80, "#DCE2E4"), (0.90, "#EDF1F1"), (1.00, WHITE)]
 EAR_STOPS = [(0.0, "#2C3440"), (0.5, "#56626E"), (0.85, "#7E8A96"), (1.0, "#9AA6B0")]  # 耳背、耳尖：淡青灰
-RUFF_STOPS = [(0.0, "#8692A0"), (0.3, "#C2CAD2"), (0.65, "#EBEFF0"), (1.0, WHITE)]  # 毛领：根灰、尖白
+RUFF_STOPS = [(0.0, "#CDD4DA"), (0.45, "#ECF0F1"), (1.0, WHITE)]  # 毛领边上的笔触：近白
 RUFF_FAR = [(0.0, "#46505C"), (0.4, "#727E8A"), (1.0, "#9EA8B2")]
 FIRE_STOPS = [(0.0, "#3FB8A6"), (0.45, FIRE), (1.0, FIRE_HOT)]
 RIM = S.mix("#DDF6F2", I["qing"], 0.15)
@@ -428,48 +428,55 @@ def ear_arrays(far):
 
 
 # ================================================================ 九尾
-# 扇面（move 时）：根部方向（度，从 +x 逆时针）、长（单位）、尖上离镜头（单位，负 = 近）。双数在前层、单数在后层
-FAN = [(56.0, 58.0, -8.0), (74.0, 64.0, 7.0), (92.0, 68.0, -10.0), (110.0, 68.0, 8.0), (128.0, 66.0, -11.0),
-       (146.0, 62.0, 8.0), (164.0, 56.0, -10.0), (182.0, 50.0, 7.0), (200.0, 44.0, -8.0)]
+# 扇面（move 时）：根部方向（度，从 +x 逆时针）、长（单位）、尖上离镜头（单位，负 = 近）、中段弯（度）。
+# 双数在前层（亮）、单数在后层（暗，长一点，尖从前层后面探出来）；九条长短、弯度略有不同
+FAN = [(56.0, 51.0, -8.0, -24.0), (74.0, 61.0, 7.0, -30.0), (92.0, 61.0, -10.0, -25.0), (110.0, 66.0, 8.0, -33.0),
+       (128.0, 58.0, -11.0, -27.0), (146.0, 61.0, 8.0, -23.0), (164.0, 50.0, -10.0, -30.0), (182.0, 50.0, 7.0, -25.0),
+       (200.0, 39.0, -8.0, -21.0)]
 FAN_MID = 128.0
-TAIL_T = [0.0, 0.1, 0.24, 0.42, 0.6, 0.76, 0.9, 1.0]
-TAIL_R = [1.4, 3.2, 5.2, 5.8, 5.3, 3.9, 1.9, 0.2]  # 根细、中段蓬、往尖收成笔尖（尖上那截是火）
+TAIL_T = [0.0, 0.1, 0.25, 0.45, 0.62, 0.78, 0.91, 1.0]
+TAIL_R = [1.2, 2.9, 5.6, 6.7, 6.2, 4.3, 1.8, 0.2]  # 根细、中段蓬、往尖收成笔尖（尖上那截是火）
 FIRE_FROM = 0.74
 
 
 def tail_layout(anim, frame, n):
-    """每条尾巴：(根部方向, 长, 尖上 z, 中段弯, 波幅, 相位, 炸毛, 火的大小)。"""
+    """每条尾巴：dict(ang 根部方向, ln 长, z 尖上离镜头, bow 中段弯, turn 整条均匀转的角度, wave 波幅, ph 相位,
+    puff 炸毛, fire 火的大小)。"""
     ph = 2 * math.pi * frame / max(n, 1)
     out = []
-    for k, (ang, ln, z) in enumerate(FAN):
-        s = (ang - FAN_MID) / 76.0  # -1（最前）.. 1（最后）
-        ln = ln + (6.0 if k % 2 else 0.0)  # 后层的尖从前层后面探出来
+    for k, (ang, ln, z, bow) in enumerate(FAN):
+        s = (ang - FAN_MID) / 72.0  # -1（最前）.. 1（最后）
+        d = dict(ang=ang, ln=ln, z=z, bow=bow, turn=0.0, wave=4.0, ph=ph + 0.7 * k, puff=1.0, fire=1.0)
         if anim == "move":
-            out.append((ang + 2.5 * math.sin(ph + 0.7 * k), ln, z, -28.0, 4.0, ph + 0.7 * k, 1.0, 1.0))
+            d["ang"] = ang + 2.5 * math.sin(ph + 0.7 * k)
         elif anim == "sweep":
-            # 0 往上收拢；1 从背上往前拱（预警停在这）；2 往前下方扫；3 扫到身前低处；4、5 收回扇面
-            T = [(112 + 30 * s, 0.95, -6.0, 1.1, 1.2), (70 + 34 * s, 1.0, -26.0, 1.25, 1.7),
-                 (22 + 34 * s, 1.0, -20.0, 1.2, 1.6), (-8 + 30 * s, 0.95, -8.0, 1.1, 1.2),
-                 (100 + 60 * s, 0.98, -10.0, 1.0, 1.0), (ang - 3.0, 1.0, -10.0, 1.0, 1.0)][frame]
-            a0, lk, bow, puff, fire = T
-            out.append((a0, ln * lk, z, bow, 2.0, ph + 0.5 * k, puff, fire))
+            # 0 往上收拢；1 从背上往前拱（尖朝前，预警停在这）；2 往前下方砸；3 扫到身前低处；4、5 收回扇面
+            a0, turn, bw, lk, puff, fire = [(102 + 24 * s, -14.0, -10.0, 0.96, 1.1, 1.2),
+                                            (96 + 16 * s, -150.0, 0.0, 1.0, 1.25, 1.7),
+                                            (72 + 14 * s, -175.0, 0.0, 1.05, 1.2, 1.6),
+                                            (52 + 12 * s, -150.0, 0.0, 1.05, 1.1, 1.3),
+                                            (104 + 40 * s, -60.0, -10.0, 1.0, 1.0, 1.1),
+                                            (ang - 3.0, -8.0, bow, 1.0, 1.0, 1.0)][frame]
+            d.update(ang=a0, turn=turn, bow=bw, ln=ln * lk, puff=puff, fire=fire, wave=2.0, ph=ph + 0.5 * k)
         else:  # summon：张到最开、尾尖青火一盏盏腾起来
-            spread = [1.0, 1.12, 1.15, 1.06][frame]
-            fire = [1.2, 1.6, 1.9, 1.4][frame]
-            out.append((FAN_MID + (ang - FAN_MID) * spread, ln, z, -18.0, 3.0, ph + 0.5 * k,
-                        1.0 + 0.1 * (frame in (1, 2)), fire))
+            spread = [1.0, 1.1, 1.13, 1.05][frame]
+            d.update(ang=FAN_MID + (ang - FAN_MID) * spread, bow=bow * 0.7, wave=3.0, ph=ph + 0.5 * k,
+                     puff=1.0 + 0.12 * (frame in (1, 2)), fire=[1.2, 1.6, 1.9, 1.4][frame])
+        out.append(d)
     return out
 
 
-def tail_curve(root, ang, ln, z_tip, bow, wave, ph, n=26):
-    """一条尾巴的中线（设计稿三维）：根部方向 ang，中段往顺时针弯 bow、尖往回勾（S 形），尖略往外张，带一道往尖传的波。"""
+def tail_curve(root, d, n=26):
+    """一条尾巴的中线（设计稿三维）：根部方向 ang，中段往顺时针弯 bow、尖往回勾（S 形），整条再均匀转 turn，
+    尖略往外张，带一道往尖传的波。"""
+    ang, ln, z_tip, bow, turn, wave, ph = (d[k] for k in ("ang", "ln", "z", "bow", "turn", "wave", "ph"))
     pts = [np.asarray(root, np.float64)]
     step = ln / n
-    spread = (ang - FAN_MID) * 0.18
+    spread = (ang - FAN_MID) * 0.18 * (1.0 - min(1.0, abs(turn) / 90.0))
     zr = 1.5 if z_tip > 0 else -1.5
     for i in range(n):
         t = (i + 0.5) / n
-        a = (ang + bow * math.sin(math.pi * t) - bow * 1.4 * t ** 3 + spread * t
+        a = (ang + bow * math.sin(math.pi * t) - bow * 1.4 * t ** 3 + spread * t + turn * t
              + wave * math.sin(ph - 2.4 * t) * (0.25 + 0.75 * t))
         r = math.radians(a)
         q = pts[-1] + step * np.array([math.cos(r), math.sin(r), 0.0])
@@ -499,16 +506,18 @@ def tail_arrays(c, puff):
     tan = np.gradient(c[:, :2], axis=0)
     tan /= np.linalg.norm(tan, axis=1, keepdims=True) + 1e-9
     n = len(c)
-    for j in range(11):
-        tt = 0.14 + 0.66 * j / 10
+    rng = np.random.default_rng(int(abs(c[-1, 0]) * 10) % 97)
+    for j in range(18):
+        tt = 0.12 + 0.68 * j / 17 + rng.uniform(-0.015, 0.015)
         i = int(tt * (n - 1))
         side = 1 if j % 2 else -1
         r = tail_radius(tt, puff)
         nr = np.array([-tan[i, 1], tan[i, 0]]) * side
-        a = math.radians(math.degrees(math.atan2(tan[i, 1], tan[i, 0])) + side * 24.0)
-        root = c[i] + np.array([nr[0], nr[1], 0.0]) * r * 0.55
-        tip = root + np.array([math.cos(a), math.sin(a), 0.0]) * (r * 1.0 + 2.6)
-        Vt, Ft, At = cone_arrays(root, tip, r * 0.42, nu=10, nv=6)
+        a = math.radians(math.degrees(math.atan2(tan[i, 1], tan[i, 0])) + side * rng.uniform(18.0, 30.0))
+        dz = rng.uniform(-0.35, 0.35) * r * 0.8
+        root = c[i] + np.array([nr[0], nr[1], 0.0]) * r * 0.5 + np.array([0.0, 0.0, dz])
+        tip = root + np.array([math.cos(a), math.sin(a), 0.0]) * (r * rng.uniform(1.0, 1.35) + 2.8)
+        Vt, Ft, At = cone_arrays(root, tip, r * 0.45, nu=10, nv=6)
         m = len(Vt)
         parts.append((Vt, Ft, {"su": [tt] * m, "sv": At["sv"], "fade": [tt] * m, "fire": [0.0] * m,
                                "hot": [0.0] * m, "zone": [0.0] * m}))
@@ -546,38 +555,57 @@ def tuft(p, root, ang, length, r0, dz=0.0):
     return cone(p, root, tip, r0, 0.3)
 
 
-def ruff_sdf(sk, ph):
-    """胸前、颈下一圈蓬松的白毛领：颈根一圈厚毛（比颈粗、往前鼓），正前方一排尖毛往前下撑出胸前的剪影，
-    近侧几簇往后下披、盖住颈根和肩的接缝。"""
+def ruff_lobes(sk):
+    """毛领的几团毛量：(中心, 半径, 朝向角（度）, 边上收笔触的弧段（度）)。外形是柔的，几团之间糅开。"""
     tb = sk["tb"]
     hp = sk["head_piv"]
-    path = bez(hp + v3(-2.0, -4.5), tb(v3(37.0, 38.0)), tb(v3(30.0, 23.0)), 5)
-    masses = [(path[1] + v3(-2.0, 0.0), (6.0, 5.6, 7.6)), (path[3] + v3(-2.5, 0.5), (7.0, 6.5, 9.0))]
-    tufts = []
-    for k, q in enumerate(path):  # 正前方：往前下撑
-        f = math.sin(math.pi * (k + 0.5) / len(path))
-        a = -38.0 - 14.0 * k + 4.0 * math.sin(ph + k)
-        tufts.append((q + v3(0.5, -1.0, 0.0), a, 7.5 + 4.0 * f, 3.6))
     n0 = tb(NECK0)
-    rng = np.random.default_rng(3)
-    for k in range(5):  # 颈侧：三排往后下披的毛，一簇簇像瓦片一样叠着（近侧满铺，远侧一排）
-        for j in range(3):
-            q = n0 + (hp - n0) * (0.1 + 0.16 * k) + v3(1.5 - 1.2 * j, 2.5 - 4.2 * j, -6.6 - 0.5 * j)
-            a = -130.0 + 10 * j + 4 * k + 3.0 * math.sin(ph + k + j) + rng.uniform(-6, 6)
-            tufts.append((q, a, 6.5 + 1.6 * j + rng.uniform(-1, 1), 2.4 + 0.3 * j))
-            if j == 1:
-                tufts.append((q * np.array([1, 1, -1]), a, 7.5, 2.6))
+    u = hp - n0
+    ua = math.degrees(math.atan2(u[1], u[0]))
+    mid = n0 + u * 0.45
+    lobes = [(tb(v3(34.0, 32.0)), (6.5, 10.5, 8.0), -14.0, (-150.0, 40.0)),  # 胸前一兜：往前鼓、往下垂
+             ((hp + tb(v3(34.0, 34.0))) / 2 + v3(0.5, -1.0), (5.5, 6.5, 6.6), ua - 90.0, (-120.0, 20.0)),  # 颈下
+             (mid + v3(-1.0, -3.0, -5.6), (11.5, 6.8, 3.4), ua - 28.0, (-200.0, -40.0)),  # 颈侧（近）：一大片往后下披
+             (n0 + v3(-4.0, -5.5, -6.6), (9.5, 7.0, 3.2), -138.0, (-120.0, 60.0)),  # 颈根盖肩（近）
+             (mid + v3(-1.0, -3.0, 5.6), (11.5, 6.8, 3.4), ua - 28.0, (-200.0, -40.0))]  # 颈侧（远）
+    return lobes
+
+
+def ruff_sdf(sk, ph):
+    """胸前、颈下一圈蓬松的白毛领：几团柔的毛量糅在一起（颈侧往后下披的只有一层，宽而软）。"""
+    lobes = ruff_lobes(sk)
 
     def fn(p):
         d = None
-        for c, r in masses:
-            v = ell(p, c, r)
-            d = v if d is None else V2.smin(d, v, 4.0)
-        for root, a, ln, r0 in tufts:
-            d = V2.smin(d, tuft(p, root, a, ln, r0), 0.8)
+        for c, r, a, _ in lobes:
+            v = ell(p, c, r, rotz(a))
+            d = v if d is None else V2.smin(d, v, 3.5)
         return d
-    pts = [c for c, _ in masses] + [t[0] for t in tufts]
-    return fn, pts
+    return fn, [c for c, *_ in lobes]
+
+
+def ruff_strokes(sk, ph):
+    """毛领边上收的笔触尖毛：沿每团毛量的外缘（下沿、后沿）一簇簇往外、往后下撇，根藏在毛量底下。"""
+    rng = np.random.default_rng(5)
+    out = []
+    down = np.array([math.cos(math.radians(-112.0)), math.sin(math.radians(-112.0))])
+    for li, (c, r, a, (t0, t1)) in enumerate(ruff_lobes(sk)):
+        if c[2] > 2.0:  # 远侧的看不见
+            continue
+        R = rotz(a)[:2, :2]
+        nseg = int(abs(t1 - t0) / 13.0) + 2
+        for th in np.linspace(t0, t1, nseg):
+            th = math.radians(th + rng.uniform(-4, 4))
+            e = R @ np.array([r[0] * math.cos(th), r[1] * math.sin(th)])
+            nrm = R @ np.array([math.cos(th) / r[0], math.sin(th) / r[1]])
+            nrm /= np.linalg.norm(nrm)
+            dv = nrm + 0.9 * down
+            ang = math.degrees(math.atan2(dv[1], dv[0])) + 3.0 * math.sin(ph + th * 3)
+            root = c + np.array([e[0] * 0.82, e[1] * 0.82, -0.6 - (r[2] * 0.25 if c[2] < -2 else 0.0)])
+            ln = rng.uniform(5.5, 8.0)
+            out.append(stroke_arrays(arc(root, ang, ang - 16.0 * np.sign(nrm[0] + 1e-6), ln, n=7, z=root[2]),
+                                     rng.uniform(1.9, 2.6), taper=0.6, w_end=0.1))
+    return out
 
 
 # 身子上的几簇毛（身子局部）：胸下一排往后下垂、尾根一圈往扇面方向炸开（盖住九条尾巴的根）
@@ -645,8 +673,8 @@ def build_boss():
     M["ear"] = V2.paint_material("JWEar", EAR_STOPS, wash=0.2, seed=11.0, rim_hex=RIM, rim=0.5, edge=0.1,
                                  shade_attr="zone")
     mix_attr(M["ear"], "inner", "#8E9AA6", 0.85)
-    brush = dict(alpha=1.0, edge_soft=0.3, edge_dark=0.25, streak=0.45, streak_from=0.35, scale=(3.0, 10.0),
-                 fade_from=0.75, comb=5.0)
+    brush = dict(alpha=1.0, edge_soft=0.35, edge_dark=0.12, streak=0.4, streak_from=0.4, scale=(3.0, 10.0),
+                 fade_from=0.7, comb=4.0)
     M["ruff"] = V2.brush_material("JWRuff", RUFF_STOPS, seed=21.0, **brush)
     M["ruff_far"] = V2.brush_material("JWRuffFar", RUFF_FAR, seed=22.0, **brush)
     M["flame"] = V2.brush_material("JWFlame", FIRE_STOPS, alpha=0.95, edge_soft=0.3, edge_dark=0.0, streak=0.35,
@@ -667,7 +695,8 @@ def build_boss():
     D["Claws"] = _dummy("JWClaws", M["ink"], "none", body)
     for k in range(len(FAN)):
         D[("tail", k)] = _dummy(f"JWTail{k}", M["tail_far"] if k % 2 else M["tail"], "outer", body)
-    D["Ruff"] = _dummy("JWRuff", M["mane"], "outer", body, cun=True)
+    D["Ruff"] = _dummy("JWRuff", M["mane"], "inner", body)
+    D["RuffFur"] = _dummy("JWRuffFur", M["ruff"], "none", body)
     D["Flames"] = _dummy("JWFlames", M["flame"], "none", body)
     # 头：静止的网格（已低头），每帧只摆位置、转角
     Vh, Fh, Ah = _head_arrays()
@@ -800,17 +829,19 @@ def frame_arrays(anim, frame, n):
     out["Claws"] = V2.merge_arrays(claws)
     # 九尾
     fur_n, fur_f, flames = [], [], []
-    for k, (ang, ln, z, bow, wave, ph, puff, fire) in enumerate(tail_layout(anim, frame, n)):
-        c = tail_curve(sk["tail_root"], ang + p["pitch"], ln, z, bow, wave, ph)
-        out[("tail", k)] = tail_arrays(c, puff)
-        flames.extend(tail_flames(c, fire, ph + 1.3 * k, c[-1, 2]))
+    for k, d in enumerate(tail_layout(anim, frame, n)):
+        d["ang"] += p["pitch"]
+        c = tail_curve(sk["tail_root"], d)
+        out[("tail", k)] = tail_arrays(c, d["puff"])
+        flames.extend(tail_flames(c, d["fire"], d["ph"] + 1.3 * k, c[-1, 2]))
     out["Flames"] = V2.merge_arrays(flames)
     fr, pts = ruff_sdf(sk, p["ph"])
 
     def mane_attrs(V):
         return {"zone": list(0.1 + 0.0 * V[:, 0]), "su": list((V[:, 1] - 10.0) / 50.0),
                 "sv": list(np.arctan2(V[:, 2], V[:, 0] - 30.0) / (2 * math.pi))}
-    out["Ruff"] = V2.sdf_arrays(fr, np.min(pts, 0) - 13.0, np.max(pts, 0) + 13.0, 0.42, mane_attrs)
+    out["Ruff"] = V2.sdf_arrays(fr, np.min(pts, 0) - 14.0, np.max(pts, 0) + 14.0, 0.45, mane_attrs)
+    out["RuffFur"] = V2.merge_arrays(ruff_strokes(sk, p["ph"]))
     return out, sk
 
 
@@ -819,7 +850,7 @@ def pose_boss(parts, anim, frame, n):
     for key, ob in parts["dyn"].items():
         V, F, A = arrs[key]
         K.replace_mesh(ob, V2.arrays_build(V, F), smooth=not (isinstance(key, str) and key in (
-            "Flames",)), attrs=A)
+            "Flames", "RuffFur")), attrs=A)
     head = parts["head"]
     head.location = Vector(V2.d3m(sk["head_piv"]))
     head.rotation_euler = (math.radians(-sk["head_rot"]), 0.0, 0.0)
