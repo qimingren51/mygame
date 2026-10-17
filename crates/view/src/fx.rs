@@ -1232,7 +1232,8 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 熔金：易伤的妖物身上一枚循环的熔金印记，罩住妖物，最后 0.5 秒淡掉；“隐”着的不画。
+    // ---- 熔金：易伤的妖物身上一枚循环的熔金印记，最后 0.5 秒淡掉；“隐”着的不画。妖物的位置在脚底，
+    // 印记抬到身子中间（1.5 倍碰撞半径高），圈比碰撞半径大一些才罩得住身子（试拍：照碰撞半径画只有脚边一小圈）。
     // 同时熔金的可能很多，只画离主角最近的 MELT_MAX 只
     if let Some(en) = &res.enemies
         && !f.melt.is_empty()
@@ -1255,8 +1256,8 @@ pub(crate) fn collect_fx(
             let Some(frame) = looped(&f.melt, now + en.wob[i], 10.0) else { continue };
             glow.add(
                 frame,
-                p.extend(layer::EMISSIVE - 0.3),
-                Vec2::splat(en.r[i] / r0),
+                (p + Vec2::Y * en.r[i] * 1.5).extend(layer::EMISSIVE - 0.3),
+                Vec2::splat(en.r[i] * 1.6 / r0),
                 0.0,
                 hdr(Color::WHITE, 1.2).with_alpha((en.melt_t[i] / 0.5).min(1.0) * 0.9),
             );
