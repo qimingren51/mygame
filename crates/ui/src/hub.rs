@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use lantern_content::{Content, Reward};
+use lantern_content::{AchievementWhen, Content, Reward};
 use lantern_platform::{Actions, HubNews, Profile};
 use lantern_view::atlas::AtlasDb;
 
@@ -218,7 +218,7 @@ fn frame(
                 skin.image("btn_focus"),
             ));
             clickable(&mut back, 0);
-            back.with_child(crate::prompts::hint(&fonts.body, 18.0, INK, "{confirm} / {back} 返回"));
+            back.with_child(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} / {back} 返回"));
         } else {
             p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, hint));
         }
@@ -378,6 +378,9 @@ fn reward_text(c: &Content, r: &Reward) -> String {
         }
         Reward::Gold(n) => format!("{n} 铜钱"),
         Reward::Oil(n) => format!("{n} 灯油"),
+        Reward::Weapon(id) => {
+            format!("法器「{}」", c.weapon_index(id).map_or(id.as_str(), |k| c.weapons[k].name.as_str()))
+        }
     }
 }
 
@@ -455,6 +458,8 @@ pub(crate) const CODEX_TAB: usize = 100;
 /// 图鉴里的一格：拿到过的写名字、短句和背景故事，没拿到过的只留个空位。
 struct CodexEntry {
     key: String,
+    /// 没拿到过时写的那一行；None 写“还没拿到过”（锁着的写怎么解锁，docs/LORE-TEXT.md 第 6.9 节）
+    hint: Option<String>,
     icon: String,
     glyph: String,
     color: Color,
@@ -464,16 +469,15 @@ struct CodexEntry {
 }
 
 /// 法器页：每件法器一行（本体、进化、异化），最后一行合璧；异化与合璧关着时不列。
-/// 还锁着的法器（`run.ron` 的 `choices.locked`）拿到过才列，免得满页都是拿不到的空位。
+/// 还锁着的法器（存档没解锁）照样列，空位上写怎么解锁。
 fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
     let mut rows = Vec::new();
     for (d, w) in c.weapons.iter().enumerate() {
-        if c.weapon_locked(d) && !profile.codex.contains(&format!("w:{}", w.id)) {
-            continue;
-        }
+        let hint = (!profile.weapon_unlocked(c, &w.id)).then(|| unlock_hint(c, d));
         let color = element_color(c, w.element);
         let mut row = vec![CodexEntry {
             key: format!("w:{}", w.id),
+            hint: hint.clone(),
             icon: format!("ui/icon_{}", w.id),
             glyph: w.icon.clone(),
             color,
@@ -484,6 +488,7 @@ fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
         if let Some(e) = &w.evolution {
             row.push(CodexEntry {
                 key: format!("w:{}_evo", w.id),
+                hint: hint.clone(),
                 icon: format!("ui/icon_{}_evo", w.id),
                 glyph: w.icon.clone(),
                 color,
@@ -495,6 +500,7 @@ fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
         if let Some(m) = w.mutation.as_ref().filter(|_| c.run.transformations) {
             row.push(CodexEntry {
                 key: format!("w:{}_mut", w.id),
+                hint: hint.clone(),
                 icon: format!("ui/icon_{}_evo", w.id),
                 glyph: "异".into(),
                 color: crate::describe::Rarity::Yi.color(),
@@ -511,6 +517,7 @@ fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
                 .iter()
                 .map(|f| CodexEntry {
                     key: format!("f:{}", f.id),
+                    hint: None,
                     icon: format!("ui/icon_{}_evo", f.weapons[0]),
                     glyph: "合".into(),
                     color: crate::describe::Rarity::He.color(),
@@ -524,13 +531,30 @@ fn weapon_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
     rows
 }
 
-/// 心法页：三个一行。
-fn passive_entries(c: &Content) -> Vec<Vec<CodexEntry>> {
+/// 还锁着的法器（存档没解锁）在图鉴里写怎么拿：进化或异化哪件老法器（看成就），没有对应成就就写保底。
+fn unlock_hint(c: &Content, d: usize) -> String {
+    let id = &c.weapons[d].id;
+    c.achievements
+        .iter()
+        .filter(|a| a.rewards.iter().any(|r| matches!(r, Reward::Weapon(w) if w == id)))
+        .find_map(|a| match &a.when {
+            AchievementWhen::Evolved(old) => c.weapon_index(old).map(|k| c.weapons[k].name.clone()),
+            _ => None,
+        })
+        .map_or_else(|| "多走几夜就能拿到".into(), |old| format!("{old}进化或异化后可得"))
+}
+
+/// 心法页：三个一行。锁着的法器的进化心法写“<新法器>解锁后可得”。
+fn passive_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
     let all: Vec<CodexEntry> = c
         .passives
         .iter()
-        .map(|p| CodexEntry {
+        .enumerate()
+        .map(|(k, p)| CodexEntry {
             key: format!("p:{}", p.id),
+            hint: (0..c.weapons.len())
+                .find(|&d| c.weapon_key(d) == Some(k) && !profile.weapon_unlocked(c, &c.weapons[d].id))
+                .map(|d| format!("{}解锁后可得", c.weapons[d].name)),
             icon: format!("ui/icon_{}", p.id),
             glyph: p.name.chars().next().map(String::from).unwrap_or_default(),
             color: crate::describe::passive_color(c, p.element),
@@ -570,7 +594,7 @@ fn codex_cell(p: &mut ChildSpawnerCommands, fonts: &Fonts, db: &AtlasDb, e: &Cod
                 cell.spawn(para(fonts, 13.0, INK_DIM, &e.flavor, 316.0));
             }
         } else {
-            cell.spawn(para(fonts, 14.0, INK_DIM, "还没拿到过", 316.0));
+            cell.spawn(para(fonts, 14.0, INK_DIM, e.hint.as_deref().unwrap_or("还没拿到过"), 316.0));
         }
     });
 }
@@ -588,7 +612,7 @@ pub(crate) fn codex_panel(
     let page = page.min(CODEX_PAGES.len() - 1);
     let rows = match page {
         1 => weapon_entries(c, profile),
-        2 => passive_entries(c),
+        2 => passive_entries(c, profile),
         _ => Vec::new(),
     };
     let count = |rows: &[Vec<CodexEntry>]| {

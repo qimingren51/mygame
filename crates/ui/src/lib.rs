@@ -50,6 +50,10 @@ pub use replay_ui::ReplaySeek;
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct SeedOverride(pub Option<u64>);
 
+/// 命令行开启的无敌调试（`--god`），应用于本次启动后手动开始的每一局。
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct GodMode(pub bool);
+
 #[derive(Resource)]
 pub(crate) struct Fonts {
     title: Handle<Font>,
@@ -87,6 +91,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SeedOverride>()
+            .init_resource::<GodMode>()
             .init_resource::<lantern_platform::HubNews>()
             .add_systems(Startup, (load_fonts, skin::load_skin, scroll::preload))
             .add_systems(OnEnter(AppState::Run), hud::spawn_hud)
@@ -97,7 +102,13 @@ impl Plugin for UiPlugin {
                     playing_input.run_if(in_state(RunState::Playing)),
                     settings_ui::refresh_values,
                     settings_ui::sync_feel,
-                    (hud::update_hud, hud::update_slots, hud::update_chips, hud::update_control_hints)
+                    (
+                        hud::update_hud,
+                        hud::update_ult_ticks,
+                        hud::update_slots,
+                        hud::update_chips,
+                        hud::update_control_hints,
+                    )
                         .run_if(in_state(AppState::Run)),
                     (bench::drive, bench::finish_input)
                         .chain()
