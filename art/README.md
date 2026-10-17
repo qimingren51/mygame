@@ -132,7 +132,7 @@ art/.venv/bin/python art/post/test_weapon_textures.py   # 自检（会先重新�
 ## 界面图标、地面装饰与一键生成（post/ui_icons.py、post/ground_decor.py、post/make_2d.py）
 
 ```bash
-art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图（约 6 分钟）
+art/.venv/bin/python art/post/make_2d.py            # 1 倍和 2 倍各生成一遍 vfx、weapons、ground、ui 和审图，2 倍另出逐帧特效和新法器（约 9 分钟）
 art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 LANTERN_ART_DENSITY 时会 1 倍、2 倍各跑一遍
 ```
 
@@ -154,7 +154,7 @@ art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out as
 art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns $A/fox_shrine_grand $A/fox_gate $A/fox_eave_lamp $A/fox_eave_lamp_lit
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
-art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves
+art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
 mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
@@ -327,6 +327,39 @@ art/.venv/bin/python art/post/test_fx_extras.py   # 自检 13 项（尺寸、白
 - `vfx/bamboo_leaf_0..3`：竹丛打碎时飞的竹叶；
 - `screens/scroll_roller.png`：开场卷轴展开时跟着那道边走的轴头。
 格式和用法见 `docs/DESIGN.md` 第 15 节。打包时 `ui_wash` 跟 ui 一起用 `--no-trim`，`vfx_leaves` 跟 vfx 一起打。
+
+## 逐帧特效（post/vfx_frames.py）
+
+```bash
+art/.venv/bin/python art/post/vfx_frames.py        # → out/assets@2x/vfx_frames/，审图 review@2x/vfx_frames_<批>.png、vfx_frames_<批>_ingame.png（约 4 分钟；后面跟 b1 / b2 只画那一批）
+art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 22 项（清单、meta、颜色、四边、亮度 0.8、淡出、朝向、压扁、火往上窜、冰碎飞散、羽毛、进化、光柱、确定性、只写自己的文件、图集）；--quick 跳过确定性，--regen 强制重画
+```
+
+只出 2 倍，Pillow + numpy，不用 Blender。质感会话的逐帧特效清单（`docs/FEEL.md`“逐帧特效图”一节）一批一批做：
+- 第一批：五行命中 `hit_{metal,wood,water,fire,earth}_0..4`、暴击 `crit_0..3`、刀光 `slash_0..5`、击杀墨花 `kill_ink_0..5`、冲击波 `shockwave_0..5`。
+- 第二批：火爆 `fire_burst_0..6`（384²，按 1080p 约一比一放大了清单的 256²）和它的墨烟 `fire_burst_smoke_0..1`（普通混合）、
+  冰碎 `ice_shatter_0..5`、羽毛纸屑粒子 `feather_0..3`（4 种，不是动画）、进化爆发 `evolve_0..7`、进化光柱 `evolve_pillar_0..5`。
+帧名 `vfx/<名字>_<帧号>`，跟 vfx 一起打包（`$A/vfx_frames`）。meta、画布、锚点和游戏里的用法见 `docs/DESIGN.md` 第 15 节“逐帧特效”。
+
+- 叠加帧在超采样的亮度场里画（笔毛纹理的飞白、干笔断续），最后软饱和到 alpha 0.8、蓝噪声抖动；可染的 RGB 恒为白。
+- `slash` 的画布从清单的 256×128 改成 256×448（锚点在弧心 (16, 224)，外沿半径 200 像素），放大到铜钱剑的扫击半径时不糊。
+- 审图：每组一条纸色底、一条夜色底（宣纸 × 月夜底色）的帧条；`_ingame` 是 1080p 的近似游戏画面（月夜底色 + 灯笼光照池），特效按实际大小摆。
+
+## 抢先体验的新法器（post/weapon_textures_ea.py）
+
+```bash
+art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>[_<场面>]_ingame.png（约 2 分钟）
+art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 16 项（清单、meta、单帧不超过 1024²、1080p 下约一比一、颜色、四边、亮度、淡出、朝向、扇形扫满且从上往下、旋风是一整圈且顺时针转、十字两道、确定性、只写自己的文件、图集）
+```
+
+只出 2 倍，Pillow + numpy；画法、帧的约定和审图都沿用 `vfx_frames.py`。`docs/BALANCE.md` 6.3 节五件新法器的“画面”一件一件做，
+帧名 `weapons/<名字>_<帧号>`（meta 的 name 是 weapons），跟 vfx 一起打包（`$A/weapons_ea`）。格式见 `docs/DESIGN.md` 第 15 节“抢先体验的新法器”。
+
+- 跟玩法半径走的大帧按 1080p 下约一比一出图（1 世界单位 ≈ 2.57 屏幕像素），单帧不超过 1024²，meta 写 `radius_px`；
+  大画布按行分条算（`tiled`），只在有东西的像素上算（掩码），省内存也快。
+- 铜钱剑（扫击半径 140–170，天罡 200）：挥击的扇形剑气 `coin_slash_0..5`（512×896，`radius_px` 440，刃口闪出铜钱影子）、
+  命中的铜钱火星 `coin_spark_0..4`（自带铜金色）、天罡的旋风 `coin_whirl_0..5`（1024²，`radius_px` 464）和再斩的十字斩痕
+  `coin_cross_0..3`；除火星外都是白色可染，建议铜金 #F2C46A。
 
 ## 灯驿长卷（post/hub_scroll.py）
 
