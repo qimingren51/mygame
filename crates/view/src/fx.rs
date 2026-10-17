@@ -118,6 +118,13 @@ pub(crate) struct FxFrames {
     vine_loop: Vec<FrameId>,
     vine_pulse: Vec<FrameId>,
     vine_bind: Vec<FrameId>,
+    /// 浪头、收尾、泡沫痕、藤、缠绕的底色层（美术的 `<名字>_body`，普通混合、不染色，和叠加层同画布、同锚点、
+    /// 同帧号）：画在暗层之下，灯下的暖纸面上浪和藤才有实体；没有就只画叠加层
+    wave_body: Vec<FrameId>,
+    wave_fade_body: Vec<FrameId>,
+    wave_trail_body: Option<FrameId>,
+    vine_body: Vec<FrameId>,
+    vine_bind_body: Vec<FrameId>,
     /// 美术的孔明灯（飘着、坠下）、落点圈、火海
     sky_float: Anim,
     sky_fall: Anim,
@@ -211,6 +218,11 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         vine_loop: sequence(&db, "weapons/vine"),
         vine_pulse: sequence(&db, "weapons/vine_pulse"),
         vine_bind: sequence(&db, "weapons/vine_bind"),
+        wave_body: sequence(&db, "weapons/wave_front_body"),
+        wave_fade_body: sequence(&db, "weapons/wave_front_fade_body"),
+        wave_trail_body: db.find("weapons/wave_trail_body_0"),
+        vine_body: sequence(&db, "weapons/vine_body"),
+        vine_bind_body: sequence(&db, "weapons/vine_bind_body"),
         sky_float: Anim::load(&db, "weapons/sky_lantern"),
         sky_fall: Anim::load(&db, "weapons/sky_lantern_fall"),
         lantern_mark: db.find("weapons/lantern_mark_0"),
@@ -617,10 +629,19 @@ fn looped(frames: &[FrameId], t: f32, fps: f32) -> Option<FrameId> {
     (!frames.is_empty()).then(|| frames[(t.max(0.0) * fps) as usize % frames.len()])
 }
 
-/// 浪头图里半个浪宽的像素（美术的 half_width_px）、泡沫痕的高；藤图的宽高（整张高对应 10 世界单位）
+/// 叠加层 `frame` 在 `frames` 里的帧号对应的底色层（美术的 `<名字>_body`）；帧数对不上就不画。
+fn body_of(frames: &[FrameId], bodies: &[FrameId], frame: FrameId) -> Option<FrameId> {
+    if frames.len() != bodies.len() {
+        return None;
+    }
+    frames.iter().position(|&f| f == frame).map(|i| bodies[i])
+}
+
+/// 浪头图里半个浪宽的像素（美术的 half_width_px）、泡沫痕的高；藤图的宽高（整张高对应 VINE_UNITS 世界单位）
 const WAVE_HALF_PX: f32 = 216.0;
 const WAVE_TRAIL_PX: f32 = 256.0;
-const VINE_PX: Vec2 = Vec2::new(512.0, 40.0);
+const VINE_PX: Vec2 = Vec2::new(512.0, 64.0);
+const VINE_UNITS: f32 = 16.0;
 /// 缠绕图在缩放为 1 时缠住的妖物半径（美术的 radius_px）
 const VINE_BIND_RADIUS_PX: f32 = 56.0;
 /// 浪走到这一段以后换收尾的帧
@@ -2386,16 +2407,35 @@ fn draw_new_weapons(
                 art
             };
             // 泡沫痕：锚点在下边正中，横向和浪头一样宽，竖向拉到浪走过的长度
+            let trail_scale = Vec2::new(k, s / (WAVE_TRAIL_PX / ppu));
             if let Some(trail) = f.wave_trail {
                 glow.add(
                     trail,
                     front.extend(layer::EMISSIVE - 0.1),
-                    Vec2::new(k, s / (WAVE_TRAIL_PX / ppu)),
+                    trail_scale,
                     rot,
                     color.with_alpha(0.55 * fade),
                 );
             }
             glow.add(frame, front.extend(layer::EMISSIVE), Vec2::splat(k), rot, color.with_alpha(0.9));
+            // 水体：湿痕和墨蓝的水墙画在地上（妖物之下），灯下托出白浪
+            if let Some(body) = f.wave_trail_body {
+                pools.fx.push(Draw {
+                    scale: trail_scale,
+                    rot,
+                    color: Color::WHITE.with_alpha(fade),
+                    ..Draw::new(body, front.extend(layer::GROUND + 0.91))
+                });
+            }
+            let body = body_of(&f.wave_loop, &f.wave_body, frame)
+                .or_else(|| body_of(&f.wave_fade, &f.wave_fade_body, frame));
+            if let Some(body) = body {
+                pools.fx.push(Draw {
+                    scale: Vec2::splat(k),
+                    rot,
+                    ..Draw::new(body, front.extend(layer::GROUND + 0.92))
+                });
+            }
         }
     }
 
@@ -2404,8 +2444,10 @@ fn draw_new_weapons(
     if let (Some(vs), Some(en)) = (&res.vines, &res.enemies) {
         let green = rgb(0x8fe07a);
         let art = looped(&f.vine_loop, now, 8.0);
-        // 美术的藤：整张宽高按原图算（裁过边也一样）；占位的剑光拖尾按它自己的大小
-        let size = if art.is_some() { VINE_PX / ppu } else { db.frame(f.vine).size };
+        // 美术的藤：整张宽高按原图算（裁过边也一样），竖向按原大；占位的剑光拖尾按它自己的大小、画 10 单位高
+        let (size, height) =
+            if art.is_some() { (VINE_PX / ppu, VINE_UNITS) } else { (db.frame(f.vine).size, 10.0) };
+        let vine_body = art.and_then(|a| body_of(&f.vine_loop, &f.vine_body, a));
         for v in &vs.0 {
             for (k, link) in v.links.iter().enumerate() {
                 let Some(h) = link.target else { continue };
@@ -2418,13 +2460,18 @@ fn draw_new_weapons(
                 }
                 let sway = (now * 3.0 + k as f32 * 1.7).sin() * 0.04;
                 // 锚点在右端：放在妖物身上、朝主角拉
+                let (scale, rot) = (Vec2::new(len / size.x, height / size.y), d.y.atan2(d.x) + sway);
                 glow.add(
                     art.unwrap_or(f.vine),
                     target.extend(layer::EMISSIVE - 0.3),
-                    Vec2::new(len / size.x, 10.0 / size.y),
-                    d.y.atan2(d.x) + sway,
+                    scale,
+                    rot,
                     green.with_alpha(0.7),
                 );
+                // 藤身（焦墨勾边、绿藤皮）压在所有妖物之上、暗层之下
+                if let Some(body) = vine_body {
+                    pools.fx.push(Draw { scale, rot, ..Draw::new(body, target.extend(layer::ACTORS + 1.2)) });
+                }
                 if let Some(pulse) = looped(&f.vine_pulse, now, 24.0) {
                     let phase = (now * 1.2 + k as f32 * 0.37).fract();
                     glow.add(
@@ -2441,13 +2488,23 @@ fn draw_new_weapons(
                     let n = f.vine_bind.len();
                     let frame = f.vine_bind[(((now - start) * 8.0) as usize).min(n - 1)];
                     let r = en.r[i] / (VINE_BIND_RADIUS_PX / ppu);
+                    let alpha = (en.root[i] / 0.25).min(1.0);
                     glow.add(
                         frame,
                         target.extend(layer::EMISSIVE - 0.25),
                         Vec2::splat(r),
                         0.0,
-                        green.with_alpha((en.root[i] / 0.25).min(1.0)),
+                        green.with_alpha(alpha),
                     );
+                    // 缠绕的藤身盘在这只妖物身上：排在它前面一点，不盖住更靠前的妖物
+                    if let Some(body) = body_of(&f.vine_bind, &f.vine_bind_body, frame) {
+                        let y = en.py[i] + (en.y[i] - en.py[i]) * a;
+                        pools.fx.push(Draw {
+                            scale: Vec2::splat(r),
+                            color: Color::WHITE.with_alpha(alpha),
+                            ..Draw::new(body, target.extend(sort_z(layer::ACTORS, y) + 2e-4))
+                        });
+                    }
                 }
             }
         }
