@@ -991,6 +991,67 @@ impl Particles {
         }
     }
 
+    /// 一团一闪而过的亮心（孔明灯爆燃的火球）：软点放大，0.1–0.2 秒里涨大、淡掉。
+    pub fn flash(&mut self, at: Vec2, size: f32, color: Color, life: f32) {
+        self.spawn(P {
+            size: (size, size * 1.6),
+            color,
+            glow: true,
+            ..P::new(self.f.ember, at, life, layer::EMISSIVE + 1.3)
+        });
+    }
+
+    /// 水花：沿 `dir`（画面方向）前方 ±spread 弧度溅出去的细流，往下落（沧浪起浪）。
+    pub fn spray(&mut self, at: Vec2, dir: Vec2, spread: f32, color: Color, n: u32) {
+        let base = dir.y.atan2(dir.x);
+        for _ in 0..self.n(n) {
+            let a = base + self.rng.range_f32(-spread, spread);
+            let (speed, life, size) = (
+                self.rng.range_f32(160.0, 340.0),
+                self.rng.range_f32(0.25, 0.45),
+                self.rng.range_f32(0.7, 1.1),
+            );
+            let p = P {
+                vel: Vec2::from_angle(a) * speed,
+                drag: 4.5,
+                accel: Vec2::new(0.0, -220.0),
+                size: (size, 0.15),
+                stretch: 1.6,
+                color,
+                glow: true,
+                align: true,
+                ..P::new(self.f.streak, at, life, layer::EMISSIVE + 1.0)
+            };
+            self.spawn(p);
+        }
+    }
+
+    /// 一串光点从 `from` 流回 `to`（青藤吸血：绿光顺着藤回到主角），0.3 秒左右到。
+    pub fn drain(&mut self, from: Vec2, to: Vec2, color: Color, n: u32) {
+        let d = to - from;
+        let side = Vec2::new(-d.y, d.x).normalize_or_zero();
+        for k in 0..self.n(n) {
+            let (life, wobble, size) = (
+                self.rng.range_f32(0.26, 0.34),
+                self.rng.range_f32(-14.0, 14.0),
+                self.rng.range_f32(0.8, 1.1),
+            );
+            // 拉长的光条顺着流的方向，比圆点在灯下看得清
+            let p = P {
+                vel: d / life + side * wobble,
+                size: (size, size * 0.5),
+                stretch: 2.2,
+                color,
+                fade_in: 0.15,
+                glow: true,
+                align: true,
+                delay: k as f32 * 0.05,
+                ..P::new(self.f.streak, from, life, layer::EMISSIVE + 1.1)
+            };
+            self.spawn(p);
+        }
+    }
+
     /// 地上一圈扩开的光（升级、点灯）。
     pub fn halo(&mut self, frame: FrameId, at: Vec2, from: f32, to: f32, life: f32, color: Color) {
         let p = P { size: (from, to), color, glow: true, ..P::new(frame, at, life, layer::EMISSIVE - 0.5) };
@@ -1427,6 +1488,74 @@ pub(crate) fn particle_events(
                     _ => {}
                 }
             }
+            // 孔明灯落地爆燃：火星往上溅、余烬飘起，烧焦的红纸片落下来，一圈火光荡开、一点焦烟
+            SimEvent::LanternBurst { pos, radius, evolved } => {
+                let at = to_screen(pos);
+                let k = if evolved { 1.3 } else { 1.0 };
+                // 先一团过辉光阈值的火球（灯下也压得过暖光），再是火星、余烬、纸片和焦烟
+                parts.flash(at + Vec2::Y * 6.0, radius / 5.0, hdr(Color::srgb(1.0, 0.72, 0.38), 2.6), 0.16);
+                parts.sparks(at, hdr(FIRE, 1.5), (22.0 * k) as u32, 320.0, Vec2::Y * 0.4);
+                parts.embers(at, radius * 0.5, FIRE, (12.0 * k) as u32);
+                parts.ash(at, radius * 0.4, 6, LANTERN_PAPER);
+                parts.smoke(at, 1.6, INK.with_alpha(0.45), 5);
+                parts.halo(frames.ring, at, 0.2, radius * 2.0 / 64.0, 0.45, hdr(FIRE, 1.4).with_alpha(0.85));
+            }
+            // 沧浪推浪：主角身前顺着浪的方向溅起一片水花、一团水汽；北冥潮四面八方都溅，一圈寒光荡开
+            SimEvent::Wave { pos, dir, radius, ring, .. } => {
+                let at = to_screen(pos) + Vec2::Y * 6.0;
+                let water = element_glow(Some(Element::Water));
+                if ring {
+                    for k in 0..8 {
+                        let d = Vec2::from_angle(k as f32 * TAU / 8.0);
+                        parts.spray(at + d * 18.0, d, 0.35, water.with_alpha(0.7), 3);
+                    }
+                    parts.halo(frames.ring, at, 0.3, radius * 2.0 / 64.0, 0.6, water.with_alpha(0.6));
+                } else {
+                    let d = (to_screen(pos + dir) - to_screen(pos)).normalize_or(Vec2::X);
+                    // 浪起的那一下：一道水色的月牙笔锋往前鼓（宽按浪的半宽），溅一片水花、一点白沫
+                    let size = radius * 2.0 / (64.0 * 0.9);
+                    let a = d.y.atan2(d.x);
+                    parts.slash(
+                        at + d * (40.0 - 4.8 * size),
+                        a + FRAC_PI_2,
+                        size,
+                        hdr(water, 1.4).with_alpha(0.7),
+                        true,
+                    );
+                    parts.spray(at + d * 24.0, d, 0.5, water.with_alpha(0.8), 20);
+                    parts.smoke(at + d * 34.0, 1.4, Color::srgba(0.88, 0.94, 1.0, 0.45), 3);
+                }
+            }
+            // 青藤吸血：两颗绿光从被连着的妖物顺着藤流回主角；万木春缠住时那只身上冒几片叶子、一小圈绿光
+            SimEvent::VineDrain { pos, bind, .. } => {
+                let at = to_screen(pos) + Vec2::Y * 10.0;
+                let wood = element_glow(Some(Element::Wood));
+                parts.drain(at, hero_at + Vec2::Y * 14.0, hdr(wood, 1.8).with_alpha(0.9), 3);
+                if bind {
+                    parts.leaves(at, 3);
+                    parts.halo(frames.ring, to_screen(pos), 0.1, 0.7, 0.35, wood.with_alpha(0.6));
+                }
+            }
+            // 镇妖塔落地：一圈尘浪、墨点四溅、碎石，地上一圈土黄的光扩到吸妖的范围（2.2 倍半径）
+            SimEvent::TowerLand { pos, radius, evolved } => {
+                let at = to_screen(pos);
+                let k = if evolved { 1.4 } else { 1.0 };
+                parts.dust(at, (16.0 * k) as u32, radius / 30.0 * k, DUST);
+                parts.ink(at, (10.0 * k) as u32, 1.6 * k);
+                parts.ash(at, radius * 0.5, 6, TOWER_STONE);
+                let earth = element_glow(Some(Element::Earth));
+                parts.halo(frames.ring, at, 0.3, radius * 2.2 * 2.0 / 64.0, 0.5, earth.with_alpha(0.5));
+            }
+            // 玲珑塔到时间炸开：金色火线四射、余烬、大团尘浪和墨，一圈大的金光
+            SimEvent::TowerBurst { pos, radius } => {
+                parts.priority = Priority::Impact;
+                let at = to_screen(pos);
+                parts.sparks(at, GOLD, 28, 320.0, Vec2::ZERO);
+                parts.embers(at, radius * 0.6, GOLD, 16);
+                parts.dust(at, 22, radius / 25.0, DUST);
+                parts.ink(at, 16, 2.0);
+                parts.halo(frames.ring, at, 0.3, radius * 2.4 / 64.0, 0.6, GOLD.with_alpha(0.8));
+            }
             // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
             SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
                 let d = (to_screen(pos + dir) - to_screen(pos)).normalize_or(Vec2::X);
@@ -1599,6 +1728,10 @@ fn hdr(c: Color, k: f32) -> Color {
     let l = c.to_linear();
     Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
 }
+
+/// 孔明灯烧焦的红纸片、镇妖塔崩出的碎石
+const LANTERN_PAPER: Color = Color::srgb(0.62, 0.2, 0.12);
+const TOWER_STONE: Color = Color::srgb(0.45, 0.38, 0.3);
 
 /// 七成样本落在入射方向 ±30°，其余完整散射；无方向沿用旧偏置。
 fn emission_dir(dir: Vec2, fallback: Vec2, choose: f32, spread: f32) -> Vec2 {
