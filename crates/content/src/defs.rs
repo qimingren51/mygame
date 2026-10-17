@@ -1110,6 +1110,9 @@ pub struct WeaponDef {
     /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
     #[serde(default)]
     pub flavor: String,
+    /// 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节，不超过 8 个字）；`run.ron` 里锁着的法器必须写
+    #[serde(default)]
+    pub unlock: String,
     pub behavior: WeaponBehavior,
     /// 第 1 级到满级
     pub levels: Vec<WeaponLevel>,
