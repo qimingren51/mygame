@@ -517,7 +517,8 @@ impl Particles {
         self.category = Category::Decorative;
         let cap = if lite { CAP / 2 } else { CAP };
         if self.list.len() > cap {
-            self.list.sort_by_key(|p| std::cmp::Reverse((p.category, p.priority)));
+            // 同一级里先留核心（逐帧图、接触核心）
+            self.list.sort_by_key(|p| std::cmp::Reverse((p.category, p.priority, p.core)));
             self.list.truncate(cap);
         }
     }
@@ -546,7 +547,10 @@ impl Particles {
         if self.list.len() < limit {
             self.list.push(p);
         } else if let Some(index) =
-            eviction(&self.list, (self.category, priority), |p| (p.category, p.priority))
+            // 挤低一级的粒子时先挤装饰的：逐帧图正播着被一颗火星顶掉，就只闪了一帧
+            eviction(&self.list, (self.category, priority, false), |p| {
+                (p.category, p.priority, p.core)
+            })
         {
             self.list.swap_remove(index);
             self.list.push(p);
@@ -1752,9 +1756,10 @@ pub(crate) fn particle_events(
                 let spin = parts.rng.range_f32(0.0, TAU);
                 let tilt = parts.rng.range_f32(-0.4, 0.4);
                 let (z, rot, color) = match fx {
+                    // 叠加的反应图在灯下的纸面上很淡，要推过辉光阈值才晕得开（试拍时 × 1.3 的燎原几乎看不见）。
                     // 贴地的亮纹（赤地的裂缝、凝霜的霜花）美术已经压扁，不转
                     Fx::ReactRongyan | Fx::ReactNingshuang => {
-                        (layer::EMISSIVE - 2.5, 0.0, hdr(Color::WHITE, 1.2))
+                        (layer::EMISSIVE - 2.5, 0.0, hdr(Color::WHITE, 1.4))
                     }
                     // 泥摊在 fx.rs 的泥沼之上；灵草从地里长出来，在妖物脚下
                     Fx::ReactYuni | Fx::ReactZisheng => (layer::GROUND + 0.9, 0.0, Color::WHITE),
@@ -1763,8 +1768,8 @@ pub(crate) fn particle_events(
                     // 白汽画在暗层之上（美术的建议），不然夜里是灰的；淡一点，不盖死妖物
                     Fx::ReactZhengteng => (layer::DARKNESS + 2.0, 0.0, Color::WHITE.with_alpha(0.7)),
                     // 断木两刀交叉，只微微转一点，保持斜劈的样子
-                    Fx::ReactDuanmu => (layer::EMISSIVE + 0.6, tilt, hdr(Color::WHITE, 1.3)),
-                    _ => (layer::EMISSIVE + 0.5, spin, hdr(Color::WHITE, 1.3)),
+                    Fx::ReactDuanmu => (layer::EMISSIVE + 0.6, tilt, hdr(Color::WHITE, 1.6)),
+                    _ => (layer::EMISSIVE + 0.5, spin, hdr(Color::WHITE, 1.6)),
                 };
                 let drawn = parts.anim(fx, at, scale, rot, color, z, hold, 0.0);
                 let tint = element_glow(Some(def.b));
@@ -2149,6 +2154,24 @@ mod tests {
         }
         assert!(!parts.spawn(P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0)));
         assert!(parts.spawn(P { core: true, ..P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0) }));
+    }
+
+    /// 池满时高一级的火星先挤掉低一级的装饰粒子，不挤正在播的逐帧图
+    #[test]
+    fn higher_sparks_evict_decor_before_cores() {
+        let mut parts = pool();
+        parts.begin_frame(false);
+        parts.priority = Priority::Normal;
+        let limit = CAP - RESERVE;
+        assert!(parts.spawn(P { core: true, ..P::new(FrameId(7), Vec2::ZERO, 1.0, 0.0) }));
+        while parts.list.len() < limit {
+            parts.list.push(P { priority: Priority::Normal, ..P::new(FrameId(0), Vec2::ZERO, 1.0, 0.0) });
+        }
+        parts.priority = Priority::Impact;
+        for _ in 0..(limit - 1) {
+            parts.spawn(P::new(FrameId(1), Vec2::ZERO, 1.0, 0.0));
+        }
+        assert!(parts.list.iter().any(|p| p.core && p.frame == FrameId(7)));
     }
 
     /// `load_anims` 按 `fx as usize` 取帧：`Fx::ALL` 必须和枚举的声明顺序一致。
