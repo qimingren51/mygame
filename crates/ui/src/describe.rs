@@ -492,6 +492,10 @@ mod tests {
         let icon = |id: &str| passive_stat_icon(&c, &c.passives[c.passive_index(id).unwrap()]);
         assert_eq!(icon("jixing").as_deref(), Some("ui/stat_speed"));
         assert_eq!(icon("zhezhi").as_deref(), Some("ui/stat_count"));
-        assert_eq!(icon("xunfeng"), None);
+        assert_eq!(icon("xunfeng").as_deref(), Some("ui/stat_proj_speed"));
+        // 现有心法的第一条属性都有图标；换成没画图标的属性就不画
+        let mut def = c.passives[c.passive_index("xunfeng").unwrap()].clone();
+        def.per_level = vec![Effect::Add(lantern_content::Stat::DarkDamage, 0.1)];
+        assert_eq!(passive_stat_icon(&c, &def), None);
     }
 }

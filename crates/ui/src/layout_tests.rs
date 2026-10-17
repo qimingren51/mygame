@@ -477,6 +477,19 @@ fn offer_cards_find_their_icons_and_art_in_the_atlas() {
         let d = c.weapon_index(id).unwrap();
         let info = crate::describe::offer_info(&c, &arsenal, &build, Offer::NewWeapon(d));
         assert!(db.find(&info.art).is_some(), "图集里没有 {}", info.art);
-        assert!(db.find(&format!("{}_evo", info.art)).is_some(), "图集里没有 {}_evo", info.art);
+        for suffix in ["_evo", "_mut"] {
+            assert!(db.find(&format!("{}{suffix}", info.art)).is_some(), "图集里没有 {}{suffix}", info.art);
+        }
+    }
+    // 十件法器都有图标和进化图标；合璧、灯油都有卡面
+    let mut names: Vec<String> = c
+        .weapons
+        .iter()
+        .flat_map(|w| [format!("ui/icon_{}", w.id), format!("ui/icon_{}_evo", w.id)])
+        .collect();
+    names.extend(c.fusions.iter().map(|f| format!("ui/card_{}", f.id)));
+    names.push(crate::describe::offer_info(&c, &arsenal, &build, Offer::Oil).art);
+    for name in names {
+        assert!(db.find(&name).is_some(), "图集里没有 {name}");
     }
 }
