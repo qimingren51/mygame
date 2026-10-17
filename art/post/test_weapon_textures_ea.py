@@ -39,7 +39,7 @@ SPEC = {
     "wave_front": (4, (448, 128), "add", True),
     "wave_front_fade": (3, (448, 128), "add", True),
     "wave_trail": (1, (448, 256), "add", True),
-    "vine": (3, (512, 40), "add", True),
+    "vine": (3, (512, 64), "add", True),
     "vine_pulse": (3, (128, 48), "add", True),
     "vine_bind": (4, (192, 192), "add", True),
     "sky_lantern": (4, (192, 192), "normal", False),
@@ -62,11 +62,19 @@ SPEC = {
     "tower_gold_lift_emit": (3, (576, 600), "add", False),
     "tower_dust": (6, (448, 304), "normal", False),
     "tower_vortex": (4, (768, 480), "add", True),
+    # 第二版（加粗加强）加的普通混合底色层：同画布、同锚点、同帧号，meta 写 layer_of
+    "wave_front_body": (4, (448, 128), "normal", False),
+    "wave_front_fade_body": (3, (448, 128), "normal", False),
+    "wave_trail_body": (1, (448, 256), "normal", False),
+    "vine_body": (3, (512, 64), "normal", False),
+    "vine_bind_body": (4, (192, 192), "normal", False),
 }
 LAYERS = {n for n in SPEC if n.endswith("_emit")}  # Blender 渲的发光层（不是特效帧，亮度另算）
+BODIES = {n: n[: -len("_body")] for n in SPEC if n.endswith("_body")}  # 底色层 → 它垫在哪组下面
 HANDOFF = {"sky_lantern_fall", "tower_fall", "tower_gold_fall"}  # 播完接别的（爆燃、立着的塔），不淡出
 # 不是 24 帧/秒一次播完的：(fps, loop)
 PLAY = {"wave_front": (12, True), "wave_front_fade": (12, False), "vine": (8, True), "vine_pulse": (24, True), "vine_bind": (8, False),
+        "wave_front_body": (12, True), "wave_front_fade_body": (12, False), "vine_body": (8, True), "vine_bind_body": (8, False),
         "sky_lantern": (12, True), "sky_lantern_emit": (12, True), "sky_lantern_fall": (12, False), "sky_lantern_fall_emit": (12, False),
         "fire_sea": (12, True), "tower_vortex": (12, True)}
 for _t in ("tower", "tower_gold"):
@@ -294,7 +302,7 @@ def test_frames_change_and_fade():
             assert wrap <= 1.6 * max(diffs), f"{name} 循环首尾接不上：首尾差 {wrap:.2f}，相邻 {[round(d, 2) for d in diffs]}"
             assert min(sums) >= 0.75 * max(sums), f"{name} 循环里亮度跳：{[round(x / max(sums), 2) for x in sums]}"
             continue
-        if name == "wave_front_fade":  # 接在循环后面散掉：一帧比一帧淡
+        if name in ("wave_front_fade", "wave_front_fade_body"):  # 接在循环后面散掉：一帧比一帧淡
             assert all(a > b for a, b in zip(sums, sums[1:])) and sums[-1] <= 0.6 * sums[0], f"浪头散掉应该越来越淡：{sums}"
             continue
         if name.endswith("lift") or name.endswith("lift_emit"):  # 塔收走：一帧比一帧散得多
@@ -411,8 +419,10 @@ def test_wave_front_crescent():
     assert meta()["files"]["wave_front_fade_0.png"]["anchor"] == info["anchor"]
     ay = info["anchor"][1] * h
 
-    def front_y(a, x0, x1):  # 这几列里浪唇（每列最亮处）的平均 y
-        return float(np.mean(np.argmax(a[:, x0:x1], axis=0)))
+    def front_y(a, x0, x1):  # 这几列里浪唇的 y：每列最靠前（y 最大）的亮处（> 0.6 峰值），取中位数（避开零星的水珠）
+        cols = a[:, x0:x1] > 0.6 * PEAK8
+        ys = [np.nonzero(c)[0].max() for c in cols.T if c.any()]
+        return float(np.median(ys))
 
     for i in frames_of("wave_front"):
         a = alpha("wave_front", i)
@@ -437,10 +447,10 @@ def test_wave_trail_fades_backward():
 
 
 def test_vine_spans_and_anchors():
-    """藤：锚点在右端正中；横向铺满（两端几像素淡掉），两端落在中线上（接主角和妖物）；整张高 = 10 世界单位。"""
+    """藤：锚点在右端正中；横向铺满（两端几像素淡掉），两端落在中线上（接主角和妖物）；整张高 = 16 世界单位（第二版加粗，4 像素 / 单位）。"""
     w, h = SPEC["vine"][1]
     info = meta()["files"]["vine_0.png"]
-    assert info["anchor"] == [1.0, 0.5] and info["stretch"] == "x" and info["height_units"] == 10
+    assert info["anchor"] == [1.0, 0.5] and info["stretch"] == "x" and info["height_units"] == 16 == h / 4
     for i in frames_of("vine"):
         a = alpha("vine", i)
         cols = (a > 0.25 * PEAK8).any(0)
@@ -457,8 +467,9 @@ def test_vine_pulse_head_forward():
     ax, ay = (np.array(meta()["files"]["vine_pulse_0.png"]["anchor"]) * [w, h]).tolist()
     for i in frames_of("vine_pulse"):
         a = alpha("vine_pulse", i)
-        yy, xx = np.unravel_index(np.argmax(a), a.shape)
-        assert math.hypot(xx + 0.5 - ax, yy + 0.5 - ay) <= 4, f"vine_pulse_{i} 最亮处 ({xx}, {yy}) 不在光头"
+        ys, xs = np.nonzero(a >= 0.95 * a.max())
+        xx, yy = xs.mean(), ys.mean()
+        assert math.hypot(xx + 0.5 - ax, yy + 0.5 - ay) <= 4, f"vine_pulse_{i} 最亮处 ({xx:.0f}, {yy:.0f}) 不在光头"
         cx, _ = centroid(a)
         assert cx < ax - 8, f"vine_pulse_{i} 尾巴应该在 −x：质心 {cx:.0f}"
 
@@ -469,6 +480,48 @@ def test_vine_bind_grows_up():
     assert info["hold_last"] is True and info["radius_px"] == int(E.BIND_R)
     tops = [bbox(alpha("vine_bind", i) > 0.25 * PEAK8)[1] for i in frames_of("vine_bind")]
     assert tops[0] > tops[1] > tops[2], f"缠绕应该越长越高：顶 {tops}"
+
+
+def test_body_layers():
+    """第二版的底色层（*_body）：和它垫着的那组同画布、同锚点、同帧数、同缩放（half_width_px / radius_px / height_units / 拉伸），
+    meta 写 layer_of；不染、普通混合。浪的水体是墨蓝（B > R），藤身是焦墨勾边加绿的藤皮（亮的像素偏绿）。"""
+    m = meta()["files"]
+    for body, of in BODIES.items():
+        assert SPEC[body][:2] == SPEC[of][:2], f"{body} 和 {of} 的帧数、画布不一样"
+        for i in frames_of(body):
+            a, b = m[f"{body}_{i}.png"], m[f"{of}_{i}.png"]
+            assert a["layer_of"] == of and a["anchor"] == b["anchor"], f"{body}_{i}: layer_of {a.get('layer_of')}、锚点 {a['anchor']}"
+            for k in ("half_width_px", "radius_px", "height_units", "stretch", "points", "fps", "loop"):
+                assert a.get(k) == b.get(k), f"{body}_{i} 的 {k} 和 {of} 不一样：{a.get(k)} / {b.get(k)}"
+            px = rgba(body, i).astype(int)
+            vis = px[..., 3] > 0
+            r, g, bl = px[..., 0][vis], px[..., 1][vis], px[..., 2][vis]
+            if body.startswith("wave"):
+                assert (bl > r).all(), f"{body}_{i} 不是墨蓝"
+            else:
+                lit = (r * 299 + g * 587 + bl * 114) // 1000 > 60
+                assert ((g >= r) & (g >= bl))[lit].mean() >= 0.97, f"{body}_{i} 藤皮不够绿"
+                assert (px[..., 3] > 200).sum() > 0 and ((r < 40) & (g < 40)).any(), f"{body}_{i} 没有焦墨勾边"
+
+
+def test_wave_thick():
+    """第二版的浪有厚度：正中几列里，水体 alpha > 0.5 的一段至少 40 像素（第一版的浪身约 25）；叠加层从浪唇到浪背的泡沫至少 50 像素。"""
+    w, _ = SPEC["wave_front"][1]
+    for i in frames_of("wave_front"):
+        body = alpha("wave_front_body", i)[:, w // 2 - 20 : w // 2 + 20]
+        rows = np.nonzero((body > 128).mean(1) > 0.5)[0]
+        assert rows.max() - rows.min() >= 40, f"wave_front_body_{i} 太薄：{rows.max() - rows.min()} 像素"
+        add = alpha("wave_front", i)[:, w // 2 - 20 : w // 2 + 20]
+        rows = np.nonzero((add > 0.1 * PEAK8).any(1))[0]
+        assert rows.max() - rows.min() >= 50, f"wave_front_{i} 太薄：{rows.max() - rows.min()} 像素"
+
+
+def test_vine_thick():
+    """第二版的藤粗约 4 世界单位：藤身每一列（避开两端）浓的部分（alpha > 200，含勾边）至少 14 像素、不超过 26 像素（叶子另算，取最细的列）。"""
+    for i in frames_of("vine_body"):
+        a = alpha("vine_body", i)
+        thick = (a[:, 60:450] > 200).sum(0)
+        assert 14 <= thick.min() <= 26, f"vine_body_{i} 最细处 {thick.min()} 像素"
 
 
 # ---------------------------------------------------------------- 孔明灯、镇妖塔

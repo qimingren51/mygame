@@ -456,6 +456,27 @@ mod tests {
         assert!(after.validate(Path::new("data")).unwrap_err().to_string().contains("run.ron"));
     }
 
+    /// 卡池的类别总权重（docs/BALANCE.md 第 6.4 节）：七个数都要大于 0，封顶开关可以是 0、不能是负数。
+    #[test]
+    fn choice_budget_is_validated() {
+        let c = Content::load(&repo_data_dir()).unwrap();
+        let b = c.run.choices.budget.as_ref().expect("run.ron 写了 choices.budget");
+        assert_eq!(b.weapon_up_each, 0.0, "封顶开关默认关");
+        let rejects = |edit: fn(&mut BudgetDef), field: &str| {
+            let mut bad = c.clone();
+            edit(bad.run.choices.budget.as_mut().unwrap());
+            let err = bad.validate(Path::new("data")).unwrap_err().to_string();
+            assert!(err.contains("run.ron") && err.contains(field), "{field}: {err}");
+        };
+        rejects(|b| b.weapon_up = 0.0, "budget.weapon_up");
+        rejects(|b| b.new_weapon_late = -1.0, "budget.new_weapon_late");
+        rejects(|b| b.key_pair = 0.0, "budget.key_pair");
+        rejects(|b| b.weapon_up_each = -1.0, "budget.weapon_up_each");
+        let mut capped = c.clone();
+        capped.run.choices.budget.as_mut().unwrap().weapon_up_each = 7.0;
+        capped.validate(Path::new("data")).unwrap();
+    }
+
     #[test]
     fn mutation_fusion_fields_are_validated() {
         let c = Content::load(&repo_data_dir()).unwrap();

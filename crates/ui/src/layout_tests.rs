@@ -459,7 +459,7 @@ fn stat_icons_named_in_the_data_are_in_the_atlas() {
     }
 }
 
-/// 卡面找图的名字和图集对得上：补给用 lotus、oil 的图标，五件法器本体和进化都有插画。
+/// 卡面找图的名字和图集对得上：补给用 lotus、oil 的图标；十件法器本体和进化都有插画，有异化的还有异化插画。
 #[test]
 fn offer_cards_find_their_icons_and_art_in_the_atlas() {
     let mut app = setup();
@@ -473,11 +473,11 @@ fn offer_cards_find_their_icons_and_art_in_the_atlas() {
         assert!(db.find(&icon).is_some(), "图集里没有 {icon}");
     }
     assert_eq!(crate::describe::offer_info(&c, &arsenal, &build, Offer::Heal).art, "ui/card_lotus");
-    for id in ["lamp", "sword", "bell", "crane", "seal"] {
-        let d = c.weapon_index(id).unwrap();
+    assert_eq!(c.weapons.len(), 10);
+    for (d, w) in c.weapons.iter().enumerate() {
         let info = crate::describe::offer_info(&c, &arsenal, &build, Offer::NewWeapon(d));
-        assert!(db.find(&info.art).is_some(), "图集里没有 {}", info.art);
-        for suffix in ["_evo", "_mut"] {
+        let suffixes: &[&str] = if w.mutation.is_some() { &["", "_evo", "_mut"] } else { &["", "_evo"] };
+        for suffix in suffixes {
             assert!(db.find(&format!("{}{suffix}", info.art)).is_some(), "图集里没有 {}{suffix}", info.art);
         }
     }

@@ -121,7 +121,11 @@
         late_after: 180.0,
         weight_passive_up: 7.0,
         weight_new_passive: 5.0,
-        // 还没解锁、不进卡池的法器：v0.3 的五件新法器（按局解锁见 docs/PLAYTEST.md 第 9 项）
+        // 按类别给总权重（docs/BALANCE.md 第 6.4 节）：写了就代替上面四项每张卡的权重。
+        // 每类的总权重按份额分给这一类能出的卡；手上法器的进化心法份额 × key_pair，进化心法已在手的法器升级 × keyed_up
+        budget: Some((weapon_up: 35.0, new_weapon: 30.0, new_weapon_late: 15.0, passive_up: 15.0, new_passive: 20.0,
+                      key_pair: 3.0, keyed_up: 1.0)),
+        // 还没解锁、不进卡池的法器：v0.3 的五件新法器，靠成就和保底解锁（docs/GAMEPLAY.md 第 13.2 节）
         locked: ["coin_sword", "sky_lantern", "wave", "vine", "tower"],
         // 保底：完成第 5、8、11、14、17 局时，按上面的顺序送一件还没解锁的（docs/GAMEPLAY.md 第 13.2 节）
         unlock_pity: [5, 8, 11, 14, 17],
