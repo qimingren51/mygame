@@ -203,11 +203,13 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 - 法器格 `slot_l*`：128²（显示 64）；心法格 `slot_s*`：88²（显示 44）。`bar_track`、`bar_fill_hp/xp/shield`、`chip_dark` 也换成了漆面。
 
 ```bash
-art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
-art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
+art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（39 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/post/ui_icons_new.py   # 新法器图标 → out/assets@2x/ui_new/（10 张 128²）
+art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards art/out/assets@2x/ui_new
 ```
 
-数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
+数值图标 `ui/stat_<键>`、`ui/stat_group_<组>`、卡面插画 `ui/card_<id>` 和新法器图标 `ui/icon_<id>`、`ui/icon_<id>_evo`（铜钱剑、孔明灯、沧浪、青藤、镇妖塔，`post/ui_icons_new.py`，和 `ui_icons.py` 同一套框；自检 `post/test_ui_icons_new.py`）打在单独的 `cards` 页，`ui` 页不动。
+数值图标：基础 12 个、组 7 个、进阶 20 个（`ui_lacquer.ADV_KEYS`：击退、灼烧、冰冻、减速、飞行速度、飞行时长、五行反应、击晕、闪避、护盾、治疗、照见圈、照见易伤、灯光、灯焰带、燃灯充能、魂火、灯油、铜钱、宝箱），对应 `assets/data/stat_labels.ron` 的 `icon`。
 帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
 
 ### 卡面插画（render/card_art.py）
@@ -216,7 +218,7 @@ art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/
 
 - 原图 480×360（4:3，不透明、满幅），界面铺满 268×201 的插画区、按圆角 6 裁切；左上压五行印、右上压品阶签，两个上角（原图约 70×70）不放主体。
 - 帧名：法器 `ui/card_<法器 id>`、`_evo`（进化）、`_mut`（异化）；合璧 `ui/card_<合璧 id>`；心法 `ui/card_<心法 id>`；补给 `ui/card_lotus`、`ui/card_oil`。
-- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器、合璧）、`card_passives.py`（心法）；共用的道具和材质在 `card_props.py`。
+- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器本体、进化、异化，合璧，新法器）、`card_passives.py`（心法、补给）；共用的道具和材质在 `card_props.py`。
   每张用 `@scene` 注册 3D 场景、`@background` 注册水墨底；渲染缓存在 `out/_card_tmp/`，后期只用 numpy / Pillow。
 - 最终渲染包在 `bstyle.render_lock()` 里（几个代理同时出图时排队）。一张 960×720、128 采样约 0.5–2 分钟。
 
@@ -226,7 +228,7 @@ art/.venv/bin/python art/render/card_art.py sword sword_evo    # 正式渲染 + 
 art/.venv/bin/python art/render/card_art.py --post sword       # 只重做后期（读缓存）
 ```
 
-打包时 `ui_cards` 和 `ui_stats` 一起打进 `cards` 页（上面的命令）。
+打包时 `ui_cards`、`ui_stats`、`ui_new` 一起打进 `cards` 页（上面的命令）。
 
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
