@@ -10,8 +10,7 @@
  "paper": true,
  "pages": {
   "actors": [
-   "actors_0.json",
-   "actors_1.json"
+   "actors.json"
   ],
   "vfx": [
    "vfx.json"

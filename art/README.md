@@ -318,7 +318,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp  # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
@@ -335,19 +335,27 @@ art/.venv/bin/python art/post/check_atlas.py
 | `models/wisp_v2.py` | 疾影：卷云头 + 被风扯长的几笔薄墨（扁带），不描线 |
 | `models/golem_v2.py` | 石妖：斧劈块面的山石垒起来，石缝里夹一片发光的魂 |
 | `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带） |
+| `models/bamboo_v2.py` | 竹魅：一节节竹段（段间墨色竹节）拼成的细长人形，头是一蓬披下来的竹叶（叶缝里焦墨的空、两点眼），手是三根挂竹叶的细竹枝；射刺像拉弓，竹节裂开、节缝透光 |
+| `models/taofeng_v2.py` | 讨封狐：扮人是斗笠（顶上三片竹叶）、三层蓑衣、竹杖，蓑衣底下露一截尾巴；现形是穿旧靛蓝袍、长袖的直立狐狸，斗笠挂在背上，眯眼笑（头、耳、尾借用赤面狐） |
+| `models/ghoul_v2.py` | 青面鬼：隐式曲面捏出来的驼背大鬼（躯干、大肚子、四肢、头各一块），肚皮发白、透着魂光（AOV），獠牙、黑爪、铁箍、焦墨乱发、暗红破布 |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
 | `post/atlas_swap.py` | 图集里只换几个素材：没换的素材从现有图集还原（不依赖本机 out/），打包后逐帧核对没换的帧逐像素相同 |
 
 - 影妖：帧 224²（原 160²），锚点 (0.5, 0.875) 是下摆墨烟的落地点，高约 46 单位（主角 0.88 倍），眼色暖金 `#FFC46B`。
   游戏会给悬浮的妖物整体抬高、上下起伏，帧里只留 ±0.5 单位的“呼吸”。
+- 竹魅：帧 320²、锚点 (0.5, 0.875)，挂点 eyes、muzzle（蓄力时在竹刺尖上）。讨封狐：帧 256²（原 224²），reveal 写了 `vertical_motion`
+  （一跳、蓑衣掀起，身高一帧一个样）。青面鬼：帧 320²、锚点 (0.5, 0.8)，身子整体往后挪，锚点在身子中心底下；move、charge 都写了
+  `vertical_motion`（一步一沉）。
+- `v2kit.sdf_mesh`：隐式曲面网格化（surface nets，纯 numpy），配 `smin`、`sd_round_cone`、`sd_ellipsoid` 捏肌肉、肚子这种圆滚滚的形体；
+  设计稿三维（x 前、y 上、z 左右，单位）里建，换到模型坐标时注意左右手互换（面要翻过来，见 ghoul_v2._sdf_arrays）。
 - 疾影、狐火：帧 224²（原 160²），锚点 (0.5, 0.875)，悬浮。石妖：帧 224²、锚点 (0.5, 0.8)，`register_x_only`
   （锚点正上方是驼背的斜坡，不是头顶）。赤面狐 move 一步一起伏 1.7 单位，写了 `vertical_motion`（自检不查逐帧身高；游戏不读）。
 - `contact_radius`：量法同 `docs/PLAYTEST.md` 的表（朝东的帧，锚点往上 52 单位内每行最靠前的点，取第 90 百分位，各帧取中位数），
   默认动画的值和 `game_radius` 取小；各动画分别量的值在 `contact_radius_by_anim`。
 - `check_asset.py`：`style: "paint"` 的素材不查调色板比例、墨线占比（多档渐变、焦墨的影妖本来就不在旧的三档色板里），其余照查；
   四足兽用 `register_band`（赤面狐 [0.70, 0.92]）取躯干做 x 配准，迈步的膝盖不算漂移。
-- 打包：换素材用 `atlas_swap.py`（见上面“打包桌面版图集”）。actors 已经分成两页（`actors_0`、`actors_1`）。
+- 打包：换素材用 `atlas_swap.py`（见上面“打包桌面版图集”）。actors 一页放得下时是 `actors.json`（第三批起），放不下自动分成 `actors_0`、`actors_1`……（游戏和冒烟测试都按 `index.json` 找页）。
 
 ## 正式管线
 

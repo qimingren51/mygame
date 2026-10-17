@@ -879,3 +879,102 @@ def post(L, grain, glow_hex, ink_hex=S.INK["jiao"], dry=0.22, seed=0, glow_max=1
     w_obj = np.clip(em / np.maximum(em + gl, 1e-6), 0, 1)[..., None]
     erg = rgb * w_obj + gcol * (1 - w_obj)
     return finish(np.clip(out_rgb, 0, 1), out_a, np.clip(erg, 0, 1), ea, grain)
+
+
+# ================================================================ 隐式曲面（SDF）建模：肌肉、肚子这种圆滚滚的形体
+def smin(a, b, k):
+    """平滑并集（多项式 smooth min），k 是过渡的宽（米）。"""
+    h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+    return b + (a - b) * h - k * h * (1.0 - h)
+
+
+def sd_round_cone(p, a, b, r0, r1):
+    """圆锥台（两头是球，半径 r0 → r1）的有符号距离（近似）。p (...,3)，a、b 端点。"""
+    a, b = np.asarray(a, np.float64), np.asarray(b, np.float64)
+    ba = b - a
+    L2 = float(ba @ ba) + 1e-12
+    t = np.clip(((p - a) @ ba) / L2, 0.0, 1.0)
+    d = np.linalg.norm(p - (a + t[..., None] * ba), axis=-1)
+    return d - (r0 + (r1 - r0) * t)
+
+
+def sd_ellipsoid(p, c, r, rot=None):
+    """椭球（中心 c、三个半径 r，rot 是 3×3 旋转：局部 → 世界）的有符号距离（近似，Inigo Quilez 的写法）。"""
+    q = p - np.asarray(c, np.float64)
+    if rot is not None:
+        q = q @ np.asarray(rot, np.float64)  # 世界 → 局部
+    r = np.asarray(r, np.float64)
+    k0 = np.linalg.norm(q / r, axis=-1)
+    k1 = np.linalg.norm(q / (r * r), axis=-1)
+    return k0 * (k0 - 1.0) / np.maximum(k1, 1e-9)
+
+
+def sdf_mesh(fn, lo, hi, step=0.015, project=2):
+    """隐式曲面 fn(p (N,3)) → 有符号距离（里面为负）在包围盒 lo..hi 里网格化（surface nets：每个跨过曲面的格子一个点，
+    每条跨过曲面的格边一个四边面），再沿梯度把点投到曲面上 project 次。返回 (顶点 (n,3), 面 [(4 个索引)])。"""
+    lo, hi = np.asarray(lo, np.float64), np.asarray(hi, np.float64)
+    n = np.maximum(np.ceil((hi - lo) / step).astype(int) + 1, 2)
+    xs = [lo[k] + np.arange(n[k]) * step for k in range(3)]
+    G = np.stack(np.meshgrid(*xs, indexing="ij"), -1)
+    F = fn(G.reshape(-1, 3)).reshape(G.shape[:3])
+    inside = F < 0
+    # 每个格子 8 个角里有里有外 → 这个格子有一个点
+    c8 = [inside[i:n[0] - 1 + i, j:n[1] - 1 + j, k:n[2] - 1 + k] for i in (0, 1) for j in (0, 1) for k in (0, 1)]
+    anyin = np.any(c8, axis=0)
+    allin = np.all(c8, axis=0)
+    active = anyin & ~allin
+    idx = -np.ones(active.shape, np.int64)
+    ii = np.argwhere(active)
+    idx[tuple(ii.T)] = np.arange(len(ii))
+    # 点的位置：格子 12 条边上过零点的平均
+    acc = np.zeros((len(ii), 3))
+    cnt = np.zeros(len(ii))
+    corners = [(i, j, k) for i in (0, 1) for j in (0, 1) for k in (0, 1)]
+    edges = [(a, b) for a in range(8) for b in range(a + 1, 8)
+             if sum(abs(corners[a][q] - corners[b][q]) for q in range(3)) == 1]
+    base = ii
+    for a, b in edges:
+        ca, cb = np.asarray(corners[a]), np.asarray(corners[b])
+        pa, pb = base + ca, base + cb
+        fa = F[tuple(pa.T)]
+        fb = F[tuple(pb.T)]
+        m = (fa < 0) != (fb < 0)
+        t = fa[m] / (fa[m] - fb[m])
+        acc[m] += (pa[m] + (pb[m] - pa[m]) * t[:, None])
+        cnt[m] += 1
+    V = lo + (acc / np.maximum(cnt, 1)[:, None]) * step
+    # 面：每条跨过曲面的格边，四周 4 个格子连成一个四边形
+    faces = []
+    for ax in range(3):
+        o1, o2 = [q for q in range(3) if q != ax]
+        sl = [slice(None)] * 3
+        sl[ax] = slice(0, n[ax] - 1)
+        a = inside[tuple(sl)]
+        sl2 = [slice(None)] * 3
+        sl2[ax] = slice(1, n[ax])
+        b = inside[tuple(sl2)]
+        cross = a != b
+        e = np.argwhere(cross)
+        e = e[(e[:, o1] >= 1) & (e[:, o2] >= 1) & (e[:, o1] < n[o1] - 1) & (e[:, o2] < n[o2] - 1)]
+        if len(e) == 0:
+            continue
+        flip = a[tuple(e.T)]  # 里 → 外 的方向决定面的朝向
+        c00 = e.copy(); c00[:, o1] -= 1; c00[:, o2] -= 1
+        c10 = e.copy(); c10[:, o2] -= 1
+        c11 = e.copy()
+        c01 = e.copy(); c01[:, o1] -= 1
+        q = np.stack([idx[tuple(c.T)] for c in (c00, c10, c11, c01)], -1)
+        ok = (q >= 0).all(1)
+        q, flip = q[ok], flip[ok]
+        if ax == 1:  # 保持右手系：y 轴的边方向反过来
+            flip = ~flip
+        q[~flip] = q[~flip][:, ::-1]
+        faces.append(q)
+    Fq = np.concatenate(faces, 0) if faces else np.zeros((0, 4), np.int64)
+    # 沿梯度投到曲面上
+    h = step * 0.5
+    for _ in range(project):
+        f0 = fn(V)
+        g = np.stack([(fn(V + np.eye(3)[k] * h) - fn(V - np.eye(3)[k] * h)) / (2 * h) for k in range(3)], -1)
+        V = V - (f0 / np.maximum((g * g).sum(-1), 1e-9))[:, None] * g
+    return V, [tuple(int(x) for x in f) for f in Fq]
