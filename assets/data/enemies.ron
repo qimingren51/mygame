@@ -22,7 +22,7 @@
      shot: Some((every: 3.0, warn: 0.6, range: 420.0, speed: 160.0, damage: 8.0, radius: 5.0, life: 3.0))),
     // 讨封狐：照见圈外像路人，自动瞄准锁定不到；进了照见圈现形，速度从 50 升到 90
     (id: "taofeng_fox", name: "讨封狐", rank: Normal, movement: Chase,
-     radius: 13.0, contact_radius: Some(11.0), hp: 25.0, speed: 50.0, damage: 9.0, xp: 2.0, sprite: "taofeng_fox", eye: "#FFD23F",
+     radius: 13.0, contact_radius: Some(13.0), hp: 25.0, speed: 50.0, damage: 9.0, xp: 2.0, sprite: "taofeng_fox", eye: "#FFD23F",
      disguise: Some((speed: 90.0))),
     // 赤面狐扑击、青面鬼冲撞（docs/BALANCE.md 第 12.6 节）：离主角 range 以内每 every 秒一次，
     // 原地蓄力 windup 秒（转向跟着主角，出手前 lock 秒锁定方向），然后以 speed 冲 duration 秒，
