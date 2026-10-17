@@ -82,3 +82,10 @@
 - contact_radius 34.8（move；sweep 42.4、summon 31.9），原来 40；眼色 #5FE8D6（enemies.ron 现是 #FFD98A）；挂点 eyes 比原来高很多（-263 vs -164）。
 - 审图：art/out/review@2x/redo_b5_{lineup,ingame,zoom3}.png、redo_boss_{move,sweep,summon}.gif
 - 下一步：收尾三项（fox_wisp、wisp、golem）。先备份现版到 art/out/assets@2x_b2/，look.py 渲关键帧，再 render_to 整套。
+
+## 九尾返工（协调员审过 2ce3db8：先不合，排在收尾前）
+- 要改：身子用 SDF 重做（胸厚腰细、后腿大腿肌肉+反关节、前腿细长带腕和爪、颈长弯、头低前探、胸前颈下白毛领 brush/strip）；
+  九尾摊成身后大扇面（左右张 140–160°），每条有弧度、根细中蓬尖青火、前后有层次，不挤一个平面；可加大画布但别出画；
+  神态美而凛：眼细长上挑、青光更亮、脸窄吻长、耳大带内耳白毛。
+- 流程：先 move 一两帧缩略图（和旧版、主角并排）给协调员看，方向对了再出整套；接触半径重量后回报。
+- 收尾三项关键帧已渲在 b6/（fw1/wi1/go1.png），现版备份在 art/out/assets@2x_b2/{fox_wisp,wisp,golem}。
