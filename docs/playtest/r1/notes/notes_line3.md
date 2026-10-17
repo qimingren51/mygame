@@ -94,3 +94,14 @@
 - 新 boss_v2.py：SDF 身子/腿/头（头静止网格按颈端摆）、G=1.12 整体放大（JWBody.scale）、HEAD_K=1.2；帧 768²（size_1x 384）。
   草图工具 b5/sketch.py（不进 Blender，按画面投影画多边形），对比 b5/cmp.py。单帧 look.py 约 1 分钟。
 - 出整套后：check_asset、check_atlas、旧帧比对、redo_b5_* + 三动图、推送，回报哈希、contact_radius、眼睛挂点新位置。
+- 九尾返工已推：提交 ab50da4，合 origin/master 97dec30 → c19f7fe（playtest-r1-enemies）。帧 896²，boss 图集分 boss_0/boss_1（4.4+1.4 MB）。
+  register_band [0.30, 0.42]；contact_radius 44（move 前沿 74.8 含头；sweep 70.8、summon 47.1；锚点上 40 单位内 move 48.4）。
+  眼睛挂点 move (251.8, -237.1) px = (+63, -59) 单位。审图 redo_b5_*、redo_boss_{move,sweep,summon}.gif；对比 b5/cmp2_third.png。
+  上一版（2ce3db8）帧备份在 art/out/assets@2x_b5a/boss。lantern_view 73 测试过。
+- 下一步：收尾三项（关键帧已在 b6/，现版备份 assets@2x_b2/）。
+
+## 收尾三项已推（狐火、疾影、石妖）
+- 提交 c94b6f2，合 origin/master b04c6f1 → 866ac2e（playtest-r1-enemies）。actors 图集分成 actors_0（4096²）+ actors_1（512²，4 帧）。
+- check_asset、check_atlas 通过；没换的 476 帧逐像素相同；contact_radius 不变（10、10、14.4）；lantern_view 73 测试过。
+- 审图 redo_b6_{lineup,ingame,zoom3}.png（和 b2 版并排）、redo_{fox_wisp_float,fox_wisp_pounce,wisp_float,golem_move}.gif。
+- 第三条线（妖物重画）全部完成：第三、四批、九尾（返工）、收尾三项。
