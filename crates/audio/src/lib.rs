@@ -128,6 +128,11 @@ pub struct Audio {
 }
 
 impl Audio {
+    /// 只看同名音效过没过最短间隔，不记时间（两道节流都过了再用 [`Self::can`] 记）。
+    fn ready(&self, name: &'static str, gap: f64) -> bool {
+        self.last.iter().find(|(n, _)| *n == name).is_none_or(|(_, t)| self.now - *t >= gap)
+    }
+
     /// 同名音效的最短间隔。
     fn can(&mut self, name: &'static str, gap: f64) -> bool {
         let now = self.now;
@@ -702,17 +707,23 @@ fn play_sim_events(
                 let s = a.sfx.big_bell.clone();
                 a.foreground(&s);
             }
-            // 五行反应：第一次发生用盖章的声音，之后每种反应换一个音高
+            // 五行反应：每种有自己的声音（sfx::reaction_sounds）；第一次发生再加盖章。
+            // 一局几千次：同一种 0.15 秒最多一声，所有反应合起来 0.06 秒最多一声
             SimEvent::Reaction { kind, first, pos, .. } => {
+                let k = usize::from(kind);
                 if first {
                     let s = a.sfx.stamp.clone();
                     a.foreground(&s);
                     let s = a.sfx.resonance.clone();
                     a.foreground(&s);
-                } else if a.can("react", 0.12) {
-                    let rate = f64::from(jiao(8 + i32::from(kind) % 7) / jiao(8));
-                    let s = a.sfx.bell_pulse.clone();
-                    a.play_at(&s, rate, -6.0, place(pos));
+                }
+                // 两道节流都过了才记时间，不然被总节流挡下的那一种也白白占了自己的 0.15 秒
+                if let (Some(s), Some(&id)) = (a.sfx.reactions.get(k).cloned(), sfx::REACTION_IDS.get(k))
+                    && (first || (a.ready(id, 0.15) && a.ready("react", 0.06)))
+                {
+                    a.can(id, 0.0);
+                    a.can("react", 0.0);
+                    a.play_at(&s, 1.0, if first { -2.0 } else { -6.0 }, place(pos));
                 }
             }
             SimEvent::UltReady => {
