@@ -984,6 +984,11 @@ impl Content {
         // ---- 卡面和提示条的短句 ----
         for w in &self.weapons {
             c.short("weapons.ron", &w.name, &w.short, CARD_SHORT)?;
+            // 锁着的法器解锁时弹“新法器 · X”，正文写在 unlock 里
+            if self.run.choices.locked.contains(&w.id) && w.unlock.trim().is_empty() {
+                return c.fail("weapons.ron", format!("{} 锁着，要写解锁提示 unlock", w.name));
+            }
+            c.short("weapons.ron", &w.name, &w.unlock, TOAST_SHORT)?;
             if let Some(e) = &w.evolution {
                 c.short("weapons.ron", &e.name, &e.short, CARD_SHORT)?;
             }
