@@ -302,6 +302,42 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
             }
         }
     }
+    // 按类别给总权重（docs/BALANCE.md 第 6.4 节）：每一类的总权重固定，按份额分给这一类能出的卡。
+    // 手上法器（还没进化）的进化心法、进化心法已在手的法器升级，份额乘配对倍率。内容再多，升级卡也不会被稀释。
+    if let Some(b) = &ch.budget {
+        let held_keys: Vec<usize> =
+            arsenal.0.iter().filter(|w| !w.transformed()).filter_map(|w| content.weapon_key(w.def)).collect();
+        let class = |o: &Offer| match *o {
+            Offer::WeaponUp(k) => {
+                let keyed = content.weapon_key(arsenal.0[k].def).is_some_and(|p| build.passive_level(p) > 0);
+                Some((0, if keyed { b.keyed_up } else { 1.0 }))
+            }
+            Offer::NewWeapon(_) => Some((1, 1.0)),
+            Offer::PassiveUp(_) => Some((2, 1.0)),
+            Offer::NewPassive(d) => Some((3, if held_keys.contains(&d) { b.key_pair } else { 1.0 })),
+            _ => None,
+        };
+        let new_weapon = if secs < ch.late_after { b.new_weapon } else { b.new_weapon_late };
+        let ups = out.iter().filter(|(o, _)| matches!(o, Offer::WeaponUp(_))).count() as f32;
+        let early = secs < ch.late_after;
+        let weapon_up = if early && b.weapon_up_each > 0.0 {
+            b.weapon_up.min(b.weapon_up_each * ups)
+        } else {
+            b.weapon_up
+        };
+        let totals = [weapon_up, new_weapon, b.passive_up, b.new_passive];
+        let mut sums = [0.0f32; 4];
+        for (o, _) in &out {
+            if let Some((c, s)) = class(o) {
+                sums[c] += s;
+            }
+        }
+        for (o, w) in &mut out {
+            if let Some((c, s)) = class(o) {
+                *w = totals[c] * s / sums[c];
+            }
+        }
+    }
     // 已到一阶的五行更容易出现，帮助玩家凑共鸣
     for (o, w) in &mut out {
         if matches!(o, Offer::Evolve(_) | Offer::Mutate(_) | Offer::Fuse { .. }) {

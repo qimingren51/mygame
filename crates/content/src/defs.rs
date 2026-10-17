@@ -327,6 +327,9 @@ pub struct ChoicesDef {
     /// 保底：完成第几局时（倒下也算），按 `locked` 的顺序送一件还没解锁的
     #[serde(default)]
     pub unlock_pity: Vec<u32>,
+    /// 按类别给总权重（docs/BALANCE.md 第 6.4 节）：写了就用它代替上面四项每张卡的权重
+    #[serde(default)]
+    pub budget: Option<BudgetDef>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -338,6 +341,26 @@ pub struct ChoicesDef {
     pub charm_offers: u32,
     pub elite_charm: f32,
     pub charm_gold: u32,
+}
+
+/// 按类别给总权重：每一类的总权重固定，按份额分给这一类里能出的卡（之后再乘五行倍率），
+/// 内容再多也不会把升级卡稀释掉。new_weapon_late 是 late_after 秒之后“新法器”的总权重。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetDef {
+    pub weapon_up: f32,
+    pub new_weapon: f32,
+    pub new_weapon_late: f32,
+    pub passive_up: f32,
+    pub new_passive: f32,
+    /// 配对：手上法器的进化心法，在“新心法”里的份额乘它
+    pub key_pair: f32,
+    /// 配对：已经拿到进化心法的法器，在“法器升级”里的份额乘它
+    pub keyed_up: f32,
+    /// 开局阶段（late_after 秒以前）“法器升级”按手上能升级的法器件数封顶：每件最多这么多，总共不超过
+    /// weapon_up（0 表示不封顶）。开局只有一两件法器时，不让这一类的总权重全压在它们身上
+    #[serde(default)]
+    pub weapon_up_each: f32,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；

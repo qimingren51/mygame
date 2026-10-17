@@ -380,3 +380,64 @@ fn unlocked_weapons_bring_their_keys_into_the_pool() {
     assert!(w.iter().any(|x| x == "coin_sword") && p.iter().any(|x| x == "ruimu"));
     assert!(!w.iter().any(|x| x == "sky_lantern") && !p.iter().any(|x| x == "luxin"));
 }
+
+/// 按类别给总权重（docs/BALANCE.md 第 6.4 节）：“新心法”一类的总权重固定，按份额分；手上法器的进化心法份额乘 key_pair。
+#[test]
+fn the_budget_splits_each_category_and_favors_the_key() {
+    let c = content();
+    let b = c.run.choices.budget.clone().expect("run.ron 写了类别权重");
+    let weights = |c: &lantern_content::Content| {
+        let mut setup = RunSetup::new(1, RunMode::Normal);
+        setup.god = true;
+        let mut sim = SimHarness::with_setup(c.clone(), setup);
+        sim.quiet();
+        let offers = lantern_sim::build::offers(c, sim.arsenal(), sim.build(), 0.0);
+        let key = c.weapon_key(sim.arsenal().0[0].def).unwrap();
+        let new: Vec<(usize, f32)> = offers
+            .iter()
+            .filter_map(|(o, w)| if let Offer::NewPassive(d) = *o { Some((d, *w)) } else { None })
+            .collect();
+        (new, key)
+    };
+    let w_of = |new: &[(usize, f32)], id: &str| new.iter().find(|(d, _)| c.passives[*d].id == id).unwrap().1;
+    let (new, key) = weights(&c);
+    // 份额：普通的 1，配对的 key_pair
+    let shares =
+        new.len() as f32 + (b.key_pair - 1.0) * f32::from(u8::from(new.iter().any(|(d, _)| *d == key)));
+    // 不带五行的心法不乘五行倍率，正好是总权重按份额分到的那一份
+    assert!((w_of(&new, "juhun") - b.new_passive / shares).abs() < 1e-4);
+    // 起手法器的进化心法和同五行的另一门比，正好 key_pair 倍
+    let same =
+        new.iter().find(|(d, _)| *d != key && c.passives[*d].element == c.passives[key].element).unwrap();
+    let w_key = new.iter().find(|(d, _)| *d == key).unwrap().1;
+    assert!((w_key / same.1 - b.key_pair).abs() < 1e-4, "配对 × {}", b.key_pair);
+    // 心法多一门，每门分得少一点，但这一类的总量不变（不稀释其他类）
+    let mut more = c.clone();
+    let mut extra = more.passives.iter().find(|p| p.id == "juhun").unwrap().clone();
+    extra.id = "juhun_copy".into();
+    more.passives.push(extra);
+    let (new2, _) = weights(&more);
+    assert_eq!(new2.len(), new.len() + 1);
+    assert!((w_of(&new2, "juhun") - b.new_passive / (shares + 1.0)).abs() < 1e-4);
+}
+
+/// 开局封顶（`weapon_up_each`）：late_after 秒以前，“法器升级”这一类按手上能升级的法器件数封顶；之后照常。
+#[test]
+fn the_early_weapon_up_cap_limits_a_lone_weapon() {
+    let mut c = content();
+    let up = |c: &lantern_content::Content, secs: f32| {
+        let mut setup = RunSetup::new(1, RunMode::Normal);
+        setup.god = true;
+        let mut sim = SimHarness::with_setup(c.clone(), setup);
+        sim.quiet();
+        let offers = lantern_sim::build::offers(c, sim.arsenal(), sim.build(), secs);
+        offers.iter().find_map(|(o, w)| matches!(o, Offer::WeaponUp(0)).then_some(*w)).unwrap()
+    };
+    let (open, late) = (up(&c, 0.0), up(&c, 200.0));
+    let b = c.run.choices.budget.as_mut().unwrap();
+    b.weapon_up_each = 7.0;
+    let total = b.weapon_up;
+    // 起手只有一件法器：开局只分到 7，五行倍率不变，所以正好是原来的 7 / 总量
+    assert!((up(&c, 0.0) / open - 7.0 / total).abs() < 1e-4);
+    assert!((up(&c, 200.0) - late).abs() < 1e-4, "3:00 以后不封顶");
+}
