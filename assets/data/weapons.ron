@@ -192,14 +192,14 @@
         // 120° 扇形；方向朝 radius + 40 以内最近的妖物，没有就朝面向；扇形里从近到远最多打 count 只；暴击率 +15%
         behavior: Sweep(arc: 2.0944, aim: 40.0, knockback: 20.0, crit_bonus: 0.15),
         levels: [
-            (cooldown: 1.20, count: 3, radius: 70.0, damage: 20.0),
-            (cooldown: 1.14, count: 3, radius: 72.0, damage: 25.0),
-            (cooldown: 1.08, count: 4, radius: 76.0, damage: 30.0),
-            (cooldown: 1.02, count: 4, radius: 78.0, damage: 36.0),
-            (cooldown: 0.96, count: 5, radius: 80.0, damage: 42.0),
-            (cooldown: 0.90, count: 5, radius: 85.0, damage: 48.0),
-            (cooldown: 0.85, count: 6, radius: 85.0, damage: 54.0),
-            (cooldown: 0.80, count: 6, radius: 85.0, damage: 60.0),
+            (cooldown: 1.20, count: 3, radius: 140.0, damage: 20.0),
+            (cooldown: 1.14, count: 3, radius: 144.0, damage: 25.0),
+            (cooldown: 1.08, count: 4, radius: 152.0, damage: 30.0),
+            (cooldown: 1.02, count: 4, radius: 156.0, damage: 36.0),
+            (cooldown: 0.96, count: 5, radius: 160.0, damage: 42.0),
+            (cooldown: 0.90, count: 5, radius: 170.0, damage: 48.0),
+            (cooldown: 0.85, count: 6, radius: 170.0, damage: 54.0),
+            (cooldown: 0.80, count: 6, radius: 170.0, damage: 60.0),
         ],
         evolution: Some((
             name: "天罡", passive: "ruimu",
@@ -207,7 +207,7 @@
             flavor: "斗柄绕着北极转，剑气绕着你转。",
             // 一整圈；暴击的那一下对同一只再斩一次（× 1.0，再斩不再触发）
             behavior: Sweep(arc: 6.2832, aim: 40.0, knockback: 25.0, crit_bonus: 0.15, echo: 1.0),
-            level: (cooldown: 0.80, count: 10, radius: 100.0, damage: 100.0),
+            level: (cooldown: 0.80, count: 10, radius: 200.0, damage: 100.0),
         )),
     ),
     (

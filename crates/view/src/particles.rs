@@ -992,6 +992,19 @@ pub(crate) fn particle_events(
                 parts.splinters(at + Vec2::new(0.0, 14.0), 5);
                 parts.dust(at, 4, 0.8, DUST);
             }
+            // 讨封狐现形：“噗”地一团淡烟，顶在头上的那片叶子飘下来，妖眼色的火星迸开，一圈淡光荡开
+            SimEvent::Unmasked { pos, kind } => {
+                let def = content.0.enemies.get(usize::from(kind));
+                let eye = def.map_or(Color::srgb(1.0, 0.82, 0.48), |d| hex(&d.eye));
+                let at = to_screen(pos);
+                let body = at + Vec2::new(0.0, def.map_or(12.0, |d| d.radius));
+                parts.smoke(body, 1.1, Color::srgba(0.86, 0.88, 0.84, 0.55), 6);
+                parts.leaves(body + Vec2::new(0.0, 12.0), 3);
+                parts.sparks(body, eye, 8, 160.0, Vec2::ZERO);
+                parts.halo(frames.ring, at, 0.15, 1.4, 0.45, eye.with_alpha(0.6));
+            }
+            // 竹魅射出竹刺：出手处崩出两三根竹片
+            SimEvent::EnemyShot { pos, .. } => parts.splinters(to_screen(pos) + Vec2::new(0.0, 12.0), 3),
             // 夜主登场，狐火把结界里的竹丛烧平：每丛起一股狐火和焦烟，结界边上烧起一圈
             // 夜主换阶段：身上炸开一团墨，妖眼色的火线四射，一圈妖光荡开；三阶更猛
             SimEvent::BossPhase { phase } => {

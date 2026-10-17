@@ -68,6 +68,12 @@ pub struct Sfx {
     pub bamboo: StaticSoundData,
     /// 狐火烧平竹丛：呼地一下着起来，噼里啪啦
     pub burn: StaticSoundData,
+    /// 竹魅瞄准：竹子被拉弯的“吱——”越绷越紧，出手前一下轻的木响
+    pub enemy_aim: StaticSoundData,
+    /// 竹刺射出：起头一下弓弦似的木响，“嗖”地往下滑
+    pub spike: StaticSoundData,
+    /// 讨封狐现形：“噗”的一团烟，一声短的狐叫（往上挑再落下），一点亮的铃
+    pub unmask: StaticSoundData,
     // 下面四个是界面上的事（卷轴、灯驿），界面发 UiCue 来播
     /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
     pub scroll_unroll: StaticSoundData,
@@ -254,6 +260,9 @@ impl Sfx {
             &self.deeper,
             &self.bamboo,
             &self.burn,
+            &self.enemy_aim,
+            &self.spike,
+            &self.unmask,
             &self.scroll_unroll,
             &self.scroll_line,
             &self.lamp_lit,
@@ -498,6 +507,45 @@ impl Sfx {
                     b.noise(t, 0.012, 0.09 - k as f32 * 0.018, noise(FilterKind::High, 3800.0));
                 }
             }),
+            // 竹魅的预警是 0.6 秒：声音跟着绷到出手那一刻，轻，不盖过夜主和危险提示
+            enemy_aim: render(0.7, |b| {
+                b.noise(
+                    0.0,
+                    0.56,
+                    0.035,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 650.0,
+                        slide: Some(1900.0),
+                        q: 6.0,
+                        attack: 0.25,
+                    },
+                );
+                b.wood(0.0, 0.03, 520.0);
+                b.wood(0.55, 0.05, 980.0);
+            }),
+            spike: render(0.3, |b| {
+                b.wood(0.0, 0.08, 1400.0);
+                b.noise(
+                    0.0,
+                    0.18,
+                    0.06,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 3200.0,
+                        slide: Some(1100.0),
+                        q: 3.0,
+                        ..Default::default()
+                    },
+                );
+            }),
+            // 狐叫学夜主换阶段的狐啸，短一半、轻一半
+            unmask: render(0.8, |b| {
+                b.noise(0.0, 0.16, 0.12, noise(FilterKind::Low, 700.0));
+                b.osc(Wave::Triangle, 620.0, 0.03, 0.12, 0.05, Some((1150.0, 0.1)), 0.02);
+                b.osc(Wave::Triangle, 1150.0, 0.14, 0.26, 0.04, Some((520.0, 0.24)), 0.01);
+                b.bell(jiao(17), 0.02, 0.03, 0.5);
+            }),
             scroll_unroll: render(3.4, |b| {
                 b.pluck(jiao(5), 0.0, 0.11, 2.6);
                 b.pluck(jiao(10), 0.02, 0.05, 2.2);
@@ -675,6 +723,9 @@ mod tests {
             ("deeper", &s.deeper),
             ("bamboo", &s.bamboo),
             ("burn", &s.burn),
+            ("enemy_aim", &s.enemy_aim),
+            ("spike", &s.spike),
+            ("unmask", &s.unmask),
             ("scroll_unroll", &s.scroll_unroll),
             ("scroll_line", &s.scroll_line),
             ("lamp_lit", &s.lamp_lit),
