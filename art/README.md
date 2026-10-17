@@ -151,7 +151,7 @@ art/.venv/bin/python art/post/test_ui_icons.py      # 三个自检脚本没设 L
 ```bash
 A=art/out/assets@2x
 art/.venv/bin/python art/post/pack_atlas.py --paper $A/ground/paper.png --out assets/atlas
-art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns
+art/.venv/bin/python art/post/pack_atlas.py --name actors --out assets/atlas $A/hero $A/shade $A/wisp $A/toad $A/golem $A/fox $A/ghoul $A/stonelord $A/fox_wisp $A/bamboo_wraith $A/taofeng_fox $A/rock_a $A/rock_b $A/rock_c $A/stone_lantern $A/stone_lantern_dark $A/ancient_lamp $A/blood_altar $A/merchant $A/bamboo_clump $A/bamboo_clump_broken $A/fox_shrine $A/stone_fox $A/fox_lanterns $A/fox_shrine_grand $A/fox_gate $A/fox_eave_lamp $A/fox_eave_lamp_lit
 art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $A/lantern_red $A/lantern_mirror $A/lantern_frost
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
 art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
@@ -162,6 +162,21 @@ art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规�
 ```
 
 格式约定见 `docs/DESIGN.md` 第 15 节。界面图集要加 `--no-trim`（不裁边）。灯笼叠层单独打成 `lanterns`，不要放进 actors。
+一页放不下（单页最大 4096²）时自动分页为 `<名>_0`、`<名>_1`……，`index.json` 的 `pages` 跟着改；页数变了要删掉旧的页文件（例如 `actors.json`、`actors.png`）。
+
+**整套重打还是只换几个素材**：
+
+- 用上面的 `pack_atlas.py` 整套重打：本机 `art/out/assets@2x/` 里这个图集的**每一个**素材都是要发布的版本（刚按正式管线全部重渲过，或者改了打包器、图集格式）。
+  `art/out/` 不进 git，别人提交的素材本机不一定有最新的，整套重打会把它们悄悄换掉。
+- 用 `post/atlas_swap.py` 只换几个素材（平时换一两只妖物、一个道具都用这个）：没换的素材从现有图集还原（裁过边的帧按原尺寸放回），
+  只换上给出的文件夹（按 meta 的 `name` 对上，没有的加在最后），重打后逐帧核对没换的帧像素、裁边、锚点、meta、动画序列都不变，不一致时退出码 1；
+  旧的页文件会先删掉，页数变了也不会留下多余的文件。
+
+```bash
+art/.venv/bin/python art/post/atlas_swap.py --atlas assets/atlas --name actors $A/shade $A/fox   # 只换影妖、赤面狐
+art/.venv/bin/python art/post/atlas_swap.py --atlas assets/atlas --name boss $A/boss
+art/.venv/bin/python art/post/check_atlas.py
+```
 
 ## 界面九宫格皮肤（post/ui_skin.py）
 
@@ -173,6 +188,45 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 
 只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
 格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
+
+重新生成时，panel_dark、overlay_vignette、pill、pip、pip_on、toast、toast_big、menu_hl 和仓库里的有细微差别（生成器早就有的漂移，master 上的脚本也一样）。
+只换改过的件时按名字拷，不要整个目录覆盖。
+
+### 黑漆描金：升级卡与状态栏（post/ui_lacquer.py）
+
+试玩第 1 轮选定，升级卡和状态栏整套用黑漆描金。`ui_skin.py` 从 `ui_lacquer.py` 取这些件，每件的显示尺寸写在 skin.json 的 note 里：
+
+- 卡框 `card_fan/ling/xuan/tian/yi/he`：600×920（显示 300×460），切片 64，中间和四边平铺，漆面按 64 像素的周期做成无缝；`card_focus`：624×944。
+- 卡上的字要用纸色或淡金（skin.json 的 `text` 是 `#ede4cf`），不能再用墨色。
+- 状态栏 `hud_portrait`：208²，中间直径 156 的窗口透明，主角胸像画在下面；`hud_ult_tick`、`hud_ult_tick_on`、`hud_ult_tick_full`：34×20，十二格绕头像章；
+  `hud_level_seal`：60²；`hud_hp_track`：256×60；`hud_xp_track`：128×20；`bar_fill_trail`：掉血残影。
+- 法器格 `slot_l*`：128²（显示 64）；心法格 `slot_s*`：88²（显示 44）。`bar_track`、`bar_fill_hp/xp/shield`、`chip_dark` 也换成了漆面。
+
+```bash
+art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
+art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
+```
+
+数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
+帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
+
+### 卡面插画（render/card_art.py）
+
+升级卡上半张的插画：一件物件的特写，Blender（Cycles CPU）精细材质，配夜色水墨底。题材见 `docs/LORE-TEXT.md` 第 7 节。
+
+- 原图 480×360（4:3，不透明、满幅），界面铺满 268×201 的插画区、按圆角 6 裁切；左上压五行印、右上压品阶签，两个上角（原图约 70×70）不放主体。
+- 帧名：法器 `ui/card_<法器 id>`、`_evo`（进化）、`_mut`（异化）；合璧 `ui/card_<合璧 id>`；心法 `ui/card_<心法 id>`；补给 `ui/card_lotus`、`ui/card_oil`。
+- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器、合璧）、`card_passives.py`（心法）；共用的道具和材质在 `card_props.py`。
+  每张用 `@scene` 注册 3D 场景、`@background` 注册水墨底；渲染缓存在 `out/_card_tmp/`，后期只用 numpy / Pillow。
+- 最终渲染包在 `bstyle.render_lock()` 里（几个代理同时出图时排队）。一张 960×720、128 采样约 0.5–2 分钟。
+
+```bash
+art/.venv/bin/python art/render/card_art.py sword --draft     # 半分辨率、少采样试渲 → out/_card_tmp/draft_card_art_sword.png
+art/.venv/bin/python art/render/card_art.py sword sword_evo    # 正式渲染 + 后期 → out/review@2x/card_art_<id>.png 和 out/assets@2x/ui_cards/card_<id>.png
+art/.venv/bin/python art/render/card_art.py --post sword       # 只重做后期（读缓存）
+```
+
+打包时 `ui_cards` 和 `ui_stats` 一起打进 `cards` 页（上面的命令）。
 
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
@@ -346,10 +400,11 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox    # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
+art/.venv/bin/python art/post/enemy_review.py b2 fox:b1 wisp  # “素材:批”：拿 out/assets@2x_<批>/ 里那一版对比（改过的）
 art/.venv/bin/python art/post/atlas_swap.py --atlas assets/atlas --name actors art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/check_atlas.py
 ```
@@ -357,19 +412,24 @@ art/.venv/bin/python art/post/check_atlas.py
 | 文件 | 作用 |
 |---|---|
 | `render/enemies_v2.py` | V2 表（素材 → 模型、帧尺寸、锚点、动画、挂点、碰撞半径、眼色）；出帧、逐帧挂点、meta（`style: "paint"`、`contact_radius`） |
-| `models/v2kit.py` | 公共件：多档带色相偏移的绘画感材质（明暗和毛色分区走同一条色带）、轮廓光、AOV 缝光（夜里透出的微光）、按设计稿投到表面上的贴片（眼、裂缝、脸上的朱砂）、离光越远越粗的墨线、后期（不吸附调色板） |
+| `models/v2kit.py` | 公共件：多档带色相偏移的绘画感材质（明暗和毛色分区走同一条色带）、轮廓光、AOV 缝光（夜里透出的微光）、按设计稿投到表面上的贴片（眼、裂缝；`design_patch` 做任意形状的整块贴片，例如脸谱）、离光越远越粗的墨线、设计稿平面里的笔画扁带和 `brush_material`（飞白、散锋，疾影、狐火用）、后期（不吸附调色板） |
 | `models/shade_v2.py` `fox_v2.py` | 影妖、赤面狐 |
+| `models/wisp_v2.py` | 疾影：卷云头 + 被风扯长的几笔薄墨（扁带），不描线 |
+| `models/golem_v2.py` | 石妖：斧劈块面的山石垒起来，石缝里夹一片发光的魂 |
+| `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带） |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
 | `post/atlas_swap.py` | 图集里只换几个素材：没换的素材从现有图集还原（不依赖本机 out/），打包后逐帧核对没换的帧逐像素相同 |
 
 - 影妖：帧 224²（原 160²），锚点 (0.5, 0.875) 是下摆墨烟的落地点，高约 46 单位（主角 0.88 倍），眼色暖金 `#FFC46B`。
   游戏会给悬浮的妖物整体抬高、上下起伏，帧里只留 ±0.5 单位的“呼吸”。
+- 疾影、狐火：帧 224²（原 160²），锚点 (0.5, 0.875)，悬浮。石妖：帧 224²、锚点 (0.5, 0.8)，`register_x_only`
+  （锚点正上方是驼背的斜坡，不是头顶）。赤面狐 move 一步一起伏 1.7 单位，写了 `vertical_motion`（自检不查逐帧身高；游戏不读）。
 - `contact_radius`：量法同 `docs/PLAYTEST.md` 的表（朝东的帧，锚点往上 52 单位内每行最靠前的点，取第 90 百分位，各帧取中位数），
   默认动画的值和 `game_radius` 取小；各动画分别量的值在 `contact_radius_by_anim`。
 - `check_asset.py`：`style: "paint"` 的素材不查调色板比例、墨线占比（多档渐变、焦墨的影妖本来就不在旧的三档色板里），其余照查；
   四足兽用 `register_band`（赤面狐 [0.70, 0.92]）取躯干做 x 配准，迈步的膝盖不算漂移。
-- 打包：`pack_atlas.py --name actors` 那行命令的素材表已经过时（少了后加的狐祠道具），换素材用 `atlas_swap.py`。
+- 打包：换素材用 `atlas_swap.py`（见上面“打包桌面版图集”）。actors 已经分成两页（`actors_0`、`actors_1`）。
 
 ## 正式管线
 

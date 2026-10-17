@@ -43,6 +43,8 @@ const PAGE: UVec2 = UVec2::new(512, 128);
 /// 粒子贴图的帧。
 #[derive(Clone, Copy)]
 pub(crate) struct PFrames {
+    /// 软点（命中亮心、光点）
+    pub dot: FrameId,
     pub streak: FrameId,
     pub smoke: FrameId,
     pub ash: FrameId,
@@ -224,6 +226,7 @@ pub(crate) fn setup_particles(
             drop: f("fx/drop"),
             wisp: f("fx/wisp"),
             slash: f("fx/slash"),
+            dot: f("fx/dot"),
             leaves: [0, 1, 2, 3].map(|i| db.find(&format!("vfx/bamboo_leaf_{i}")).unwrap_or(f("fx/ash"))),
             real_leaves: db.find("vfx/bamboo_leaf_0").is_some(),
         },
@@ -443,15 +446,40 @@ impl Particles {
                 _ => color,
             }
         };
+        // 接触核心加大一倍多（试玩第 1 轮：原来 3–4 像素的亮点在乱战里看不见）
         self.spawn(P {
             color: core_color,
-            size: (size * if crit { 1.3 } else { 1.0 }, size * 0.5),
+            size: (size * if crit { 2.9 } else { 2.2 }, size * 0.9),
             stretch,
             rot: angle,
             glow: true,
             core: true,
             ..P::new(frame, at, life, layer::EMISSIVE + 1.2)
         });
+        // 一团一闪而过的亮心，亮度过辉光阈值，晕开一圈；暴击再加一道横竖交叉的星芒
+        let hot = |c: Color, k: f32| {
+            let l = c.to_linear();
+            Color::linear_rgba(l.red * k, l.green * k, l.blue * k, 1.0)
+        };
+        self.spawn(P {
+            color: hot(core_color.mix(&Color::WHITE, 0.5), if crit { 2.6 } else { 1.8 }),
+            size: (if crit { 1.6 } else { 1.1 }, 0.2),
+            glow: true,
+            core: true,
+            ..P::new(self.f.dot, at, if crit { 0.09 } else { 0.07 }, layer::EMISSIVE + 1.3)
+        });
+        if crit {
+            for k in 0..2 {
+                self.spawn(P {
+                    color: hot(Color::srgb(1.0, 0.92, 0.7), 2.2),
+                    size: (0.9, 0.3),
+                    stretch: 6.0,
+                    rot: angle + std::f32::consts::FRAC_PI_4 + k as f32 * std::f32::consts::FRAC_PI_2,
+                    glow: true,
+                    ..P::new(self.f.streak, at, 0.1, layer::EMISSIVE + 1.3)
+                });
+            }
+        }
         let n = self.n(if crit { 6 } else { 4 });
         for k in 0..n {
             let d = emission_dir(dir, fallback, self.rng.next_f32(), self.rng.next_f32());
@@ -864,6 +892,7 @@ pub(crate) fn particle_events(
     fixed: Res<Time<Fixed>>,
     mut clock: ResMut<ParticleClock>,
     mut parts: ResMut<Particles>,
+    (phase, mut evolving): (Option<Res<lantern_sim::SimPhase>>, Local<Option<u16>>),
 ) {
     let dt = time.delta_secs();
     clock.trail_cd -= dt;
@@ -872,6 +901,32 @@ pub(crate) fn particle_events(
     let mut bamboo_bursts = 0;
     let mut pulses = 0;
     parts.begin_frame(feel.lite);
+    // 进化：卡片收起、回到战斗的那一刻，在主角身上炸开（试玩第 1 轮：原来只有辉光一闪和界面卡片）；
+    // 共约 114 个，在高光那一档的每帧预算（128）里
+    for ev in &outbox.0 {
+        if let SimEvent::Evolve { weapon, .. } = *ev {
+            *evolving = Some(weapon);
+        }
+    }
+    if let Some(weapon) = *evolving
+        && phase.as_deref() == Some(&lantern_sim::SimPhase::Play)
+    {
+        *evolving = None;
+        let color = element_glow(content.0.weapons.get(usize::from(weapon)).map(|w| w.element));
+        parts.priority = Priority::Ultimate;
+        parts.category = Category::Decorative;
+        let bright = |c: Color, k: f32| {
+            let l = c.to_linear();
+            Color::linear_rgba(l.red * k, l.green * k, l.blue * k, 1.0)
+        };
+        parts.halo(frames.ring, hero_at, 0.2, 8.0, 0.9, bright(GOLD, 1.8).with_alpha(0.95));
+        parts.halo(frames.ring, hero_at, 0.1, 5.0, 0.7, bright(color, 1.6).with_alpha(0.9));
+        parts.sparks(hero_at + Vec2::Y * 14.0, bright(color, 1.5), 36, 520.0, Vec2::ZERO);
+        parts.sparks(hero_at + Vec2::Y * 14.0, bright(GOLD, 1.5), 18, 380.0, Vec2::new(0.0, 0.6));
+        parts.embers(hero_at, 40.0, GOLD, 30);
+        parts.ink(hero_at + Vec2::Y * 6.0, 20, 2.2);
+        parts.dust(hero_at, 8, 1.6, INK.with_alpha(0.5));
+    }
     for &index in &feedback.selected {
         let Some(ev) = outbox.0.get(index) else { continue };
         parts.priority = Priority::of(ev);
@@ -1257,6 +1312,7 @@ mod tests {
             category: Category::Decorative,
             spawned: [0; Priority::ALL.len()],
             f: PFrames {
+                dot: frame,
                 streak: frame,
                 smoke: frame,
                 ash: frame,

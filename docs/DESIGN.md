@@ -217,7 +217,7 @@ Points(2), Favor,                                                 // 夜签“�
 
 **落塔**（`sim/weapons/tower.rs`，docs/BALANCE.md 第 6.3 节）：冷却好了落 `count`（加数量加成）座，落点和孔明灯共用 `weapons::densest`（同样的 `range / pick / cluster / spread`，附近没有妖物就落在面向前方 150）。塔放进 `Towers` 资源，由 `update_towers`（紧跟 `update_waves`）推进：预警 `warn` 秒（画面读 `Towers` 画预警圈），落地是一次带击晕的圆形 `Strike`，发 `SimEvent::TowerLand`；之后立 `life` 秒，每步把 `pull × radius` 以内的妖物直接往塔心挪 `pull_speed × DT`（精英一半，夜主不挪，挪到离塔心 1 为止），每 `tick` 秒一次 `damage × tick_scale` 的圆形 `Strike`；到时间收走，有 `burst`（玲珑塔）就再炸一次带击晕的 `Strike`，发 `SimEvent::TowerBurst`。
 
-**未解锁的法器**：`run.ron` 的 `choices.locked`（法器 ID）里的法器不出“新法器”卡（`Content::weapon_locked`），校验要求 ID 存在、不是起手法器。工具用 `Content::unlock` 放开（`lantern-tools kite --unlock all|<ID>,…`），内容哈希跟着变。按局解锁做出来以后，解锁状态由存档经 `RunSetup` 进模拟。新法器的四个资源（`SkyLanterns`、`Waves`、`Vines`、`Towers`）空的时候不写状态哈希，没带这几件法器的局哈希和加它们之前一样。
+**未解锁的法器**：`run.ron` 的 `choices.locked`（法器 ID）里的法器不出“新法器”卡（`Content::weapon_locked`），校验要求 ID 存在、不是起手法器。工具用 `Content::unlock` 放开（`lantern-tools kite --unlock all|<ID>,…`），内容哈希跟着变。玩家靠成就和保底解锁（docs/GAMEPLAY.md 第 13.2 节）：存档 `Profile.unlocked` 由 `Profile::run_setup` 写进 `RunSetup.unlocked`（ID 集合，回放带着它，卡池能重现），开局转成 `Build.unlocked`（下标）。`offers()` 里法器锁着 = `Build::weapon_locked`（数据锁着且没解锁）；锁着的法器的进化心法（`Content::weapon_key`，异化共用）也不出新心法卡（`Build::passive_locked`），所以第一局是 5 件法器、12 门心法。新法器的四个资源（`SkyLanterns`、`Waves`、`Vines`、`Towers`）空的时候不写状态哈希，没带这几件法器的局哈希和加它们之前一样。
 
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
@@ -332,10 +332,10 @@ assets/data/
   attributes.ron   局外属性：用铜钱买（每级价格 = 基础 × 级 × (1 + 2% × 已买总级数)）
   lamps.ron        灯：起手法器、本命五行、灯性与代价、光色、一句话描述
   charms.ron       灯坠（带一句话描述）
-  achievements.ron 成就：条件和奖励（开放基础、灯、灯坠、更、铜钱、灯油）
+  achievements.ron 成就：条件和奖励（开放基础、灯、灯坠、更、铜钱、灯油、法器）
   hub.ron          灯驿人物的台词：按条件挑一句（docs/LORE-TEXT.md 第 1 节）
   regions.ron      地区：名字、开场卷轴的旁白（长夜、天明），P0 只有青丘
-  stat_labels.ron  局内属性面板：分组、每项属性的标签、悬停说明、数值写法（docs/LORE-TEXT.md 第 8 节）
+  stat_labels.ron  局内属性面板：分组、每项属性的标签、悬停说明、数值写法（docs/LORE-TEXT.md 第 8 节）、图标名（组 ui/stat_group_<icon>，属性 ui/stat_<icon>）
 ```
 
 - 数据结构用 `serde` 定义在 `lantern_content` 里，游戏和命令行工具共用同一套。
@@ -428,7 +428,7 @@ assets/data/
 - **少字**（docs/PLAYTEST.md 第 4 项）：底部按键提示只在前两局显示；提示条同时最多 2 条，合围、妖潮、幻身、九尾扫这些说明讲过一次就只出标题（存档的 `tips`）；反应的说明和第一次停顿也只有一次——出发时把存档里见过的反应带进 `RunSetup::known_reactions`，模拟的 `Discoveries::seen` 从它开始，结算只记这一局触发的（`Discoveries::run`）。
 - **只读模拟**：升级卡片、宝箱、结算都只读 `Flow`、`Build`、`Arsenal` 等资源，玩家的选择发 `SimCommand::Choose / Reroll / Skip / Ack`。卡片上的说明文字（升级前后的数值、新心法、进化）由 `describe.rs` 根据内容数据生成。
 - **局内属性面板**（试玩第 1 轮第 10 项，`ui/stats_panel.rs`）：暂停菜单第二行“属性”打开（暂停时按 Tab 也行），对局中按住 Tab 临时看（不暂停，松开收起；手柄走暂停菜单）。分组和文字来自 `stat_labels.ron`：基础一组总是列全，其余组默认只列和初始值（`Stats::base`）不同的，Tab 或确认键切换成全部；变了的数值用泥金色。最后一组是法器：等级、进化缺哪门心法，变过形的写进化、异化、合璧。焦点或鼠标所在的格子在面板下方写含义和来源（`stats::sources`，最多 6 项）。行多时画布按行数变高、整页等比缩小。打开时暂停菜单隐藏，暂停菜单的输入先让给面板。图标（`ui/stat_<key>`、`ui/stat_group_<组>`）美术画好后再加。
-- **升级卡版式**（试玩第 1 轮第 3 项，`choice.rs` 的 `card`）：上半张插画（`OfferInfo.art`，4:3，图集里没有就把图标放大到 132），左上压五行印 `ui/icon_el_*`，右上写品阶；下面卡名、一行收益（`OfferInfo.gain`：法器升级按数值生成，其余取 `short`）、等级点（`pip` / `pip_on`，选完以后的等级）、一行共鸣或进化提示（亮色的是共鸣激活、可进化、异化、合璧）；页脚写类别、进化配对的图标（法器卡画进化心法，心法卡画它能进化的法器，没拿到的画淡）和按键。完整说明不上卡，聚焦的那张在卡片下方显示 `desc` 加一行细节。卡框仍按品阶换 `card_*` 皮肤，美术的新卡框到了换皮肤图即可。
+- **升级卡版式**（试玩第 1 轮第 3 项，`choice.rs` 的 `card`）：上半张插画（`OfferInfo.art`，4:3，图集里没有就把图标放大到 132），左上压五行印 `ui/icon_el_*`，右上写品阶；下面卡名、一行收益（`OfferInfo.gain`：法器升级按数值生成，其余取 `short`）、等级点（`pip` / `pip_on`，选完以后的等级）、一行共鸣或进化提示（亮色的是共鸣激活、可进化、异化、合璧）；页脚写类别、进化配对的图标（法器卡画进化心法，心法卡画它能进化的法器，没拿到的画淡）和按键。完整说明不上卡，聚焦的那张在卡片下方显示 `desc` 加一行细节。卡框是黑漆描金（试玩第 1 轮用户选定）：按品阶换 `card_fan` / `card_ling` / `card_xuan` / `card_tian`，异化用 `card_yi`、合璧用 `card_he`；卡上的字用纸色 `PAPER`、淡金或五行色，不再用墨色。按钮 `btn` 是浓墨横扫，字用纸色；`btn_disabled` 是淡灰横扫，字用 skin.json 里的 `#8f877a`。
 - 字体：标题用 Ma Shan Zheng，正文和数字用 Noto Serif SC（都是 OFL 协议）。`crates/ui/fonts.py` 裁剪出子集：GB2312 一级字库的 3755 个常用汉字，加上界面代码和 `assets/data/` 里所有非 ASCII 字符（两款合计约 4.6 MB，完整字体约 31 MB）。常用字预先放进去，新增文字大多不用重新生成，各个分支也不会老在这几个二进制文件上冲突；用到常用字以外的字时 CI 的 `--check` 会报缺字，再运行一次脚本。Ma Shan Zheng 没有“·”，标题字体的文字里自动换成“•”。
 - 文字：界面固定文字仍写在 `crates/ui` 的代码里，名字和说明在 `assets/data/`。加第二种语言时再统一移到 `assets/i18n/`（第 8 节）。
 - 性能面板默认隐藏，仅开发模式或“设置 → 高级 → 性能调试”开启后可用 F3 切换；种子号也只在面板内显示。面板包含：帧率、帧时间、模拟每步耗时（FixedUpdate 首尾计时，只做诊断）、画面层每帧耗时（`ViewStats`）、妖物和魂火数量、精灵、发光与粒子数量。egui 调试面板（实时开关光照、调整妖物数量、无敌、加速）在需要时再加，只在 `dev` 特性下编译。
@@ -443,6 +443,8 @@ assets/data/
 **输入**：`platform/input.rs` 在 `PreUpdate` 汇总 `Actions`。默认键盘 WASD / 方向键移动、空格 / Shift 闪避、E / F 燃灯、G 交互（狐村护火、留灯）、Esc 暂停；手柄左摇杆 / 十字键移动、A / RB 闪避、Y / RT 燃灯、X 交互、Start 暂停。交互（`Action::Interact`）只属于“游戏进行中”场景，和菜单里的跳过、灯驿（也是手柄 X）不冲突，提示模板写 `{interact}`。模拟只在 `SimPhase::Play` 接收量化的 `InputFrame` 与 `SimCommand`，玩法和回放格式不变。
 
 - **菜单导航**：标题、设置、暂停、结算、灯驿、夜签、升级、点灯、货郎、灯坠均支持手柄。摇杆移动死区 0.22，菜单触发 / 回中阈值 0.55 / 0.30；只走主轴，长按先等待 0.34 秒，再每 0.11 秒走一格。网格按视觉行列循环，货郎跳过不可购买项。升级用上下切换卡片与重抽 / 封印 / 跳过操作，保留封印目标。焦点沿用泥金框；鼠标只有实际移动或点击才接管。
+- **信息栏版式**（黑漆描金，`hud.rs`）：顶部三块放在一张 `FitViewport` 画布里（窗口小于 1280×720 时一起缩小）。左上是头像章 `hud_portrait`（胸像 `ui/portrait_hero` 画在底下），12 个燃灯刻度 `hud_ult_tick` / `_on` / `_full` 沿圆环排一圈（`UltTick`，到第 k 格的进度点亮，蓄满整圈换满格），等级印 `hud_level_seal` 压在右下角只写数字；燃灯蓄满时头像下写“燃灯”加按键，没满按燃灯时同一处闪“燃灯未满”。头像右边是大血条 `hud_hp_track`（460×30，填充内缩 7，掉血残影 `bar_fill_trail`，护盾一道细线压在上沿，数字写在右端）、经验条 `hud_xp_track`（460×10），再下面法器格 `slot_l`（64）和心法格 `slot_s`（44），空格子画到上限（法器栏按 `build::weapon_slots` 减 `occupied_slots`，心法按 `choices.slots`）。顶部中间只写用时。右上是五行计数，下面击杀、铜钱、石灯笼，再下面夜签和古灯增益。夜主血条和新手按键提示在底部居中（`HudFooter`，边缘箭头按它的高度让开）。回放状态在左下角。`hud_fx.rs` 的标记照旧：`UltBar` 在头像章上（没满时整个章一抖），`UltFill` 在每个刻度上（蓄满时一起呼吸），`HpBar` / `HpTrail` 在血条上，`LevelLabel` 是印里的数字。`layout_tests` 检查 640×360 到 1920×1080 的窗口里用时、击杀、血条不互相压住。
+- **数值图标**（美术的 cards 图集页）：`stat_labels.ron` 的 `icon` 指向 `ui/stat_<icon>`（基础 12 项）和 `ui/stat_group_<icon>`（各组，法器组固定用 `stat_group_weapons`）；属性面板的格子和组名前画它，心法卡的收益行前画心法第一条加减属性效果的图标（`Content::stat_icon`），没写图标的不画。校验只许小写字母、数字、下划线；`layout_tests` 检查写到的图标图集里都有。
 - **设备提示**：`ActiveInput` 记录最近有效的键鼠 / 手柄操作；摇杆漂移、保持杆位不抢走另一设备，断开手柄回到键鼠。`ui/prompts.rs` 的 `Prompt` 模板在 UI 布局前按当前绑定展开，覆盖 HUD、菜单、燃灯提示与回放；切设备不重建面板、不重播动画。面键用位置约定 A 下、B 右、X 左、Y 上。
 - **改键**：标题设置和暂停设置共用 `ui/controls.rs`；键盘四向及动作、手柄动作可改，十字键 / 摇杆导航固定。`Bindings` 按场景检测冲突，保留键盘方向键 / Esc、数字直选与系统快捷键。冲突不覆盖原绑定；捕获前后均等松键，捕获按键不会穿透菜单或模拟。旧副键仅在动作未改键且未被自定义绑定占用时保留。每页可恢复默认，改动立即原子写入设置。
 - **首夜引导**：`ui/onboarding.rs` 在首个正常夜行显示移动、闪避、燃灯、升级的非模态轻提示；移动读取实际位移，闪避 / 燃灯读取 `SimOutbox`，升级核对模拟接受前后的选择阶段。每项完成即保存，完整完成后不再出现；第一局结算后也不再提示。放弃首局再出发时只补未完成项。每个情境最多显示十秒，暂停和无关选择页隐藏，跑分 / 回放 / 自动驾驶 / 无敌模式不写教学进度。引导只读模拟状态，不改模拟命令、随机流或结果。
@@ -455,7 +457,7 @@ assets/data/
 
 | 文件 | 内容 |
 | --- | --- |
-| `save.ron` | 局外进度（`Profile`，第 3 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯和灯坠、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、展开过的开场卷轴（`scrolls`）、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场、首夜教学完成项（`onboarding`）、已见故事事件（`events: BTreeSet<String>`）、已拾手记（`journals: BTreeSet<u8>`）、灯驿里听过的只说一次的台词（`hub_lines_seen`，`hub.ron` 的 once ID）、讲过一次的说明（`tips`：合围、妖潮、幻身、九尾扫等，讲过以后提示条只出标题）、图鉴拿到过的法器和心法（`codex`：`w:<id>`、`w:<id>_evo`、`w:<id>_mut`、`f:<合璧 id>`、`p:<id>`，结算时由 `flow::codex_keys` 按局末的法器栏和心法算，合璧把两件进化材料一并记上） |
+| `save.ron` | 局外进度（`Profile`，第 4 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯、灯坠和法器（`unlocked`）、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、展开过的开场卷轴（`scrolls`）、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场、首夜教学完成项（`onboarding`）、已见故事事件（`events: BTreeSet<String>`）、已拾手记（`journals: BTreeSet<u8>`）、灯驿里听过的只说一次的台词（`hub_lines_seen`，`hub.ron` 的 once ID）、讲过一次的说明（`tips`：合围、妖潮、幻身、九尾扫等，讲过以后提示条只出标题）、图鉴拿到过的法器和心法（`codex`：`w:<id>`、`w:<id>_evo`、`w:<id>_mut`、`f:<合璧 id>`、`p:<id>`，结算时由 `flow::codex_keys` 按局末的法器栏和心法算，合璧把两件进化材料一并记上） |
 | `settings.ron` | 第 2 版：全屏、垂直同步、音乐／音效／界面／环境音量、画面手感选项、伤害数字（全部／只看暴击／关，经 `view::Feel` 同步到画面层）、键盘与手柄动作绑定（`bindings`） |
 | `replays/` | 最近 20 局的回放 |
 | `logs/`（Windows 见下文） | 运行日志（保留最近 5 份），包含 panic 信息与调用栈 |
@@ -465,6 +467,7 @@ assets/data/
 
 - 存档和设置都带 `version` 字段，每次升级格式时写一个迁移函数，旧存档逐级迁移。主文件不可用时读取并解析 `.bak`；恢复成功后先保留损坏的主文件，再允许保存。主文件及备份都不存在才视为首次运行；恢复失败或无法安全保留原文件时暂用默认值/备份，并禁止保存覆盖原数据。
 - 一局结束时结算界面调用 `Profile::record`：加灯油和铜钱、更新统计和最佳记录（无尽夜只记在它自己的榜上，按更分开）、判断成就并立即发奖（成就发的灯油和铜钱不乘倍率）；看回放、跑分、无敌模式不计。心灯、属性在标题界面（M2.5-4 起是灯驿）花钱升级，开局时写进 `RunSetup`，所以回放能重现。属性可以全部退还（返还实际花掉的铜钱），也可以出发前单独关掉。
+- **第四版法器解锁**：`unlocked`（法器 ID）默认空。成就 `Evolved(<法器>)` 看存档的图鉴（`w:<id>_evo` 或 `w:<id>_mut`，跨局累计），奖励 `Weapon(<法器>)` 往 `unlocked` 里加；结算时 `run.ron` 的 `choices.unlock_pity` 里的局数到了，再按 `choices.locked` 的顺序送一件还锁着的。`Recorded.unlocked` 列出这一局新解锁的（成就和保底都算），结算面板据此每件写一行：法器图标、“新法器 · X”、`weapons.ron` 的 `unlock`（LORE-TEXT 6.9 节的正文，≤ 8 字；`choices.locked` 里的法器必须写，校验检查）；结算整页放在 `FitViewport` 画布里，每件新法器加高一行。图鉴法器页照样列出锁着的法器（`Profile::weapon_unlocked` 判断），没拿到过的空位写“<老法器>进化或异化后可得”（看哪条 `Evolved` 成就奖励它）；锁着的法器的进化心法在心法页写“<新法器>解锁后可得”。三版升四版时按图鉴补发这几个成就，并按已完成的局数补送过了的保底。
 - **第三版叙事存档**：`events` / `journals` / `hub_lines_seen` 与 `onboarding` 同在第 3 版，默认空集合，旧一、二版可加载，升版不补写玩家未做过的选择，也不补记听过哪句；余额和心灯等级原样保留，不按新价追补或扣回。`Profile::run_setup` 冻结 `StorySeed { events, journals, chapter }` 写入可选的 `RunSetup.story`，回放携带同一快照；`RunSetup::new` 缺省 `None`，旧回放、工具与基准路径不启用故事、不多取随机数。
 - **故事模拟**（`sim/story.rs`）：35 秒保底故事点、6 秒护火、3 秒留灯、64 单位范围；`SimCommand::Interact`（平台动作 `Action::Interact`，只在游戏进行中生效，默认 G / 手柄 X，可改键）主动开始，走出范围取消本次计时。`StoryBeat { beat }` 和 `JournalFound { page }` 进入 `SimOutbox`。结算的 `RunResult.events/journals` 合并进 Profile，失败也保留，回放/跑分/无敌不写存档。所有叙事状态（含位置、计时、已拾页及初始快照）仅在启用时进入状态哈希，不改变旧默认黄金路径。
 - **手记门槛**：卷一初始；卷二曾进入青丘或已有一夜记录；卷三通关一更或亲手留灯；卷四通关且完成至少 4 夜、持有至少 12 页；卷五通关且至少 6 夜、持有至少 18 页、心灯累计 6 级、无尽夜至少存活 900 秒并打退过夜主。章节在出发时固定，局内留灯仅能抬到卷三。普通掉落每夜首次点灯/古灯/血祭坛/货郎必得，之后 35% 概率且每夜最多三页，走 `SimRng` 的 Story 流（`Stream::Story`，加在流表末尾；只在叙事启用时写进状态哈希）。先补最早尚未集齐的已解锁卷，卷内随机未持有页；第 13 页在留灯时必得，或卷三开放后的首次有效拾取保底，不占概率。
@@ -491,6 +494,7 @@ assets/data/
 | `cargo run --release -p lantern-tools -- kite --runs 1 [--seed 1] [--god] --record bot.ron` | 机器人打一局存成回放，并打印关键时刻（进化、反应初见、夜主登场、伏诛……）；`--god` 无敌打完整局。原来的 `record` 命令并进来了 |
 | `cargo run -p lantern -- --replay <文件> [--from <秒>]` | 在游戏里观看回放；`--from` 开局后一帧里跑到那一秒再开始看 |
 | `cargo run -p lantern --features dev` | 开发模式：调试面板、热重载 |
+| `cargo run -p lantern -- --god [--windowed] [--seed 42]` | 手动无敌调试：`ui::GodMode` 在首次出发和选夜签出发时写入 `RunSetup.god`，重开沿用，不计奖励、成绩和教学进度；仅此次启动生效，不能与 `--replay` 同用 |
 | `lantern --smoke-test --windowed` | 冒烟测试（`view::smoke`）：正式启动，资源和渲染管线就绪后提交 120 帧再以 0 退出；出错、提前关闭或超时以非 0 退出。Windows CI 在发布包上跑 |
 
 - **命令行路径**：游戏和工具用 `std::env::args_os()` 读取参数；`--replay`、`replay <文件>`、`--record`、`--csv` 保留为 `OsString` / `Path` / `PathBuf`，支持中文、空格及非 UTF-8 路径。数字和文字参数单独校验，非法编码返回错误。Unix 回归测试用 `OsStr::from_bytes` 覆盖实际回放读写、CSV 输出及启动错误日志。

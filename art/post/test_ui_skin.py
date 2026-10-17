@@ -40,15 +40,17 @@ import ui_skin as U  # noqa: E402
 SKIN = U.SKIN_DIR
 EXPECTED = [
     "panel", "panel_dark", "overlay_vignette",
-    "card_fan", "card_ling", "card_xuan", "card_tian", "card_omen", "card_focus", "note_box", "note_box_hi",
+    "card_fan", "card_ling", "card_xuan", "card_tian", "card_yi", "card_he", "card_omen", "card_focus", "note_box", "note_box_hi",
     "btn", "btn_focus", "btn_pressed", "btn_disabled",
     "btn_primary", "btn_primary_focus", "btn_primary_pressed", "btn_primary_disabled", "pill", "pill_on",
     "slot_l", "slot_l_empty", "slot_l_evo", "slot_s", "slot_s_empty", "slot_s_evo",
-    "bar_track", "bar_fill_hp", "bar_fill_xp", "bar_fill_boss", "bar_fill_shield", "bar_fill_unlock", "pip", "pip_on",
+    "bar_track", "hud_hp_track", "hud_xp_track", "bar_fill_hp", "bar_fill_xp", "bar_fill_boss", "bar_fill_shield",
+    "bar_fill_unlock", "bar_fill_trail", "hud_portrait", "hud_ult_tick", "hud_ult_tick_on", "hud_ult_tick_full", "hud_level_seal",
+    "pip", "pip_on",
     "toast", "toast_big", "chip", "chip_dark",
     "divider", "scroll_body", "scroll_end", "arrow_marker", "focus_ring", "menu_hl",
 ]  # fmt: skip
-FILLS = ["bar_fill_hp", "bar_fill_xp", "bar_fill_boss", "bar_fill_shield", "bar_fill_unlock"]
+FILLS = ["bar_fill_hp", "bar_fill_xp", "bar_fill_boss", "bar_fill_shield", "bar_fill_unlock", "bar_fill_trail"]
 BUDGET = 3 * 1024 * 1024
 GLOWS = ["card_focus", "focus_ring", "pip_on"]
 INDEPENDENT = ["card_tian", "btn_focus", "slot_l_evo", "panel_dark", "scroll_body", "bar_fill_hp"]

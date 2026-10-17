@@ -320,9 +320,13 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
-    /// 还没解锁的法器（ID）：不进卡池。新法器按局解锁之前先锁着（docs/BALANCE.md 第 6.3 节）
+    /// 还没解锁的法器（ID）：不进卡池，它们的进化心法也不进。靠成就（`Reward::Weapon`）或保底解锁，
+    /// 保底按这里的顺序送（docs/GAMEPLAY.md 第 13.2 节）
     #[serde(default)]
     pub locked: Vec<String>,
+    /// 保底：完成第几局时（倒下也算），按 `locked` 的顺序送一件还没解锁的
+    #[serde(default)]
+    pub unlock_pity: Vec<u32>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -1106,6 +1110,9 @@ pub struct WeaponDef {
     /// 一句话描述（docs/LORE-TEXT.md 第 3.5 节），卡片上说明下面的一行小字
     #[serde(default)]
     pub flavor: String,
+    /// 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节，不超过 8 个字）；`run.ron` 里锁着的法器必须写
+    #[serde(default)]
+    pub unlock: String,
     pub behavior: WeaponBehavior,
     /// 第 1 级到满级
     pub levels: Vec<WeaponLevel>,
@@ -1579,6 +1586,8 @@ pub enum AchievementWhen {
     ResonanceTier(u8),
     /// 第一次进化法器
     Evolution,
+    /// 进化或异化过这件法器（`weapons.ron` 的 ID，跨局累计，看图鉴）
+    Evolved(String),
     /// 不受伤击败一只精英
     FlawlessElite,
     /// 通关，且所有属性都不生效
@@ -1595,6 +1604,8 @@ pub enum Reward {
     Tier(u8),
     Gold(u32),
     Oil(u32),
+    /// 解锁一件还锁着的法器（`run.ron` 的 `choices.locked`），连同它的进化心法
+    Weapon(String),
 }
 
 /// 一个地区（`regions.ron`，docs/GAMEPLAY.md 第 8.1 节、docs/LORE.md 第 6 节）。P0 只有青丘。
@@ -1708,6 +1719,9 @@ impl HubWhen {
 #[serde(deny_unknown_fields)]
 pub struct StatGroupDef {
     pub name: String,
+    /// 组的图标：图集里的 `ui/stat_group_<icon>`；不写就只写名字
+    #[serde(default)]
+    pub icon: String,
     /// 总是全部列出（基础）；其余组默认只列和基础值不同的
     #[serde(default)]
     pub always: bool,
@@ -1723,6 +1737,9 @@ pub struct StatLabelDef {
     /// 悬停说明，不超过 16 个字
     pub hint: String,
     pub format: StatFormat,
+    /// 图标：图集里的 `ui/stat_<icon>`（属性面板、心法卡的收益行）；不写就只写字
+    #[serde(default)]
+    pub icon: String,
     /// 并进来一起显示的倍率（灯焰带的 FlameBandMult）
     #[serde(default)]
     pub times: Option<Stat>,
