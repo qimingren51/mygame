@@ -123,6 +123,8 @@
         weight_new_passive: 5.0,
         // 还没解锁、不进卡池的法器：v0.3 的五件新法器（按局解锁见 docs/PLAYTEST.md 第 9 项）
         locked: ["coin_sword", "sky_lantern", "wave", "vine", "tower"],
+        // 保底：完成第 5、8、11、14、17 局时，按上面的顺序送一件还没解锁的（docs/GAMEPLAY.md 第 13.2 节）
+        unlock_pity: [5, 8, 11, 14, 17],
         // 已到一阶的五行，选项权重 ×1.5
         owned_element_mult: 1.5,
         favor_mult: 1.3,

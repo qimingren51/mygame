@@ -320,9 +320,13 @@ pub struct ChoicesDef {
     pub insight_mult: f32,
     /// 保底（docs/GAMEPLAY.md 第 5.8 节）
     pub pity: PityDef,
-    /// 还没解锁的法器（ID）：不进卡池。新法器按局解锁之前先锁着（docs/BALANCE.md 第 6.3 节）
+    /// 还没解锁的法器（ID）：不进卡池，它们的进化心法也不进。靠成就（`Reward::Weapon`）或保底解锁，
+    /// 保底按这里的顺序送（docs/GAMEPLAY.md 第 13.2 节）
     #[serde(default)]
     pub locked: Vec<String>,
+    /// 保底：完成第几局时（倒下也算），按 `locked` 的顺序送一件还没解锁的
+    #[serde(default)]
+    pub unlock_pity: Vec<u32>,
     /// 什么都满了时的补给：回复生命上限的比例、灯油
     pub heal: f32,
     pub oil: u32,
@@ -1579,6 +1583,8 @@ pub enum AchievementWhen {
     ResonanceTier(u8),
     /// 第一次进化法器
     Evolution,
+    /// 进化或异化过这件法器（`weapons.ron` 的 ID，跨局累计，看图鉴）
+    Evolved(String),
     /// 不受伤击败一只精英
     FlawlessElite,
     /// 通关，且所有属性都不生效
@@ -1595,6 +1601,8 @@ pub enum Reward {
     Tier(u8),
     Gold(u32),
     Oil(u32),
+    /// 解锁一件还锁着的法器（`run.ron` 的 `choices.locked`），连同它的进化心法
+    Weapon(String),
 }
 
 /// 一个地区（`regions.ron`，docs/GAMEPLAY.md 第 8.1 节、docs/LORE.md 第 6 节）。P0 只有青丘。

@@ -45,6 +45,8 @@ pub struct Build {
     pub insight: Option<Element>,
     /// 这一局手上同时有过最多几件法器（成就用）
     pub max_weapons: u32,
+    /// 存档解锁了的法器（`weapons.ron` 下标，来自 `RunSetup::unlocked`）
+    pub unlocked: Vec<usize>,
 }
 
 /// 被封印的一项。
@@ -73,6 +75,7 @@ impl Build {
         b.lamp_element = Some(content.lamps[setup.lamp_index(content)].element);
         b.insight = setup.insight;
         b.charms = setup.charms.iter().filter_map(|id| content.charm_index(id)).collect();
+        b.unlocked = setup.unlocked.iter().filter_map(|id| content.weapon_index(id)).collect();
         if let Some(pick) = &setup.omen
             && let Some(i) = content.omen_index(&pick.id)
             && let Some(el) = pick.element
@@ -155,6 +158,19 @@ impl Build {
         }
         h.write_u32(self.evolutions);
         h.write_u32(self.banished.len() as u32);
+        for &d in &self.unlocked {
+            h.write_u32(d as u32);
+        }
+    }
+
+    /// 这一局还锁着的法器：数据里锁着，存档也没解锁（docs/GAMEPLAY.md 第 13.2 节）。
+    pub fn weapon_locked(&self, content: &Content, d: usize) -> bool {
+        content.weapon_locked(d) && !self.unlocked.contains(&d)
+    }
+
+    /// 这一局还锁着的心法：还锁着的法器的进化心法。
+    pub fn passive_locked(&self, content: &Content, p: usize) -> bool {
+        (0..content.weapons.len()).any(|d| content.weapon_key(d) == Some(p) && self.weapon_locked(content, d))
     }
 
     /// 封印了哪些东西（法器、心法、合璧）。
@@ -265,7 +281,9 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
     if occupied_slots(content, arsenal, build) < weapon_slots(content, build) {
         let weight = if secs < ch.late_after { ch.weight_new_weapon } else { ch.weight_new_weapon_late };
         for d in 0..content.weapons.len() {
-            if !arsenal.0.iter().any(|w| w.contains(content, d)) && !banned_w(d) && !content.weapon_locked(d)
+            if !arsenal.0.iter().any(|w| w.contains(content, d))
+                && !banned_w(d)
+                && !build.weapon_locked(content, d)
             {
                 out.push((Offer::NewWeapon(d), weight));
             }
@@ -278,7 +296,8 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
     }
     if (build.passives.len() as u32) < ch.slots {
         for d in 0..content.passives.len() {
-            if !build.passives.iter().any(|p| p.def == d) && !banned_p(d) {
+            if !build.passives.iter().any(|p| p.def == d) && !banned_p(d) && !build.passive_locked(content, d)
+            {
                 out.push((Offer::NewPassive(d), ch.weight_new_passive));
             }
         }

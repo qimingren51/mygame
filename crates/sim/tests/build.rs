@@ -341,3 +341,42 @@ fn locked_weapons_stay_out_of_the_pool_until_unlocked() {
     assert!(locked.iter().all(|d| new(&c).contains(d)), "解锁后进卡池");
     assert_ne!(c.hash, hash, "解锁改变内容哈希，回放不会混用");
 }
+
+#[test]
+fn unlocked_weapons_bring_their_keys_into_the_pool() {
+    let c = content();
+    let pool = |sim: &SimHarness| -> (Vec<String>, Vec<String>) {
+        let offers = lantern_sim::build::offers(&c, sim.arsenal(), sim.build(), 0.0);
+        let weapons = offers
+            .iter()
+            .filter_map(
+                |(o, _)| if let Offer::NewWeapon(d) = *o { Some(c.weapons[d].id.clone()) } else { None },
+            )
+            .collect();
+        let passives = offers
+            .iter()
+            .filter_map(
+                |(o, _)| if let Offer::NewPassive(d) = *o { Some(c.passives[d].id.clone()) } else { None },
+            )
+            .collect();
+        (weapons, passives)
+    };
+    // 第一局：锁着的法器和它们的进化心法都不出（docs/GAMEPLAY.md 第 13.2 节）
+    let (w, p) = pool(&fresh(1));
+    for id in ["coin_sword", "sky_lantern", "wave", "vine", "tower"] {
+        assert!(!w.iter().any(|x| x == id), "{id} 锁着");
+    }
+    for id in ["ruimu", "luxin", "hanyi", "huichun", "panshi"] {
+        assert!(!p.iter().any(|x| x == id), "{id} 跟着锁着");
+    }
+    assert_eq!(p.len(), c.passives.len() - 5, "其余心法照常");
+    // 存档解锁了铜钱剑：铜钱剑和锐目进卡池，其他几件照样锁着
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.god = true;
+    setup.unlocked.insert("coin_sword".into());
+    let mut sim = SimHarness::with_setup(c.clone(), setup);
+    sim.quiet();
+    let (w, p) = pool(&sim);
+    assert!(w.iter().any(|x| x == "coin_sword") && p.iter().any(|x| x == "ruimu"));
+    assert!(!w.iter().any(|x| x == "sky_lantern") && !p.iter().any(|x| x == "luxin"));
+}

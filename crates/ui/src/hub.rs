@@ -378,6 +378,9 @@ fn reward_text(c: &Content, r: &Reward) -> String {
         }
         Reward::Gold(n) => format!("{n} 铜钱"),
         Reward::Oil(n) => format!("{n} 灯油"),
+        Reward::Weapon(id) => {
+            format!("法器「{}」", c.weapon_index(id).map_or(id.as_str(), |k| c.weapons[k].name.as_str()))
+        }
     }
 }
 

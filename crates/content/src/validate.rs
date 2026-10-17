@@ -787,6 +787,9 @@ impl Content {
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
         }
+        if ch.unlock_pity.windows(2).any(|w| w[0] >= w[1]) || ch.unlock_pity.first() == Some(&0) {
+            return c.fail("run.ron", "choices.unlock_pity 要从 1 起、从小到大".into());
+        }
         for id in &ch.locked {
             if self.weapon_index(id).is_none() {
                 return c.fail("run.ron", format!("choices.locked 引用了不存在的法器 \"{id}\""));
@@ -1324,8 +1327,25 @@ impl Content {
                         return c
                             .fail("achievements.ron", format!("成就 \"{}\" 开放的第 {t} 更不存在", a.id));
                     }
+                    crate::Reward::Weapon(id) if !self.run.choices.locked.contains(id) => {
+                        return c.fail(
+                            "achievements.ron",
+                            format!(
+                                "成就 \"{}\" 解锁的法器 \"{id}\" 不在 run.ron 的 choices.locked 里",
+                                a.id
+                            ),
+                        );
+                    }
                     _ => {}
                 }
+            }
+            if let crate::AchievementWhen::Evolved(id) = &a.when
+                && self.weapon_index(id).is_none_or(|d| self.weapons[d].evolution.is_none())
+            {
+                return c.fail(
+                    "achievements.ron",
+                    format!("成就 \"{}\" 要进化的法器 \"{id}\" 不存在或没有进化", a.id),
+                );
             }
         }
 

@@ -217,7 +217,7 @@ Points(2), Favor,                                                 // 夜签“�
 
 **落塔**（`sim/weapons/tower.rs`，docs/BALANCE.md 第 6.3 节）：冷却好了落 `count`（加数量加成）座，落点和孔明灯共用 `weapons::densest`（同样的 `range / pick / cluster / spread`，附近没有妖物就落在面向前方 150）。塔放进 `Towers` 资源，由 `update_towers`（紧跟 `update_waves`）推进：预警 `warn` 秒（画面读 `Towers` 画预警圈），落地是一次带击晕的圆形 `Strike`，发 `SimEvent::TowerLand`；之后立 `life` 秒，每步把 `pull × radius` 以内的妖物直接往塔心挪 `pull_speed × DT`（精英一半，夜主不挪，挪到离塔心 1 为止），每 `tick` 秒一次 `damage × tick_scale` 的圆形 `Strike`；到时间收走，有 `burst`（玲珑塔）就再炸一次带击晕的 `Strike`，发 `SimEvent::TowerBurst`。
 
-**未解锁的法器**：`run.ron` 的 `choices.locked`（法器 ID）里的法器不出“新法器”卡（`Content::weapon_locked`），校验要求 ID 存在、不是起手法器。工具用 `Content::unlock` 放开（`lantern-tools kite --unlock all|<ID>,…`），内容哈希跟着变。按局解锁做出来以后，解锁状态由存档经 `RunSetup` 进模拟。新法器的四个资源（`SkyLanterns`、`Waves`、`Vines`、`Towers`）空的时候不写状态哈希，没带这几件法器的局哈希和加它们之前一样。
+**未解锁的法器**：`run.ron` 的 `choices.locked`（法器 ID）里的法器不出“新法器”卡（`Content::weapon_locked`），校验要求 ID 存在、不是起手法器。工具用 `Content::unlock` 放开（`lantern-tools kite --unlock all|<ID>,…`），内容哈希跟着变。玩家靠成就和保底解锁（docs/GAMEPLAY.md 第 13.2 节）：存档 `Profile.unlocked` 由 `Profile::run_setup` 写进 `RunSetup.unlocked`（ID 集合，回放带着它，卡池能重现），开局转成 `Build.unlocked`（下标）。`offers()` 里法器锁着 = `Build::weapon_locked`（数据锁着且没解锁）；锁着的法器的进化心法（`Content::weapon_key`，异化共用）也不出新心法卡（`Build::passive_locked`），所以第一局是 5 件法器、12 门心法。新法器的四个资源（`SkyLanterns`、`Waves`、`Vines`、`Towers`）空的时候不写状态哈希，没带这几件法器的局哈希和加它们之前一样。
 
 **异化与合璧**（EA 内容，docs/GAMEPLAY.md 第 6.5、6.6 节）由 `run.ron` 的 `transformations: bool` 开关，不写时为 false；v0.2 起数据里写 true（试玩第 1 轮，docs/PLAYTEST.md）。关着时 `can_mutate`、`can_fuse` 一律为假：不出 `Mutate` / `Fuse` 卡，质变卡保底、封印后重整整组都不启用，进化卡说明和信息栏的星标照旧。`lantern-tools kite --transformations`、`--fusion` 照样打开，测试里调 `Content::enable_transformations()`，要关掉就改 `content.run.transformations = false`；它同时改内容哈希，打开时录的回放不会在关着的版本上重放。
 
@@ -332,7 +332,7 @@ assets/data/
   attributes.ron   局外属性：用铜钱买（每级价格 = 基础 × 级 × (1 + 2% × 已买总级数)）
   lamps.ron        灯：起手法器、本命五行、灯性与代价、光色、一句话描述
   charms.ron       灯坠（带一句话描述）
-  achievements.ron 成就：条件和奖励（开放基础、灯、灯坠、更、铜钱、灯油）
+  achievements.ron 成就：条件和奖励（开放基础、灯、灯坠、更、铜钱、灯油、法器）
   hub.ron          灯驿人物的台词：按条件挑一句（docs/LORE-TEXT.md 第 1 节）
   regions.ron      地区：名字、开场卷轴的旁白（长夜、天明），P0 只有青丘
   stat_labels.ron  局内属性面板：分组、每项属性的标签、悬停说明、数值写法（docs/LORE-TEXT.md 第 8 节）、图标名（组 ui/stat_group_<icon>，属性 ui/stat_<icon>）
@@ -457,7 +457,7 @@ assets/data/
 
 | 文件 | 内容 |
 | --- | --- |
-| `save.ron` | 局外进度（`Profile`，第 3 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯和灯坠、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、展开过的开场卷轴（`scrolls`）、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场、首夜教学完成项（`onboarding`）、已见故事事件（`events: BTreeSet<String>`）、已拾手记（`journals: BTreeSet<u8>`）、灯驿里听过的只说一次的台词（`hub_lines_seen`，`hub.ron` 的 once ID）、讲过一次的说明（`tips`：合围、妖潮、幻身、九尾扫等，讲过以后提示条只出标题）、图鉴拿到过的法器和心法（`codex`：`w:<id>`、`w:<id>_evo`、`w:<id>_mut`、`f:<合璧 id>`、`p:<id>`，结算时由 `flow::codex_keys` 按局末的法器栏和心法算，合璧把两件进化材料一并记上） |
+| `save.ron` | 局外进度（`Profile`，第 4 版）：灯油和铜钱（余额、累计）、心灯等级、局外属性等级与开关、解锁的灯、灯坠和法器（`unlocked`）、开放到第几更、成就、见过的反应、上次的选择（含是否走无尽夜）、见过的灯驿人物、展开过的开场卷轴（`scrolls`）、最佳记录、无尽夜各更的最长存活（`endless`）、累计统计、局数和胜场、首夜教学完成项（`onboarding`）、已见故事事件（`events: BTreeSet<String>`）、已拾手记（`journals: BTreeSet<u8>`）、灯驿里听过的只说一次的台词（`hub_lines_seen`，`hub.ron` 的 once ID）、讲过一次的说明（`tips`：合围、妖潮、幻身、九尾扫等，讲过以后提示条只出标题）、图鉴拿到过的法器和心法（`codex`：`w:<id>`、`w:<id>_evo`、`w:<id>_mut`、`f:<合璧 id>`、`p:<id>`，结算时由 `flow::codex_keys` 按局末的法器栏和心法算，合璧把两件进化材料一并记上） |
 | `settings.ron` | 第 2 版：全屏、垂直同步、音乐／音效／界面／环境音量、画面手感选项、伤害数字（全部／只看暴击／关，经 `view::Feel` 同步到画面层）、键盘与手柄动作绑定（`bindings`） |
 | `replays/` | 最近 20 局的回放 |
 | `logs/`（Windows 见下文） | 运行日志（保留最近 5 份），包含 panic 信息与调用栈 |
@@ -467,6 +467,7 @@ assets/data/
 
 - 存档和设置都带 `version` 字段，每次升级格式时写一个迁移函数，旧存档逐级迁移。主文件不可用时读取并解析 `.bak`；恢复成功后先保留损坏的主文件，再允许保存。主文件及备份都不存在才视为首次运行；恢复失败或无法安全保留原文件时暂用默认值/备份，并禁止保存覆盖原数据。
 - 一局结束时结算界面调用 `Profile::record`：加灯油和铜钱、更新统计和最佳记录（无尽夜只记在它自己的榜上，按更分开）、判断成就并立即发奖（成就发的灯油和铜钱不乘倍率）；看回放、跑分、无敌模式不计。心灯、属性在标题界面（M2.5-4 起是灯驿）花钱升级，开局时写进 `RunSetup`，所以回放能重现。属性可以全部退还（返还实际花掉的铜钱），也可以出发前单独关掉。
+- **第四版法器解锁**：`unlocked`（法器 ID）默认空。成就 `Evolved(<法器>)` 看存档的图鉴（`w:<id>_evo` 或 `w:<id>_mut`，跨局累计），奖励 `Weapon(<法器>)` 往 `unlocked` 里加；结算时 `run.ron` 的 `choices.unlock_pity` 里的局数到了，再按 `choices.locked` 的顺序送一件还锁着的。`Recorded.unlocked` 列出这一局新解锁的（成就和保底都算），界面据此弹“新法器 · X”。三版升四版时按图鉴补发这几个成就，并按已完成的局数补送过了的保底。
 - **第三版叙事存档**：`events` / `journals` / `hub_lines_seen` 与 `onboarding` 同在第 3 版，默认空集合，旧一、二版可加载，升版不补写玩家未做过的选择，也不补记听过哪句；余额和心灯等级原样保留，不按新价追补或扣回。`Profile::run_setup` 冻结 `StorySeed { events, journals, chapter }` 写入可选的 `RunSetup.story`，回放携带同一快照；`RunSetup::new` 缺省 `None`，旧回放、工具与基准路径不启用故事、不多取随机数。
 - **故事模拟**（`sim/story.rs`）：35 秒保底故事点、6 秒护火、3 秒留灯、64 单位范围；`SimCommand::Interact`（平台动作 `Action::Interact`，只在游戏进行中生效，默认 G / 手柄 X，可改键）主动开始，走出范围取消本次计时。`StoryBeat { beat }` 和 `JournalFound { page }` 进入 `SimOutbox`。结算的 `RunResult.events/journals` 合并进 Profile，失败也保留，回放/跑分/无敌不写存档。所有叙事状态（含位置、计时、已拾页及初始快照）仅在启用时进入状态哈希，不改变旧默认黄金路径。
 - **手记门槛**：卷一初始；卷二曾进入青丘或已有一夜记录；卷三通关一更或亲手留灯；卷四通关且完成至少 4 夜、持有至少 12 页；卷五通关且至少 6 夜、持有至少 18 页、心灯累计 6 级、无尽夜至少存活 900 秒并打退过夜主。章节在出发时固定，局内留灯仅能抬到卷三。普通掉落每夜首次点灯/古灯/血祭坛/货郎必得，之后 35% 概率且每夜最多三页，走 `SimRng` 的 Story 流（`Stream::Story`，加在流表末尾；只在叙事启用时写进状态哈希）。先补最早尚未集齐的已解锁卷，卷内随机未持有页；第 13 页在留灯时必得，或卷三开放后的首次有效拾取保底，不占概率。
