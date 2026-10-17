@@ -310,6 +310,20 @@ fn camera_impulse(events: &[SimEvent], facing: Vec2, hero: Vec2) -> Impulse {
                 cue.stop = 0.045;
             }
             SimEvent::Dash { .. } => cue.kick = -to_screen(facing).normalize_or_zero() * 0.3,
+            // 新法器（试玩第 1 轮）：孔明灯落地轻轻一震；镇妖塔砸下来往下一顿（比落印重一点），
+            // 玲珑塔炸开一震一推；北冥潮一圈涌出去轻轻一震。普通的浪和青藤不动镜头
+            SimEvent::LanternBurst { evolved, .. } => cue.trauma = if evolved { 0.1 } else { 0.07 },
+            SimEvent::TowerLand { evolved, .. } => {
+                cue.trauma = if evolved { 0.26 } else { 0.18 };
+                cue.kick = Vec2::NEG_Y * if evolved { 0.75 } else { 0.55 };
+            }
+            SimEvent::TowerBurst { .. } => {
+                cue.priority = cue.priority.max(Priority::Impact);
+                cue.trauma = 0.35;
+                cue.zoom = 0.03;
+                cue.hold = 0.15;
+            }
+            SimEvent::Wave { ring: true, .. } => cue.trauma = 0.12,
             SimEvent::Strike { fx, .. } => match fx {
                 StrikeFx::Seal { evolved } => {
                     cue.trauma = if evolved { 0.3 } else { 0.15 };

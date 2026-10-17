@@ -765,6 +765,35 @@ fn play_sim_events(
                 let s = if evolved { a.sfx.coin_whirl.clone() } else { a.sfx.coin_sweep.clone() };
                 a.play_at(&s, rate, -3.0, place(pos));
             }
+            // 另外四件新法器：孔明灯落地、推浪、青藤吸血、镇妖塔落地 / 炸开
+            SimEvent::LanternBurst { pos, .. } if a.can("lantern_burst", 0.06) => {
+                let rate = a.rate(0.92, 1.08);
+                let s = a.sfx.lantern_burst.clone();
+                a.play_at(&s, rate, -3.0, place(pos));
+            }
+            SimEvent::Wave { pos, ring, .. } if a.can("wave", 0.15) => {
+                let rate = a.rate(0.95, 1.05);
+                let s = if ring { a.sfx.wave_ring.clone() } else { a.sfx.wave_push.clone() };
+                a.play_at(&s, rate, -2.0, place(pos));
+            }
+            SimEvent::VineDrain { pos, bind, .. } => {
+                if bind && a.can("vine_bind", 0.3) {
+                    let s = a.sfx.vine_bind.clone();
+                    a.play_at(&s, 1.0, -3.0, place(pos));
+                } else if a.can("vine_drain", 0.12) {
+                    let rate = a.rate(0.97, 1.03);
+                    let s = a.sfx.vine_drain.clone();
+                    a.play_at(&s, rate, -6.0, place(pos));
+                }
+            }
+            SimEvent::TowerLand { pos, .. } if a.can("tower_land", 0.2) => {
+                let s = a.sfx.tower_land.clone();
+                a.play_at(&s, 1.0, -1.0, place(pos));
+            }
+            SimEvent::TowerBurst { pos, .. } if a.can("tower_burst", 0.2) => {
+                let s = a.sfx.tower_burst.clone();
+                a.play_at(&s, 1.0, 0.0, place(pos));
+            }
             // 新的三只小妖（试玩第 1 轮）：竹魅瞄准、射竹刺，讨封狐现形；都按位置放、限流，一群也不连成一片
             SimEvent::EnemyAim { pos, .. } if a.can("enemy_aim", 0.25) => {
                 let rate = a.rate(0.94, 1.06);
