@@ -75,3 +75,10 @@
 - 收尾三项代码已改（未渲）：fox_wisp_v2 打开尾巴外沿火舌 TAIL_FLAMES、加两条 TONGUES 和头顶一簇 LICK；
   wisp_v2 加 _volume（笔画后面一根半透明的薄烟管：membrane_alpha + alpha_streak）；golem_v2 缝光 AOV 0.55→1.0、
   缝加厚加多（SEAMS2）、肚石背石上加发光裂缝（CRACKS，design_outline）。
+
+## 第五批（九尾）已推送（13:43 UTC）
+- 提交 2ce3db8（九尾 + boss 图集），合 origin/master fcbb79b → 535ff83，已推 playtest-r1-enemies。
+- atlas_swap --name boss：boss 图集只有九尾（54 帧，没换的 0 个）；check_asset、check_atlas 通过（合并后再查一遍也过）。
+- contact_radius 34.8（move；sweep 42.4、summon 31.9），原来 40；眼色 #5FE8D6（enemies.ron 现是 #FFD98A）；挂点 eyes 比原来高很多（-263 vs -164）。
+- 审图：art/out/review@2x/redo_b5_{lineup,ingame,zoom3}.png、redo_boss_{move,sweep,summon}.gif
+- 下一步：收尾三项（fox_wisp、wisp、golem）。先备份现版到 art/out/assets@2x_b2/，look.py 渲关键帧，再 render_to 整套。
