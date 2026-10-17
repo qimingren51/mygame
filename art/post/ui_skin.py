@@ -42,6 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import vfx_textures as V  # noqa: E402  只用与密度无关的工具
 import weapon_textures as W  # noqa: E402
+import ui_lacquer as LQ  # noqa: E402  黑漆描金的件（升级卡、状态栏），试玩第 1 轮选定
 
 S = V.S
 SCALE = 2
@@ -1343,10 +1344,14 @@ def specs() -> dict:
     add("panel", make_panel, (176, 176, 80, 80), "tile", "tile", TXT_INK, "大面板：毛边宣纸，左上角洇一团淡墨（暂停、结算、心灯、设置）")
     add("panel_dark", make_panel_dark, (32,) * 4, "stretch", "stretch", TXT_PAPER, "夜墨小面板：HUD 底板、提示框、结算数据格")
     add("overlay_vignette", make_overlay, (0,) * 4, "stretch", "stretch", TXT_PAPER, "全屏压暗：整张拉伸铺满屏幕，四周墨云")
-    for k, nm in (("fan", "凡"), ("ling", "灵"), ("xuan", "玄"), ("tian", "天")):
-        add(f"card_{k}", lambda k=k: make_card(k), (CARD_SL,) * 4, "tile", "tile", TXT_INK, f"升级 / 宝箱卡：{nm}品纸笺")
+    for k, nm in (("fan", "凡品：铁灰内光、单道旧金线"), ("ling", "灵品：青蓝内光、双金线、方胜结"),
+                  ("xuan", "玄品：紫色内光、双金线、方胜结、一圈金点"), ("tian", "天品：金色内光、双金线、连珠、如意结、洒金"),
+                  ("yi", "异化：朱红内光、两线之间一道朱漆"), ("he", "合璧：玉青内光、双金线、连珠、如意结、洒金")):
+        add(f"card_{k}", lambda k=k: LQ.make_card(k), (LQ.CARD_SL,) * 4, "tile", "tile", TXT_PAPER,
+            f"升级 / 宝箱卡 600×920（节点 300×460）：黑漆描金，{nm}；字用纸色或金色")
     add("card_omen", lambda: make_card("omen"), (CARD_SL,) * 4, "tile", "tile", TXT_INK, "夜签卡：朱砂双线框")
-    add("card_focus", make_card_focus, (CARD_SL,) * 4, "stretch", "stretch", TXT_INK, "卡片焦点：叠在卡片上，同尺寸同切片")
+    add("card_focus", LQ.make_card_focus, (LQ.CARD_SL,) * 4, "stretch", "stretch", TXT_PAPER,
+        "卡片焦点 624×944：节点比卡片每边大 6（逻辑），卡边一道泥金亮线、往外一圈暖光")
     add("note_box", lambda: make_note(False), (24,) * 4, "stretch", "stretch", "#4f4942", "卡片里的说明框：淡墨晕染")
     add("note_box_hi", lambda: make_note(True), (24,) * 4, "stretch", "stretch", "#2e2924", "卡片里的提示框（可进化等）：藤黄晕染")
     for primary in (False, True):
@@ -1360,21 +1365,40 @@ def specs() -> dict:
     add("pill", lambda: make_capsule("pill"), hx(32), "stretch", "stretch", TXT_PAPER, "开关 / 徽记小胶囊（关）")
     add("pill_on", lambda: make_capsule("pill_on"), hx(32), "stretch", "stretch", "#f6efe0", "开关 / 徽记小胶囊（开）：朱砂")
     for big, sz in ((True, "l"), (False, "s")):
-        what = "法器格 128²" if big else "心法格 80²"
-        add(f"slot_{sz}", lambda b=big: make_slot(b, "full"), (0,) * 4, "stretch", "stretch", TXT_PAPER, f"{what}：夜墨方砚")
-        add(f"slot_{sz}_empty", lambda b=big: make_slot(b, "empty"), (0,) * 4, "stretch", "stretch", TXT_PAPER, f"{what}：空格，虚笔")
-        add(f"slot_{sz}_evo", lambda b=big: make_slot(b, "evo"), (0,) * 4, "stretch", "stretch", TXT_GOLD, f"{what}：进化，泥金边")
-    add("bar_track", make_track, hx(24), "stretch", "stretch", TXT_PAPER, "进度条底槽（填充条放在里面，上下各留 4）")
-    for k, nm, txt in (("hp", "血条：朱砂", TXT_PAPER), ("xp", "经验条：藤黄", TXT_INK), ("boss", "夜主血条：绛紫", TXT_PAPER),
-                       ("unlock", "解锁进度：石绿", TXT_PAPER)):
-        add(f"bar_fill_{k}", lambda k=k: make_fill(k), hx(20), "stretch", "stretch", txt, f"{nm}，宽度按百分比设")
-    add("bar_fill_shield", lambda: make_fill("shield"), hx(10), "stretch", "stretch", TXT_PAPER, "护盾细条：淡花青，叠在血条上沿")
+        what = "法器格 128²（显示 64）" if big else "心法格 88²（显示 44）"
+        add(f"slot_{sz}", lambda b=big: LQ.make_slot(b, "full"), (0,) * 4, "stretch", "stretch", TXT_PAPER, f"{what}：黑漆方砚，金边")
+        add(f"slot_{sz}_empty", lambda b=big: LQ.make_slot(b, "empty"), (0,) * 4, "stretch", "stretch", TXT_PAPER,
+            f"{what}：空格，一道淡金虚边")
+        add(f"slot_{sz}_evo", lambda b=big: LQ.make_slot(b, "evo"), (0,) * 4, "stretch", "stretch", TXT_GOLD,
+            f"{what}：进化，双金边、暖光、洒金")
+    add("bar_track", lambda: LQ.make_track(""), hx(24), "stretch", "stretch", TXT_PAPER,
+        "进度条底槽：黑漆槽、细金边（填充放在里面，四周各留 4，即逻辑 2）")
+    add("hud_hp_track", lambda: LQ.make_track("hp"), hx(48), "stretch", "stretch", TXT_PAPER,
+        "大血条框 256×60（建议显示 460×30）：黑漆、金边，两头一粒金珠；填充四周各留 14（逻辑 7），数字写在条里")
+    add("hud_xp_track", lambda: LQ.make_track("xp"), hx(16), "stretch", "stretch", TXT_PAPER,
+        "经验条框 128×20（建议显示 460×10，放在血条下）：填充四周各留 4（逻辑 2）")
+    for k, nm, txt, fn in (("hp", "血条：朱漆红", TXT_PAPER, lambda: LQ.make_fill("hp")),
+                           ("xp", "经验条：泥金", TXT_INK, lambda: LQ.make_fill("xp")),
+                           ("boss", "夜主血条：绛紫", TXT_PAPER, lambda: make_fill("boss")),
+                           ("unlock", "解锁进度：石绿", TXT_PAPER, lambda: make_fill("unlock"))):
+        add(f"bar_fill_{k}", fn, hx(20), "stretch", "stretch", txt, f"{nm}，宽度按百分比设")
+    add("bar_fill_shield", lambda: LQ.make_fill("shield"), hx(10), "stretch", "stretch", TXT_PAPER,
+        "护盾：淡青白，叠在血条上半，宽度按护盾值")
+    add("bar_fill_trail", lambda: LQ.make_fill("trail"), hx(20), "stretch", "stretch", TXT_INK,
+        "掉血残影：浅色，画在血条填充后面，比血条慢半拍缩回")
+    add("hud_portrait", LQ.make_portrait, (0,) * 4, "stretch", "stretch", TXT_PAPER,
+        "头像章 208²（显示 104）：黑漆圆盘、两道金圈，中间直径 156（显示 78）的窗口透明，主角胸像 ui/portrait_hero 画在下面")
+    for st, nm in (("off", "灭"), ("on", "亮"), ("full", "满格，更亮带光")):
+        add("hud_ult_tick" + ("" if st == "off" else f"_{st}"), lambda st=st: LQ.make_ult_tick(st), (0,) * 4, "stretch", "stretch",
+            TXT_PAPER, f"燃灯刻度一格（{nm}）34×20（显示 17×10）：十二格绕头像章，长边沿圆周，圆心距 = 外径/2 − 8.5（逻辑）")
+    add("hud_level_seal", LQ.make_level_seal, (0,) * 4, "stretch", "stretch", "#f6eedc",
+        "等级印 60²（显示 30）：朱砂方印，压在头像章右下；等级数字由界面写（马善政 17 号、纸色）")
     add("pip", lambda: make_pip(False), (0,) * 4, "stretch", "stretch", TXT_PAPER, "心灯进度点（灭）")
     add("pip_on", lambda: make_pip(True), (0,) * 4, "stretch", "stretch", TXT_PAPER, "心灯进度点（亮）：灯焰")
     add("toast", lambda: make_toast(False), hx(56), "stretch", "stretch", TXT_PAPER, "提示条：夜墨横拖")
     add("toast_big", lambda: make_toast(True), hx(64), "stretch", "stretch", TXT_PAPER, "大提示条：下沿一道朱砂")
     add("chip", lambda: make_capsule("chip"), hx(24), "stretch", "stretch", TXT_INK, "小签（纸色）：五行、增益")
-    add("chip_dark", lambda: make_capsule("chip_dark"), hx(24), "stretch", "stretch", TXT_PAPER, "小签（夜墨）：HUD 上的五行、增益")
+    add("chip_dark", LQ.make_chip, hx(24), "stretch", "stretch", TXT_PAPER, "小签（黑漆细金边）：HUD 上的五行计数、卡上的品阶签")
     add("divider", make_divider, hx(96), "stretch", "stretch", "#4f4942", "分隔线：两头尖的淡墨横线")
     add("scroll_body", make_scroll_body, (0, SCROLL_SL, 0, SCROLL_SL), "tile", "tile", TXT_INK, "宝箱卷轴的卷身：横向平铺")
     add("scroll_end", make_scroll_end, (0,) * 4, "stretch", "stretch", TXT_INK,
@@ -1506,7 +1530,8 @@ def _card(B: Board, sk: Skin, kind: str, x, y, w, h, *, icon: str, name: str, de
     m = 34 * k * 2
     if rarity:
         seal = 44 * k
-        rc = {"card_fan": S.INK["dan"], "card_ling": "#3e6fa8", "card_xuan": "#7a4fb0", "card_tian": "#c9962e"}.get(kind, S.ACCENT["zhusha"])
+        rc = {"card_fan": S.INK["dan"], "card_ling": "#3e6fa8", "card_xuan": "#7a4fb0", "card_tian": "#c9962e", "card_yi": "#cf8cdb",
+              "card_he": "#f6bd62"}.get(kind, S.ACCENT["zhusha"])
         B.dr.rounded_rectangle((x + m, y + m, x + m + seal, y + m + seal), radius=4 * k, fill=rc)
         B.text(x + m + seal / 2, y + m + seal / 2 + 2 * k, rarity, _font("brush", 34 * k), "#f6efe0", "mm")
     isz = int(round(112 * k))
@@ -1557,7 +1582,7 @@ def review_sheet(images: dict[str, Image.Image], path: Path) -> None:
                 bg.alpha_composite(sk(name, w, h))
                 add(bg, centered("择一而行", brush(64), P))
         elif name.startswith("card_") and name not in ("card_focus", "card_omen"):
-            nm = {"card_fan": "凡", "card_ling": "灵", "card_xuan": "玄", "card_tian": "天"}[name]
+            nm = {"card_fan": "凡", "card_ling": "灵", "card_xuan": "玄", "card_tian": "天", "card_yi": "异", "card_he": "合"}[name]
             for w, h in ((320, 400), (460, 660)):
                 small = w < 400
                 add(None, lambda B, x, y, im, w=w, h=h, small=small: _card(

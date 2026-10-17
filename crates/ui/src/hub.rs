@@ -218,7 +218,7 @@ fn frame(
                 skin.image("btn_focus"),
             ));
             clickable(&mut back, 0);
-            back.with_child(crate::prompts::hint(&fonts.body, 18.0, INK, "{confirm} / {back} 返回"));
+            back.with_child(crate::prompts::hint(&fonts.body, 18.0, PAPER, "{confirm} / {back} 返回"));
         } else {
             p.spawn(crate::prompts::hint(&fonts.body, 18.0, PAPER, hint));
         }
