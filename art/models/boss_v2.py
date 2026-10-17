@@ -6,13 +6,13 @@
 造型：身子、四条腿、头都是隐式曲面（v2kit.sdf_mesh，同青面鬼）：胸口厚、腰收细（肚子往上收）；后腿大腿肌肉饱满、
 飞节往后折（反关节），前腿细长、带腕关节和爪。颈长、往前弯，头低低地往前探（扑食的架势）。
 脸窄、吻长；丹凤眼细长上挑、青光，墨勾眼线带一笔上挑的尾；耳朵大、耳里一簇白毛；额心一簇青火印。
-胸前、颈下一圈蓬松的白毛领（笔触扁带），颊后、肘后、腿后、肚下、尾根几簇毛。
-九条尾巴从尾根在身后摊成扇面（约 155°），前后两层错开（单数在后、暗一档）；每条根细、中段蓬、尖上一截青火（AOV 发光），
-火舌往外飘。
+胸前、颈下一圈蓬松的白毛领：几团柔的毛量糅在一起（里面不勾线），边上用笔触尖毛收；颊后、肘后、腿后、肚下几簇尖毛。
+九条尾巴从尾根在身后摊成扇面（约 145°），前后两层错开（单数在后、暗一档）；每条 S 形弯、长短弯度各有不同，
+根细、中段蓬（轮廓上一簇簇尖毛）、尖收成笔尖，尖上一截青火（AOV 发光），火舌往外飘、火越大越往上腾。
 动画（只画 E）：
   move   8 帧：小跑（对角步：脚按轨迹走，两节腿反解），身子一步一起伏；扇面里每条尾巴带着波轻轻摆，尾火跳动。
-  sweep  6 帧（不循环，2 帧蓄力）：0 伏低、九尾往上收拢；1 九尾从背上往前拱、尾火大盛（预警期间停在这一帧）；
-         2 往前下方一扫；3 扫到身前低处；4、5 收回扇面。
+  sweep  6 帧（不循环，2 帧蓄力）：0 伏低、九尾往上收拢；1 九尾从背上往前拱成一道浪、尾火大盛（预警期间停在这一帧）；
+         2 尾巴猛地抻长、越过头顶往前下砸；3 扫到身前低处；4、5 收回扇面。
   summon 4 帧（不循环）：昂头，九尾张到最开、尾尖青火腾起（召狐火），3 稍落。
 帧 896²（2 倍；原 640²，扇面放不下），锚点 (0.5, 0.8)（大妖物）。挂点 eyes。
 坐标：设计稿三维（单位；x 前、y 上、z 左右，z 负 = 近镜头），用 v2kit.d3m 换到模型坐标。
@@ -51,8 +51,7 @@ WHITE = "#F6F8F8"
 FUR_STOPS = [(0.00, "#323A46"), (0.16, "#4A5564"), (0.30, "#66717F"), (0.44, "#86909C"), (0.56, "#A4AEB8"),
              (0.68, "#C2CAD0"), (0.80, "#DCE2E4"), (0.90, "#EDF1F1"), (1.00, WHITE)]
 EAR_STOPS = [(0.0, "#2C3440"), (0.5, "#56626E"), (0.85, "#7E8A96"), (1.0, "#9AA6B0")]  # 耳背、耳尖：淡青灰
-RUFF_STOPS = [(0.0, "#CDD4DA"), (0.45, "#ECF0F1"), (1.0, WHITE)]  # 毛领边上的笔触：近白
-RUFF_FAR = [(0.0, "#46505C"), (0.4, "#727E8A"), (1.0, "#9EA8B2")]
+RUFF_STOPS = [(0.0, "#B8C1CA"), (0.45, "#E4E9EC"), (1.0, WHITE)]  # 毛领边上的笔触：根略灰、尖白
 FIRE_STOPS = [(0.0, "#3FB8A6"), (0.45, FIRE), (1.0, FIRE_HOT)]
 RIM = S.mix("#DDF6F2", I["qing"], 0.15)
 STEP = 0.5  # 隐式曲面网格的格距（单位）
@@ -604,7 +603,7 @@ def ruff_strokes(sk, ph):
             dv = nrm + 0.9 * down
             ang = math.degrees(math.atan2(dv[1], dv[0])) + 3.0 * math.sin(ph + th * 3)
             root = c + np.array([e[0] * 0.82, e[1] * 0.82, -0.6 - (r[2] * 0.25 if c[2] < -2 else 0.0)])
-            ln = rng.uniform(5.5, 8.0)
+            ln = rng.uniform(6.5, 9.0)
             out.append(stroke_arrays(arc(root, ang, ang - 16.0 * np.sign(nrm[0] + 1e-6), ln, n=7, z=root[2]),
                                      rng.uniform(1.9, 2.6), taper=0.6, w_end=0.1))
     return out
@@ -675,10 +674,9 @@ def build_boss():
     M["ear"] = V2.paint_material("JWEar", EAR_STOPS, wash=0.2, seed=11.0, rim_hex=RIM, rim=0.5, edge=0.1,
                                  shade_attr="zone")
     mix_attr(M["ear"], "inner", "#8E9AA6", 0.85)
-    brush = dict(alpha=1.0, edge_soft=0.35, edge_dark=0.12, streak=0.4, streak_from=0.4, scale=(3.0, 10.0),
+    brush = dict(alpha=1.0, edge_soft=0.35, edge_dark=0.22, streak=0.4, streak_from=0.4, scale=(3.0, 10.0),
                  fade_from=0.7, comb=4.0)
     M["ruff"] = V2.brush_material("JWRuff", RUFF_STOPS, seed=21.0, **brush)
-    M["ruff_far"] = V2.brush_material("JWRuffFar", RUFF_FAR, seed=22.0, **brush)
     M["flame"] = V2.brush_material("JWFlame", FIRE_STOPS, alpha=0.95, edge_soft=0.3, edge_dark=0.0, streak=0.35,
                                    streak_from=0.45, scale=(3.0, 8.0), fade_from=0.55, seed=31.0, glow=1.0,
                                    glow_to=0.9, glow_tip=0.5, comb=5.0)
@@ -697,7 +695,8 @@ def build_boss():
     D["Claws"] = _dummy("JWClaws", M["ink"], "none", body)
     for k in range(len(FAN)):
         D[("tail", k)] = _dummy(f"JWTail{k}", M["tail_far"] if k % 2 else M["tail"], "outer", body)
-    D["Ruff"] = _dummy("JWRuff", M["mane"], "inner", body)
+    D["Ruff"] = _dummy("JWRuff", M["mane"], "none", body)
+    bpy.data.collections[B.CONTOUR_COLLECTION].objects.link(D["Ruff"])  # 毛领里面不勾线（外形柔），外缘算进整体剪影
     D["RuffFur"] = _dummy("JWRuffFur", M["ruff"], "none", body)
     D["Flames"] = _dummy("JWFlames", M["flame"], "none", body)
     # 头：静止的网格（已低头），每帧只摆位置、转角
@@ -830,7 +829,7 @@ def frame_arrays(anim, frame, n):
             claws += [cone_arrays(a, b, 0.55) for a, b in cl]
     out["Claws"] = V2.merge_arrays(claws)
     # 九尾
-    fur_n, fur_f, flames = [], [], []
+    flames = []
     for k, d in enumerate(tail_layout(anim, frame, n)):
         d["ang"] += p["pitch"]
         c = tail_curve(sk["tail_root"], d)
