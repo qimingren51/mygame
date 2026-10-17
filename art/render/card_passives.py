@@ -128,7 +128,7 @@ def blossom(name, loc, normal, size, petal_m, center_m, stamen_m, *, n=5, open_=
     return root
 
 
-def mat_young_leaf(name, color=(0.16, 0.42, 0.10), tip=(0.42, 0.62, 0.16)):
+def mat_young_leaf(name, color=(0.16, 0.42, 0.10), tip=(0.42, 0.62, 0.16), vein=(0.55, 0.70, 0.30)):
     """嫩叶：亮的嫩绿，叶尖偏黄绿，透光多；中脉一道浅色。UV.x 叶柄 → 叶尖。"""
     M = K.Mat(name)
     m = M.math
@@ -137,7 +137,7 @@ def mat_young_leaf(name, color=(0.16, 0.42, 0.10), tip=(0.42, 0.62, 0.16)):
     M.l(uv, sep.inputs[0])
     col = M.mix(M.maprange(sep.outputs["X"], 0.2, 1.0), (*color, 1.0), (*tip, 1.0))
     mid = M.maprange(m("ABSOLUTE", m("SUBTRACT", sep.outputs["Y"], 0.5)), 0.0, 0.04, 1.0, 0.0)
-    col = M.mix(m("MULTIPLY", mid, 0.6), col, (0.55, 0.70, 0.30, 1.0))
+    col = M.mix(m("MULTIPLY", mid, 0.6), col, (*vein, 1.0))
     veins = m("ABSOLUTE", m("SINE", m("MULTIPLY", m("ADD", sep.outputs["Y"], m("MULTIPLY", sep.outputs["X"], 0.6)), math.pi * 8.0)))
     nrm = M.bump(m("ADD", m("MULTIPLY", veins, 0.3), mid), strength=0.2, distance=0.0004)
     bsdf = M.principled(Base_Color=col, Roughness=0.45, Specular_IOR_Level=0.35, Normal=nrm, Coat_Weight=0.2, Coat_Roughness=0.2)
@@ -1987,13 +1987,15 @@ def eyelid_build(R=EYE_R, n=160, m=46, T=0.050):
 def build_ruimu(draft):
     """锐目：一只眼睛的特写，脸和眼周都埋在暗处（眼睑只是两片暗影，不画皮肤和睫毛），只有一道横的月光照亮眼睛这一条；
     虹膜铜金色的放射纹，瞳孔放大，瞳孔里七枚方孔小铜钱排成北斗，钱面带一点高光。"""
+    from mathutils import Vector  # noqa: PLC0415
+
     K.set_world(lin("#04060B"), 1.0)
     eye = make_obj("Eyeball", K.lathe_uv([(EYE_R * math.sin(a), -EYE_R * math.cos(a)) for a in np.linspace(0, math.pi, 96)], segments=128),
                    mat_iris("IrisM"), index=1)
     lid_m = P.mat_stone("LidDark", color=(0.012, 0.010, 0.010), rough=0.9, scale=40.0, bump=0.0)
     lid = make_obj("Lids", eyelid_build(), lid_m, index=1)
     # 瞳孔里的北斗七钱：真的小方孔钱，贴着瞳孔、钱面朝镜头；斗口朝上、斗柄往右
-    rp, rc = 0.0032, 0.00052
+    rp, rc = 0.0034, 0.00056
     pts = np.array(P.DIPPER, float)
     pts = pts - (pts.min(0) + pts.max(0)) / 2
     k = (rp - rc * 1.15) / np.hypot(pts[:, 0], pts[:, 1]).max()
@@ -2003,13 +2005,16 @@ def build_ruimu(draft):
     coin_m = P.mat_coin("PupilCoin", gilt=1.0, rough=0.28, emit=((1.0, 0.58, 0.16), 0.55))
     sc = rc / 0.022
     for j, (x, y) in enumerate(pts):
-        zc = math.sqrt(max(EYE_R ** 2 - x * x - y * y, 0.0)) + 0.00004
-        make_obj(f"Coin{j}", P.coin_build(), coin_m, parent=eye, loc=(x, y, zc), scale=(sc, sc, sc * 0.6), index=2)
+        zc = math.sqrt(max(EYE_R ** 2 - x * x - y * y, 0.0))
+        nrm = Vector((x, y, zc)).normalized()
+        ob = make_obj(f"Coin{j}", P.coin_build(), coin_m, parent=eye, loc=tuple(nrm * (EYE_R + 0.00007)), scale=(sc, sc, sc * 0.6), index=2)
+        ob.rotation_mode = "QUATERNION"
+        ob.rotation_quaternion = nrm.to_track_quat("Z", "Y")
     for ob in (eye, lid):  # 光轴 +Z → 世界 -Y（朝镜头），物体 +Y → 世界 +Z（朝上）
         ob.rotation_euler = (math.radians(90), 0, 0)
     # 月光：一道横的长条光，只照亮眼睛这一条；另一盏小的给铜钱点高光
-    K.area_light("Key", (-0.05, -0.24, 0.035), (0, 0, 0.001), 0.35, 0.22, size_y=0.010, color=(0.78, 0.88, 1.0))
-    K.area_light("Glint", (0.03, -0.20, 0.03), (0, 0, 0.0), 0.02, 0.02, color=(1.0, 0.85, 0.60))
+    K.area_light("Key", (-0.05, -0.22, 0.085), (0, 0, 0.001), 0.40, 0.12, size_y=0.010, color=(0.78, 0.88, 1.0))
+    K.area_light("Glint", (0.05, -0.18, 0.07), (0, 0, 0.0), 0.02, 0.02, color=(1.0, 0.85, 0.60))
     K.area_light("Rim", (0.10, 0.15, 0.06), (0, 0, 0), 0.03, 0.10, color=(0.55, 0.68, 1.0))
     K.camera((0.0015, -0.062, 0.0024), (0.0003, 0.0, 0.0005), lens=85.0)
     return {"light": "cold"}
@@ -2080,7 +2085,7 @@ def build_lotus(draft):
     # 荷叶：一大片圆叶托底（边缘起伏、叶脉放射）；压低镜面，免得反出一大片光
     from card_weapons import low_spec  # noqa: PLC0415
 
-    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.006, 0.022, 0.010), tip=(0.014, 0.040, 0.016)), 0.10)
+    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.006, 0.022, 0.010), tip=(0.014, 0.040, 0.016), vein=(0.030, 0.070, 0.030)), 0.10)
 
     def lotus_leaf(bm):
         uvl = bm.loops.layers.uv.new("UVMap")

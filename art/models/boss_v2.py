@@ -72,11 +72,11 @@ def build_boss():
     scale = B.empty("JWScale", root)
     scale.scale = SCALE
     body = B.empty("JWBody", scale)
-    M_fur = fur_material("JWFur", 3.0)
-    M_leg = fur_material("JWFurLeg", 5.0)
-    M_far = fur_material("JWFurFar", 6.0, bias=-0.58, rim=0.35)
-    M_head = fur_material("JWFurHead", 7.0, bias=-0.24)
-    M_tail = fur_material("JWFurTail", 9.0, streak=0.24, bias=-0.26)
+    M_fur = fur_material("JWFur", 3.0, bias=-0.06)
+    M_leg = fur_material("JWFurLeg", 5.0, bias=-0.06)
+    M_far = fur_material("JWFurFar", 6.0, bias=-0.36, rim=0.35)
+    M_head = fur_material("JWFurHead", 7.0, bias=-0.02)
+    M_tail = fur_material("JWFurTail", 9.0, streak=0.24, bias=-0.04)
     M_ear = V2.paint_material("JWEar", EAR_STOPS, wash=0.2, seed=11.0, rim_hex=RIM, rim=0.5, edge=0.1)
     M_paw = V2.paint_material("JWPaw", [(0.0, "#2A323C"), (0.5, "#5A6674"), (1.0, "#8A96A2")], wash=0.2, seed=12.0,
                               edge=0.1)
@@ -167,9 +167,9 @@ def build_boss():
              for x, y in ((0.10 * hl, 0.80 * hh), (-0.07 * hl, 0.0), (0.10 * hl, -0.78 * hh), (0.24 * hl, 0.0))]
     V2.design_patch("JWPupil", tree, V2.closed_smooth(scr(pupil), 24), M_jiao, head_yaw, lift=0.009, spacing=0.25)
     # 额心的青印：一簇往上挑的小火苗（三瓣）
-    cx, cy = DZ._hx([(16.3, 33.9)])[0]
-    mark = [(cx, cy - 0.55), (cx + 0.38, cy - 0.05), (cx + 0.2, cy + 0.42), (cx + 0.05, cy + 0.95),
-            (cx - 0.12, cy + 0.38), (cx - 0.42, cy + 0.6), (cx - 0.38, cy - 0.05)]
+    cx, cy = DZ._hx([(17.3, 33.0)])[0]  # 额心：两眼之上、眉心往上一点
+    mark = [(cx + 0.75 * x, cy + 0.75 * y) for x, y in
+            ((0.0, -0.7), (0.5, -0.05), (0.26, 0.55), (0.08, 1.25), (-0.16, 0.5), (-0.55, 0.8), (-0.5, -0.05))]
     V2.design_patch("JWMark", tree, V2.closed_smooth(scr(mark), 30), M_mark, head_yaw, lift=0.006, spacing=0.25)
     (fx, fy), fl, fh, ft = DZ.FOX_EYE_FAR
     inv = head_yaw.matrix_world.inverted()
@@ -189,9 +189,9 @@ def build_boss():
 
 # ================================================================ 姿态
 # 九条尾巴的扇面（move 时）：根部的方向（度，从 +x 逆时针）、每节弯多少、离镜头（米，负 = 近）、长短
-FAN = [(96, -1.6, -0.20, 0.92), (110, -2.2, 0.14, 0.98), (122, -2.8, -0.12, 1.0), (134, -3.4, 0.20, 1.0),
-       (146, -4.0, -0.04, 1.0), (158, -4.6, 0.26, 0.98), (170, -5.2, 0.06, 0.95), (182, -5.6, 0.30, 0.9),
-       (194, -6.0, 0.16, 0.85)]
+FAN = [(84, -1.2, -0.22, 0.9), (100, -1.8, 0.16, 0.96), (116, -2.4, -0.14, 1.0), (132, -3.0, 0.22, 1.0),
+       (148, -3.6, -0.06, 1.0), (164, -4.2, 0.28, 0.98), (180, -4.8, 0.08, 0.95), (196, -5.2, 0.32, 0.9),
+       (212, -5.6, 0.18, 0.84)]
 
 
 def tail_layout(anim, frame, n):
@@ -204,8 +204,8 @@ def tail_layout(anim, frame, n):
         elif anim == "sweep":
             # 0 往上收拢；1 从背上往前拱过来（预警时停在这）；2 往前下方扫；3 扫到身前低处；4、5 收回扇面
             s = (k - 4) / 4.0
-            T = [(118 + 14 * s, -3.6, 1.0, 1.15), (78 + 12 * s, -8.2, 1.0, 1.6), (40 + 16 * s, -7.0, 1.05, 1.5),
-                 (12 + 18 * s, -4.0, 1.0, 1.2), (110 + 40 * s, -4.4, 0.98, 1.0), (ang - 4, curl, ln, 1.0)][frame]
+            T = [(116 + 22 * s, -3.0, 1.0, 1.15), (92 + 26 * s, -6.4, 1.05, 1.6), (52 + 26 * s, -6.0, 1.05, 1.5),
+                 (18 + 26 * s, -3.6, 1.0, 1.2), (112 + 50 * s, -4.0, 0.98, 1.0), (ang - 4, curl, ln, 1.0)][frame]
             a0, cu, lk, fire = T
             out.append((a0, cu, 2.0, ph + 0.4 * k, ln * lk, frame in (1, 2), fire))
         else:  # summon：张到最开、尾尖青火一盏盏腾起来
@@ -296,7 +296,7 @@ def pose_boss(parts, anim, frame, n):
         back = c2[0] - (c2[1] - c2[0]) / np.linalg.norm(c2[1] - c2[0]) * 1.2
         c2 = np.vstack([back, c2])
         cm = [FX.d2m(x, y, lat + 0.01 * j / len(c2)) for j, (x, y) in enumerate(c2)]
-        tube, fur = FX._tail_geom(cm, 1.25 if puff else 0.92, seed=21 + k)
+        tube, fur = FX._tail_geom(cm, 0.82 if puff else 0.62, seed=21 + k)
         K.replace_mesh(t_ob, tube)
         K.replace_mesh(tf_ob, fur)
         # 火舌：尾尖往外三条，略往上飘、随相位抖
