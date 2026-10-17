@@ -1,4 +1,0 @@
-branch: playtest-r1-vfx
-base: fcbb79bc940cb111459e2b0cd9353798791a400b
- M art/post/vfx_frames.py
- M art/post/weapon_textures_ea.py

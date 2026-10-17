@@ -102,14 +102,14 @@ V2 = {
              "anims": [("move", 6, 10, {})], "radius": 14, "eye": "#FFF1C2", "glow": "#FFD36B", "lines": (1.6, 1.0, 0.75),
              "sockets": ("eyes",), "shadow_units": 11.25,
              "meta": {"category": "enemy", "vertical_motion": True, "default_anim": "move"}},
-    # 九尾：夜主，白狐九尾、尾尖青火；帧 640²、锚点 (0.5, 0.8)；扫尾 2 帧蓄力；尾火只走 AOV 发光（尾巴整条是一个物体，挂发光材质会整条进发光层）
-    "boss": {"module": "boss_v2", "build": "build_boss", "pose": "pose_boss", "size_1x": 320,
+    # 九尾：夜主，白狐九尾、尾尖青火；帧 768²（扇面大）、锚点 (0.5, 0.8)；扫尾 2 帧蓄力；尾火只走 AOV 发光（尾巴整条是一个物体，挂发光材质会整条进发光层）
+    "boss": {"module": "boss_v2", "build": "build_boss", "pose": "pose_boss", "size_1x": 384,
              "anchor": S.BIG_ENEMY_ANCHOR,
              "anims": [("move", 8, 8, {}),
                        ("sweep", 6, 10, {"loop": False, "windup_frames": 2, "vertical_motion": True}),
                        ("summon", 4, 6, {"loop": False, "vertical_motion": True})],
-             "radius": 44, "eye": "#5FE8D6", "glow": "#6FF2D8", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
-             "shadow_units": 35.25,
+             "radius": 44, "eye": "#66F4E2", "glow": "#6FF2D8", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
+             "shadow_units": 39.5,
              # 配准取躯干那一段（九尾的扇面一甩一甩，默认的条带会扫到尾根）
              "meta": {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy", "default_anim": "move",
                       "register_band": [0.58, 0.74]}},

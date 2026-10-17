@@ -91,3 +91,16 @@ Blender 最终渲染包在 B.render_lock() 里；每完成一项推一次、Send
   compare_pack2：旧 238 帧逐像素逐字段不变、新增 59 帧和素材一致。打包前备份 $SP/atlas_before_b3。
 - 草稿：$SP/try_b3.py <组,…> [缩放] → $SP/b3_try/strip_*.png（夜色底叠加 / 纸夜各半的普通混合）。
 - 合 master：无冲突（master 上 actors 变回单页、新 cards 图集）；合后 check_atlas、两套测试都过。
+
+## 9. 沧浪、青藤加粗加强 + 裂土、燎原改（完成，playtest-r1-vfx bd9c9b2；合 origin/master a5e9672 后 526a488，已推）
+- 协调者（用户定的）：游戏截图（$SP/feel_v3/）里浪头是一道细白弧、藤细得像激光线 → 加粗加强；可以加普通混合的底色层 *_body。
+- weapon_textures_ea.py：_wave() 一次算叠加 + 水体（lru_cache），WAVE_T 58（原 25），浪唇九个浪花卷、水纹四道、泡沫点、水雾、水珠；
+  _wave_trail() 叠加 + 湿痕；_vine()（VINE_H 64、VINE_UNITS 16、VINE_HW 7.6、七个结节、卷须用 F.curl_blade、十六片大叶）；
+  _vine_bind() 藤粗一倍、藤身层后半圈先画；vine_pulse 头半径 7.4、尾宽 4.8。
+- 新组：wave_front_body、wave_front_fade_body、wave_trail_body、vine_body、vine_bind_body（普通混合、不染、layer_of）。
+- 要接代码：*_body 五组；fx.rs 的 VINE_PX (512, 40) 和 `10.0 / size.y` 抵掉，缩放还是 1，不改也对（注释和常量最好改成 64 / 16）。
+- vfx_frames.py：react_lietu 的 EARTH 压暗一档、墨线 2.6 宽、刺尖亮边 #E8CC98；react_liaoyuan reach 到 1.08、火舌宽 8–11、火团小、舔火苗淡。
+- 审图：$SP/cmp_ingame.py（旧帧在 $SP/old_v1，同一套摆法上旧下新）→ review@2x/weapons_ea_wave_cmp.png、weapons_ea_vine_cmp.png、
+  vfx_frames_b3_lietu_liaoyuan_cmp.png；试画 $SP/try_wv.py wave|vine|bind。
+- 测试：test_weapon_textures_ea 28 项（+ 底色层、浪厚、藤粗；浪唇改成按“最靠前的亮处”的中位数找，绿光头按近峰值像素的质心找），
+  test_vfx_frames 35/35，check_atlas 通过。打包：vfx 两页，改 30 帧、新增 15 帧。打包前备份 $SP/atlas_before_wv2。
