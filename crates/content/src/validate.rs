@@ -787,6 +787,21 @@ impl Content {
         if ch.slots == 0 {
             return c.fail("run.ron", "choices.slots 至少为 1".into());
         }
+        if let Some(b) = &ch.budget {
+            c.positive(
+                "run.ron",
+                &[
+                    ("choices.budget.weapon_up", b.weapon_up),
+                    ("choices.budget.new_weapon", b.new_weapon),
+                    ("choices.budget.new_weapon_late", b.new_weapon_late),
+                    ("choices.budget.passive_up", b.passive_up),
+                    ("choices.budget.new_passive", b.new_passive),
+                    ("choices.budget.key_pair", b.key_pair),
+                    ("choices.budget.keyed_up", b.keyed_up),
+                ],
+            )?;
+            c.non_negative("run.ron", &[("choices.budget.weapon_up_each", b.weapon_up_each)])?;
+        }
         if ch.unlock_pity.windows(2).any(|w| w[0] >= w[1]) || ch.unlock_pity.first() == Some(&0) {
             return c.fail("run.ron", "choices.unlock_pity 要从 1 起、从小到大".into());
         }
