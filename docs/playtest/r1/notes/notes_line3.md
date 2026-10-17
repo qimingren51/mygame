@@ -68,3 +68,10 @@
   actors 仍一页，没换的 512 帧逐像素相同；check_asset、check_atlas 通过。审图 redo_b4_*、redo_{stonelord,toad}_move.gif。
 - 省额度：出整套用 b2/render_to.py（EV.render 直接渲到 art/out/assets@2x），别用 produce.py（会把全部素材自检一遍，8 分钟）。
 - 下一步：九尾 boss（boss 图集，帧 640²，move 8、sweep 6（2 帧蓄力）、summon 4），然后收尾三项。
+- 九尾（2026-10-17 12:0x UTC）：models/boss_v2.py 写好（借用 fox_v2；SCALE (1.9, 2.05, 2.15)；月白、青眼、额心青印、
+  九尾扇面、尾尖青火走 AOV——别用发光材质，发光层按物体分，整条尾巴会进去）。V2 表 boss：register_band [0.58, 0.74]
+  （move 的“身高”在锚点那一列量到的是背，不是尾扇）。summon 最后几条尾巴限角 188°、短一点，不然出画。
+  整套约 12 分钟（每帧 36 秒）。contact_radius 34.8（原表 40：新头在 52 单位以上，前沿只量到胸和前腿）。
+- 收尾三项代码已改（未渲）：fox_wisp_v2 打开尾巴外沿火舌 TAIL_FLAMES、加两条 TONGUES 和头顶一簇 LICK；
+  wisp_v2 加 _volume（笔画后面一根半透明的薄烟管：membrane_alpha + alpha_streak）；golem_v2 缝光 AOV 0.55→1.0、
+  缝加厚加多（SEAMS2）、肚石背石上加发光裂缝（CRACKS，design_outline）。

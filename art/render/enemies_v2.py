@@ -110,7 +110,9 @@ V2 = {
                        ("summon", 4, 6, {"loop": False, "vertical_motion": True})],
              "radius": 44, "eye": "#5FE8D6", "glow": "#6FF2D8", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
              "shadow_units": 35.25,
-             "meta": {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy", "default_anim": "move"}},
+             # 配准取躯干那一段（九尾的扇面一甩一甩，默认的条带会扫到尾根）
+             "meta": {"category": "boss", "register_x_only": True, "anchor_kind": "big_enemy", "default_anim": "move",
+                      "register_band": [0.58, 0.74]}},
     # 赤面狐：精英，帧 320²、锚点 (0.5, 0.8)；扑击 2 帧蓄力
     "fox": {"module": "fox_v2", "build": "build_fox", "pose": "pose_fox", "size_1x": 160, "anchor": S.BIG_ENEMY_ANCHOR,
             "anims": [("move", 8, 12, {"vertical_motion": True}),  # 小跑一步一起伏 1.7 单位（自检不查逐帧身高）
