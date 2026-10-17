@@ -316,7 +316,9 @@ mod tests {
         assert!(c.stat_labels[0].stats.iter().all(|l| !l.icon.is_empty()));
         assert!(c.stat_labels.iter().all(|g| !g.icon.is_empty()));
         assert_eq!(c.stat_icon(Stat::Speed), Some("speed"));
-        assert_eq!(c.stat_icon(Stat::LotusHeal), None);
+        assert_eq!(c.stat_icon(Stat::LotusHeal), Some("heal"));
+        // 没画图标的属性不写
+        assert_eq!(c.stat_icon(Stat::DarkDamage), None);
         let mut bad = c.clone();
         bad.stat_labels[0].stats[0].icon = "../health".into();
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
@@ -653,8 +655,10 @@ mod tests {
     fn contact_radius_defaults_to_radius_and_cannot_exceed_it() {
         let c = Content::load(&repo_data_dir()).unwrap();
         let lord = &c.enemies[c.enemy_index("stonelord").unwrap()];
-        assert_eq!(lord.contact_radius, Some(14.0));
-        assert!((lord.contact_ratio() - 0.5).abs() < 1e-6);
+        // 石将的身体比碰撞圈小得多（重画后量出 13.4，取 13）
+        let contact = lord.contact_radius.expect("石将写了接触半径");
+        assert!(contact < lord.radius);
+        assert!((lord.contact_ratio() - contact / lord.radius).abs() < 1e-6);
         assert_eq!(c.enemies[c.enemy_index("shade").unwrap()].contact_ratio(), 1.0);
         for bad in [lord.radius + 1.0, 0.0] {
             let mut c = c.clone();

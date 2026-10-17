@@ -14,6 +14,11 @@ shockwave（6 帧 512×320，贴地亮环，已压扁）。
 第二批：fire_burst（7 帧 384²，自带火色，叠加）+ fire_burst_smoke（2 帧，墨烟，普通混合，接在火爆第 5 帧上）、
 ice_shatter（6 帧 192²，可染）、feather（4 种 32×16 的粒子，不是动画，普通混合、可染）、
 evolve（8 帧 512²，金 #FFE7A8）、evolve_pillar（6 帧 128×512，锚点在底边中点）。
+第三批：十种五行反应 react_*，都自带颜色、不染。叠加的：燎原 liaoyuan（6 帧 384²）、赤地 rongyan（6 帧 384×240 地面）、
+铸兵 zhubing（5 帧 256²）、凝霜 ningshuang（6 帧 384×240 地面）、熔金 rongjin（6 帧 128²，循环 10 帧/秒）、断木 duanmu（5 帧 256²）；
+普通混合的：滋生 zisheng（6 帧 320×288，焦墨勾边）、蒸腾 zhengteng（7 帧 448²）、裂土 lietu（6 帧 352×320，焦墨勾边）、
+淤泥 yuni（6 帧 416×272 地面）。有范围的按 BALANCE 7.2 的反应范围在 1080p 下约一比一定画布，写 radius_px（看得见的横向半径），
+清单的 256² / 256×192 装不下的放大了；长在地上的（滋生、裂土）锚点是地面点，下面留出前排和地缝的地方；能留着的写 hold_last。
 火爆尾巴的“墨烟”在叠加帧里画不出来（叠加只能加亮），所以单独出一组普通混合的墨烟帧，和火爆同画布、同锚点。
 火爆按爆燃半径缩放（火的死亡爆炸 46–69、孔明灯 44–64），清单的 256² 在 1080p 下要放大一倍半；按 1080p 下约一比一改成 384²，
 radius_px 144（56 世界单位一比一）。
@@ -23,7 +28,7 @@ slash 的画布：清单写的 256×128 只放得下半径约 70 像素的 120°
 弧心左边那一大块是空的，打包时会裁掉，不占图集。铜钱剑的扇形半径翻倍（140–170）以后另画了 weapons/coin_slash（weapon_textures_ea.py）。
 
 产物：art/out/assets@2x/vfx_frames/*.png + meta.json（name: vfx）
-审图：art/out/review@2x/vfx_frames_<批>.png（纸色底 / 夜色底的帧条）、vfx_frames_<批>_ingame.png（1080p 合成）
+审图：art/out/review@2x/vfx_frames_<批>.png（纸色底 / 夜色底的帧条）、vfx_frames_<批>_ingame*.png（1080p 合成；第三批两张）
 打包：pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 
 用法（仓库根目录）：
@@ -1131,6 +1136,803 @@ def make_evolve_pillar() -> list[Image.Image]:
     return out
 
 
+# ============================================================== 第三批：十种五行反应（都不染，按主色画）
+# 尺寸按 BALANCE 7.2 的反应范围在 1080p 下约一比一定（1 世界单位 ≈ 2.57 像素），radius_px 是效果的横向半径，
+# 游戏按反应范围缩放；地面的已按透视压扁（flat 0.62）。
+
+
+class Paint:
+    """普通混合的上色层（超采样网格上预乘 alpha 叠画），最后缩小、抖动成 RGBA 帧。"""
+
+    def __init__(self, X, Y):
+        self.X, self.Y = X, Y
+        self.xs, self.ys = X[0], Y[:, 0]
+        self.p = np.zeros(X.shape + (3,))
+        self.a = np.zeros(X.shape)
+
+    def window(self, x0, y0, x1, y1):
+        r0, r1 = np.searchsorted(self.ys, y0), np.searchsorted(self.ys, y1)
+        c0, c1 = np.searchsorted(self.xs, x0), np.searchsorted(self.xs, x1)
+        return slice(int(r0), int(r1)), slice(int(c0), int(c1))
+
+    def over(self, sl, rgb, alpha) -> None:
+        """在上面盖一层：rgb 是颜色（0..1，单色或逐像素），alpha 是覆盖度。"""
+        al = np.clip(alpha, 0, 1)
+        col = np.broadcast_to(np.asarray(rgb, dtype=np.float64), al.shape + (3,))
+        self.p[sl] = col * al[..., None] + self.p[sl] * (1 - al[..., None])
+        self.a[sl] = al + self.a[sl] * (1 - al)
+
+    def image(self, seed: int) -> Image.Image:
+        a = V.downsample(self.a, SS)
+        p = V.downsample(self.p, SS)
+        rgb = p / np.maximum(a, 1e-6)[..., None]
+        a8 = V.dither_alpha(np.clip(a, 0, 1), np.random.default_rng(seed))
+        a8[a < 0.004] = 0
+        a8[0, :] = a8[-1, :] = a8[:, 0] = a8[:, -1] = 0
+        return V.to_rgba8(np.clip(rgb, 0, 1), None, a8)
+
+
+def lerp_col(t, palette):
+    """按 t（0..1，可以是场）在调色板 [(t, "#hex"), …] 里插值出颜色。"""
+    xs = [q for q, _ in palette]
+    cols = np.array([V.col(c) for _, c in palette])
+    t = np.clip(np.asarray(t, dtype=np.float64), 0, 1)
+    return np.stack([np.interp(t, xs, cols[:, k]) for k in range(3)], -1)
+
+
+def jag_path(rng, p0, ang, length, n=14, jitter=0.35, bend=0.0):
+    """裂缝 / 闪电似的折线：从 p0 朝 ang 走 length，每一段方向抖一下。"""
+    pts = [np.array(p0, dtype=np.float64)]
+    a = ang
+    for _ in range(n):
+        a += rng.uniform(-jitter, jitter) + bend
+        pts.append(pts[-1] + length / n * np.array([math.cos(a), math.sin(a)]))
+    return np.array(pts)
+
+
+def polyline_dist(X, Y, pts):
+    """到折线的距离和沿线参数（0..1）。"""
+    best = np.full(X.shape, 1e9)
+    tpar = np.zeros(X.shape)
+    seglen = np.hypot(*np.diff(pts, axis=0).T)
+    cum = np.concatenate([[0.0], np.cumsum(seglen)])
+    total = max(cum[-1], 1e-6)
+    for k in range(len(pts) - 1):
+        d, u = seg(X, Y, *pts[k], *pts[k + 1])
+        better = d < best
+        best = np.where(better, d, best)
+        tpar = np.where(better, (cum[k] + u * seglen[k]) / total, tpar)
+    return best, tpar
+
+
+REACT_FIRE = [(0.0, "#B8321C"), (0.45, "#FF7A2A"), (0.8, "#FFC27A"), (1.0, "#FFF1C2")]
+LY_SIZE = 384  # 燎原的画布：火舌够到 150 像素，舌尖的火团再往外、往上一点
+
+
+def make_react_liaoyuan() -> list[Image.Image]:
+    """燎原：一团火炸开，三条火舌朝三个方向窜出去（120° 散开、带一点弯，像去点着旁边的妖物），舌尖各爆一小团火；
+    火星顺着火舌飞，末两帧火舌变细、断成一截截往上飘。叠加，主色 #FF7A2A，不染；radius_px 是火舌够到的半径。"""
+    size = LY_SIZE
+    c = size / 2
+    R = 150.0
+    rng = np.random.default_rng(9901)
+    tongues = []
+    for k in range(3):
+        ang = math.radians(-90 + 120 * k + rng.uniform(-14, 14))
+        tongues.append(dict(ang=ang, curl=float(rng.choice([-1.0, 1.0])) * rng.uniform(0.25, 0.45), seed=int(rng.integers(1 << 30))))
+    licks = [(2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 12, rng.uniform(0.8, 1.2), int(rng.integers(1 << 30))) for k in range(12)]
+    embers = [(int(rng.integers(0, 3)), rng.uniform(0.2, 1.0), rng.uniform(-8, 8), rng.uniform(1.0, 1.6)) for _ in range(15)]
+    reach = [0.22, 0.6, 0.9, 1.0, 1.0, 0.96]
+    width = [15.0, 21.0, 20.0, 16.0, 10.0, 6.0]
+    core_r = [24.0, 36.0, 42.0, 36.0, 26.0, 14.0]
+    env = [1.0, 1.0, 1.0, 0.85, 0.6, 0.32]
+    out = []
+    for i in range(6):
+        X, Y = grid(size, size)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        r = np.hypot(X - c, Y - c)
+        th = np.arctan2(Y - c, X - c)
+        spokes = np.clip(0.55 + V.angular_noise(np.random.default_rng(9902), th, harmonics=(7, 11, 13, 17), amp=1.3), 0, 1)
+        acc.add(full, env[i] * np.exp(-((r / core_r[i]) ** 2)) * (0.6 + 0.4 * spokes), 1.0 - 0.12 * i)
+        for ang, lf, sd in licks:  # 火团边上一圈短火苗，尖往上翘
+            L = core_r[i] * 1.5 * lf
+            u = np.array([math.cos(ang), math.sin(ang)])
+            b = np.array([c, c]) + u * core_r[i] * 0.4
+            tip = np.array([c, c]) + u * L + np.array([0.0, -0.3 * L])
+            pts = V.bezier([b, (b + tip) / 2 + u * 3, tip], 30)
+            tt = np.linspace(0, 1, len(pts))
+            hw = 5.0 * (1 - tt) ** 0.7 + 0.2
+            sl = acc.window(min(b[0], tip[0]) - 12, min(b[1], tip[1]) - 12, max(b[0], tip[0]) + 12, max(b[1], tip[1]) + 12)
+            cov, f_ = V.brush_stroke(X[sl], Y[sl], pts, hw, np.random.default_rng(sd + i // 2), dry=0.3, dry_start=0.5, ss=SS)
+            acc.add(sl, env[i] * 0.9 * cov, np.clip(0.9 - 0.7 * f_["t"] - 0.1 * i, 0, 1))
+        for tg in tongues:  # 三条大火舌
+            L = R * reach[i]
+            u = np.array([math.cos(tg["ang"]), math.sin(tg["ang"])])
+            nrm = np.array([-u[1], u[0]]) * tg["curl"]
+            b = np.array([c, c]) + u * 10
+            pts = V.bezier([b, b + u * L * 0.4 + nrm * L * 0.25, b + u * L * 0.8 + nrm * L * 0.2, b + u * L], 80)
+            tt = np.linspace(0, 1, len(pts))
+            pts = pts + np.outer(6.0 * tt * np.sin(2 * math.pi * (1.5 * tt - 0.15 * i) + tg["seed"] % 5), [-u[1], u[0]])  # 火舌左右摆
+            hw = width[i] * (0.55 + 0.45 * np.sin(np.pi * np.clip(tt * 1.6, 0, 1))) * (1 - 0.75 * tt) + 0.3
+            lo, hi = pts.min(0) - 24, pts.max(0) + 24
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            cov, f_ = V.brush_stroke(X[sl], Y[sl], pts, hw, np.random.default_rng(tg["seed"] + i // 2), dry=0.3 + 0.1 * i,
+                                     dry_start=0.4, edge_jitter=0.35, ss=SS)
+            if i >= 4:  # 断成一截截
+                cut = 0.5 + 0.5 * np.sin(f_["t"] * 22 + tg["seed"] % 7)
+                cov = cov * smoothstep(0.25, 0.55, cut)
+            acc.add(sl, env[i] * cov, np.clip(0.8 - 0.6 * f_["t"] - 0.08 * i, 0, 1))
+            if i >= 2:  # 舌尖爆一小团火
+                tip = pts[-1]
+                k_ = [0, 0, 0.7, 1.0, 0.7, 0.35][i]
+                sl = acc.window(tip[0] - 30, tip[1] - 34, tip[0] + 30, tip[1] + 24)
+                rr = np.hypot(X[sl] - tip[0], (Y[sl] - tip[1]) * 1.2)
+                acc.add(sl, k_ * np.exp(-((rr / 14.0) ** 2)) * (0.6 + 0.4 * dry(W.ptex(np.random.default_rng(9903), 12, 256, 8.0, 0.8),
+                                                                                  0.0, np.arctan2(Y[sl] - tip[1], X[sl] - tip[0]) / 6.3, 0.2)), 0.6)
+        for k, tpos, off, sz in embers:  # 火星顺着火舌飞
+            if i == 0:
+                continue
+            tg = tongues[k]
+            u = np.array([math.cos(tg["ang"]), math.sin(tg["ang"])])
+            p = np.array([c, c]) + u * R * min(1.0, tpos * reach[i] + 0.1 * i) + np.array([-u[1], u[0]]) * off - np.array([0, 4.0 * i])
+            sl = acc.window(p[0] - 6, p[1] - 6, p[0] + 6, p[1] + 10)
+            acc.add(sl, 0.85 * (1 - i / 7) * streak(X[sl], Y[sl], p[0] - u[0] * 6, p[1] - u[1] * 6, p[0], p[1], sz), 0.7)
+        out.append(frame_color(acc.a, acc.heat(), 9905 + i, REACT_FIRE))
+    return out
+
+
+GROUND_W, GROUND_H = 384, 240  # 地面反应的画布（清单的尺寸）；中心是锚点
+
+
+def make_react_rongyan() -> list[Image.Image]:
+    """赤地：地面从中心爆开，一圈发红的裂缝往外裂（九道主缝、每道分一两个叉，折线、越往外越细），裂缝里透出熔岩的光，
+    缝边一圈暗红的余热；正中先一闪，冲出一圈热浪；末两帧光往回收、缝里只剩暗红（末帧可以留着，持续 3 秒，游戏淡出）。已压扁，叠加，主色 #FF5A2A，不染。"""
+    w, h = GROUND_W, GROUND_H
+    cx, cy = w / 2, h / 2
+    R = 150.0
+    rng = np.random.default_rng(9911)
+    cracks = []
+    for k in range(9):
+        ang = 2 * math.pi * (k + rng.uniform(-0.25, 0.25)) / 9
+        main = jag_path(rng, (0.0, 0.0), ang, R * rng.uniform(0.8, 1.0), n=12, jitter=0.32)
+        cracks.append((main, 1.0))
+        for _ in range(int(rng.integers(1, 3))):
+            j = int(rng.integers(3, 9))
+            sub = jag_path(rng, main[j], ang + rng.choice([-1, 1]) * rng.uniform(0.5, 0.9), R * rng.uniform(0.25, 0.4), n=6, jitter=0.4)
+            cracks.append((sub, j / 12))
+    grow = [0.18, 0.55, 0.9, 1.0, 1.0, 1.0]
+    glow = [1.0, 1.0, 1.0, 0.85, 0.62, 0.5]
+    heat_k = [1.0, 0.95, 0.85, 0.7, 0.5, 0.42]
+    out = []
+    for i in range(6):
+        X, Y = grid(w, h)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        gx, gy = X - cx, (Y - cy) / FLAT
+        r = np.hypot(gx, gy)
+        if i >= 1:  # 整片地微微发红（赤地的范围）
+            edge = R * min(1.0, grow[i] + 0.1) * (1 + V.angular_noise(np.random.default_rng(9912), np.arctan2(gy, gx), harmonics=(3, 5, 7, 9), amp=0.08))
+            acc.add(full, [0, 0.08, 0.12, 0.12, 0.1, 0.09][i] * smoothstep(edge, 0.55 * edge, r), 0.25)
+        if i <= 2:  # 正中一闪 + 热浪
+            acc.add(full, [1.0, 0.7, 0.35][i] * np.exp(-((r / [16.0, 24.0, 30.0][i]) ** 2)), 1.0)
+            ring = np.exp(-(((r - R * [0.15, 0.55, 0.95][i]) / 6.0) ** 2))
+            acc.add(full, [0.5, 0.45, 0.25][i] * ring, 0.7)
+        for pts, start in cracks:
+            vis = np.clip((grow[i] - start) / max(1 - start, 1e-3), 0, 1) if start > 0 else grow[i]
+            if vis <= 0:
+                continue
+            m = max(2, int(round(len(pts) * vis)))
+            sp = pts[:m] * np.array([1.0, FLAT]) + np.array([cx, cy])
+            lo, hi = sp.min(0) - 14, sp.max(0) + 14
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            d, tpar = polyline_dist(X[sl], Y[sl], sp)
+            wid = 2.4 * (1 - 0.6 * tpar) * (1.0 if start == 0 else 0.7) + 0.4
+            line = smoothstep(wid + 0.5, wid - 0.5, d)
+            halo = np.exp(-((d / (6.0 + 3 * (i >= 3))) ** 2))
+            acc.add(sl, glow[i] * np.clip(line + 0.35 * halo, 0, 1), np.clip(heat_k[i] * (0.95 - 0.35 * tpar) * (0.55 + 0.45 * line) + 0.08 * line, 0, 1))
+        out.append(frame_color(acc.a, acc.heat(), 9915 + i, [(0.0, "#8E2414"), (0.4, "#FF5A2A"), (0.75, "#FFB070"), (1.0, "#FFF0D0")]))
+    return out
+
+
+def make_react_zhubing() -> list[Image.Image]:
+    """铸兵：中心一闪，三片金刃（剑形：刃口一道亮线、中脊一道、尖朝外）从中心闪出去、往外飞，带一点转；
+    末两帧飞远、变淡，身后拖细光。叠加，主色 #F2D98A，不染（金刃本身另有投射物，这是出手那一下）。"""
+    size = 256
+    c = size / 2
+    rng = np.random.default_rng(9921)
+    blades = [math.radians(-90 + 120 * k + rng.uniform(-6, 6)) for k in range(3)]
+    L = [26.0, 60.0, 80.0, 84.0, 82.0]
+    off = [5.0, 10.0, 15.0, 22.0, 30.0]
+    env = [0.9, 1.0, 1.0, 0.65, 0.2]
+    spin = [0.0, 0.05, 0.1, 0.16, 0.22]
+    out = []
+    for i in range(5):
+        X, Y = grid(size, size)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        r = np.hypot(X - c, Y - c)
+        if i <= 1:
+            for k in range(4):
+                cv, _ = needle(X, Y, c, c, k * math.pi / 2 + math.pi / 4, [34.0, 22.0][i], [3.0, 2.2][i], taper=1.5)
+                acc.add(full, [1.0, 0.7][i] * cv, 1.0)
+            acc.add(full, [1.0, 0.6][i] * np.exp(-((r / [8.0, 6.0][i]) ** 2)), 1.0)
+        for ang0 in blades:
+            ang = ang0 + spin[i]
+            u = np.array([math.cos(ang), math.sin(ang)])
+            base = np.array([c, c]) + u * off[i]
+            tip = base + u * L[i]
+            lo, hi = np.minimum(base, tip) - 12, np.maximum(base, tip) + 12
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            cov, dd, along = almond_field(X[sl], Y[sl], base, tip, 13.0, bulge=0.3)
+            vperp = -(X[sl] - base[0]) * u[1] + (Y[sl] - base[1]) * u[0]
+            edge = smoothstep(1.4, 0.2, np.abs(dd)) * (vperp > 0)  # 一侧刃口亮
+            ridge = smoothstep(0.9, 0.2, np.abs(vperp)) * (along < 0.95)
+            acc.add(sl, env[i] * np.clip(0.4 * cov + 0.9 * edge + 0.6 * ridge * cov, 0, 1), np.clip(0.15 + 0.35 * along + 0.25 * edge, 0, 1))
+            if i >= 2:  # 身后拖的细光
+                t0 = base - u * (12 + 10 * i)
+                sl2 = acc.window(min(t0[0], base[0]) - 6, min(t0[1], base[1]) - 6, max(t0[0], base[0]) + 6, max(t0[1], base[1]) + 6)
+                acc.add(sl2, 0.5 * env[i] * streak(X[sl2], Y[sl2], t0[0], t0[1], base[0], base[1], 2.2), 0.6)
+        out.append(frame_color(acc.a, acc.heat(), 9925 + i, [(0.0, "#B88A3A"), (0.5, "#F2D98A"), (1.0, "#FFF8E0")]))
+    return out
+
+
+def make_react_ningshuang() -> list[Image.Image]:
+    """凝霜：地上一朵霜花：六道主枝从中心往外长（每道两侧一排斜的冰晶小枝，越往外越短），主枝之间六片淡的瓣，
+    边上一圈细霜针；正中先一闪。0–3 帧往外长，4–5 帧留着、变淡（末帧可以留着，游戏淡出）。已压扁，叠加，主色 #CDEBFF，不染。"""
+    w, h = GROUND_W, GROUND_H
+    cx, cy = w / 2, h / 2
+    R = 150.0
+    rng = np.random.default_rng(9931)
+    lens = rng.uniform(0.84, 1.0, 6)  # 六道主枝长短不齐
+    twig = rng.uniform(0.75, 1.15, (6, 7, 2))
+    grow = [0.2, 0.5, 0.8, 1.0, 1.0, 1.0]
+    env = [1.0, 1.0, 0.95, 0.9, 0.68, 0.55]
+    out = []
+    for i in range(6):
+        X, Y = grid(w, h)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        gx, gy = (X - cx), (Y - cy) / FLAT
+        r = np.hypot(gx, gy)
+        th = np.arctan2(gy, gx)
+        if i <= 1:
+            acc.add(full, [1.0, 0.6][i] * np.exp(-((r / [14.0, 20.0][i]) ** 2)), 1.0)
+        for k in range(6):
+            L = R * grow[i] * lens[k]
+            ang = math.radians(30 + 60 * k)
+            u = np.array([math.cos(ang), math.sin(ang)])
+            # 主枝（地面坐标里画，再压扁）：用 gx, gy 直接算
+            d, uu = seg(gx, gy, 0.0, 0.0, u[0] * L, u[1] * L)
+            hw = 2.2 * (1 - 0.6 * uu) + 0.4
+            acc.add(full, env[i] * smoothstep(hw + 0.6, hw - 0.6, d), 0.9 - 0.3 * uu)
+            for j in range(1, 7):  # 两侧斜的小枝
+                t = j / 7
+                if t * R > L:
+                    continue
+                p = u * t * L
+                bl0 = (1 - t) * 0.35 * R * min(1.0, (L - t * R) / (0.2 * R) + 0.3)
+                for sgn in (-1, 1):
+                    bl = bl0 * twig[k, j, (sgn + 1) // 2]
+                    a2 = ang + sgn * math.radians(60)
+                    q = p + bl * np.array([math.cos(a2), math.sin(a2)])
+                    d2, u2 = seg(gx, gy, p[0], p[1], q[0], q[1])
+                    acc.add(full, 0.8 * env[i] * smoothstep(1.6, 0.4, d2) * (1 - 0.5 * u2), 0.7)
+            # 瓣：主枝之间一片淡的杏仁形
+            a3 = ang + math.radians(30)
+            v = np.array([math.cos(a3), math.sin(a3)])
+            cov, dd, _ = almond_field(gx, gy, v * 8, v * L * 0.62, 0.3 * L * 0.62 + 1, bulge=0.45)
+            acc.add(full, env[i] * (0.18 * cov + 0.45 * smoothstep(1.2, 0.0, np.abs(dd)) * (dd < 0.5)), 0.5)
+        if i >= 2:  # 外沿一圈细霜针
+            rim_r = R * grow[i] * 0.9 * (1 + V.angular_noise(np.random.default_rng(9932), th, harmonics=(3, 5, 7), amp=0.06))
+            needles = np.clip(np.cos(th * 36 + 0.8 * np.sin(th * 5)) ** 16, 0, 1) * np.exp(-(((r - rim_r) / 6.0) ** 2))
+            acc.add(full, 0.5 * env[i] * needles, 0.6)
+        out.append(frame_color(acc.a, acc.heat(), 9935 + i, [(0.0, "#7FB8E8"), (0.6, "#CDEBFF"), (1.0, "#FFFFFF")]))
+    return out
+
+def smooth_stroke(X, Y, pts, hw, aa=0.45):
+    """实心笔触（填色用，不带飞白）：返回覆盖度和 stroke_fields 的场。"""
+    f = V.stroke_fields(X, Y, pts, np.asarray(hw, dtype=np.float64))
+    return smoothstep(f["hw"] + aa, f["hw"] - aa, np.hypot(f["perp"], f["over"])), f
+
+
+def curl_blade(root, ang0, L, bend, curl, curl_len, n=90):
+    """卷草的中线：从 root 朝 ang0 出发走 L，整体弯 bend（弧度）；最后 curl_len 像素曲率线性变大（羊角螺线），
+    一共再转 curl（弧度，正 = 顺时针），卷成蕨菜芽那样的螺旋。"""
+    s = np.linspace(0.0, L, n)
+    k = np.clip((s - (L - curl_len)) / max(curl_len, 1e-6), 0, 1)
+    theta = ang0 + bend * s / max(L, 1e-6) + curl * k**2
+    steps = np.stack([np.cos(theta), np.sin(theta)], -1) * (L / (n - 1))
+    return np.asarray(root, dtype=np.float64) + np.concatenate([[[0.0, 0.0]], np.cumsum(steps[:-1], 0)])
+
+
+ZS_W, ZS_H = 320, 288
+ZS_ROOT = (160.0, 196.0)  # 锚点：草丛中心的地面点（下面留给前排的根、土渣和地上那片淡绿）
+GRASS = [(0.0, "#2F7D57"), (0.45, "#6FD6A0"), (1.0, "#C6F4DC")]  # 根 → 主色 → 尖
+GRASS_LIGHT = "#E2FAEC"
+
+
+def make_react_zisheng() -> list[Image.Image]:
+    """滋生：地上卷着长出一丛灵草：七株卷草（像蕨菜的嫩芽，尖上打卷、往外卷）从锚点四周破土，土渣往外蹦；
+    0–2 帧往上长、卷慢慢舒开，3–5 帧长成、轻轻一摆后停住；根上四片小叶张开，地上一片很淡的绿，几粒淡绿的灵光点往上飘。
+    普通混合，主色 #6FD6A0，焦墨勾边，不染；锚点是地面中心，radius_px 是滋生范围的横向半径（50，1080p 下一比一）。末帧可以留着。"""
+    w, h = ZS_W, ZS_H
+    ax, ay = ZS_ROOT
+    rng = np.random.default_rng(9941)
+    blades = []
+    for k in range(7):
+        gx = (k - 3) / 3 * 88 + rng.uniform(-9, 9)
+        side = 1.0 if gx > 6 else (-1.0 if gx < -6 else float(rng.choice([-1.0, 1.0])))
+        L = rng.uniform(104, 132) * (1 - 0.32 * abs(gx) / 92)
+        blades.append(dict(root=(ax + gx, ay + rng.uniform(-22, 18) * FLAT), ang=-math.pi / 2 + 0.55 * gx / 92 + rng.uniform(-0.08, 0.08),
+                           L=L, side=side, bend=side * rng.uniform(0.12, 0.3), curl=side * rng.uniform(7.2, 8.2),
+                           w0=3.4 + 2.4 * L / 132, speed=rng.uniform(0.88, 1.12), seed=int(rng.integers(1 << 30))))
+    leaves = []
+    for k in range(4):
+        gx = rng.uniform(-64, 64)
+        side = 1.0 if gx >= 0 else -1.0
+        leaves.append(dict(base=np.array([ax + gx, ay + rng.uniform(-6, 16) * FLAT]), ang=-math.pi / 2 + side * rng.uniform(0.75, 1.15),
+                           L=rng.uniform(24, 32), wd=rng.uniform(9.5, 12.5)))
+    motes = [(rng.uniform(-92, 92), rng.uniform(-16, 16), rng.uniform(1.5, 2.3), rng.uniform(0.75, 1.25)) for _ in range(9)]
+    crumbs = [(rng.uniform(-84, 84), rng.uniform(-18, 18), rng.uniform(0, 2 * math.pi), rng.uniform(1.0, 1.9)) for _ in range(14)]
+    grow = [0.24, 0.56, 0.84, 1.0, 1.0, 1.0]
+    sway = [0.0, 0.0, 0.0, 0.07, 0.025, 0.0]
+    hole_c, mote_c, light = V.col("#3E3227"), V.col("#D6F8E6"), V.col(GRASS_LIGHT)
+    out = []
+    for i in range(6):
+        X, Y = grid(w, h)
+        pt = Paint(X, Y)
+        full = (slice(None), slice(None))
+        gx_, gy_ = X - ax, (Y - ay) / FLAT
+        edge = 112.0 * min(1.0, 0.35 + grow[i]) * (1 + V.angular_noise(np.random.default_rng(9942), np.arctan2(gy_, gx_), harmonics=(3, 5, 7, 9), amp=0.1))
+        pt.over(full, V.col("#6FD6A0"), [0.08, 0.13, 0.16, 0.17, 0.17, 0.17][i] * smoothstep(edge, 0.55 * edge, np.hypot(gx_, gy_)))
+        if i <= 2:  # 破土：土渣往外蹦
+            for gx, gy, a0, sz in crumbs:
+                d = [5.0, 13.0, 19.0][i]
+                x = ax + gx + d * math.cos(a0)
+                y = ay + (gy + d * math.sin(a0)) * FLAT - [5.0, 8.0, 3.0][i]
+                sl = pt.window(x - 4, y - 4, x + 4, y + 4)
+                pt.over(sl, hole_c, [0.85, 0.7, 0.4][i] * dot(X[sl], Y[sl], x, y, sz))
+        items = [(b["root"][1], "b", b) for b in blades] + [(lf["base"][1], "l", lf) for lf in leaves]
+        for _, kind, it in sorted(items, key=lambda q: q[0]):  # 从后往前画
+            if kind == "l":  # 小叶：焦墨勾边、一道浅的叶脉
+                g = float(smoothstep(0.2, 0.75, grow[i]))
+                if g <= 0:
+                    continue
+                base = it["base"]
+                u = np.array([math.cos(it["ang"]), math.sin(it["ang"])])
+                tip = base + u * it["L"] * (0.45 + 0.55 * g)
+                lo, hi = np.minimum(base, tip) - 10, np.maximum(base, tip) + 10
+                sl = pt.window(lo[0], lo[1], hi[0], hi[1])
+                cov, dd, along = almond_field(X[sl], Y[sl], base, tip, it["wd"] * (0.55 + 0.45 * g), bulge=0.4)
+                pt.over(sl, JIAO, 0.88 * smoothstep(0.45, -0.45, dd - 1.1))
+                v = -(X[sl] - base[0]) * u[1] + (Y[sl] - base[1]) * u[0]
+                colr = lerp_col(0.3 + 0.5 * along, GRASS)
+                colr = colr + (light - colr) * (0.55 * smoothstep(0.9, 0.3, np.abs(v)) * (along < 0.85))[..., None]
+                pt.over(sl, colr, cov)
+                continue
+            b = it  # 卷草：先画一笔焦墨（宽 1 像素多一点，尾巴干笔断开），再在上面填绿
+            g = min(1.0, grow[i] * b["speed"])
+            L = b["L"] * g
+            pts = curl_blade(b["root"], b["ang"] + b["side"] * sway[i], L, b["bend"], b["curl"] * (1.1 - 0.1 * g), float(np.clip(0.45 * L, 18, 52)))
+            tt = np.linspace(0, 1, len(pts))
+            hw = b["w0"] * (0.65 + 0.35 * g) * (1 - 0.8 * tt**0.75) + 0.6
+            lo, hi = pts.min(0) - 9, pts.max(0) + 9
+            sl = pt.window(lo[0], lo[1], hi[0], hi[1])
+            r0 = b["root"]
+            hole = np.hypot((X[sl] - r0[0]) / (b["w0"] * 2.0), (Y[sl] - r0[1] - 1) / (b["w0"] * 0.7))
+            pt.over(sl, hole_c, 0.6 * g * smoothstep(1.0, 0.7, hole))
+            ink, _ = V.brush_stroke(X[sl], Y[sl], pts, hw + 1.1, np.random.default_rng(b["seed"]), dry=0.3, dry_start=0.55, ss=SS)
+            pt.over(sl, JIAO, 0.9 * ink)
+            cov, f_ = smooth_stroke(X[sl], Y[sl], pts, hw)
+            colr = lerp_col(0.12 + 0.88 * f_["t"], GRASS)
+            colr = colr + (light - colr) * (0.4 * smoothstep(0.1, 0.8, -f_["perp"] / f_["hw"]))[..., None]  # 左边（向光）亮一点
+            pt.over(sl, colr, cov)
+        if 1 <= i <= 4:  # 灵光点往上飘
+            for k, (gx, gy, sz, sp) in enumerate(motes):
+                x = ax + gx + 3.0 * math.sin(1.3 * i + k)
+                y = ay + gy * FLAT - (10.0 + 15.0 * i * sp)
+                sl = pt.window(x - 5, y - 5, x + 5, y + 5)
+                pt.over(sl, mote_c, [0.0, 0.6, 0.85, 0.75, 0.45][i] * dot(X[sl], Y[sl], x, y, sz))
+        out.append(pt.image(9945 + i))
+    return out
+
+
+ZT_SIZE = 448
+ZT_C = (224.0, 280.0)  # 炸开的点（锚点）：偏下，汽往上翻
+ZT_R = 160  # 汽团看得见的横向半径（蒸腾范围 70 在 1080p 下是 180 像素，游戏放大约一成）
+STEAM = [(0.0, "#7F8C99"), (0.55, "#E8EEF2"), (1.0, "#FFFFFF")]  # 背光 → 主色 → 受光
+
+
+def make_react_zhengteng() -> list[Image.Image]:
+    """蒸腾：一团白汽炸开、翻滚着往上升。0 帧一团紧的汽，八道汽柱往外喷；1–3 帧十几团汽往外滚开（每团左上受光、右下背光，
+    背光那边一道淡灰的边，往下的贴地压扁）；4–6 帧整团往上飘、变大变薄，从上往下被扯成一缕缕。普通混合，主色 #E8EEF2，不染；
+    radius_px 是汽团的横向半径（蒸腾范围 70，1080p 下一比一）。"""
+    w = h = ZT_SIZE
+    cx, cy = ZT_C
+    rng = np.random.default_rng(9951)
+    puffs = []
+    for k in range(16):
+        phi = 2 * math.pi * (k + rng.uniform(-0.35, 0.35)) / 16
+        dist = rng.uniform(0.0, 0.45) if k % 3 == 0 else rng.uniform(0.5, 1.0)
+        puffs.append(dict(phi=phi, dist=dist, r=rng.uniform(32, 46) * (1.12 - 0.3 * dist), rise=rng.uniform(0.8, 1.25), seed=int(rng.integers(1 << 30))))
+    jets = [(2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 8, rng.uniform(64, 92)) for k in range(8)]
+    spread = 128.0
+    D = [0.2, 0.56, 0.84, 1.0, 1.08, 1.14, 1.18]  # 往外滚（× spread）
+    SZ = [0.4, 0.7, 0.92, 1.02, 1.1, 1.17, 1.24]  # 每团的大小
+    RISE = [0.0, 3.0, 8.0, 14.0, 24.0, 36.0, 50.0]  # 整团往上飘（像素）
+    OP = [0.95, 0.95, 0.93, 0.88, 0.75, 0.55, 0.32]
+    TEAR = [0.0, 0.0, 0.04, 0.1, 0.24, 0.4, 0.56]  # 扯碎的程度
+    nrng = np.random.default_rng(9952)
+    streaks = 0.5 + 0.2 * V.noise(nrng, (h + 96, w), (9.0, 5.0), angle=math.pi / 2)  # 略竖着拉长的噪声，跟着汽往上走
+    blobs = V.noise(nrng, (h, w), 6.0)
+    lx, ly = -0.45, -0.89  # 光从左上来
+    rim_c = V.col("#66737F")  # 背光那边的灰边：夜里汽团靠它和暗面认出来
+    out = []
+    for i in range(7):
+        X, Y = grid(w, h)
+        pt = Paint(X, Y)
+        sh = min(int(RISE[i] * 1.3), 96)
+        ns = np.repeat(np.repeat(streaks[sh : sh + h], SS, 0), SS, 1)
+        nb = np.repeat(np.repeat(blobs, SS, 0), SS, 1)
+        tear = TEAR[i] * np.clip(1.0 + (cy - Y) / 220.0, 0.5, 1.7)  # 越高扯得越碎
+        cur = []
+        for p in puffs:
+            ux, uy = math.cos(p["phi"]), math.sin(p["phi"])
+            uy = uy * FLAT if uy > 0 else 0.8 * uy
+            cur.append((cy + uy * spread * p["dist"] * D[i] - RISE[i] * p["rise"], cx + ux * spread * p["dist"] * D[i], p["r"] * SZ[i], p))
+        for py, px, r, p in sorted(cur, key=lambda q: q[0]):  # 上面（远）的先画，下面的盖上去
+            sl = pt.window(px - 1.4 * r, py - 1.4 * r, px + 1.4 * r, py + 1.4 * r)
+            dx, dy = X[sl] - px, Y[sl] - py
+            edge = r * (1 + V.angular_noise(np.random.default_rng(p["seed"]), np.arctan2(dy, dx) + 0.15 * i, harmonics=(3, 4, 5, 7), amp=0.12))
+            d = np.hypot(dx, dy) - edge
+            shade = np.clip((dx * lx + dy * ly) / r, -1, 1)
+            colr = lerp_col(0.55 + 0.45 * shade, STEAM)
+            rim = smoothstep(-6.0, -0.5, d) * smoothstep(0.1, -0.5, shade)
+            colr = colr + (rim_c - colr) * (0.6 * rim)[..., None]
+            keep = smoothstep(tear[sl] - 0.16, tear[sl] + 0.16, ns[sl] + 0.4 * np.clip(-d / r, 0, 1))  # 边上先散
+            pt.over(sl, colr, smoothstep(1.5, -1.5, d) * OP[i] * (0.86 + 0.07 * nb[sl]) * keep)
+        if i <= 1:  # 往外喷的汽柱
+            for a0, L in jets:
+                sy_ = FLAT if math.sin(a0) > 0 else 1.0
+                L2 = L * [0.8, 1.2][i]
+                x0, y0 = cx + 14 * math.cos(a0), cy + 14 * math.sin(a0) * sy_
+                x1, y1 = cx + L2 * math.cos(a0), cy + L2 * math.sin(a0) * sy_
+                sl = pt.window(min(x0, x1) - 12, min(y0, y1) - 12, max(x0, x1) + 12, max(y0, y1) + 12)
+                pt.over(sl, lerp_col(0.8, STEAM), [0.9, 0.55][i] * streak(X[sl], Y[sl], x0, y0, x1, y1, [8.0, 10.0][i]))
+        out.append(pt.image(9955 + i))
+    return out
+
+
+RJ_FPS = 10  # 熔金印记循环的帧率（6 帧一圈 0.6 秒）
+RJ_R = 30  # 金环半径（像素）
+RJ_C = (64.0, 58.0)
+
+
+def make_react_rongjin() -> list[Image.Image]:
+    """熔金：妖物身上的熔金印记，循环（6 帧、10 帧/秒，首尾接得上）：一圈熔化的金环（干笔飞白，一段亮光绕着转，一圈转一周），
+    环里四道短刻痕、一点金芯一明一暗；环下沿挂三滴金水往下淌、拉长、淡掉，再从环上冒出来；环外几点金星轮流一闪。
+    叠加，主色 #FFB347，不染；radius_px 是金环的半径，游戏按妖物的身体半径缩放（半径 12 左右时 1080p 下一比一）。"""
+    size = 128
+    cx, cy = RJ_C
+    rng = np.random.default_rng(9961)
+    tex = W.ptex(rng, ns=12, nt=256, along=6.0, across=0.8)
+    drips = [(math.radians(a), rng.uniform(0, 1)) for a in (62.0, 96.0, 128.0)]
+    glints = [(rng.uniform(0, 2 * math.pi), rng.uniform(1.05, 1.3), k / 4 + rng.uniform(-0.05, 0.05)) for k in range(4)]
+    n = 6
+    out = []
+    for i in range(n):
+        ph = i / n
+        X, Y = grid(size, size)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        dx, dy = X - cx, Y - cy
+        r = np.hypot(dx, dy)
+        th = np.arctan2(dy, dx)
+        rr = RJ_R * (1 + 0.04 * np.cos(3 * th + 1.3) + 0.025 * np.cos(5 * th + 0.4))
+        q = (r - rr) / 3.0
+        travel = 0.5 + 0.5 * np.cos(th - 2 * math.pi * ph)  # 一段亮光绕环转，一个循环转一圈
+        ring = smoothstep(1.0, 0.45, np.abs(q)) * (0.65 + 0.35 * dry(tex, np.clip(q, -1, 1), (th / (2 * math.pi)) % 1, 0.3))
+        acc.add(full, ring * (0.5 + 0.5 * travel**3), 0.3 + 0.45 * travel**3)
+        acc.add(full, 0.22 * np.exp(-(((r - rr) / 7.0) ** 2)), 0.2)
+        pulse = 0.72 + 0.28 * math.cos(2 * math.pi * ph)
+        for k in range(4):
+            a = math.pi / 4 + k * math.pi / 2
+            cv, _ = needle(X, Y, cx + 8 * math.cos(a), cy + 8 * math.sin(a), a, 12.0, 1.7, taper=0.8)
+            acc.add(full, 0.75 * pulse * cv, 0.55)
+        acc.add(full, pulse * np.exp(-((r / 5.0) ** 2)), 1.0)
+        for a0, p0 in drips:  # 金水：sin(π f) 在 f = 0、1 都是 0，接得上
+            f = (ph + p0) % 1.0
+            e = math.sin(math.pi * f)
+            sx, sy = cx + RJ_R * math.cos(a0), cy + RJ_R * math.sin(a0)
+            hx, hy = sx, sy + 5 + 20 * f
+            d, u = seg(X, Y, sx, sy, hx, hy)
+            acc.add(full, e * 0.65 * smoothstep(1.3, 0.4, d) * (0.4 + 0.6 * u), 0.45)
+            acc.add(full, e * dot(X, Y, hx, hy + 1.0, 2.4 - 0.5 * f), 0.7)
+        for a0, rf, p0 in glints:
+            life = max(0.0, math.sin(2 * math.pi * ((ph + p0) % 1.0))) ** 2
+            if life <= 0.01:
+                continue
+            gx, gy = cx + RJ_R * rf * math.cos(a0), cy + RJ_R * rf * math.sin(a0)
+            for ang in (0.0, math.pi / 2, math.pi, 1.5 * math.pi):
+                cv, _ = needle(X, Y, gx, gy, ang, 6.0 * life + 2, 1.1, taper=1.4)
+                acc.add(full, life * cv, 0.85)
+        out.append(frame_color(acc.a, acc.heat(), 9965 + i, [(0.0, "#A0521C"), (0.5, "#FFB347"), (1.0, "#FFF2C8")]))
+    return out
+
+
+DM_PAL = [(0.0, "#4FBF86"), (0.25, "#6FD6A0"), (0.75, "#E9D9A6"), (1.0, "#FFF6DA")]  # 热度：木 0.25、金 0.75、闪 1.0
+
+
+def make_react_duanmu() -> list[Image.Image]:
+    """断木：交叉的两刀。0 帧金色的一刀从左上斩到右下（中段粗、两头尖，外弧一侧是亮的刃口），刀头最亮；1 帧这刀亮满，
+    木色的一刀从右上斩到左下；2 帧两刀都在，交叉处一闪（白金），木屑和金星往外崩；3–4 帧两刀从交叉处断开、往两边错开淡掉，
+    木屑飞远。叠加，金 #E9D9A6 + 木 #6FD6A0，不染（自带颜色按热度：木 0.25、金 0.75、闪 1.0）。"""
+    size = 256
+    rng = np.random.default_rng(9981)
+    cuts = [(np.array([52.0, 46.0]), np.array([206.0, 212.0]), 13.0, 0.75), (np.array([210.0, 50.0]), np.array([48.0, 206.0]), -11.0, 0.25)]
+    seeds = [int(rng.integers(1 << 30)) for _ in cuts]
+    curves = []
+    for p0, p1, bulge, _ in cuts:
+        u = (p1 - p0) / np.linalg.norm(p1 - p0)
+        nrm = np.array([-u[1], u[0]])
+        curves.append((V.bezier([p0, (p0 + p1) / 2 + nrm * bulge, p1], 120), u, nrm))
+    d2 = ((curves[0][0][:, None] - curves[1][0][None]) ** 2).sum(-1)
+    k0, k1 = np.unravel_index(int(d2.argmin()), d2.shape)
+    xc, yc = (curves[0][0][k0] + curves[1][0][k1]) / 2  # 交叉点
+    chips = [(rng.uniform(0, 2 * math.pi), rng.uniform(0.6, 1.0), rng.uniform(1.4, 2.3), float(rng.choice([0.25, 0.75]))) for _ in range(14)]
+    reveal = [(0.72, 0.0), (1.0, 0.7), (1.0, 1.0), (1.0, 1.0), (1.0, 1.0)]  # 每帧两刀各斩到哪
+    env = [(1.0, 0.0), (0.92, 1.0), (0.95, 1.0), (0.6, 0.62), (0.18, 0.2)]
+    split = [0.0, 0.0, 0.0, 4.5, 9.0]  # 断开后错开的距离
+    flash = [0.0, 0.55, 1.0, 0.35, 0.0]
+    tt = np.linspace(0, 1, 120)
+    hw = 7.0 * np.sin(np.pi * tt) ** 0.6 + 0.35
+    out = []
+    for i in range(5):
+        X, Y = grid(size, size)
+        acc = Acc(X, Y)
+        full = (slice(None), slice(None))
+        for (pts, u, nrm), (_, _, bulge, heat), sd, rv, e in zip(curves, cuts, seeds, reveal[i], env[i]):
+            if rv <= 0 or e <= 0:
+                continue
+            halves = [(slice(0, 61), -1.0), (slice(60, 120), 1.0)] if split[i] > 0 else [(slice(0, 120), 0.0)]
+            for k, (part, sgn) in enumerate(halves):
+                q = pts[part] + sgn * split[i] * (nrm + 0.6 * u)
+                lo, hi = q.min(0) - 12, q.max(0) + 12
+                sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+                cov, f_ = V.brush_stroke(X[sl], Y[sl], q, hw[part], np.random.default_rng(sd + k), dry=0.35 + 0.1 * i, dry_start=0.55, ss=SS)
+                t_full = tt[part][0] + f_["t"] * (tt[part][-1] - tt[part][0])  # 回到整刀的 0..1
+                head = smoothstep(rv + 0.02, rv - 0.08, t_full) * (0.45 + 0.55 * np.clip(t_full / rv, 0, 1)) if rv < 1 else 1.0
+                edge = smoothstep(0.25, 0.85, math.copysign(1.0, bulge) * f_["perp"] / f_["hw"])
+                acc.add(sl, e * cov * head * (0.65 + 0.35 * edge), heat + 0.12 * edge)
+        if flash[i] > 0:  # 交叉处一闪
+            for ang in (0.0, math.pi / 2, math.pi, 1.5 * math.pi):
+                cv, _ = needle(X, Y, xc, yc, ang, [0, 26.0, 40.0, 30.0][i], 2.4, taper=1.4)
+                acc.add(full, flash[i] * cv, 1.0)
+            acc.add(full, flash[i] * np.exp(-((np.hypot(X - xc, Y - yc) / [1, 6.0, 9.0, 7.0][i]) ** 2)), 1.0)
+        if i >= 2:  # 木屑、金星往外崩
+            for a0, df, sz, heat in chips:
+                d1 = [0, 0, 22.0, 52.0, 78.0][i] * df
+                d0 = max(0.0, d1 - 12.0)
+                x0, y0 = xc + d0 * math.cos(a0), yc + d0 * math.sin(a0) + 0.004 * d0 * d0
+                x1, y1 = xc + d1 * math.cos(a0), yc + d1 * math.sin(a0) + 0.004 * d1 * d1
+                sl = acc.window(min(x0, x1) - 6, min(y0, y1) - 6, max(x0, x1) + 6, max(y0, y1) + 6)
+                acc.add(sl, [0, 0, 0.9, 0.7, 0.3][i] * streak(X[sl], Y[sl], x0, y0, x1, y1, sz), heat)
+        out.append(frame_color(acc.a, acc.heat(), 9985 + i, DM_PAL))
+    return out
+
+
+LT_W, LT_H = 352, 320
+LT_ROOT = (176.0, 228.0)  # 锚点：地刺根部的地面中心（底边往上 92 像素，下面留给地缝和翻开的土）
+LT_R = 150  # 地刺丛的横向半径（裂土范围 60，1080p 下一比一）
+EARTH = {"lit": "#B08B60", "mid": "#8B6A47", "dark": "#5E4630", "hole": "#3E3227", "dust": "#A08462", "chip": "#4A3826"}
+
+
+def spike_shape(rng, H, wb, lean):
+    """一根尖石刺的多边形（局部坐标：根的中点在原点，往上是 −y）：两边各三个折点（棱角分明），三成的尖是斜着断的；
+    按 lean 斜切（尖往外歪）。"""
+    us = np.array([0.3, 0.58, 0.82])
+    left = [(-wb * (1 - u) ** 0.75 * rng.uniform(0.8, 1.12), -H * u + rng.uniform(-5, 5)) for u in us]
+    right = [(wb * (1 - u) ** 0.75 * rng.uniform(0.8, 1.12), -H * u + rng.uniform(-5, 5)) for u in us]
+    tip = [(-0.22 * wb, -0.93 * H), (0.18 * wb, -H)] if rng.uniform() < 0.35 else [(rng.uniform(-0.08, 0.08) * wb, -H)]
+    poly = np.array([(-wb, 0.0)] + left + tip + right[::-1] + [(wb, 0.0)])
+    poly[:, 0] += -poly[:, 1] * lean
+    return poly
+
+
+def make_react_lietu() -> list[Image.Image]:
+    """裂土：一簇地刺破土而出。地上先裂开七道墨缝、土坑；七根尖石刺从坑里冲出来（中间的最高，两边的矮、往外歪），
+    0 帧冒头、1 帧冲到顶、2 帧略过头、3 帧站住；每根左边受光（#B08B60）、右边背光（#5E4630），焦墨勾边，背光面几笔皴；
+    碎石往外蹦、根上扬土；4 帧刺上裂开几道缝、尖上掉渣，5 帧往下塌回土里、变淡。普通混合，主色 #8B6A47，不染；
+    锚点在地刺根部的地面中心，radius_px 是地刺丛的横向半径（裂土范围 60，1080p 下一比一）。"""
+    w, h = LT_W, LT_H
+    ax, ay = LT_ROOT
+    rng = np.random.default_rng(9991)
+    layout = [(0.0, -8.0, 134.0, 26.0, 0.0), (-34.0, 4.0, 102.0, 21.0, -0.2), (36.0, -2.0, 110.0, 21.0, 0.22), (-68.0, -6.0, 78.0, 18.0, -0.38),
+              (70.0, 8.0, 74.0, 18.0, 0.36), (-104.0, 2.0, 50.0, 14.0, -0.55), (102.0, -4.0, 56.0, 14.0, 0.52)]
+    spikes = []
+    for gx, gy, H, wb, lean in layout:
+        H *= rng.uniform(0.92, 1.08)
+        lean += rng.uniform(-0.05, 0.05)
+        spikes.append(dict(root=np.array([ax + gx + rng.uniform(-4, 4), ay + gy * FLAT]), H=H, wb=wb, side=1.0 if gx >= 0 else -1.0,
+                           poly=spike_shape(rng, H, wb, lean), delay=rng.uniform(0, 0.12) + abs(gx) / 104 * 0.15,
+                           frac=rng.uniform(0.52, 0.68), seed=int(rng.integers(1 << 30))))
+    cracks = [jag_path(rng, (0.0, 0.0), 2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 7 + 0.2, rng.uniform(80, 125), n=7, jitter=0.75) for k in range(7)]
+    pebbles = [(rng.uniform(-0.95 * math.pi, -0.05 * math.pi), rng.uniform(70, 130), rng.uniform(2.2, 4.0), int(rng.integers(0, 7)), rng.uniform(0, 2 * math.pi))
+               for _ in range(12)]
+    dusts = [(int(k), rng.uniform(-10, 10), rng.uniform(14, 22), int(rng.integers(1 << 30))) for k in range(7) for _ in range(2)]
+    rise = [0.42, 0.98, 1.06, 1.0, 0.97, 0.55]
+    OP = [1.0, 1.0, 1.0, 1.0, 0.94, 0.62]
+    crack_grow = [0.45, 0.85, 1.0, 1.0, 1.0, 1.0]
+    lit_c, mid_c, dark_c, hole_c = (V.col(EARTH[k]) for k in ("lit", "mid", "dark", "hole"))
+    mottle = V.noise(np.random.default_rng(9993), (h, w), 2.5)
+    out = []
+    for i in range(6):
+        X, Y = grid(w, h)
+        pt = Paint(X, Y)
+        mt = np.repeat(np.repeat(mottle, SS, 0), SS, 1)
+        e = np.hypot((X - ax) / 128.0, (Y - ay) / (128.0 * FLAT * 0.8))  # 根下一片翻开的暗土
+        pt.over((slice(None), slice(None)), hole_c, OP[i] * [0.18, 0.28, 0.32, 0.32, 0.3, 0.22][i] * smoothstep(1.0, 0.5, e) * (0.75 + 0.25 * mt))
+        for pts in cracks:  # 地缝（焦墨，压扁）
+            m = max(2, int(round(len(pts) * crack_grow[i])))
+            sp = pts[:m] * np.array([1.0, FLAT]) + np.array([ax, ay])
+            lo, hi = sp.min(0) - 6, sp.max(0) + 6
+            sl = pt.window(lo[0], lo[1], hi[0], hi[1])
+            d, tpar = polyline_dist(X[sl], Y[sl], sp)
+            wid = 2.0 * (1 - 0.75 * tpar) + 0.35
+            pt.over(sl, JIAO, OP[i] * 0.85 * smoothstep(wid + 0.5, wid - 0.5, d))
+        for s in spikes:  # 土坑
+            r0 = s["root"]
+            sl = pt.window(r0[0] - 2 * s["wb"], r0[1] - s["wb"], r0[0] + 2 * s["wb"], r0[1] + s["wb"])
+            e = np.hypot((X[sl] - r0[0]) / (1.3 * s["wb"]), (Y[sl] - r0[1]) / (0.42 * s["wb"]))
+            pt.over(sl, hole_c, OP[i] * 0.85 * smoothstep(1.0, 0.75, e))
+        for s in sorted(spikes, key=lambda q: q["root"][1]):  # 地刺（从后往前）
+            hgt = max(0.08, rise[i] - s["delay"] * [1.0, 0.4, 0, 0, 0, 0][i])
+            pl = s["poly"].copy()
+            if hgt >= 1:
+                pl[:, 1] *= hgt
+            else:
+                pl[:, 1] += (1 - hgt) * s["H"]
+            poly = pl + s["root"]
+            lo, hi = poly.min(0) - 4, poly.max(0) + 4
+            sl = pt.window(lo[0], lo[1], hi[0], min(hi[1], s["root"][1] + 3))
+            Xs, Ys = X[sl], Y[sl]
+            cov, dd = poly_cover(Xs, Ys, poly)
+            cov = cov * smoothstep(s["root"][1] + 1.0, s["root"][1] - 1.0, Ys)  # 地面以下的看不见
+            b0 = s["root"] + np.array([0.0, max(0.0, (1 - hgt) * s["H"])])
+            tip = poly[int(np.argmin(poly[:, 1]))]
+            axv = (tip - b0) / max(np.linalg.norm(tip - b0), 1e-6)
+            nv = np.array([-axv[1], axv[0]])
+            v = (Xs - b0[0]) * nv[0] + (Ys - b0[1]) * nv[1]  # 中脊右边为正（背光）
+            k = smoothstep(-1.2, 1.2, v)  # 棱线分明
+            colr = lit_c * (1 - k[..., None]) + dark_c * k[..., None]
+            colr = colr + (V.col("#C9A77A") - colr) * (0.5 * smoothstep(-7.0, -1.5, v) * (1 - k))[..., None]  # 受光面贴着棱线一道亮
+            colr = colr + (mid_c - colr) * np.clip(0.25 + 0.2 * mt[sl], 0, 0.6)[..., None]
+            low = smoothstep(s["root"][1] - 0.3 * s["H"], s["root"][1], Ys)  # 根上暗一点
+            colr = colr + (dark_c - colr) * (0.35 * low)[..., None]
+            pt.over(sl, colr, OP[i] * cov)
+            rr = np.random.default_rng(s["seed"])
+            for uq in (0.25, 0.45, 0.65):  # 背光面几笔皴
+                p0 = b0 + (tip - b0) * uq + nv * 2.0
+                p1 = p0 + (nv * 0.55 - axv * 0.35) * s["wb"] * (1 - uq) * rr.uniform(0.8, 1.1)
+                d, uu = seg(Xs, Ys, *p0, *p1)
+                pt.over(sl, JIAO, OP[i] * 0.6 * cov * smoothstep(1.1, 0.3, d) * (1 - 0.6 * uu))
+            band = smoothstep(1.7, 0.6, np.abs(dd)) * (dd > -2.0) * smoothstep(s["root"][1] + 1.0, s["root"][1] - 1.0, Ys)
+            tex = W.ptex(rr, ns=8, nt=128, along=5.0, across=0.8)
+            per = (np.arctan2(Ys - (b0[1] + tip[1]) / 2, Xs - (b0[0] + tip[0]) / 2) / (2 * math.pi)) % 1
+            pt.over(sl, JIAO, OP[i] * 0.92 * band * (0.55 + 0.45 * dry(tex, 0.0 * per, per, 0.35)))
+            if i >= 4:  # 裂开：一道横着的折线缝
+                yk = b0 + (tip - b0) * s["frac"]
+                pts = jag_path(rr, yk - nv * s["wb"] * 1.2, math.atan2(nv[1], nv[0]) + rr.uniform(-0.25, 0.25), 2.4 * s["wb"], n=6, jitter=0.5)
+                d, _ = polyline_dist(Xs, Ys, pts)
+                pt.over(sl, JIAO, OP[i] * 0.9 * cov * smoothstep(1.3, 0.4, d))
+        if i <= 3:  # 碎石往外蹦（抛物线）
+            for a0, v0, sz, ks, rot in pebbles:
+                t = [0.25, 0.55, 0.85, 1.1][i]
+                r0 = spikes[ks]["root"]
+                x = r0[0] + math.cos(a0) * v0 * t
+                y = r0[1] - 6 + math.sin(a0) * v0 * t + 70 * t * t
+                if y > r0[1] + 12:
+                    continue
+                quad = np.array([(x + sz * math.cos(rot + i + q * 1.7), y + sz * 0.8 * math.sin(rot + i + q * 1.7)) for q in range(4)])
+                sl = pt.window(x - 6, y - 6, x + 6, y + 6)
+                c, _ = poly_cover(X[sl], Y[sl], quad)
+                pt.over(sl, V.col(EARTH["chip"]), 0.95 * c)
+        if i >= 4:  # 尖上掉渣
+            for s in spikes[:5]:
+                tip = s["poly"][int(np.argmin(s["poly"][:, 1]))] + s["root"]
+                for q in range(2):
+                    x = tip[0] + s["side"] * (3 + 5 * q) * (i - 3)
+                    y = tip[1] + (8 + 14 * q) * (i - 3) ** 1.4 + (1 - rise[i]) * s["H"] * 0.3
+                    sl = pt.window(x - 5, y - 5, x + 5, y + 5)
+                    pt.over(sl, V.col(EARTH["chip"]), OP[i] * 0.9 * dot(X[sl], Y[sl], x, y, 2.2 - 0.5 * q))
+        if i <= 3:  # 根上扬土
+            for ks, ox, rad, sd in dusts:
+                r0 = spikes[ks]["root"]
+                x, y = r0[0] + ox * (1 + 0.3 * i), r0[1] - 4 - 6 * i
+                R_ = rad * (0.7 + 0.25 * i)
+                sl = pt.window(x - 1.6 * R_, y - 1.6 * R_, x + 1.6 * R_, y + 1.6 * R_)
+                dx, dy = X[sl] - x, Y[sl] - y
+                edge = R_ * (1 + V.angular_noise(np.random.default_rng(sd), np.arctan2(dy, dx), harmonics=(3, 4, 5, 7), amp=0.15))
+                pt.over(sl, V.col(EARTH["dust"]), [0.5, 0.45, 0.32, 0.16][i] * smoothstep(0.0, -0.45 * R_, np.hypot(dx, dy * 1.3) - edge))
+        out.append(pt.image(9995 + i))
+    return out
+
+
+YN_W, YN_H = 416, 272
+YN_R = 172  # 泥滩的横向半径（淤泥范围 70，1080p 下一比一 ≈ 180）
+MUD = {"body": "#5B4A3A", "deep": "#46382B", "rim": "#3E3227", "hi": "#8A745C", "hi2": "#A28C70"}
+
+
+def make_react_yuni() -> list[Image.Image]:
+    """淤泥：一团泥浆砸在地上溅开、摊成一滩。0 帧中间一团泥、九道泥舌往外甩，泥点飞在半空（沿飞的方向拉长）；
+    1–2 帧摊开、泥舌收成一圈不规则的边，泥点落地成一圈小泥斑；3–5 帧落定：边上一圈深色的积泥（像颜料干在边上），
+    面上三道亮的反光、几个气泡，3–4 帧一圈涟漪往外。已压扁，普通混合，主色 #5B4A3A，不染；
+    radius_px 是泥滩的横向半径（淤泥范围 70，1080p 下一比一）；末帧留着（持续 4 秒，游戏淡出）。"""
+    w, h = YN_W, YN_H
+    cx, cy = w / 2, h / 2
+    rng = np.random.default_rng(9971)
+    fingers = [(2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 9, rng.uniform(0.8, 1.2), rng.uniform(0.08, 0.12)) for k in range(9)]
+    drops = [(rng.uniform(0, 2 * math.pi), rng.uniform(1.02, 1.12), rng.uniform(3.0, 6.0)) for _ in range(16)]
+    bubbles = [(rng.uniform(0, 2 * math.pi), rng.uniform(0.15, 0.65), rng.uniform(2.5, 4.2)) for _ in range(5)]
+    sheens = [(-0.32, -0.3, 0.42, 195.0, 275.0), (0.18, 0.2, 0.3, 200.0, 250.0), (-0.05, 0.42, 0.22, 190.0, 240.0)]  # (中心 x, y（× R）, 半径, 起止角)
+    Rs = [0.3, 0.64, 0.86, 0.96, 0.995, 1.0]
+    FL = [0.5, 0.36, 0.16, 0.06, 0.01, 0.0]  # 泥舌长（× YN_R）
+    DR = [0.45, 0.8, 1.0, 1.0, 1.0, 1.0]  # 泥点飞到哪（× 落点）
+    body_c, rim_c, hi_c, hi2_c = (V.col(MUD[k]) for k in ("body", "rim", "hi", "hi2"))
+    mottle = V.noise(np.random.default_rng(9973), (h, w), 5.0)
+    out = []
+    for i in range(6):
+        X, Y = grid(w, h)
+        pt = Paint(X, Y)
+        full = (slice(None), slice(None))
+        gx, gy = X - cx, (Y - cy) / FLAT
+        r = np.hypot(gx, gy)
+        th = np.arctan2(gy, gx)
+        R = YN_R * Rs[i]
+        edge = R * (1 + V.angular_noise(np.random.default_rng(9972), th, harmonics=(3, 4, 5, 7, 9, 11), amp=0.1))
+        for a0, lf, wf in fingers:
+            edge = edge + FL[i] * YN_R * lf * np.exp(-((np.angle(np.exp(1j * (th - a0))) / wf) ** 2))
+        d = r - edge
+        mt = np.repeat(np.repeat(mottle, SS, 0), SS, 1)
+        colr = lerp_col(0.5 + 0.12 * mt, [(0.0, MUD["deep"]), (0.5, MUD["body"]), (1.0, MUD["hi"])])
+        rim = smoothstep(-6.0, -1.0, d)
+        colr = colr + (rim_c - colr) * (0.85 * rim)[..., None]
+        pt.over(full, colr, smoothstep(1.0, -1.0, d) * (0.82 + 0.14 * rim))  # 面上透一点地，边上积泥浓
+        for a0, df, sz in drops:
+            dist = YN_R * df * DR[i]
+            x, y = cx + dist * math.cos(a0), cy + dist * math.sin(a0) * FLAT
+            sl = pt.window(x - 14, y - 10, x + 14, y + 10)
+            if i <= 1:  # 半空里：沿飞的方向拉长
+                back = [10.0, 7.0][i]
+                pt.over(sl, body_c, 0.92 * streak(X[sl], Y[sl], x - back * math.cos(a0), y - back * math.sin(a0) * FLAT, x, y, sz * 0.8))
+            else:  # 落地的泥斑
+                e = np.hypot((X[sl] - x) / sz, (Y[sl] - y) / (sz * FLAT))
+                pt.over(sl, rim_c, smoothstep(1.1, 0.9, e))
+                pt.over(sl, body_c, 0.9 * smoothstep(0.75, 0.5, e))
+        if i >= 2:  # 面上的反光
+            for sx, sy, sr, a0, a1 in sheens:
+                angs = np.radians(np.linspace(a0, a1, 24))
+                arc = np.stack([cx + R * (sx + sr * np.cos(angs)), cy + R * (sy + sr * np.sin(angs)) * FLAT], -1)
+                lo, hi = arc.min(0) - 5, arc.max(0) + 5
+                sl = pt.window(lo[0], lo[1], hi[0], hi[1])
+                dd, tpar = polyline_dist(X[sl], Y[sl], arc)
+                wid = 1.6 * np.sin(np.pi * tpar) + 0.3
+                pt.over(sl, hi2_c, [0, 0, 0.55, 0.85, 0.85, 0.85][i] * smoothstep(wid + 0.5, wid - 0.5, dd))
+        if 3 <= i <= 4:  # 涟漪
+            rr = R * [0, 0, 0, 0.42, 0.68][i]
+            pt.over(full, hi2_c, [0, 0, 0, 0.5, 0.28][i] * smoothstep(1.6, 0.3, np.abs(r - rr)) * (d < -4))
+        if i >= 3:  # 气泡
+            for a0, bf, sz in bubbles:
+                x, y = cx + R * bf * math.cos(a0), cy + R * bf * math.sin(a0) * FLAT
+                sl = pt.window(x - 7, y - 7, x + 7, y + 7)
+                e = np.hypot(X[sl] - x, (Y[sl] - y) / FLAT * 0.8)
+                pt.over(sl, hi_c, 0.8 * smoothstep(0.9, 0.3, np.abs(e - sz)))
+                pt.over(sl, hi2_c, 0.9 * dot(X[sl], Y[sl], x - 0.35 * sz, y - 0.3 * sz, 0.8))
+        out.append(pt.image(9975 + i))
+    return out
+
+
 # ============================================================== 清单与输出
 
 # 名字: (生成函数, 画布 (w, h), 锚点, blend, tint, 颜色说明, 附加 meta)
@@ -1167,7 +1969,44 @@ BATCH2 = {
     "evolve_pillar": (make_evolve_pillar, (PILLAR_W, PILLAR_H), (0.5, 1.0), "add", False, "full",
                       {"note": "进化光柱：从地面升起，锚点在底边中点（光柱的根贴着地面）；自带金色 #FFE7A8，不染"}),
 }
-BATCHES = {"b1": BATCH1, "b2": BATCH2}
+# 第三批：十种五行反应，都自带颜色、不染。有范围的写 radius_px（按反应范围缩放，1080p 下约一比一）；地面的已压扁（flat）。
+BATCH3 = {
+    "react_liaoyuan": (make_react_liaoyuan, (LY_SIZE, LY_SIZE), (0.5, 0.5), "add", False, "full",
+                       {"radius_px": 150, "note": "燎原：一团火炸开，三条火舌朝三个方向窜出去、舌尖各爆一小团火；radius_px 是火舌够到的半径，"
+                                                  "按燎原范围缩放（60，1080p 下一比一）；自带火色，主色 #FF7A2A，不染"}),
+    "react_rongyan": (make_react_rongyan, (GROUND_W, GROUND_H), (0.5, 0.5), "add", False, "full",
+                      {"flat": FLAT, "radius_px": 135, "hold_last": True,
+                       "note": "赤地：地面从中心爆开一圈发红的裂缝，缝里透出熔岩光；已压扁，radius_px 是裂缝的横向半径（赤地范围 50）；"
+                               "末帧缝里只剩暗红，可以留着（持续 3 秒，游戏淡出）；主色 #FF5A2A，不染"}),
+    "react_zhubing": (make_react_zhubing, (256, 256), (0.5, 0.5), "add", False, "full",
+                      {"note": "铸兵：中心一闪，三片金刃从中心闪出去、往外飞（金刃本身另有投射物，这是出手那一下）；主色 #F2D98A，不染"}),
+    "react_ningshuang": (make_react_ningshuang, (GROUND_W, GROUND_H), (0.5, 0.5), "add", False, "full",
+                         {"flat": FLAT, "radius_px": 150, "hold_last": True,
+                          "note": "凝霜：地上一朵六瓣霜花往外长；已压扁，radius_px 是霜花的横向半径（凝霜范围 50）；末帧可以留着（减速 1.5 秒，游戏淡出）；"
+                                  "主色 #CDEBFF，不染"}),
+    "react_zisheng": (make_react_zisheng, (ZS_W, ZS_H), (ZS_ROOT[0] / ZS_W, ZS_ROOT[1] / ZS_H), "normal", False, "full",
+                      {"radius_px": 128, "hold_last": True,
+                       "note": "滋生：一丛卷草破土长出来、尖上打卷，焦墨勾边；锚点是草丛中心的地面点，radius_px 是滋生范围的横向半径（50）；"
+                               "末帧可以留着当灵草（留 5 秒，游戏淡出）；主色 #6FD6A0，不染"}),
+    "react_zhengteng": (make_react_zhengteng, (ZT_SIZE, ZT_SIZE), (ZT_C[0] / ZT_SIZE, ZT_C[1] / ZT_SIZE), "normal", False, "full",
+                        {"radius_px": ZT_R, "note": "蒸腾：一团白汽炸开、翻滚着往上升、扯成一缕缕；锚点是炸开的点（偏下），radius_px 是汽团的横向半径"
+                                                   "（蒸腾范围 70）；主色 #E8EEF2，不染；画在角色之上"}),
+    "react_rongjin": (make_react_rongjin, (128, 128), (RJ_C[0] / 128, RJ_C[1] / 128), "add", False, "full",
+                      {"fps": RJ_FPS, "loop": True, "radius_px": RJ_R,
+                       "note": "熔金：妖物身上的熔金印记，循环（持续 4 秒）：金环上一段亮光绕着转，下沿淌金水；锚点是金环中心，"
+                               "radius_px 是金环半径，按妖物的身体半径缩放；主色 #FFB347，不染"}),
+    "react_duanmu": (make_react_duanmu, (256, 256), (0.5, 0.5), "add", False, "full",
+                     {"note": "断木：交叉的两刀，先金（左上斩到右下）后木（右上斩到左下），交叉处一闪、木屑崩开，两刀断开错开淡掉；"
+                              "金 #E9D9A6 + 木 #6FD6A0，不染"}),
+    "react_lietu": (make_react_lietu, (LT_W, LT_H), (LT_ROOT[0] / LT_W, LT_ROOT[1] / LT_H), "normal", False, "full",
+                    {"radius_px": LT_R, "note": "裂土：一簇尖石刺破土而出，焦墨勾边、带皴，碎石蹦出、扬土，末两帧裂开塌回去；锚点是地刺根部的地面中心"
+                                               "（底边往上 92 像素，前面的地缝在锚点下面），radius_px 是地刺丛的横向半径（裂土范围 60）；主色 #8B6A47，不染"}),
+    "react_yuni": (make_react_yuni, (YN_W, YN_H), (0.5, 0.5), "normal", False, "full",
+                   {"flat": FLAT, "radius_px": YN_R, "hold_last": True,
+                    "note": "淤泥：一团泥浆砸开、泥舌甩出去、摊成一滩，边上一圈深色积泥、面上反光和气泡；已压扁，radius_px 是泥滩的横向半径"
+                            "（淤泥范围 70）；末帧留着（持续 4 秒，游戏淡出）；主色 #5B4A3A，不染"}),
+}
+BATCHES = {"b1": BATCH1, "b2": BATCH2, "b3": BATCH3}
 
 
 def build(batch: dict) -> dict[str, list[Image.Image]]:
@@ -1214,7 +2053,11 @@ def main(only: list[str] | None = None) -> None:
         frames = build(batch)
         write(frames, batch)
         R.strip_sheet(key, batch, frames, REVIEW / f"vfx_frames_{key}.png", note=R.NOTES.get(key))
-        R.ingame(key, batch, frames, REVIEW / f"vfx_frames_{key}_ingame.png", placements=R.INGAME.get(key))
+        scenes = R.INGAME.get(key)
+        if not isinstance(scenes, dict):  # 一批一张合成；摆不下的分几张（键是文件名的后缀）
+            scenes = {"": scenes}
+        for suffix, placements in scenes.items():
+            R.ingame(key, batch, frames, REVIEW / f"vfx_frames_{key}_ingame{suffix}.png", placements=placements)
         print(f"{key}: {sum(len(v) for v in frames.values())} 帧  {time.perf_counter() - t0:.1f}s")
 
 

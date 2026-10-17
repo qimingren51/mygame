@@ -80,6 +80,13 @@ pub(crate) struct FxFrames {
     foxfire: Vec<FrameId>,
     /// 火爆的一团焰球（美术的 `weapons/blast`）
     blast: Option<FrameId>,
+    /// 图集里有美术的逐帧火爆 / 冰碎时，玩家的爆炸交给粒子层播（particles.rs 的 `Fx::FireBurst`、`Fx::IceShatter`），这里不再画
+    art_blast: (bool, bool),
+    /// 图集里有美术的五行反应逐帧图（第三批十种一起进的）时，反应交给粒子层播，这里不再画交错的笔锋；
+    /// 赤地、淤泥、灵草等反应图播完再浮出来
+    art_react: bool,
+    /// 熔金：易伤的妖物身上的循环印记（美术的 `vfx/react_rongjin`，10 帧 / 秒）
+    melt: Vec<FrameId>,
     spring: Option<FrameId>,
     rift: Option<FrameId>,
     rift_glow: Option<FrameId>,
@@ -136,6 +143,12 @@ pub(crate) struct FxFrames {
 const ZONE_LAVA_R: f32 = 43.0;
 const ZONE_MUD_R: f32 = 45.5;
 const ZONE_HERB_R: f32 = 39.5;
+/// 反应逐帧图播完的时长（6 帧 / 24）：有图时，持续的区域和灵草在这之后才浮出来
+const REACT_LEAD: f32 = 0.25;
+/// 熔金印记在缩放为 1 时罩住的妖物半径（美术的 radius_px 30）
+const MELT_R: f32 = 7.5;
+/// 同时画熔金印记的妖物上限（离主角近的优先）
+const MELT_MAX: usize = 64;
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
     let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
@@ -168,6 +181,9 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         spark: need("vfx/spark"),
         foxfire: (0..3).filter_map(|i| db.find(&format!("weapons/foxfire_{i}"))).collect(),
         blast: db.find("weapons/blast"),
+        art_blast: (db.find("vfx/fire_burst_0").is_some(), db.find("vfx/ice_shatter_0").is_some()),
+        art_react: db.find("vfx/react_liaoyuan_0").is_some(),
+        melt: sequence(&db, "vfx/react_rongjin"),
         spring: db.find("ground/spring"),
         rift: db.find("ground/rift"),
         rift_glow: db.find("ground/rift_glow"),
@@ -539,7 +555,7 @@ pub(crate) fn read_fx_events(
 }
 
 /// 一组按序号编的帧（`<名字>_0`、`_1`……）；图集登记了同名动画就用动画。
-fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
+pub(crate) fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
     if let Some(a) = db.anim(name) {
         return a.to_vec();
     }
@@ -768,10 +784,11 @@ pub(crate) fn collect_fx(
     dim_personal(&mut pools, &mut glow, personal_start, visibility);
 
     // ---- 反应留下的区域：赤地（橙红的裂纹）、淤泥（暗褐的泥圈）
+    let lead = if f.art_react { REACT_LEAD } else { 0.0 };
     if let Some(zones) = &res.zones {
         for z in &zones.0 {
             let p = to_screen(z.pos);
-            let fade = (z.life / 0.5).min(1.0) * ((z.max_life - z.life) / 0.2).min(1.0);
+            let fade = (z.life / 0.5).min(1.0) * ((z.max_life - z.life - lead) / 0.2).clamp(0.0, 1.0);
             match (z.kind, f.zone_lava, f.zone_mud) {
                 (ZoneKind::Lava, Some((base, glow_frame)), _) => {
                     let k = z.radius / db.frame(base).radius.unwrap_or(ZONE_LAVA_R);
@@ -846,7 +863,7 @@ pub(crate) fn collect_fx(
     if let Some(herbs) = &res.herbs {
         for h in &herbs.list {
             let p = to_screen(h.pos);
-            let fade = (h.life / 0.6).min(1.0);
+            let fade = (h.life / 0.6).min(1.0) * ((h.max_life - h.life - lead) / 0.3).clamp(0.0, 1.0);
             let sway = (now * 2.4 + h.pos.x * 0.07).sin() * 0.08;
             if let Some((base, glow_frame)) = f.zone_herb {
                 // 一小丛灵草，半径和拾取距离差不多
@@ -1215,6 +1232,38 @@ pub(crate) fn collect_fx(
         }
     }
 
+    // ---- 熔金：易伤的妖物身上一枚循环的熔金印记，最后 0.5 秒淡掉；“隐”着的不画。妖物的位置在脚底，
+    // 印记抬到身子中间（1.5 倍碰撞半径高），圈比碰撞半径大一些才罩得住身子（试拍：照碰撞半径画只有脚边一小圈）。
+    // 同时熔金的可能很多，只画离主角最近的 MELT_MAX 只
+    if let Some(en) = &res.enemies
+        && !f.melt.is_empty()
+    {
+        let r0 = db.frame(f.melt[0]).radius.unwrap_or(MELT_R);
+        let mut melted: Vec<(f32, usize, Vec2)> = en
+            .iter_alive()
+            .filter(|&i| en.melt_t[i] > 0.0 && !en.cloaked[i])
+            .map(|i| {
+                let p = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
+                (p.distance_squared(hero), i, p)
+            })
+            .collect();
+        if melted.len() > MELT_MAX {
+            melted.select_nth_unstable_by(MELT_MAX, |a, b| a.0.total_cmp(&b.0));
+            melted.truncate(MELT_MAX);
+        }
+        for (_, i, p) in melted {
+            // 每只错开相位，不一起闪；重复挂上熔金时不从头播
+            let Some(frame) = looped(&f.melt, now + en.wob[i], 10.0) else { continue };
+            glow.add(
+                frame,
+                (p + Vec2::Y * en.r[i] * 1.5).extend(layer::EMISSIVE - 0.3),
+                Vec2::splat(en.r[i] * 1.6 / r0),
+                0.0,
+                hdr(Color::WHITE, 1.2).with_alpha((en.melt_t[i] / 0.5).min(1.0) * 0.9),
+            );
+        }
+    }
+
     // ---- 地裂：地面上的墨痕；凤火、竹墙与剑林复用图集，以颜色和轮廓区分
     if let Some(fissures) = &res.fissures {
         for z in &fissures.0 {
@@ -1449,6 +1498,7 @@ pub(crate) fn collect_fx(
                     glow.light(&frames, &db, l.pos, (rgb(0xffd98a).with_alpha(flare), l.r * 0.9));
                 }
             }
+            OneShot::Reaction { .. } if f.art_react => {}
             OneShot::Reaction { color } => {
                 // 五行相遇用交错短笔锋，避免每次反应再铺一个大圈。
                 let k = px(f.slash, l.r * (0.8 + u * 0.4));
@@ -1462,6 +1512,8 @@ pub(crate) fn collect_fx(
                     );
                 }
             }
+            OneShot::Blast { ice: false, .. } if f.art_blast.0 => {}
+            OneShot::Blast { ice: true, .. } if f.art_blast.1 => {}
             OneShot::Blast { color, .. } | OneShot::HostileBlast { color } => {
                 if matches!(l.kind, OneShot::Blast { ice: true, .. }) {
                     // 冰爆是向外迸射的尖棱，火爆是向上卷的焰舌。

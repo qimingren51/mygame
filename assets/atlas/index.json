@@ -14,7 +14,8 @@
    "actors.json"
   ],
   "vfx": [
-   "vfx.json"
+   "vfx_0.json",
+   "vfx_1.json"
   ],
   "ground": [
    "ground.json"

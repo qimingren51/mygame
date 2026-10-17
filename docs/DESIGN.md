@@ -541,7 +541,7 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns；狐祠庭院的大狐仙祠 fox_shrine_grand、石牌坊 fox_gate、檐下留灯 fox_eave_lamp 和 fox_eave_lamp_lit），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`、`wave_*`、`vine*`、`sky_lantern*`、`lantern_mark`、`fire_sea`、`tower*`（见下面“抢先体验的新法器”） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`、`fire_burst*`、`ice_shatter_*`、`feather_*`、`evolve*` 和十种五行反应 `react_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`、`wave_*`、`vine*`、`sky_lantern*`、`lantern_mark`、`fire_sea`、`tower*`（见下面“抢先体验的新法器”） |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
@@ -622,7 +622,7 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。
 - **逐帧特效**（试玩第 1 轮，质感会话的清单分批出图，`art/post/vfx_frames.py`）：
   - 帧名 `vfx/<名字>_<帧号>`，帧号从 0 起、一位数；同一组每帧的原画布一样大、锚点一样（打包裁了边，按 `spriteSourceSize` 还原，同 `weapons/foxfire_*`）。
-  - `meta.lantern.frames` 里每帧有 `anim`（组名）、`frame`、`frames`、`fps`（都是 24）、`loop`（第一、二批都是 false，播完就没）、`kind: "fx"`；五行命中另有 `element`，可染的有建议颜色 `tint_hint`。播放时 t 秒取第 ⌊t × fps⌋ 帧，过了最后一帧就不画（`hold_last` 的除外）。几种挑着用的粒子（羽毛纸屑）不是动画，写 `variant`、`variants`。
+  - `meta.lantern.frames` 里每帧有 `anim`（组名）、`frame`、`frames`、`fps`（都是 24，只有循环的熔金印记 `react_rongjin` 是 10）、`loop`（除了 `react_rongjin` 都是 false，播完就没）、`kind: "fx"`；五行命中另有 `element`，可染的有建议颜色 `tint_hint`。播放时 t 秒取第 ⌊t × fps⌋ 帧，过了最后一帧就不画（`hold_last` 的除外）。几种挑着用的粒子（羽毛纸屑）不是动画，写 `variant`、`variants`。
   - 叠加帧最亮处 alpha 约 0.8，亮度留给 `EMIT_HDR` 和辉光；可染的帧 RGB 恒为白，乘五行色：金 #E9D9A6、木 #6FD6A0、水 #6FB8FF、火 #FF8A3D、土 #C9925A。
 
   | 帧 | 帧数 | 原画布（2 倍） | 锚点 | 混合 | 颜色 | 说明 |
@@ -638,6 +638,16 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `vfx/feather_0..3` | 4 种 | 32×16 | 中心 | 普通 | 白，可染，建议纸白 #EDE6D6 | 散开用的粒子，不是动画（meta 写 `variant`、`variants`，没有 `anim`），规则同 `vfx/bamboo_leaf_0..3`：尖 / 长边朝 +X（`points: "+x"`）。0、1 是羽毛（细长、羽轴微弯、根上绒羽），2 是对折的纸片，3 是撕下的纸屑；小图不抖动 |
   | `vfx/evolve_0..7` | 8 | 512² | 中心 | 叠加 | 自带金色 #FFE7A8，不染 | 进化爆发：莲花 / 日轮一样的放射光，两圈尖瓣、九道笔锋光芒、一圈日芒，0–3 帧开花，末两帧光芒干成一截截、散成光点；原大 |
   | `vfx/evolve_pillar_0..5` | 6 | 128×512 | 底边中点 `(0.5, 1.0)` | 叠加 | 自带金色 #FFE7A8，不染 | 进化光柱：从地面升起，第 0 帧到三分之一高，1–2 帧冲到顶，之后从下往上收细、变淡，光点往上飘；原大 |
+  | `vfx/react_liaoyuan_0..5` | 6 | 384² | 中心 | 叠加 | 自带火色，主色 #FF7A2A，不染 | 第三批（五行反应，BALANCE 7.2）。燎原：一团火炸开，三条火舌朝三个方向窜出去（带弯、左右摆），舌尖各爆一小团火，火星顺着飞；末两帧火舌断成一截截。`radius_px: 150` 是火舌够到的半径，按燎原范围（60）缩放，1080p 下一比一 |
+  | `vfx/react_rongyan_0..5` | 6 | 384×240 | 中心 | 叠加 | 自带，主色 #FF5A2A，不染 | 赤地：地面从中心爆开，九道发红的裂缝往外裂、缝里透出熔岩光，正中一闪、冲出一圈热浪，整片地微微发红；已压扁（`flat: 0.62`）；`radius_px: 135`（赤地范围 50）；`hold_last: true`，末帧缝里只剩暗红，可以留着（持续 3 秒，游戏淡出） |
+  | `vfx/react_zhubing_0..4` | 5 | 256² | 中心 | 叠加 | 自带金色，主色 #F2D98A，不染 | 铸兵：中心一闪，三片金刃（一侧刃口亮、一道中脊）带一点转往外飞，身后拖细光；原大（金刃本身另有投射物，这是出手那一下） |
+  | `vfx/react_ningshuang_0..5` | 6 | 384×240 | 中心 | 叠加 | 自带冰色，主色 #CDEBFF，不染 | 凝霜：地上一朵霜花，六道主枝带两排斜的冰晶小枝往外长，主枝之间六片淡瓣，外沿一圈霜针；已压扁；`radius_px: 150`（凝霜范围 50）；`hold_last: true`（减速 1.5 秒，游戏淡出） |
+  | `vfx/react_zisheng_0..5` | 6 | 320×288 | 地面点 `(0.5, 0.6806)` | 普通 | 自带，主色 #6FD6A0，焦墨勾边，不染 | 滋生：七株卷草（像蕨菜芽，尖上打螺旋）从地里长出来，土渣蹦开，根上小叶张开，地上一片淡绿，灵光点往上飘；锚点下面留着前排的根和那片淡绿；`radius_px: 128`（滋生范围 50）；`hold_last: true`，末帧可以留着当灵草 |
+  | `vfx/react_zhengteng_0..6` | 7 | 448² | 炸开的点 `(0.5, 0.625)` | 普通 | 自带，主色 #E8EEF2，不染 | 蒸腾：一团白汽炸开（八道汽柱），十几团汽往外滚开（左上受光、右下背光带灰边），再整团往上飘、从边上散成一缕缕；画在角色之上；`radius_px: 160` 是看得见的横向半径（蒸腾范围 70，游戏放大约一成） |
+  | `vfx/react_rongjin_0..5` | 6 | 128² | 金环中心 `(0.5, 0.4531)` | 叠加 | 自带，主色 #FFB347，不染 | 熔金：妖物身上的熔金印记，**循环**（`loop: true`、`fps: 10`，持续 4 秒）：金环上一段亮光绕着转，环里四道刻痕、金芯一明一暗，下沿三滴金水往下淌；`radius_px: 30` 是金环半径，按妖物的身体半径缩放（半径 12 左右时一比一） |
+  | `vfx/react_duanmu_0..4` | 5 | 256² | 中心 | 叠加 | 自带：金 #E9D9A6 + 木 #6FD6A0，不染 | 断木：交叉的两刀，先金（左上斩到右下）后木（右上斩到左下），交叉处一闪、木屑和金星崩开，3–4 帧两刀从交叉处断开、错开淡掉；原大 |
+  | `vfx/react_lietu_0..5` | 6 | 352×320 | 地刺根部 `(0.5, 0.7125)` | 普通 | 自带，主色 #8B6A47，焦墨勾边，不染 | 裂土：地上裂开墨缝、翻开一片暗土，七根尖石刺从坑里冲出来（左面受光、右面背光、带皴），碎石蹦、根上扬土，末两帧刺上裂缝、掉渣、塌回去；清单写锚点在底边中点，为了画前排的地缝改成根部的地面点（下面留 92 像素）；`radius_px: 150`（裂土范围 60） |
+  | `vfx/react_yuni_0..5` | 6 | 416×272 | 中心 | 普通 | 自带，主色 #5B4A3A，不染 | 淤泥：一团泥浆砸开、九道泥舌甩出去、泥点落成一圈泥斑，摊成一滩：边上一圈深色积泥，面上反光、气泡、涟漪；已压扁；`radius_px: 172`（淤泥范围 70）；`hold_last: true`（持续 4 秒，游戏淡出） |
 - **抢先体验的新法器**（docs/BALANCE.md 6.3 节的“画面”，`art/post/weapon_textures_ea.py`）：帧名 `weapons/<名字>_<帧号>`，在 vfx 图集里；动画帧的 meta（`anim`、`frame`、`frames`、`fps`、`loop`）和播法同上面的“逐帧特效”。可染的建议颜色写在 `tint_hint`。
   - 跟玩法半径走的大帧按 1080p 下约一比一出图（1 世界单位 ≈ 2.57 屏幕像素），不按 4 像素 / 单位画小了再放大；单帧不超过 1024²。meta 的 `radius_px` 是外沿半径，缩放 = 想要的半径 ÷（`radius_px` ÷ `pxPerUnit`）。vfx 图集因此从 2048² 变成 4096²。
 

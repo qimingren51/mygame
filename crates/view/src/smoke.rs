@@ -30,6 +30,8 @@ use crate::{AssetRoot, atlas::AtlasDb};
 
 const FRAMES: u32 = 120;
 const TIMEOUT: Duration = Duration::from_secs(120);
+/// 提交完最后一帧后等渲染设备做完的最短时间（总时限剩得更多时等更久）
+const FINAL_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Resource, Clone)]
 pub struct SmokeTest {
@@ -211,8 +213,10 @@ fn count_presented_frame(
             info!("冒烟测试：资源和渲染管线就绪，开始统计窗口画面");
         }
         if frames == FRAMES {
+            // 软件渲染（CI 的 WARP）一帧要将近一秒，最后还排着十几帧：用剩下的总时限去等，至少 10 秒
+            let wait = TIMEOUT.saturating_sub(test.start.elapsed()).max(FINAL_WAIT);
             device
-                .poll(PollType::Wait { submission_index: None, timeout: Some(Duration::from_secs(10)) })
+                .poll(PollType::Wait { submission_index: None, timeout: Some(wait) })
                 .unwrap_or_else(|error| panic!("冒烟测试失败：等待渲染完成失败：{error}"));
         }
         test.frames.store(frames, Ordering::Release);
