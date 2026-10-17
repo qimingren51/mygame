@@ -511,15 +511,20 @@ def make_portrait() -> Image.Image:
 
 
 def make_ult_tick(state: str) -> Image.Image:
-    """燃灯刻度的一格（34×20，逻辑 17×10，长边沿圆周、朝外为上）：off 暗槽 + 旧金边；on 灯焰色；full 满格更亮、带光。"""
+    """燃灯刻度的一格（34×20，逻辑 17×10，长边沿圆周、朝外为上）：off 暗槽（深褐底、内沿一道暗金、外圈旧金边，
+    在黑漆环上 720p 也看得出一格格，但明显比亮格暗）；on 灯焰色；full 满格更亮、带光。"""
     W_, H_ = 34, 20
     c = Canvas(W_, H_, 1890, ss=4)
     d = rrect_sd(c.X, c.Y, 6, 5, W_ - 6, H_ - 5, 4.0)
     m = smoothstep(c.aa, -c.aa, d)
     if state == "off":
-        c.over(hexc("#0A0806"), m * 0.9)
-        rim = smoothstep(0.8 + c.aa, 0.8 - c.aa, np.abs(d + 0.6))
-        c.over(hexc("#6E5A36"), rim * 0.85)
+        c.over(hexc("#4A3924"), m * 0.95)
+        inner = smoothstep(-1.0, -3.2, d) * m  # 槽心压暗一点，像凹下去的一格
+        c.over(hexc("#1E160E"), inner * 0.55)
+        top = smoothstep(1.2, 0.0, np.abs(c.Y - 6.4)) * smoothstep(0.0, -1.0, d)  # 槽口朝外的一边一道暗金
+        c.over(hexc("#6B5434"), top * 0.6)
+        rim = smoothstep(1.1 + c.aa, 1.1 - c.aa, np.abs(d + 0.7))
+        c.over(hexc("#A88A52"), rim * 0.95)
     else:
         full = state == "full"
         glow = np.exp(-np.maximum(d, 0) ** 2 / (2 * (2.8 if full else 1.8) ** 2))

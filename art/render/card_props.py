@@ -382,7 +382,7 @@ def talisman_strip(name, pts, width, img, *, ups=None, index=1, parent=None, cur
 # ====================================================================== 纸鹤
 
 
-def crane_build(wing_up=0.10, wing_sweep=0.0, neck_up=0.16, tail_up=0.14, scale=1.0, wing_bend=0.03):
+def crane_build(wing_up=0.10, wing_sweep=0.0, neck_up=0.16, tail_up=0.14, scale=1.0, wing_bend=0.03, wings=True):
     """折纸鹤（朝 +X，Y 是左右，Z 朝上）：菱形身子、细长的颈和尾斜着往上、颈头折下一个小喙，两片三角大翅。
     每个面都是平的（平直着色），折痕处颜色由材质按 AO 压一点。wing_up：翅尖抬高；wing_sweep：翅尖前后（+ 往前）。"""
     s = scale
@@ -426,8 +426,8 @@ def crane_build(wing_up=0.10, wing_sweep=0.0, neck_up=0.16, tail_up=0.14, scale=
             mid = (-0.075, 0.006 * sy, -0.006)
             tri(tb_top, mid, ttip)
             tri(mid, tb_bot, ttip)
-        # 翅：根在背脊（top 前后），翅尖往外；中间一道折痕往下凹一点（两片面）
-        for sy in (1, -1):
+        # 翅：根在背脊（top 前后），翅尖往外；中间一道折痕往下凹一点（两片面）。wings=False 时不要翅（另做）
+        for sy in (1, -1) if wings else ():
             r0, r1 = (0.072, 0.004 * sy, 0.028), (-0.072, 0.004 * sy, 0.028)
             wt = (-0.03 + wing_sweep, 0.33 * sy, wing_up + 0.045)
             crease = (-0.01 + wing_sweep * 0.5, 0.17 * sy, (wing_up + 0.045) * 0.5 + 0.02 - wing_bend)
