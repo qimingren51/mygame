@@ -194,11 +194,29 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 
 ```bash
 art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
-art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats   # 有卡面插画后再加 art/out/assets@2x/ui_cards
+art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
 ```
 
 数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
 帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
+
+### 卡面插画（render/card_art.py）
+
+升级卡上半张的插画：一件物件的特写，Blender（Cycles CPU）精细材质，配夜色水墨底。题材见 `docs/LORE-TEXT.md` 第 7 节。
+
+- 原图 480×360（4:3，不透明、满幅），界面铺满 268×201 的插画区、按圆角 6 裁切；左上压五行印、右上压品阶签，两个上角（原图约 70×70）不放主体。
+- 帧名：法器 `ui/card_<法器 id>`、`_evo`（进化）、`_mut`（异化）；合璧 `ui/card_<合璧 id>`；心法 `ui/card_<心法 id>`；补给 `ui/card_lotus`、`ui/card_oil`。
+- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器、合璧）、`card_passives.py`（心法）；共用的道具和材质在 `card_props.py`。
+  每张用 `@scene` 注册 3D 场景、`@background` 注册水墨底；渲染缓存在 `out/_card_tmp/`，后期只用 numpy / Pillow。
+- 最终渲染包在 `bstyle.render_lock()` 里（几个代理同时出图时排队）。一张 960×720、128 采样约 0.5–2 分钟。
+
+```bash
+art/.venv/bin/python art/render/card_art.py sword --draft     # 半分辨率、少采样试渲 → out/_card_tmp/draft_card_art_sword.png
+art/.venv/bin/python art/render/card_art.py sword sword_evo    # 正式渲染 + 后期 → out/review@2x/card_art_<id>.png 和 out/assets@2x/ui_cards/card_<id>.png
+art/.venv/bin/python art/render/card_art.py --post sword       # 只重做后期（读缓存）
+```
+
+打包时 `ui_cards` 和 `ui_stats` 一起打进 `cards` 页（上面的命令）。
 
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 
