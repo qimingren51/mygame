@@ -566,13 +566,12 @@ def test_reaction_sizes():
 
 
 def test_reactions_hold_and_fade():
-    """末帧能留着的（赤地、凝霜、滋生、淤泥）：末两帧形状一样（alpha > 30 的部分交并比 ≥ 0.85）、末帧还有最满那帧的四成以上；
+    """末帧能留着的（赤地、凝霜、滋生、淤泥）：末两帧形状一样、只是浓淡不同（alpha 的相关系数 ≥ 0.95）、末帧还有最满那帧的四成以上；
     一次性的普通混合（蒸腾、裂土）末帧淡到一半以下。"""
     for name in HOLD3:
         n = SPEC3[name][0]
-        a, b = alpha(name, n - 2) > 30, alpha(name, n - 1) > 30
-        iou = (a & b).sum() / (a | b).sum()
-        assert iou >= 0.85, f"{name} 末两帧形状不一样（交并比 {iou:.2f}），留不住"
+        corr = float(np.corrcoef(alpha(name, n - 2).ravel(), alpha(name, n - 1).ravel())[0, 1])
+        assert corr >= 0.95, f"{name} 末两帧形状不一样（相关系数 {corr:.3f}），留不住"
         sums = [alpha(name, i).sum() for i in frames_of(name)]
         assert sums[-1] >= 0.4 * max(sums), f"{name} 末帧太淡（{sums[-1] / max(sums):.2f}），留着看不见"
         assert meta()["files"][f"{name}_{n - 1}.png"]["hold_last"] is True
@@ -645,9 +644,9 @@ def test_zisheng_grows_from_root():
 
 
 def test_zhengteng_rises():
-    """蒸腾：第 0 帧一小团（宽不到第 3 帧的一半）；2 帧以后整团往上飘（质心一帧比一帧高）。"""
+    """蒸腾：0–3 帧一帧比一帧宽（第 0 帧一小团，宽不到第 3 帧的六成）；2 帧以后整团往上飘（质心一帧比一帧高）。"""
     widths = [np.ptp(np.nonzero(alpha("react_zhengteng", i).max(0) > 10)[0]) for i in frames_of("react_zhengteng")]
-    assert widths[0] < 0.5 * widths[3], f"蒸腾第 0 帧太大：{widths}"
+    assert all(a < b for a, b in zip(widths[:4], widths[1:4])) and widths[0] < 0.6 * widths[3], f"蒸腾的宽度：{widths}"
     ys = [centroid(alpha("react_zhengteng", i))[1] for i in frames_of("react_zhengteng")]
     assert all(a > b - 1 for a, b in zip(ys[2:], ys[3:])) and ys[6] < ys[2] - 8, f"汽应该往上飘：质心 y {[round(y) for y in ys]}"
 
