@@ -82,10 +82,11 @@ pub(crate) enum Fx {
     CoinWhirl,
     CoinSpark,
     CoinCross,
+    TowerDust,
 }
 
 impl Fx {
-    const ALL: [Fx; 19] = [
+    const ALL: [Fx; 20] = [
         Fx::None,
         Fx::HitMetal,
         Fx::HitWood,
@@ -105,6 +106,7 @@ impl Fx {
         Fx::CoinWhirl,
         Fx::CoinSpark,
         Fx::CoinCross,
+        Fx::TowerDust,
     ];
 
     /// 图集里的帧名前缀（后面接 `_0`、`_1`……）
@@ -129,12 +131,13 @@ impl Fx {
             Fx::CoinWhirl => "weapons/coin_whirl",
             Fx::CoinSpark => "weapons/coin_spark",
             Fx::CoinCross => "weapons/coin_cross",
+            Fx::TowerDust => "weapons/tower_dust",
         }
     }
 
     /// 普通混合的帧（墨溅、墨烟）画在暗层之下，其余叠加、画在暗层之上
     fn glow(self) -> bool {
-        !matches!(self, Fx::KillInk | Fx::FireSmoke)
+        !matches!(self, Fx::KillInk | Fx::FireSmoke | Fx::TowerDust)
     }
 
     fn hit(e: Option<Element>) -> Fx {
@@ -1534,13 +1537,48 @@ pub(crate) fn particle_events(
             SimEvent::LanternBurst { pos, radius, evolved } => {
                 let at = to_screen(pos);
                 let k = if evolved { 1.3 } else { 1.0 };
-                // 先一团过辉光阈值的火球（灯下也压得过暖光），再是火星、余烬、纸片和焦烟
-                parts.flash(at + Vec2::Y * 6.0, radius / 5.0, hdr(Color::srgb(1.0, 0.72, 0.38), 2.6), 0.16);
+                // 美术的火爆（接在灯坠下的最后一帧后面，按爆燃半径缩放）和第 5 帧起的墨烟；
+                // 没有这段时，先一团过辉光阈值的火球、一圈火光。火星、余烬、烧焦的纸片照旧
+                if parts.anim(
+                    Fx::FireBurst,
+                    at,
+                    radius / 36.0,
+                    0.0,
+                    hdr(Color::WHITE, 1.2),
+                    layer::EMISSIVE + 1.1,
+                    0.0,
+                    0.0,
+                ) {
+                    parts.anim(
+                        Fx::FireSmoke,
+                        at,
+                        radius / 36.0,
+                        0.0,
+                        Color::WHITE.with_alpha(0.8),
+                        layer::ACTORS + 1.45,
+                        0.5,
+                        5.0 / ANIM_FPS,
+                    );
+                } else {
+                    parts.flash(
+                        at + Vec2::Y * 6.0,
+                        radius / 5.0,
+                        hdr(Color::srgb(1.0, 0.72, 0.38), 2.6),
+                        0.16,
+                    );
+                    parts.smoke(at, 1.6, INK.with_alpha(0.45), 5);
+                    parts.halo(
+                        frames.ring,
+                        at,
+                        0.2,
+                        radius * 2.0 / 64.0,
+                        0.45,
+                        hdr(FIRE, 1.4).with_alpha(0.85),
+                    );
+                }
                 parts.sparks(at, hdr(FIRE, 1.5), (22.0 * k) as u32, 320.0, Vec2::Y * 0.4);
                 parts.embers(at, radius * 0.5, FIRE, (12.0 * k) as u32);
                 parts.ash(at, radius * 0.4, 6, LANTERN_PAPER);
-                parts.smoke(at, 1.6, INK.with_alpha(0.45), 5);
-                parts.halo(frames.ring, at, 0.2, radius * 2.0 / 64.0, 0.45, hdr(FIRE, 1.4).with_alpha(0.85));
             }
             // 沧浪推浪：主角身前顺着浪的方向溅起一片水花、一团水汽；北冥潮四面八方都溅，一圈寒光荡开
             SimEvent::Wave { pos, dir, radius, ring, .. } => {
@@ -1582,7 +1620,20 @@ pub(crate) fn particle_events(
             SimEvent::TowerLand { pos, radius, evolved } => {
                 let at = to_screen(pos);
                 let k = if evolved { 1.4 } else { 1.0 };
-                parts.dust(at, (16.0 * k) as u32, radius / 30.0 * k, DUST);
+                // 美术的落地尘土（自带土墨色、已经压扁，radius_px 160 = 40 个世界单位，按落地半径缩放，
+                // 塔砸下那一刻起播）；没有时用代码的尘浪
+                if !parts.anim(
+                    Fx::TowerDust,
+                    at,
+                    radius / 40.0 * k,
+                    0.0,
+                    Color::WHITE,
+                    layer::ACTORS + 1.45,
+                    0.3,
+                    0.0,
+                ) {
+                    parts.dust(at, (16.0 * k) as u32, radius / 30.0 * k, DUST);
+                }
                 parts.ink(at, (10.0 * k) as u32, 1.6 * k);
                 parts.ash(at, radius * 0.5, 6, TOWER_STONE);
                 let earth = element_glow(Some(Element::Earth));
@@ -1596,7 +1647,19 @@ pub(crate) fn particle_events(
                 parts.embers(at, radius * 0.6, GOLD, 16);
                 parts.dust(at, 22, radius / 25.0, DUST);
                 parts.ink(at, 16, 2.0);
-                parts.halo(frames.ring, at, 0.3, radius * 2.4 / 64.0, 0.6, GOLD.with_alpha(0.8));
+                // 美术的冲击波染金，按炸开的半径缩放（radius_px 220 = 55 个世界单位）；没有时一圈金光
+                if !parts.anim(
+                    Fx::Shockwave,
+                    at,
+                    radius / 55.0,
+                    0.0,
+                    hdr(SHOCK, 1.4),
+                    layer::EMISSIVE - 0.4,
+                    0.0,
+                    0.0,
+                ) {
+                    parts.halo(frames.ring, at, 0.3, radius * 2.4 / 64.0, 0.6, GOLD.with_alpha(0.8));
+                }
             }
             // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
             SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
