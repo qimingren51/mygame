@@ -158,9 +158,14 @@ impl Content {
         Ok(())
     }
 
-    /// 法器 d 是否还锁着。
+    /// 法器 d 是否还锁着（只看数据；存档解锁的由调用方另外排除）。
     pub fn weapon_locked(&self, d: usize) -> bool {
         self.run.choices.locked.iter().any(|id| *id == self.weapons[d].id)
+    }
+
+    /// 法器 d 的进化心法（异化共用同一门）。
+    pub fn weapon_key(&self, d: usize) -> Option<usize> {
+        self.weapons[d].evolution.as_ref().and_then(|e| self.passive_index(&e.passive))
     }
 
     /// 打开异化与合璧（EA 内容，`run.ron` 里默认关闭）。工具、测试用；内容哈希跟着变，
