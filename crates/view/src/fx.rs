@@ -80,6 +80,8 @@ pub(crate) struct FxFrames {
     foxfire: Vec<FrameId>,
     /// 火爆的一团焰球（美术的 `weapons/blast`）
     blast: Option<FrameId>,
+    /// 图集里有美术的逐帧火爆 / 冰碎时，玩家的爆炸交给粒子层播（particles.rs 的 `Fx::FireBurst`、`Fx::IceShatter`），这里不再画
+    art_blast: (bool, bool),
     spring: Option<FrameId>,
     rift: Option<FrameId>,
     rift_glow: Option<FrameId>,
@@ -157,6 +159,7 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         spark: need("vfx/spark"),
         foxfire: (0..3).filter_map(|i| db.find(&format!("weapons/foxfire_{i}"))).collect(),
         blast: db.find("weapons/blast"),
+        art_blast: (db.find("vfx/fire_burst_0").is_some(), db.find("vfx/ice_shatter_0").is_some()),
         spring: db.find("ground/spring"),
         rift: db.find("ground/rift"),
         rift_glow: db.find("ground/rift_glow"),
@@ -522,7 +525,7 @@ pub(crate) fn read_fx_events(
 /// 把颜色在线性空间里提亮 k 倍：叠在自发光层上，峰值越过辉光阈值 1.0 才晕得开
 /// （试玩第 1 轮：钟鸣原来 0.55 × 1.5 ≈ 0.83，不发光）。
 /// 一组按序号编的帧（`<名字>_0`、`_1`……）；图集登记了同名动画就用动画。
-fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
+pub(crate) fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
     if let Some(a) = db.anim(name) {
         return a.to_vec();
     }
@@ -1378,6 +1381,8 @@ pub(crate) fn collect_fx(
                     );
                 }
             }
+            OneShot::Blast { ice: false, .. } if f.art_blast.0 => {}
+            OneShot::Blast { ice: true, .. } if f.art_blast.1 => {}
             OneShot::Blast { color, .. } | OneShot::HostileBlast { color } => {
                 if matches!(l.kind, OneShot::Blast { ice: true, .. }) {
                     // 冰爆是向外迸射的尖棱，火爆是向上卷的焰舌。
