@@ -411,7 +411,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad  # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad,boss  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
@@ -432,6 +432,7 @@ art/.venv/bin/python art/post/check_atlas.py
 | `models/taofeng_v2.py` | 讨封狐：扮人是斗笠（顶上三片竹叶）、三层蓑衣、竹杖，蓑衣底下露一截尾巴；现形是穿旧靛蓝袍、长袖的直立狐狸，斗笠挂在背上，眯眼笑（头、耳、尾借用赤面狐） |
 | `models/stonelord_v2.py` | 石将：隐式曲面凿出来的石翁仲（3/4 侧面），圆顶盔、护心镜、披膊、鱼鳞甲裙（刻槽走 zone 属性）、双手拄长刀；风化起伏、雨痕、青苔从脚往上爬（moss 属性），落脚两帧崩石屑 |
 | `models/toad_v2.py` | 金蟾：圆胖的金身子（一身小疙瘩）、背上嵌七枚铜钱、嘴里衔一枚、三条腿（一条后腿），耷拉眼皮斜眼瞟（贼）；一蹦一蹦，身后掉钱；夜里眼珠和铜钱泛金光 |
+| `models/boss_v2.py` | 九尾（夜主）：借用赤面狐的骨架、躯干、头、耳、腿和尾巴做法，放大拉长；月白的毛、青眼、额心一簇青火印；九条尾巴扇形展开，尾尖一截青火（AOV 发光）带火舌；扫尾时九尾从背上往前拱、再往前下扫，召唤时张到最开、尾火腾起 |
 | `models/ghoul_v2.py` | 青面鬼：隐式曲面捏出来的驼背大鬼（躯干、大肚子、四肢、头各一块），肚皮发白、透着魂光（AOV），獠牙、黑爪、铁箍、焦墨乱发、暗红破布 |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
@@ -442,6 +443,8 @@ art/.venv/bin/python art/post/check_atlas.py
 - 竹魅：帧 320²、锚点 (0.5, 0.875)，挂点 eyes、muzzle（蓄力时在竹刺尖上）。讨封狐：帧 256²（原 224²），reveal 写了 `vertical_motion`
   （一跳、蓑衣掀起，身高一帧一个样）。青面鬼：帧 320²、锚点 (0.5, 0.8)，身子整体往后挪，锚点在身子中心底下；move、charge 都写了
   `vertical_motion`（一步一沉）。
+- 九尾：帧 640²、锚点 (0.5, 0.8)（boss 图集，`atlas_swap.py --name boss`），`register_x_only`，配准只取躯干那一段（`register_band: [0.58, 0.74]`，尾巴扇面会扫进默认条带）；尾尖的火不能用发光材质
+  （发光层按物体分，整条尾巴都会进去），走 AOV（`add_glow_const`）。
 - 石将：帧 320²、锚点 (0.5, 0.8)，move 写了 `vertical_motion`（落脚一沉，盔顶跟着上下）。金蟾：帧 192²（原 160²），整体往后（离镜头远）挪 3.5 单位，
   近镜头那只手才不出画；`vertical_motion`（蹦）。
 - `v2kit.sdf_mesh`：隐式曲面网格化（surface nets，纯 numpy），配 `smin`、`sd_round_cone`、`sd_ellipsoid` 捏肌肉、肚子这种圆滚滚的形体；
