@@ -103,6 +103,14 @@ pub(crate) struct FxFrames {
     wave_front: FrameId,
     vine: FrameId,
     tower: FrameId,
+    /// 美术的浪头（循环）、浪走到头的收尾、浪后的泡沫痕；没有就用上面的占位
+    wave_loop: Vec<FrameId>,
+    wave_fade: Vec<FrameId>,
+    wave_trail: Option<FrameId>,
+    /// 美术的藤（循环）、流回主角的光点、万木春的缠绕
+    vine_loop: Vec<FrameId>,
+    vine_pulse: Vec<FrameId>,
+    vine_bind: Vec<FrameId>,
     /// 反应留下的区域：赤地（底图 + 叠加光）、淤泥、灵草（底图 + 叠加光）
     zone_lava: Option<(FrameId, Option<FrameId>)>,
     zone_mud: Option<FrameId>,
@@ -170,6 +178,12 @@ pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content:
         wave_front: db.find("weapons/wave_front").unwrap_or_else(|| need("fx/wave")),
         vine: db.find("weapons/vine").unwrap_or_else(|| need("weapons/sword_trail")),
         tower: db.find("weapons/tower").unwrap_or_else(|| need("weapons/seal")),
+        wave_loop: sequence(&db, "weapons/wave_front"),
+        wave_fade: sequence(&db, "weapons/wave_front_fade"),
+        wave_trail: db.find("weapons/wave_trail_0"),
+        vine_loop: sequence(&db, "weapons/vine"),
+        vine_pulse: sequence(&db, "weapons/vine_pulse"),
+        vine_bind: sequence(&db, "weapons/vine_bind"),
         ink: (0..3).filter_map(|k| db.find(&format!("vfx/ink_{k}"))).collect(),
         zone_lava: db.find("ground/zone_lava").map(|f| (f, db.find("ground/zone_lava_glow"))),
         zone_mud: db.find("ground/zone_mud"),
@@ -258,6 +272,8 @@ pub(crate) struct FxState {
     flash_decay: f32,
     /// 合围预警的墨雾：已经起了多久、预警多长、合拢后散了多久
     mist: Option<(f32, f32, Option<f32>)>,
+    /// 万木春缠住的妖物：开始缠的时刻（缠绕动画从头播，播完停在最后一帧）
+    binds: std::collections::BTreeMap<lantern_sim::enemies::EnemyHandle, f32>,
 }
 
 impl Default for FxState {
@@ -274,6 +290,7 @@ impl Default for FxState {
             flash_fresh: false,
             flash_decay: 3.0,
             mist: None,
+            binds: Default::default(),
         }
     }
 }
@@ -504,6 +521,28 @@ pub(crate) fn read_fx_events(
 /// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
 /// 把颜色在线性空间里提亮 k 倍：叠在自发光层上，峰值越过辉光阈值 1.0 才晕得开
 /// （试玩第 1 轮：钟鸣原来 0.55 × 1.5 ≈ 0.83，不发光）。
+/// 一组按序号编的帧（`<名字>_0`、`_1`……）；图集登记了同名动画就用动画。
+fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
+    if let Some(a) = db.anim(name) {
+        return a.to_vec();
+    }
+    (0..).map_while(|k| db.find(&format!("{name}_{k}"))).collect()
+}
+
+/// 循环播放：按帧率取第几帧；空的返回 None。
+fn looped(frames: &[FrameId], t: f32, fps: f32) -> Option<FrameId> {
+    (!frames.is_empty()).then(|| frames[(t.max(0.0) * fps) as usize % frames.len()])
+}
+
+/// 浪头图里半个浪宽的像素（美术的 half_width_px）、泡沫痕的高；藤图的宽高（整张高对应 10 世界单位）
+const WAVE_HALF_PX: f32 = 216.0;
+const WAVE_TRAIL_PX: f32 = 256.0;
+const VINE_PX: Vec2 = Vec2::new(512.0, 40.0);
+/// 缠绕图在缩放为 1 时缠住的妖物半径（美术的 radius_px）
+const VINE_BIND_RADIUS_PX: f32 = 56.0;
+/// 浪走到这一段以后换收尾的帧
+const WAVE_FADE_FROM: f32 = 0.8;
+
 fn hdr(c: Color, k: f32) -> Color {
     let l = c.to_linear();
     Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
@@ -1457,7 +1496,7 @@ pub(crate) fn collect_fx(
         }
     }
 
-    draw_new_weapons(&res, &f, &frames, &db, (now, a, hero), &mut pools, &mut glow);
+    draw_new_weapons(&res, &f, &frames, &db, (now, a, hero), &mut fx.binds, &mut pools, &mut glow);
 
     // ---- 飞剑
     if let Some(shots) = &res.shots {
@@ -2101,11 +2140,13 @@ fn draw_new_weapons(
     frames: &ActorFrames,
     db: &AtlasDb,
     (now, a, hero): (f32, f32, Vec2),
+    binds: &mut std::collections::BTreeMap<lantern_sim::enemies::EnemyHandle, f32>,
     pools: &mut Pools,
     glow: &mut GlowRequests,
 ) {
     let px = |frame: FrameId, world: f32| world / db.frame(frame).size.x;
     let lerp = |prev: Vec2, cur: Vec2| to_screen(prev.lerp(cur, a));
+    let ppu = db.px_per_unit;
 
     // 孔明灯：飘在半空，地上一团影子；落地前一秒往下沉，落点亮一圈
     if let Some(sl) = &res.sky_lanterns {
@@ -2161,25 +2202,54 @@ fn draw_new_weapons(
             }
             let front = to_screen(w.origin + w.dir * s);
             let d = to_screen(w.origin + w.dir) - to_screen(w.origin);
+            // 图里浪往 +y 推：转到前进方向再加 90°
             let rot = d.y.atan2(d.x) + std::f32::consts::FRAC_PI_2;
-            let k = px(f.wave_front, w.half * 2.0);
-            glow.add(
-                f.wave_front,
-                front.extend(layer::EMISSIVE),
-                Vec2::new(k, k * 0.35),
-                rot,
-                color.with_alpha(0.85 * fade),
-            );
+            let u = s / w.reach.max(1.0);
+            let Some(art) = looped(&f.wave_loop, now, 12.0) else {
+                // 美术的图到之前：横着压扁的寒波圈
+                let k = px(f.wave_front, w.half * 2.0);
+                glow.add(
+                    f.wave_front,
+                    front.extend(layer::EMISSIVE),
+                    Vec2::new(k, k * 0.35),
+                    rot,
+                    color.with_alpha(0.85 * fade),
+                );
+                continue;
+            };
+            // 半宽 216 像素对应缩放 1；走到最后两成换收尾的几帧，播一遍
+            let k = w.half / (WAVE_HALF_PX / ppu);
+            let frame = if u > WAVE_FADE_FROM && !f.wave_fade.is_empty() {
+                let n = f.wave_fade.len();
+                f.wave_fade[(((u - WAVE_FADE_FROM) / (1.0 - WAVE_FADE_FROM) * n as f32) as usize).min(n - 1)]
+            } else {
+                art
+            };
+            // 泡沫痕：锚点在下边正中，横向和浪头一样宽，竖向拉到浪走过的长度
+            if let Some(trail) = f.wave_trail {
+                glow.add(
+                    trail,
+                    front.extend(layer::EMISSIVE - 0.1),
+                    Vec2::new(k, s / (WAVE_TRAIL_PX / ppu)),
+                    rot,
+                    color.with_alpha(0.55 * fade),
+                );
+            }
+            glow.add(frame, front.extend(layer::EMISSIVE), Vec2::splat(k), rot, color.with_alpha(0.9));
         }
     }
 
-    // 藤：从主角连到缠着的妖物，微微晃
+    // 藤：从主角连到缠着的妖物，微微晃；光点顺着藤流回主角；万木春缠住的妖物脚下绕一圈藤
+    let mut bound = Vec::new();
     if let (Some(vs), Some(en)) = (&res.vines, &res.enemies) {
         let green = rgb(0x8fe07a);
-        let w = db.frame(f.vine).size;
+        let art = looped(&f.vine_loop, now, 8.0);
+        // 美术的藤：整张宽高按原图算（裁过边也一样）；占位的剑光拖尾按它自己的大小
+        let size = if art.is_some() { VINE_PX / ppu } else { db.frame(f.vine).size };
         for v in &vs.0 {
             for (k, link) in v.links.iter().enumerate() {
-                let Some(i) = link.target.and_then(|h| en.resolve(h)) else { continue };
+                let Some(h) = link.target else { continue };
+                let Some(i) = en.resolve(h) else { continue };
                 let target = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
                 let d = target - hero;
                 let len = d.length();
@@ -2187,18 +2257,42 @@ fn draw_new_weapons(
                     continue;
                 }
                 let sway = (now * 3.0 + k as f32 * 1.7).sin() * 0.04;
-                let scale = Vec2::new(len / w.x, 10.0 / w.y);
-                // 拖尾的锚点在右端：放在妖物身上、朝主角拉
+                // 锚点在右端：放在妖物身上、朝主角拉
                 glow.add(
-                    f.vine,
+                    art.unwrap_or(f.vine),
                     target.extend(layer::EMISSIVE - 0.3),
-                    scale,
+                    Vec2::new(len / size.x, 10.0 / size.y),
                     d.y.atan2(d.x) + sway,
                     green.with_alpha(0.7),
                 );
+                if let Some(pulse) = looped(&f.vine_pulse, now, 24.0) {
+                    let phase = (now * 1.2 + k as f32 * 0.37).fract();
+                    glow.add(
+                        pulse,
+                        target.lerp(hero, phase).extend(layer::EMISSIVE - 0.2),
+                        Vec2::ONE,
+                        (-d).y.atan2((-d).x),
+                        green.with_alpha(0.9),
+                    );
+                }
+                if en.root[i] > 0.0 && !f.vine_bind.is_empty() {
+                    let start = *binds.entry(h).or_insert(now);
+                    bound.push(h);
+                    let n = f.vine_bind.len();
+                    let frame = f.vine_bind[(((now - start) * 8.0) as usize).min(n - 1)];
+                    let r = en.r[i] / (VINE_BIND_RADIUS_PX / ppu);
+                    glow.add(
+                        frame,
+                        target.extend(layer::EMISSIVE - 0.25),
+                        Vec2::splat(r),
+                        0.0,
+                        green.with_alpha((en.root[i] / 0.25).min(1.0)),
+                    );
+                }
             }
         }
     }
+    binds.retain(|h, _| bound.contains(h));
 
     // 塔：落地前画预警圈，越接近落地越亮；立着时画塔身和吸妖的范围，快收走时淡出
     if let Some(ts) = &res.towers {
