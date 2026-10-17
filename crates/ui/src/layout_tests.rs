@@ -361,3 +361,25 @@ fn stat_icons_named_in_the_data_are_in_the_atlas() {
         assert!(db.find(&n).is_some(), "图集里没有 {n}");
     }
 }
+
+/// 卡面找图的名字和图集对得上：补给用 lotus、oil 的图标，五件法器本体和进化都有插画。
+#[test]
+fn offer_cards_find_their_icons_and_art_in_the_atlas() {
+    let mut app = setup();
+    let world = app.world_mut();
+    let c = world.resource::<lantern_sim::GameContent>().0.clone();
+    let db = world.resource::<AtlasDb>();
+    let (arsenal, build) = (Arsenal::default(), Build::default());
+    for offer in [Offer::Heal, Offer::Oil] {
+        let info = crate::describe::offer_info(&c, &arsenal, &build, offer);
+        let icon = info.icon.unwrap();
+        assert!(db.find(&icon).is_some(), "图集里没有 {icon}");
+    }
+    assert_eq!(crate::describe::offer_info(&c, &arsenal, &build, Offer::Heal).art, "ui/card_lotus");
+    for id in ["lamp", "sword", "bell", "crane", "seal"] {
+        let d = c.weapon_index(id).unwrap();
+        let info = crate::describe::offer_info(&c, &arsenal, &build, Offer::NewWeapon(d));
+        assert!(db.find(&info.art).is_some(), "图集里没有 {}", info.art);
+        assert!(db.find(&format!("{}_evo", info.art)).is_some(), "图集里没有 {}_evo", info.art);
+    }
+}

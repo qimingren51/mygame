@@ -494,6 +494,7 @@ assets/data/
 | `cargo run --release -p lantern-tools -- kite --runs 1 [--seed 1] [--god] --record bot.ron` | 机器人打一局存成回放，并打印关键时刻（进化、反应初见、夜主登场、伏诛……）；`--god` 无敌打完整局。原来的 `record` 命令并进来了 |
 | `cargo run -p lantern -- --replay <文件> [--from <秒>]` | 在游戏里观看回放；`--from` 开局后一帧里跑到那一秒再开始看 |
 | `cargo run -p lantern --features dev` | 开发模式：调试面板、热重载 |
+| `cargo run -p lantern -- --god [--windowed] [--seed 42]` | 手动无敌调试：`ui::GodMode` 在首次出发和选夜签出发时写入 `RunSetup.god`，重开沿用，不计奖励、成绩和教学进度；仅此次启动生效，不能与 `--replay` 同用 |
 | `lantern --smoke-test --windowed` | 冒烟测试（`view::smoke`）：正式启动，资源和渲染管线就绪后提交 120 帧再以 0 退出；出错、提前关闭或超时以非 0 退出。Windows CI 在发布包上跑 |
 
 - **命令行路径**：游戏和工具用 `std::env::args_os()` 读取参数；`--replay`、`replay <文件>`、`--record`、`--csv` 保留为 `OsString` / `Path` / `PathBuf`，支持中文、空格及非 UTF-8 路径。数字和文字参数单独校验，非法编码返回错误。Unix 回归测试用 `OsStr::from_bytes` 覆盖实际回放读写、CSV 输出及启动错误日志。
