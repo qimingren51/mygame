@@ -32,10 +32,13 @@ ATLAS = V.ART.parent / "assets" / "atlas"
 
 # 每组：帧数、画布、混合、可染（BALANCE.md 6.3 节的“画面”，帧数按 24 帧/秒折算）
 SPEC = {
+    "coin_slash": (6, (512, 896), "add", True),
     "coin_spark": (5, (128, 128), "add", False),
-    "coin_whirl": (6, (448, 448), "add", True),
+    "coin_whirl": (6, (1024, 1024), "add", True),
     "coin_cross": (4, (160, 160), "add", True),
 }
+# 跟半径走的帧：1080p 下按这些半径（世界单位）缩放时，缩放比例要在 0.8–1.25 之间（约一比一，不靠放大）
+RADII = {"coin_slash": (140.0, 170.0), "coin_whirl": (200.0,)}
 PEAK8 = round(F.PEAK * 255)
 
 WRITTEN: list[Path] = []
@@ -169,10 +172,20 @@ def test_meta_fields():
 
 def test_png_format():
     for name, (n, size, *_r) in SPEC.items():
+        assert max(size) <= 1024, f"{name} 单帧 {size} 超过 1024²"
         for i in range(n):
             im = Image.open(E.OUT / f"{name}_{i}.png")
             assert im.mode == "RGBA" and im.size == size, f"{name}_{i}: {im.mode} {im.size}"
             assert alpha(name, i).sum() / 255 > 20, f"{name}_{i} 几乎是空的"
+
+
+def test_scale_at_1080p():
+    """跟半径走的帧写了 radius_px；1080p 下按玩法半径缩放，比例在 0.8–1.25（贴图约一比一，不靠游戏里放大）。"""
+    for name, radii in RADII.items():
+        R = float(meta()["files"][f"{name}_0.png"]["radius_px"])
+        for r in radii:
+            k = r * E.K1080 / R
+            assert 0.8 <= k <= 1.25, f"{name}: 半径 {r} 在 1080p 下要缩放 {k:.2f}（radius_px {R:.0f}）"
 
 
 def test_colors():
@@ -235,11 +248,40 @@ def test_coin_spark_direction():
     assert meta()["files"]["coin_spark_0.png"]["points"] == "+x"
 
 
+def test_coin_slash_fan():
+    """挥击：弧心是锚点，扇形朝 +X 张开 120°；外沿 = radius_px；笔锋从上往下扫（质心的角度一帧比一帧大），
+    扫完时整个扇面都有刀光；扇形外面（±64° 以外）几乎没东西。"""
+    info = meta()["files"]["coin_slash_0.png"]
+    R = float(info["radius_px"])
+    w, h = SPEC["coin_slash"][1]
+    assert R == E.CSLASH_R and info["angle_deg"] == 120 and info["points"] == "+x"
+    assert info["anchor"] == [E.CSLASH_C[0] / w, E.CSLASH_C[1] / h]
+    r, th = polar("coin_slash")
+    angs = []
+    for i in frames_of("coin_slash"):
+        a = alpha("coin_slash", i)
+        angs.append(float((a * th).sum() / a.sum()))
+        if i <= 2:
+            out = a[np.abs(th) > 64].sum() / a.sum()
+            assert out <= 0.03, f"coin_slash_{i} 扇形外面还有 {out:.1%}"
+        if i in (1, 2):
+            m = (a / a.sum()).ravel()
+            order = np.argsort(r.ravel())
+            r99 = r.ravel()[order][np.searchsorted(np.cumsum(m[order]), 0.99)]
+            assert R - 12 <= r99 <= R + 24, f"coin_slash_{i} 外沿 {r99:.0f}，radius_px {R:.0f}"
+    # 0–4 帧刀光一路往下（末帧只剩收笔的碎丝和飘远的铜钱影子，不算）
+    assert all(a < b for a, b in zip(angs[:5], angs[1:5])), f"笔锋应该从上往下扫：质心角度 {[round(x) for x in angs]}"
+    a = sum(alpha("coin_slash", i) for i in (0, 1, 2))  # 0–2 帧扫过的地方合起来
+    sectors = [a[(th >= s) & (th < s + 10) & (r > 0.6 * R)].sum() for s in range(-60, 60, 10)]
+    assert min(sectors) >= 0.03 * sum(sectors), f"扇面有一块没扫到：{[round(x / sum(sectors), 3) for x in sectors]}"
+
+
 def test_coin_whirl_ring():
     """天罡旋风：以锚点为圆心的一圈，外沿 = radius_px；转满一整圈（每 30° 都有刀光）；顺时针转。"""
     info = meta()["files"]["coin_whirl_0.png"]
     R = float(info["radius_px"])
     assert info["anchor"] == [0.5, 0.5] and R == E.WHIRL_R
+    half = SPEC["coin_whirl"][1][0] / 2
     r, th = polar("coin_whirl")
     for i in (1, 2, 3):
         a = alpha("coin_whirl", i)
@@ -252,7 +294,7 @@ def test_coin_whirl_ring():
         lo = R * 0.85 if i == 1 else R - 8  # 第 1 帧还在往外张
         assert lo <= r99 <= R + 24, f"coin_whirl_{i} 外沿 {r99:.0f}，radius_px {R:.0f}"
         cx, cy = centroid(a)
-        assert math.hypot(cx - 224, cy - 224) <= 12, f"coin_whirl_{i} 偏心：({cx:.0f}, {cy:.0f})"
+        assert math.hypot(cx - half, cy - half) <= 0.04 * R, f"coin_whirl_{i} 偏心：({cx:.0f}, {cy:.0f})"
     a = alpha("coin_whirl", 2)
     sectors = [a[(th >= s) & (th < s + 30) & (r > 0.7 * R)].sum() for s in range(-180, 180, 30)]
     assert min(sectors) >= 0.03 * sum(sectors), f"天罡第 2 帧有一块没刀光：{[round(s / sum(sectors), 3) for s in sectors]}"

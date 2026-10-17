@@ -12,16 +12,16 @@
 slash（6 帧，月牙刀光，弧心是锚点，扇形朝 +X 张开 120°）、kill_ink（6 帧 192²，焦墨，普通混合，末帧留着）、
 shockwave（6 帧 512×320，贴地亮环，已压扁）。
 
-slash 的画布：清单写的 256×128 只放得下半径约 70 像素的 120° 扇形（铜钱剑半径 70–85 世界单位 = 280–340 像素，要放大 4–5 倍，
-会糊）；这里改成 256×448、弧心在左边 (16, 224)，外沿半径 200 像素（50 世界单位，游戏里放大 1.4–1.7 倍），
-meta 照扇形预警 weapons/sector 的写法：points: "+x"、radius_px（外沿半径）、angle_deg。弧心左边那一大块是空的，打包时会裁掉，不占图集。
+slash 的画布：清单写的 256×128 只放得下半径约 70 像素的 120° 扇形，放大了会糊；这里改成 256×448、弧心在左边 (16, 224)、
+外沿半径 200 像素，meta 照扇形预警 weapons/sector 的写法：points: "+x"、radius_px（外沿半径）、angle_deg。
+弧心左边那一大块是空的，打包时会裁掉，不占图集。铜钱剑的扇形半径翻倍（140–170）以后另画了 weapons/coin_slash（weapon_textures_ea.py）。
 
 产物：art/out/assets@2x/vfx_frames/*.png + meta.json（name: vfx）
-审图：art/out/review@2x/vfx_frames_b1.png（纸色底 / 夜色底的帧条）、vfx_frames_b1_ingame.png（1080p 合成）
-打包：pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames
+审图：art/out/review@2x/vfx_frames_<批>.png（纸色底 / 夜色底的帧条）、vfx_frames_<批>_ingame.png（1080p 合成）
+打包：pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 
 用法（仓库根目录）：
-  art/.venv/bin/python art/post/vfx_frames.py
+  art/.venv/bin/python art/post/vfx_frames.py        # 全部；后面跟批名（b1、b2 …）只画那几批
   art/.venv/bin/python art/post/test_vfx_frames.py
 """
 
@@ -86,6 +86,70 @@ def frame_ink(a_ss: np.ndarray, seed: int) -> Image.Image:
     a8[a < 0.004] = 0
     a8[0, :] = a8[-1, :] = a8[:, 0] = a8[:, -1] = 0
     return V.to_rgba8(JIAO, None, a8)
+
+
+def union_heat(parts: list) -> tuple[np.ndarray, np.ndarray]:
+    """几层 (亮度, 热度) 合起来：亮度按 1 − ∏(1 − a)，热度按亮度加权平均（热度可以是数或场）。"""
+    a = soft_union(*[f for f, _ in parts])
+    wsum = sum(np.clip(f, 0, 1) for f, _ in parts)
+    hsum = sum(np.clip(f, 0, 1) * h for f, h in parts)
+    return a, hsum / np.maximum(wsum, 1e-6)
+
+
+class Acc:
+    """大画布上的局部累计：每一样只在自己的包围盒里算，按 1 − ∏(1 − a) 合进来，同时累计按亮度加权的热度
+    （结果和 union_heat 一样，只是快得多）。window 给出包围盒（最终像素）对应的切片。"""
+
+    def __init__(self, X: np.ndarray, Y: np.ndarray):
+        self.X, self.Y = X, Y
+        self.xs, self.ys = X[0], Y[:, 0]
+        self.a = np.zeros_like(X)
+        self.w = np.zeros_like(X)
+        self.h = np.zeros_like(X)
+
+    def window(self, x0: float, y0: float, x1: float, y1: float):
+        r0, r1 = np.searchsorted(self.ys, y0), np.searchsorted(self.ys, y1)
+        c0, c1 = np.searchsorted(self.xs, x0), np.searchsorted(self.xs, x1)
+        return slice(int(r0), int(r1)), slice(int(c0), int(c1))
+
+    def add(self, sl, f, heat=0.0) -> None:
+        f = np.clip(f, 0, 1)
+        self.a[sl] = 1.0 - (1.0 - self.a[sl]) * (1.0 - f)
+        self.w[sl] += f
+        self.h[sl] += f * heat
+
+    def heat(self) -> np.ndarray:
+        return self.h / np.maximum(self.w, 1e-6)
+
+
+def almond_field(X, Y, base, tip, width: float, bulge: float = 0.45, aa: float = 0.45):
+    """杏仁形（花瓣、叶片）的解析版：返回 (覆盖度, 到边的近似距离（里负外正，像素）, 沿长轴 0..1)。比多边形快得多。"""
+    ax = np.asarray(tip, dtype=np.float64) - np.asarray(base, dtype=np.float64)
+    L = float(np.hypot(*ax))
+    ux, uy = ax / L
+    u = ((X - base[0]) * ux + (Y - base[1]) * uy) / L
+    v = -(X - base[0]) * uy + (Y - base[1]) * ux
+    p = math.log(0.5) / math.log(bulge)
+    uc = np.clip(u, 0, 1)
+    prof = 0.5 * width * np.sin(np.pi * uc**p) ** 0.85
+    d = np.where((u >= 0) & (u <= 1), np.abs(v) - prof, np.hypot(np.maximum(-u, u - 1) * L, v))
+    return smoothstep(aa, -aa, d), d, uc
+
+
+def frame_color(a_ss: np.ndarray, heat_ss: np.ndarray, seed: int, palette, peak: float = PEAK) -> Image.Image:
+    """自带颜色的叠加帧：alpha 同 frame_white（软饱和到 peak、蓝噪声抖动、四边为 0），
+    颜色按热度在调色板 [(热度, "#RRGGBB"), …] 里插值（热度按亮度加权缩小）。"""
+    a_ss = np.clip(a_ss, 0, None)
+    a = V.downsample(a_ss, SS)
+    heat = V.downsample(a_ss * np.clip(heat_ss, 0, 1), SS) / np.maximum(a, 1e-6)
+    a = peak * np.tanh(1.25 * np.clip(a, 0.0, 1.0)) / math.tanh(1.25)
+    a8 = V.dither_alpha(a, np.random.default_rng(seed))
+    a8[a < 0.004] = 0
+    a8[0, :] = a8[-1, :] = a8[:, 0] = a8[:, -1] = 0
+    xs = [q for q, _ in palette]
+    cols = np.array([V.col(c) for _, c in palette])
+    rgb = np.stack([np.interp(np.clip(heat, 0, 1), xs, cols[:, k]) for k in range(3)], -1)
+    return V.to_rgba8(rgb, None, a8)
 
 
 def soft_union(*fields) -> np.ndarray:
@@ -669,13 +733,17 @@ def build(batch: dict) -> dict[str, list[Image.Image]]:
 
 
 def meta_entries(batch: dict, frames: dict[str, list[Image.Image]]) -> dict:
+    """每帧的 meta。动画写 anim、frame、frames、fps、loop；附加 meta 里有 _variants 的是几种挑着用的粒子（不是动画），写 variant、variants。"""
     files = {}
     for name, (_, size, anc, blend, tint, color, extra) in batch.items():
         n = len(frames[name])
+        extra = dict(extra)
+        variants = extra.pop("_variants", False)
         for i, img in enumerate(frames[name]):
             assert img.size == size, (name, img.size, size)
+            seq = {"variant": i, "variants": n} if variants else {"anim": name, "frame": i, "frames": n, "fps": FPS, "loop": False}
             files[f"{name}_{i}.png"] = {"size": list(size), "anchor": [float(anc[0]), float(anc[1])], "color": color, "blend": blend, "tint": tint,
-                                        "anim": name, "frame": i, "frames": n, "fps": FPS, "loop": False, "kind": "fx", **extra}
+                                        **seq, "kind": "fx", **extra}
     return files
 
 
@@ -693,17 +761,20 @@ def write(frames: dict[str, list[Image.Image]], batch: dict, out: Path = OUT, na
     return meta
 
 
-def main() -> None:
+def main(only: list[str] | None = None) -> None:
+    """only 给出时只画这几批（命令行：vfx_frames.py b2）。"""
+    import vfx_frames_review as R  # noqa: PLC0415  审图单独一个文件
+
     t0 = time.perf_counter()
     for key, batch in BATCHES.items():
+        if only and key not in only:
+            continue
         frames = build(batch)
         write(frames, batch)
-        import vfx_frames_review as R  # noqa: PLC0415  审图单独一个文件
-
-        R.strip_sheet(key, batch, frames, REVIEW / f"vfx_frames_{key}.png")
-        R.ingame(key, batch, frames, REVIEW / f"vfx_frames_{key}_ingame.png")
+        R.strip_sheet(key, batch, frames, REVIEW / f"vfx_frames_{key}.png", note=R.NOTES.get(key))
+        R.ingame(key, batch, frames, REVIEW / f"vfx_frames_{key}_ingame.png", placements=R.INGAME.get(key))
         print(f"{key}: {sum(len(v) for v in frames.values())} 帧  {time.perf_counter() - t0:.1f}s")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

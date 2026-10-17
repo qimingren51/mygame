@@ -37,9 +37,9 @@ def composite(bg_lin: np.ndarray, img: Image.Image, blend: str, tint: np.ndarray
     """把一帧按游戏的方式合到底图上（线性光）。light 给出时，普通混合的帧先画在纸上、再整体乘光照（墨受光照）。"""
     arr = np.asarray(img.convert("RGBA"), dtype=np.float64) / 255.0
     a = arr[..., 3:4]
-    rgb = M.to_lin(arr[..., :3])
+    rgb = M.to_lin(arr[..., :3]) * tint
     if blend == "add":
-        return bg_lin + rgb * tint * a * EMIT_HDR
+        return bg_lin + rgb * a * EMIT_HDR
     base = bg_lin / light if light is not None else bg_lin
     over = rgb * a + base * (1 - a)
     return over * light if light is not None else over
@@ -54,13 +54,13 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
     for name, spec in batch.items():
         imgs = frames[name]
         fw, fh = imgs[0].size
-        sc = min(1.0, (max_w - label_w) / (len(imgs) * (fw + gap)))
+        sc = min(max(1.0, 128.0 // fw), (max_w - label_w) / (len(imgs) * (fw + gap)))  # 小粒子放大看
         cw, ch = int(round(fw * sc)), int(round(fh * sc))
         strips = []
         for band in ("paper", "night"):
             strip = np.zeros((ch, len(imgs) * (cw + gap) - gap, 3))
             for i, img in enumerate(imgs):
-                im = img if sc == 1.0 else img.resize((cw, ch), Image.LANCZOS)
+                im = img if sc == 1.0 else img.resize((cw, ch), Image.NEAREST if sc > 1 else Image.LANCZOS)
                 x0 = i * (cw + gap)
                 bg = paper_lin[(i * 37) % 300 : (i * 37) % 300 + ch, (i * 53) % 300 : (i * 53) % 300 + cw]
                 bg = np.tile(bg, (math.ceil(ch / bg.shape[0]), math.ceil(cw / bg.shape[1]), 1))[:ch, :cw]
@@ -76,7 +76,7 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
     out = Image.new("RGB", (width, height), (24, 24, 26))
     d = ImageDraw.Draw(out)
     head = title or f"逐帧特效 {key}"
-    d.text((pad, 10), f"{head}：每组上一条纸色底（宣纸）、下一条夜色底（宣纸 × 月夜 {NIGHT}）；叠加帧按染色 × 1.5 加上去，墨花受光照。2 倍原大（1080p 游戏里是 0.64 倍）",
+    d.text((pad, 10), f"{head}：每组上一条纸色底（宣纸）、下一条夜色底（宣纸 × 月夜 {NIGHT}）；叠加帧按染色 × 1.5 加上去，墨花受光照。帧条按贴图像素画（大图缩小、小粒子放大，见左边）；1080p 游戏里的大小看 _ingame 合成",
            fill=(240, 239, 236), font=M.font(19))
     d.text((pad, 38), note or "叠加帧审图染色：五行命中按元素色（金 #E9D9A6 木 #6FD6A0 水 #6FB8FF 火 #FF8A3D 土 #C9925A），冲击波 #FFE2A8，刀光按金；暴击自带白金、不染",
            fill=(195, 194, 183), font=M.font(15))
@@ -86,8 +86,8 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
         d.text((pad, y + 4), name, fill=(250, 250, 245), font=M.font(20))
         sub = f"{len(imgs)} 帧 {size[0]}×{size[1]}  {blend}{' 可染' if tint else ''}"
         d.text((pad, y + 30), sub, fill=(195, 194, 183), font=M.font(14))
-        if sc < 1:
-            d.text((pad, y + 50), f"（审图缩到 {sc:.2f}）", fill=(160, 160, 150), font=M.font(13))
+        if sc != 1:
+            d.text((pad, y + 50), f"（审图{'放大' if sc > 1 else '缩'}到 {sc:.2f}）", fill=(160, 160, 150), font=M.font(13))
         for k, s in enumerate(strips):
             out.paste(Image.fromarray(s, "RGB"), (label_w, y + k * (s.shape[0] + gap)))
         y += 2 * strips[0].shape[0] + 3 * gap + 12
@@ -95,7 +95,8 @@ def strip_sheet(key: str, batch: dict, frames: dict, path, title: str | None = N
 
 
 # 1080p 合成：(特效, 帧, 世界坐标 x, y（模拟坐标，y 向下）, 摆法, 想要的半径（世界单位，按 meta 的 radius_px 缩放；None 是原大）)
-# 摆法：hero 放在主角身上（刀光、旋风的弧心），body 打在妖物身上（脚底往上约 22），ground 贴地
+# 摆法：hero 放在主角腰上（刀光、旋风的弧心），body 打在妖物身上（脚底往上约 22），ground / feet 在脚底。
+# 普通混合的帧：ground / feet 画在角色之下（贴地），hero / body 画在角色之上（空中的烟、碎纸）；都受光照。
 INGAME_B1 = [
     ("slash", 2, (0.0, 12.0), "hero", 85.0),  # 铜钱剑 Lv8 的扫击半径，朝 +X（右边那只）
     ("hit_metal", 1, (62.0, -82.0), "body", None),
@@ -107,6 +108,26 @@ INGAME_B1 = [
     ("kill_ink", 5, (-322.0, -46.0), "ground", None),
     ("shockwave", 2, (-90.0, 150.0), "ground", None),
 ]
+LIFT = {"hero": 10.0, "body": 22.0, "ground": 0.0, "feet": 0.0}  # 往上抬多少世界单位
+INGAME = {
+    "b1": INGAME_B1,
+    "b2": [
+        ("evolve", 3, (0.0, 12.0), "hero", None),
+        ("evolve_pillar", 2, (0.0, 12.0), "feet", None),
+        ("fire_burst", 2, (125.0, 72.0), "body", None),
+        ("fire_burst", 5, (-238.0, 58.0), "body", None),
+        ("fire_burst_smoke", 0, (-238.0, 58.0), "body", None),
+        ("ice_shatter", 2, (-168.0, -100.0), "body", None),
+        ("ice_shatter", 4, (288.0, -128.0), "body", None),
+        ("feather", 0, (250.0, 140.0), "ground", None),
+        ("feather", 1, (262.0, 118.0), "ground", None),
+        ("feather", 2, (238.0, 112.0), "ground", None),
+        ("feather", 3, (270.0, 146.0), "ground", None),
+    ],
+}
+NOTES = {
+    "b2": "叠加帧审图染色：冰碎按建议色 #CDEBFF，火爆、进化自带颜色；羽毛纸屑染纸白 #EDE6D6、普通混合；墨烟是焦墨、普通混合",
+}
 
 
 def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = None, title: str | None = None) -> None:
@@ -115,11 +136,21 @@ def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = 
     paper = np.asarray(Image.open(M.ATLAS / "paper.png").convert("RGB"))
     img = M.paper_layer(paper)
     placements = INGAME_B1 if placements is None else placements
-    # 地上的墨花（画在暗层之下，受光照）
-    for name, fi, (x, y), how, _r in placements:
-        if name in frames and how == "ground" and batch[name][3] == "normal":
-            anc = batch[name][2]
-            M.blit(img, M.premul(frames[name][fi]), *M.to_screen(x, y), anc, sc)
+
+    def place(name, fi, x, y, how, want_r, mode="over", gain=1.0):
+        spec = batch[name]
+        im, anc = frames[name][fi], spec[2]
+        px, py = M.to_screen(x, y)
+        scale = sc if want_r is None else want_r * M.PPU / spec[6]["radius_px"] * sc
+        M.blit(img, M.premul(im, tint=tint_of(name, spec)), px, py - LIFT[how] * M.K, anc, scale, mode=mode, gain=gain)
+
+    def normal_layer(on_ground: bool):
+        for name, fi, (x, y), how, want_r in placements:
+            if name in frames and batch[name][3] == "normal" and (how in ("ground", "feet")) == on_ground:
+                place(name, fi, x, y, how, want_r)
+
+    # 地上的墨花、落羽（画在角色之下，受光照）
+    normal_layer(True)
     # 角色（死掉的那只不画，只留墨花）
     dead = {(x, y) for name, _, (x, y), how, _r in placements if name == "kill_ink"}
     items = [(y, f, x) for f, x, y, _ in M.ENEMIES if (x, y) not in dead] + [(M.HERO_POS[1], "hero", M.HERO_POS[0])]
@@ -131,6 +162,8 @@ def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = 
         else:
             im, anc = sp[f]
             M.blit(img, M.premul(im), *M.to_screen(x, y), anc, sc, flip=x > M.HERO_POS[0])
+    # 空中普通混合的（墨烟等，画在角色之上，同样受光照）
+    normal_layer(False)
     # 光照图：月夜底色 + 主角灯笼的光照池
     sx, sy = M.asset_meta("hero")["sockets"]["lantern"]["idle"]["S"][0]
     lamp = (M.HERO_POS[0] + sx / M.PPU, M.HERO_POS[1] + sy / M.PPU)
@@ -143,25 +176,18 @@ def ingame(key: str, batch: dict, frames: dict, path, placements: list | None = 
     img = img * M.to_lin(big).astype(np.float32)
     # 叠加特效（暗层之上，× 1.5）
     for name, fi, (x, y), how, want_r in placements:
-        if name not in frames or batch[name][3] != "add":
-            continue
-        spec = batch[name]
-        im, anc = frames[name][fi], spec[2]
-        px, py = M.to_screen(x, y)
-        scale = sc if want_r is None else want_r * M.PPU / spec[6]["radius_px"] * sc
-        if how == "body":
-            py -= 22 * M.K  # 打在身上：脚底往上约 22 世界单位
-        if how == "hero":  # 刀光、旋风：弧心放在主角腰上
-            py -= 10 * M.K
-        M.blit(img, M.premul(im, tint=tint_of(name, spec)), px, py, anc, scale, mode="add", gain=EMIT_HDR)
+        if name in frames and batch[name][3] == "add":
+            place(name, fi, x, y, how, want_r, mode="add", gain=EMIT_HDR)
     out = Image.fromarray(np.round(M.to_srgb(np.clip(img, 0, 1)) * 255).astype(np.uint8), "RGB")
     d = ImageDraw.Draw(out)
     head = title or f"逐帧特效 {key}"
     d.text((16, 12), f"{head}：1080p 游戏大小（1 世界单位 = 2.57 像素），月夜底色 {NIGHT} + 灯笼光照池；叠加特效画在暗层之上 × 1.5，墨花画在地上",
            fill=(240, 239, 236), font=M.font(20))
+    labelled = set()
     for name, fi, (x, y), how, _r in placements:
-        if name not in frames:
+        if name not in frames or (x, y) in labelled:
             continue
+        labelled.add((x, y))
         px, py = M.to_screen(x, y)
         d.text((px - 40, py + 14), f"{name}_{fi}", fill=(230, 230, 225), font=M.font(15))
     V.save_png(out, path)

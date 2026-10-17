@@ -292,15 +292,18 @@ art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 17 项（清单、me
 ## 抢先体验的新法器（post/weapon_textures_ea.py）
 
 ```bash
-art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>_ingame.png（约 2 分钟）
-art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 14 项（清单、meta、颜色、四边、亮度、淡出、朝向、旋风是一整圈且顺时针转、十字两道、确定性、只写自己的文件、图集）
+art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>[_<场面>]_ingame.png（约 2 分钟）
+art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 16 项（清单、meta、单帧不超过 1024²、1080p 下约一比一、颜色、四边、亮度、淡出、朝向、扇形扫满且从上往下、旋风是一整圈且顺时针转、十字两道、确定性、只写自己的文件、图集）
 ```
 
 只出 2 倍，Pillow + numpy；画法、帧的约定和审图都沿用 `vfx_frames.py`。`docs/BALANCE.md` 6.3 节五件新法器的“画面”一件一件做，
 帧名 `weapons/<名字>_<帧号>`（meta 的 name 是 weapons），跟 vfx 一起打包（`$A/weapons_ea`）。格式见 `docs/DESIGN.md` 第 15 节“抢先体验的新法器”。
 
-- 铜钱剑：挥击的刀光直接用 `vfx/slash_0..5`（建议染铜金 #F2C46A）；这里补命中的铜钱火星 `coin_spark_0..4`（自带铜金色）、
-  天罡的旋风 `coin_whirl_0..5` 和再斩的十字斩痕 `coin_cross_0..3`（白色可染）。
+- 跟玩法半径走的大帧按 1080p 下约一比一出图（1 世界单位 ≈ 2.57 屏幕像素），单帧不超过 1024²，meta 写 `radius_px`；
+  大画布按行分条算（`tiled`），只在有东西的像素上算（掩码），省内存也快。
+- 铜钱剑（扫击半径 140–170，天罡 200）：挥击的扇形剑气 `coin_slash_0..5`（512×896，`radius_px` 440，刃口闪出铜钱影子）、
+  命中的铜钱火星 `coin_spark_0..4`（自带铜金色）、天罡的旋风 `coin_whirl_0..5`（1024²，`radius_px` 464）和再斩的十字斩痕
+  `coin_cross_0..3`；除火星外都是白色可染，建议铜金 #F2C46A。
 
 ## 灯驿长卷（post/hub_scroll.py）
 
