@@ -349,7 +349,7 @@ art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 22 项（清单、me
 
 ```bash
 art/.venv/bin/python art/post/weapon_textures_ea.py        # → out/assets@2x/weapons_ea/，审图 review@2x/weapons_ea_<件>.png、weapons_ea_<件>[_<场面>]_ingame.png（约 2 分钟）
-art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 21 项（清单、meta、单帧不超过 1024²、1080p 下约一比一、颜色、四边、亮度、淡出或循环接得上、朝向、扇形扫满且从上往下、旋风是一整圈且顺时针转、十字两道、浪头月牙、泡沫痕往后淡、藤铺满且两端在中线、绿光头朝前、缠绕往上长、确定性、只写自己的文件、图集）
+art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 25 项（清单、meta、单帧不超过 1024²、1080p 下约一比一、颜色、四边、亮度、淡出或循环接得上、朝向、扇形扫满且从上往下、旋风是一整圈且顺时针转、十字两道、浪头月牙、泡沫痕往后淡、藤铺满且两端在中线、绿光头朝前、缠绕往上长、孔明灯大小和发光层、落点圈和火海压扁、塔的大小、尘土和旋涡、确定性、只写自己的文件、图集）
 ```
 
 只出 2 倍，Pillow + numpy；画法、帧的约定和审图都沿用 `vfx_frames.py`。`docs/BALANCE.md` 6.3 节五件新法器的“画面”一件一件做，
@@ -363,7 +363,13 @@ art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 21 项（清
 - 沧浪：浪头 `wave_front_0..3`（循环）+ `wave_front_fade_0..2`（散掉），448×128，往 +y 推进、按半宽等比缩放；
   泡沫痕 `wave_trail_0`（竖向拉伸）。青藤：藤 `vine_0..2`（512×40，锚点右端、沿 X 拉伸）、回血的绿光 `vine_pulse_0..2`、
   万木春缠绕 `vine_bind_0..3`。都是白色可染。
-- 循环的组在附加 meta 里写 `fps`、`loop: true`；接在别的组后面播的写 `follows`。只画某几件：`weapon_textures_ea.py wave vine`。
+- 孔明灯、镇妖塔先用 Blender 渲源图（模型 `models/ea_weapons.py`）：
+  `art/.venv/bin/python art/render/weapons_ea_render.py [--only sky_lantern,tower,tower_gold]` → `out/assets@2x/ea_<名字>/`（约 3 分钟），
+  再由 `weapon_textures_ea.py lantern tower` 改名成 `weapons/sky_lantern*`、`tower*`，落下 / 收走的帧用 2D 拉伸、位移、消散做，
+  发光层的亮度按颜色压到 0.3–0.75（塔 0.55–0.9）。另有孔明灯的落点圈 `lantern_mark_0`、火海 `fire_sea_0..3`，
+  镇妖塔的尘土 `tower_dust_0..5`、吸妖旋涡 `tower_vortex_0..3`（2D）。
+- 循环的组在附加 meta 里写 `fps`、`loop: true`；接在别的组后面播的写 `follows`；某组的发光层写 `layer_of`。
+  只画某几件：`weapon_textures_ea.py wave vine`。
 - 审图的 1080p 合成可以把帧拉伸、转向（`vfx_frames_review.ingame` 的摆法第 6 项：`size_units`、`to` + `h_units`、`face`）。
 
 ## 灯驿长卷（post/hub_scroll.py）

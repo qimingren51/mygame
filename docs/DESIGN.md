@@ -541,7 +541,7 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns；狐祠庭院的大狐仙祠 fox_shrine_grand、石牌坊 fox_gate、檐下留灯 fox_eave_lamp 和 fox_eave_lamp_lit），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`（见下面“抢先体验的新法器”） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`、`wave_*`、`vine*`、`sky_lantern*`、`lantern_mark`、`fire_sea`、`tower*`（见下面“抢先体验的新法器”） |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
@@ -653,7 +653,19 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `weapons/vine_0..2` | 3 | 512×40 | 右端正中 `(1.0, 0.5)` | 叠加 | 白，可染，建议 #8FE07A | 青藤：锚点放在妖物身上，沿 X 拉到主角（`stretch: "x"`，横向缩放 = 连线长度 ÷ 画布宽），整张高 = 10 世界单位（`height_units: 10`）；主藤约 2 单位粗，一根卷须绕着拧，两侧小叶叶尖朝妖物；两端在中线上收细。8 帧/秒循环 |
   | `weapons/vine_pulse_0..2` | 3 | 128×48 | 光头 `(0.8125, 0.5)` | 叠加 | 白，可染，建议 #8FE07A | 每跳回血的绿光：头朝 +X（转向主角），游戏沿藤从妖物移到主角；原大；24 帧/秒循环 |
   | `weapons/vine_bind_0..3` | 4 | 192² | 脚底 `(0.5, 0.72)` | 叠加 | 白，可染，建议 #8FE07A | 万木春缠绕：两根藤从妖物脚下长出来盘住它，梢上一个小卷；`radius_px: 56` 是缠绕圈的横向半径，按妖物半径缩放；8 帧/秒，`hold_last`，末帧留到缠绕结束再淡出 |
-  - 命中复用逐帧特效：沧浪的水花用 `vfx/hit_water`，青藤的小刺用 `vfx/hit_wood`。
+  | `weapons/sky_lantern_0..3` | 4 | 192² | 灯身中心 `(0.5, 0.5)` | 普通 | 自带颜色 | 孔明灯飘着（Blender 渲的纸灯，上宽下窄、顶上圆拱，透着灯火）：原大约宽 20、高 26 世界单位，**按原大画**（占位代码的 0.65 改成 1，万灯升可到 1.1）；12 帧/秒循环（轻轻摆、灯火一明一暗）。游戏在锚点放辉光和光源 |
+  | `weapons/sky_lantern_emit_0..3` | 4 | 192² | 同上 | 叠加 | 自带颜色 | 孔明灯的发光层（透光的纸）：和 `sky_lantern` 同画布、同锚点、同帧号（`layer_of`），叠加画在暗层之上，夜里灯才是亮的 |
+  | `weapons/sky_lantern_fall_0..2` + `sky_lantern_fall_emit_0..2` | 3 | 192² | 同上 | 普通 + 叠加 | 自带颜色 | 落地前最后一点时间烧着坠下来：往一边歪倒（18° → 70°），纸从下口烧穿、火舌窜起来；12 帧/秒；落地那一刻接 `vfx/fire_burst`（按爆燃半径） |
+  | `weapons/lantern_mark_0` | 1 | 352×224 | 中心 | 叠加 | 白，可染，建议暗红 #C23A2B | 孔明灯的落点圈：断续的干笔圆、四道往里指的短笔、正中小十字，已压扁（`flat`）；`radius_px: 144`，按爆燃半径缩放，落地前 1 秒出现，可以从 1.2 倍收紧到 1 倍、越来越亮 |
+  | `weapons/fire_sea_0..3` | 4 | 352×224 | 中心 | 叠加 | 自带火色，不染 | 火海：地上一片低矮的火苗，已压扁；`radius_px: 120`，按 0.8 × 爆燃半径缩放；12 帧/秒循环，3 秒后淡出 |
+  | `weapons/tower_0..1` + `tower_emit_0..1` | 2 | 448×472 | 塔基座 `(0.5, 0.8353)` | 普通 + 叠加 | 自带颜色 | 镇妖塔立着（Blender 渲的七层密檐方塔，一个角朝镜头；淡赭墙身、重墨瓦、朱砂斗拱，拱门里透灯光）：原大约宽 40、高 70 世界单位 = 半径 45 时的大小（fx.rs 现在的 半径 ÷ 45 正好）；4 帧/秒循环，檐角铜铃往两边摆；发光层是拱门里的光 |
+  | `weapons/tower_fall_0..2` + `_emit` | 3 | 448×472 | 同上 | 普通 + 叠加 | 自带颜色 | 从天上砸下来：0 帧在上方 26 单位、拉长、拖墨的速度线，1 帧快落地，2 帧落地压扁一下；24 帧/秒；落地接 `tower_dust` |
+  | `weapons/tower_lift_0..2` + `_emit` | 3 | 448×472 | 同上 | 普通 + 叠加 | 自带颜色 | 收走：0 帧整座描一圈金边，之后往上升、从基座往上散成金色的光；12 帧/秒 |
+  | `weapons/tower_gold*` | 同上 | 576×600 | 塔基座 `(0.5, 0.8448)` | 同上 | 自带颜色 | 玲珑塔：同一套动画（`tower_gold_0..1`、`_fall_0..2`、`_lift_0..2`，各带 `_emit`），玉白墙身、石绿瓦、描金，拱门里透金光；原大约宽 56、高 96 = 半径 60 时的大小（半径 ÷ 60） |
+  | `weapons/tower_dust_0..5` | 6 | 448×304 | 中心 | 普通 | 土墨色 #6E6253，不染 | 镇妖塔落地的尘土冲击波：一圈尘团往外滚开、越来越淡，几粒碎石蹦出去，已压扁；`radius_px: 160`，按落地半径缩放 |
+  | `weapons/tower_vortex_0..3` | 4 | 768×480 | 中心 | 叠加 | 白，可染，建议土色 #C9925A | 吸妖的范围：地上淡淡的旋涡（峰值 alpha 0.5），六道螺旋往里转，外沿断续的细线，已压扁；`radius_px: 360`，按吸的范围（2.2R）缩放（1080p 下 140 单位一比一；玲珑塔的 500 是放大）；12 帧/秒循环。占位代码转一个压扁的圆环会把椭圆也转歪，换成这组帧就不用转了 |
+  - 命中复用逐帧特效：沧浪的水花用 `vfx/hit_water`，青藤的小刺用 `vfx/hit_wood`；孔明灯爆燃用 `vfx/fire_burst`（加 `fire_burst_smoke`）；镇妖塔每跳的塔底金光和玲珑塔炸开的金色冲击波用 `vfx/shockwave` 染金（#FFE2A8，按半径 R、140 缩放；140 在 1080p 下要放大约 1.6 倍）。
+  - 孔明灯和塔是 `art/render/weapons_ea_render.py`（模型在 `art/models/ea_weapons.py`）用 Blender 渲的源图，再由 `weapon_textures_ea.py` 改名、做落下 / 收走的 2D 变化、压发光层的亮度。
 - **界面图集 `ui`**：用 `pack_atlas.py --no-trim` 打包，每帧的 `frame` 矩形就是整张原图（`spriteSourceSize` 恒为 `(0, 0, 原图宽, 原图高)`），界面代码直接按矩形取图。全部普通混合、不染色，按 1080p 逻辑像素的 2 倍绘制（128² 的图标在 1080p 下显示 64 像素最清楚）。帧名里的 id 和网页版数据一致：
 
   | 类别 | 帧 | 尺寸 |

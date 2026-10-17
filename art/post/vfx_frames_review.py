@@ -112,7 +112,8 @@ INGAME_B1 = [
     ("kill_ink", 5, (-322.0, -46.0), "ground", None),
     ("shockwave", 2, (-90.0, 150.0), "ground", None),
 ]
-LIFT = {"hero": 10.0, "body": 22.0, "ground": 0.0, "feet": 0.0, "over": 0.0}  # 往上抬多少世界单位；over 是脚底、但画在角色之上（烟）
+LIFT = {"hero": 10.0, "body": 22.0, "ground": 0.0, "feet": 0.0, "over": 0.0, "air": 54.0, "low": 26.0}
+# 往上抬多少世界单位；over 是脚底、但画在角色之上（烟）；air / low 是飘在半空的（孔明灯飘着 / 快落地）
 INGAME = {
     "b1": INGAME_B1,
     "b2": [

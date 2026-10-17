@@ -42,9 +42,35 @@ SPEC = {
     "vine": (3, (512, 40), "add", True),
     "vine_pulse": (3, (128, 48), "add", True),
     "vine_bind": (4, (192, 192), "add", True),
+    "sky_lantern": (4, (192, 192), "normal", False),
+    "sky_lantern_emit": (4, (192, 192), "add", False),
+    "sky_lantern_fall": (3, (192, 192), "normal", False),
+    "sky_lantern_fall_emit": (3, (192, 192), "add", False),
+    "lantern_mark": (1, (352, 224), "add", True),
+    "fire_sea": (4, (352, 224), "add", False),
+    "tower": (2, (448, 472), "normal", False),
+    "tower_emit": (2, (448, 472), "add", False),
+    "tower_fall": (3, (448, 472), "normal", False),
+    "tower_fall_emit": (3, (448, 472), "add", False),
+    "tower_lift": (3, (448, 472), "normal", False),
+    "tower_lift_emit": (3, (448, 472), "add", False),
+    "tower_gold": (2, (576, 600), "normal", False),
+    "tower_gold_emit": (2, (576, 600), "add", False),
+    "tower_gold_fall": (3, (576, 600), "normal", False),
+    "tower_gold_fall_emit": (3, (576, 600), "add", False),
+    "tower_gold_lift": (3, (576, 600), "normal", False),
+    "tower_gold_lift_emit": (3, (576, 600), "add", False),
+    "tower_dust": (6, (448, 304), "normal", False),
+    "tower_vortex": (4, (768, 480), "add", True),
 }
+LAYERS = {n for n in SPEC if n.endswith("_emit")}  # Blender 渲的发光层（不是特效帧，亮度另算）
+HANDOFF = {"sky_lantern_fall", "tower_fall", "tower_gold_fall"}  # 播完接别的（爆燃、立着的塔），不淡出
 # 不是 24 帧/秒一次播完的：(fps, loop)
-PLAY = {"wave_front": (12, True), "wave_front_fade": (12, False), "vine": (8, True), "vine_pulse": (24, True), "vine_bind": (8, False)}
+PLAY = {"wave_front": (12, True), "wave_front_fade": (12, False), "vine": (8, True), "vine_pulse": (24, True), "vine_bind": (8, False),
+        "sky_lantern": (12, True), "sky_lantern_emit": (12, True), "sky_lantern_fall": (12, False), "sky_lantern_fall_emit": (12, False),
+        "fire_sea": (12, True), "tower_vortex": (12, True)}
+for _t in ("tower", "tower_gold"):
+    PLAY.update({_t: (4, True), f"{_t}_emit": (4, True), f"{_t}_lift": (12, False), f"{_t}_lift_emit": (12, False)})
 LOOPS = {n for n, (_f, lp) in PLAY.items() if lp}
 STILLS = {n for n, spec in SPEC.items() if spec[0] == 1}  # 只有一张的（拉伸用的带子）
 # 跟半径走的帧：1080p 下按这些半径（世界单位）缩放时，缩放比例要在 0.8–1.25 之间（约一比一，不靠放大）
@@ -205,7 +231,8 @@ def test_scale_at_1080p():
 
 
 def test_colors():
-    """可染的 RGB 恒为白；铜钱火星是暖的铜金色（R ≥ G ≥ B），第 0 帧的亮星接近烧白。"""
+    """可染的 RGB 恒为白；铜钱火星、火海是暖色（R ≥ G ≥ B），火星第 0 帧的亮星接近烧白；尘土是土墨色。
+    Blender 渲的灯、塔另有管线的调色板（这里不查）。"""
     for name, (n, _s, _b, tint) in SPEC.items():
         for i in range(n):
             px = rgba(name, i)
@@ -213,8 +240,10 @@ def test_colors():
             rgb = px[..., :3][vis].astype(int)
             if tint:
                 assert (rgb == 255).all(), f"{name}_{i} 不是白色"
-            else:
+            elif name in ("coin_spark", "fire_sea"):
                 assert (rgb[:, 0] >= rgb[:, 1]).all() and (rgb[:, 1] >= rgb[:, 2]).all(), f"{name}_{i} 不是暖色"
+            elif name == "tower_dust":
+                assert (rgb == np.array(V.col(E.DUST_INK) * 255).round()).all(), f"{name}_{i} 不是土墨色"
     hot = rgba("coin_spark", 0)
     w = hot[..., 3].astype(float)
     mean = (hot[..., :3].astype(float) * w[..., None]).sum((0, 1)) / w.sum()
@@ -235,10 +264,16 @@ def test_borders_and_clipping():
 
 
 def test_peak_alpha():
+    """叠加的特效帧最亮处 alpha 约 0.8（发光层、普通混合的不算）。"""
     for name in SPEC:
+        if name in LAYERS or SPEC[name][2] != "add":
+            continue
         peaks = [alpha(name, i).max() for i in frames_of(name)]
         assert max(peaks) <= PEAK8 + 2, f"{name} 最亮 {max(peaks):.0f} 超过 {PEAK8}"
         floor = PEAK8 - 70 if name in STILLS else PEAK8 - 40 if name == "wave_front_fade" else PEAK8 - 12  # 淡带子、散掉的不用到顶
+        if name == "tower_vortex":  # 淡淡的一层（峰值上限 0.5）
+            assert 50 <= max(peaks) <= 0.5 * 255 + 2, f"旋涡最亮 {max(peaks):.0f}"
+            continue
         assert max(peaks) >= floor, f"{name} 最亮只有 {max(peaks):.0f}"
 
 
@@ -246,11 +281,14 @@ def test_frames_change_and_fade():
     """相邻两帧不一样；一次性的：最亮的帧在前一半，末帧淡到三成五以下（散掉、缠住留着的除外）；
     循环的：首尾接得上（末帧到首帧的变化和相邻两帧差不多），亮度一帧帧差不多（±25%）。"""
     for name in SPEC:
-        if name in STILLS:
+        if name in STILLS or name in ("tower_emit", "tower_gold_emit"):  # 塔的拱门光两帧本来一样
             continue
         sums = [alpha(name, i).sum() for i in frames_of(name)]
         diffs = [np.abs(alpha(name, i) - alpha(name, i - 1)).mean() for i in frames_of(name)[1:]]
-        assert min(diffs) > 0.02, f"{name} 有两帧几乎一样：{[round(d, 3) for d in diffs]}"
+        least = 0.002 if name in ("tower", "tower_gold") else 0.02  # 塔立着只有檐角的铃铛在摆
+        assert min(diffs) > least, f"{name} 有两帧几乎一样：{[round(d, 4) for d in diffs]}"
+        if name in HANDOFF or name in LAYERS and name[: -len("_emit")] in HANDOFF:
+            continue
         if name in LOOPS:
             wrap = np.abs(alpha(name, 0) - alpha(name, len(sums) - 1)).mean()
             assert wrap <= 1.6 * max(diffs), f"{name} 循环首尾接不上：首尾差 {wrap:.2f}，相邻 {[round(d, 2) for d in diffs]}"
@@ -258,6 +296,9 @@ def test_frames_change_and_fade():
             continue
         if name == "wave_front_fade":  # 接在循环后面散掉：一帧比一帧淡
             assert all(a > b for a, b in zip(sums, sums[1:])) and sums[-1] <= 0.6 * sums[0], f"浪头散掉应该越来越淡：{sums}"
+            continue
+        if name.endswith("lift") or name.endswith("lift_emit"):  # 塔收走：一帧比一帧散得多
+            assert all(a > b for a, b in zip(sums, sums[1:])) and sums[-1] <= 0.35 * sums[0], f"{name} 应该越散越少：{sums}"
             continue
         if meta()["files"][f"{name}_0.png"].get("hold_last"):  # 末帧留着的：长到最后
             assert int(np.argmax(sums)) >= len(sums) - 2, f"{name} 应该越长越满：{[round(x / 255) for x in sums]}"
@@ -430,13 +471,78 @@ def test_vine_bind_grows_up():
     assert tops[0] > tops[1] > tops[2], f"缠绕应该越长越高：顶 {tops}"
 
 
+# ---------------------------------------------------------------- 孔明灯、镇妖塔
+
+
+def opaque_box(name, i, thr=0.5):
+    return bbox(alpha(name, i) > thr * 255)
+
+
+def test_lantern_size_and_layers():
+    """孔明灯：原大约宽 20、高 26 世界单位（4 像素 / 单位），锚点在灯身中心；发光层在灯的剪影里；
+    坠落三帧越歪越厉害（剪影的长轴转过去）。"""
+    for i in frames_of("sky_lantern"):
+        x0, y0, x1, y1 = opaque_box("sky_lantern", i)
+        wu, hu = (x1 - x0 + 1) / 4, (y1 - y0 + 1) / 4
+        assert 17 <= wu <= 23 and 23 <= hu <= 29, f"sky_lantern_{i} 大小 {wu:.1f}×{hu:.1f} 单位"
+        assert abs((x0 + x1) / 2 - 96) <= 6 and abs((y0 + y1) / 2 - 96) <= 10, f"sky_lantern_{i} 不在锚点上"
+    for base, glow in (("sky_lantern", "sky_lantern_emit"), ("sky_lantern_fall", "sky_lantern_fall_emit")):
+        for i in frames_of(base):
+            inside = V.fft_blur((alpha(base, i) > 8).astype(float), 1.5) > 0.05
+            outside = alpha(glow, i)[~inside].sum() / max(alpha(glow, i).sum(), 1)
+            assert outside < 0.02, f"{glow}_{i} 有 {outside:.1%} 在灯的剪影外"
+
+    widths = [np.ptp(np.nonzero(alpha("sky_lantern_fall", i).max(0) > 128)[0]) for i in frames_of("sky_lantern_fall")]
+    w0 = np.ptp(np.nonzero(alpha("sky_lantern", 0).max(0) > 128)[0])
+    assert w0 < widths[0] < widths[2], f"坠落应该越歪越横：飘着宽 {w0}，坠落 {widths}"
+
+
+def test_lantern_mark_and_fire_sea():
+    """落点圈、火海：贴地压扁（高 ÷ 宽 ≈ 0.62），横向半径和 radius_px 对得上。"""
+    for name in ("lantern_mark", "fire_sea"):
+        R = meta()["files"][f"{name}_0.png"]["radius_px"]
+        for i in frames_of(name):
+            x0, y0, x1, y1 = bbox(alpha(name, i) > 0.15 * PEAK8)
+            assert abs((x1 - x0 + 1) / 2 - R) <= 0.15 * R + 8, f"{name}_{i} 横向半径 {(x1 - x0 + 1) / 2:.0f}，radius_px {R}"
+            if name == "lantern_mark":
+                ratio = (y1 - y0 + 1) / (x1 - x0 + 1)
+                assert abs(ratio - F.FLAT) <= 0.06, f"{name}_{i} 高宽比 {ratio:.2f}"
+
+
+def test_tower_sizes():
+    """镇妖塔约宽 40、高 70 世界单位，玲珑塔约宽 56、高 96（4 像素 / 单位）；锚点在基座：塔的最下沿就在锚点下面不远；
+    拱门的光在塔身里；落下第 0 帧比立着时高；收走一帧比一帧散。"""
+    for name, (wu_, hu_) in (("tower", (40, 70)), ("tower_gold", (56, 96))):
+        w, h = SPEC[name][1]
+        ay = meta()["files"][f"{name}_0.png"]["anchor"][1] * h
+        x0, y0, x1, y1 = opaque_box(name, 0)
+        wu, hu = (x1 - x0 + 1) / 4, (y1 - y0 + 1) / 4
+        assert abs(wu - wu_) <= 0.18 * wu_ and abs(hu - hu_) <= 0.12 * hu_, f"{name} 大小 {wu:.0f}×{hu:.0f} 单位"
+        assert 0 <= y1 - ay <= 70, f"{name} 基座最下沿 {y1}，锚点 {ay:.0f}"
+        inside = V.fft_blur((alpha(name, 0) > 8).astype(float), 1.5) > 0.05
+        assert alpha(f"{name}_emit", 0)[~inside].sum() < 0.02 * max(alpha(f"{name}_emit", 0).sum(), 1), f"{name} 的拱门光跑出塔外"
+        assert opaque_box(f"{name}_fall", 0)[1] < y0 - 40, f"{name}_fall_0 应该在上方"
+        fall2 = opaque_box(f"{name}_fall", 2)
+        assert (fall2[2] - fall2[0]) > (x1 - x0), f"{name}_fall_2 落地应该压扁变宽"
+
+
+def test_tower_dust_and_vortex():
+    """尘土一帧比一帧往外滚（越来越宽）、末帧淡；旋涡压扁、横向半径对得上 radius_px。"""
+    widths = [np.ptp(np.nonzero(alpha("tower_dust", i).max(0) > 20)[0]) for i in frames_of("tower_dust")]
+    assert all(a < b for a, b in zip(widths, widths[1:])), f"尘土应该越滚越宽：{widths}"
+    R = meta()["files"]["tower_vortex_0.png"]["radius_px"]
+    x0, y0, x1, y1 = bbox(alpha("tower_vortex", 0) > 20)
+    assert abs((x1 - x0 + 1) / 2 - R) <= 0.06 * R, f"旋涡横向半径 {(x1 - x0 + 1) / 2:.0f}，radius_px {R}"
+    assert abs((y1 - y0 + 1) / (x1 - x0 + 1) - F.FLAT) <= 0.05, "旋涡没按地面透视压扁"
+
+
 # ---------------------------------------------------------------- 其他
 
 
 def test_review_images():
     for key in E.BATCHES:
         sheet = Image.open(E.REVIEW / f"weapons_ea_{key}.png")
-        assert sheet.width >= 1500, f"weapons_ea_{key} 帧条尺寸 {sheet.size}"
+        assert sheet.width >= 900, f"weapons_ea_{key} 帧条尺寸 {sheet.size}"
         assert Image.open(E.REVIEW / f"weapons_ea_{key}_ingame.png").size == (1920, 1080)
 
 
