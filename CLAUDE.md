@@ -83,6 +83,7 @@ Linux 编译需要：`pkg-config libasound2-dev libudev-dev libwayland-dev libxk
 - Linux 无显示环境的常规测试跳过窗口集成测试；有 Xvfb 和 Mesa lavapipe 时可运行 `WGPU_BACKEND=vulkan WGPU_FORCE_FALLBACK_ADAPTER=1 xvfb-run -a cargo test -p lantern --test smoke_test -- --ignored`，覆盖真实渲染成功、贴图缺失或损坏、字体损坏。Windows CI 自动运行这些集成测试。
 - `.github/workflows/release.yml`：
   - 推送 `v*` 标签时，打包 Linux 和 Windows 版本，发布到 GitHub Releases。
+  - 云端会话推不了标签（代理拒绝）。可以在自己电脑上推标签；也可以在网页的 Releases 页新建发布、顺带建标签（目标选 CI 全绿的提交），工作流会把安装包补上去。
   - 手动运行时只打包，产物在这次运行的 Artifacts 里。
 
 ### 协作

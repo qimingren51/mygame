@@ -37,7 +37,7 @@
      charge: Some((range: 360.0, every: 5.0, windup: 0.8, lock: 0.3, speed: 380.0, duration: 0.6, damage_mult: 2.0,
                    recover: 1.0))),
     (id: "stonelord", name: "石将", rank: Elite, movement: Chase,
-     radius: 28.0, contact_radius: Some(14.0), hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
+     radius: 28.0, contact_radius: Some(13.0), hp: 1100.0, speed: 34.0, damage: 16.0, xp: 30.0, sprite: "stonelord", eye: "#FFB46B"),
     // 九尾（docs/BALANCE.md 第 12.2 节）：生命 48000（再乘更的倍率；灯阵完整时 ×0.8）。
     // 一阶段：每 2.6 秒一圈 14 发狐火（速度 115、半径 6、伤害 14、存活 6 秒），每 7 秒召唤 6 只影妖。
     // 二阶段（60%）：离你约 200 处分出 2 个幻身，打不死、没有影子，每 3.5 秒放一圈 8 发狐火，

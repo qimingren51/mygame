@@ -333,14 +333,16 @@ art/.venv/bin/python art/post/test_fx_extras.py   # 自检 13 项（尺寸、白
 ## 逐帧特效（post/vfx_frames.py）
 
 ```bash
-art/.venv/bin/python art/post/vfx_frames.py        # → out/assets@2x/vfx_frames/，审图 review@2x/vfx_frames_<批>.png、vfx_frames_<批>_ingame.png（约 4 分钟；后面跟 b1 / b2 只画那一批）
-art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 22 项（清单、meta、颜色、四边、亮度 0.8、淡出、朝向、压扁、火往上窜、冰碎飞散、羽毛、进化、光柱、确定性、只写自己的文件、图集）；--quick 跳过确定性，--regen 强制重画
+art/.venv/bin/python art/post/vfx_frames.py        # → out/assets@2x/vfx_frames/，审图 review@2x/vfx_frames_<批>.png、vfx_frames_<批>_ingame*.png（约 7 分钟；后面跟 b1 / b2 / b3 只画那一批）
+art/.venv/bin/python art/post/test_vfx_frames.py   # 自检 35 项（清单、meta、颜色、四边、亮度 0.8、淡出、朝向、压扁、火往上窜、冰碎飞散、羽毛、进化、光柱、十种反应的颜色 / 位置 / 大小 / 动作、确定性、只写自己的文件、图集）；--quick 跳过确定性，--regen 强制重画
 ```
 
 只出 2 倍，Pillow + numpy，不用 Blender。质感会话的逐帧特效清单（`docs/FEEL.md`“逐帧特效图”一节）一批一批做：
 - 第一批：五行命中 `hit_{metal,wood,water,fire,earth}_0..4`、暴击 `crit_0..3`、刀光 `slash_0..5`、击杀墨花 `kill_ink_0..5`、冲击波 `shockwave_0..5`。
 - 第二批：火爆 `fire_burst_0..6`（384²，按 1080p 约一比一放大了清单的 256²）和它的墨烟 `fire_burst_smoke_0..1`（普通混合）、
   冰碎 `ice_shatter_0..5`、羽毛纸屑粒子 `feather_0..3`（4 种，不是动画）、进化爆发 `evolve_0..7`、进化光柱 `evolve_pillar_0..5`。
+- 第三批：十种五行反应 `react_*`（燎原、赤地、铸兵、凝霜、滋生、蒸腾、熔金、断木、裂土、淤泥），都自带颜色、不染；有范围的按反应范围
+  在 1080p 下约一比一定画布、写 `radius_px`；熔金印记循环（10 帧/秒）；能留着的写 `hold_last`。审图的 1080p 合成分两张（`_ingame`、`_ingame2`）。
 帧名 `vfx/<名字>_<帧号>`，跟 vfx 一起打包（`$A/vfx_frames`）。meta、画布、锚点和游戏里的用法见 `docs/DESIGN.md` 第 15 节“逐帧特效”。
 
 - 叠加帧在超采样的亮度场里画（笔毛纹理的飞白、干笔断续），最后软饱和到 alpha 0.8、蓝噪声抖动；可染的 RGB 恒为白。
