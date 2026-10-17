@@ -107,3 +107,9 @@
   test_ui_skin 13/13、lantern_ui 63 个通过。
 - 审图：art/out/review@2x/cards_b3_sheet.png、cards_b3_1080p.png（锐目标“重画（第 2 批）”）、icons_new_weapons.png、stats_advanced.png。
 - 剩第 4 批：新法器卡面 10 张（试渲中，l2/b4_draft.log）。
+
+### 第 4 批（新法器卡面 10 张）：已推 ff19616（2026-10-17，先 merge origin/master fcbb79b → 1c7f2ae）
+- 协调要求：镇妖塔是七层密檐塔，玲珑塔玉白石绿描金 → pagoda(dense=True, eave_trim=True)；沧浪（水墙）用按高度盖白沫的卷浪。
+- cards 页 96 帧 4096×4096；原 86 帧逐像素不变；check_atlas、lantern_ui 63 个通过。
+- 审图：art/out/review@2x/cards_b4_sheet.png、cards_b4_1080p.png（主仓库字体子集缺“罡”，审图时改用 wt 的子集字体和 subset-chars.txt）。
+- 全部任务完成：插画四批 + 锐目重画 + hud_ult_tick + 新法器图标 10 + 进阶属性图标 20。

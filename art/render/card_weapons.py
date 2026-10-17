@@ -1610,9 +1610,9 @@ def eave_build(hs_out, hs_in, h, curl=0.25, n=16, nv=8):
 
 
 def pagoda(name, *, tiers=7, hs=0.30, body_h=0.20, shrink=0.085, wall_m=None, roof_m=None, trim_m=None, window_m=None,
-           bell_m=None, loc=(0, 0, 0), rot=(0, 0, 0), index=1):
+           bell_m=None, loc=(0, 0, 0), rot=(0, 0, 0), index=1, dense=False, eave_trim=False):
     """方塔（底在 z=0）：每层一段塔身（四面各一扇窗）+ 一层翘角的檐，檐角各挂一只小铜铃；顶上塔刹（相轮几圈 + 宝珠）。
-    返回 (父物体, 塔高)。"""
+    dense=True 是密檐塔：第一层塔身高（四面一扇大门），往上各层塔身很矮、檐一层压一层。返回 (父物体, 塔高)。"""
     bpy = K._bpy()
     root = bpy.data.objects.new(name, None)
     K.link(root)
@@ -1625,17 +1625,27 @@ def pagoda(name, *, tiers=7, hs=0.30, body_h=0.20, shrink=0.085, wall_m=None, ro
         f = (1 - shrink) ** k
         half = hs * f
         bh = body_h * (1 - 0.04 * k)
+        if dense:
+            bh = body_h * 2.0 if k == 0 else body_h * 0.42
         make_obj(f"{name}_Body{k}", K.box_build(half * 2, half * 2, bh), wall_m, parent=root, loc=(0, 0, z + bh / 2), index=index,
                  smooth=False)
         for sx, sy, rz in ((0, -1, 0.0), (0, 1, 0.0), (-1, 0, math.pi / 2), (1, 0, math.pi / 2)):
-            make_obj(f"{name}_Win{k}_{sx}{sy}", K.box_build(half * 0.55, 0.012, bh * 0.55), window_m, parent=root,
+            ww, wh = (half * 0.55, bh * 0.55) if not dense or k == 0 else (half * 0.30, bh * 0.50)
+            make_obj(f"{name}_Win{k}_{sx}{sy}", K.box_build(ww, 0.012, wh), window_m, parent=root,
                      loc=(sx * (half + 0.002), sy * (half + 0.002), z + bh * 0.5), rot=(0, 0, rz), index=index, smooth=False)
         z += bh
         hs_out = half * 1.75
         hs_in = hs * (1 - shrink) ** (k + 1) * 0.98
-        eh = body_h * 0.42
+        eh = body_h * (0.30 if dense else 0.42)
         make_obj(f"{name}_Eave{k}", eave_build(hs_out, hs_in, eh, curl=0.10 * f + 0.03), roof_m, parent=root, loc=(0, 0, z), index=index)
         lift = 0.10 * f + 0.03
+        if eave_trim:  # 檐口描金：沿檐口一圈细金边（跟着四角翘）
+            rim = []
+            for (ax, ay), (bx, by) in zip(((1, -1), (1, 1), (-1, 1), (-1, -1)), ((1, 1), (-1, 1), (-1, -1), (1, -1))):
+                for t in np.linspace(0, 1, 24, endpoint=False):
+                    rim.append((hs_out * (ax + (bx - ax) * t), hs_out * (ay + (by - ay) * t), z + lift * abs(2 * t - 1) ** 4 + 0.004))
+            rim.append(rim[0])
+            make_obj(f"{name}_Rim{k}", K.tube_uv(rim, 0.007, sides=6), trim_m, parent=root, index=index)
         for sx in (-1, 1):
             for sy in (-1, 1):
                 c = (sx * hs_out * 0.99, sy * hs_out * 0.99, z + lift - 0.012)
@@ -1693,7 +1703,7 @@ def spiral_in(c, r0, r1, turns, z0, z1, phase, n=120):
 
 @scene("tower", name="镇妖塔", samples=128, grade=dict(EARTH_GRADE, exposure=1.02, bloom=0.36))
 def build_tower(draft):
-    """镇妖塔：一座七层小宝塔从天上压下来（略斜，塔底离地还有一截），每层翘角檐下挂着小铜铃；塔底下地上一圈旋涡，
+    """镇妖塔：一座七层密檐小宝塔从天上压下来（略斜，塔底离地还有一截），每层翘角檐下挂着小铜铃；塔底下地上一圈旋涡，
     几缕墨色的妖气被卷着往塔底吸，旋涡心透出一点暗紫的光。镜头低一点往上看。"""
     from mathutils import Vector  # noqa: PLC0415
 
@@ -1703,8 +1713,8 @@ def build_tower(draft):
     roof = P.mat_roof_tiles("TowerTiles", color=(0.045, 0.045, 0.05))
     trim = P.mat_bronze("TowerBronze", base=(0.30, 0.20, 0.09), patina_amt=0.6)
     window = P.mat_emit("TowerWindow", (1.0, 0.55, 0.22), 4.0)
-    root, H = pagoda("Tower", tiers=7, hs=0.36, body_h=0.24, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window, bell_m=trim,
-                     loc=(0.0, 0.0, 0.80),
+    root, H = pagoda("Tower", tiers=7, hs=0.36, body_h=0.26, shrink=0.07, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window,
+                     bell_m=trim, dense=True, loc=(0.0, 0.0, 0.80),
                      rot=(math.radians(-6), math.radians(5), math.radians(28)))
     crack = K.np_image("crack_tower", P.crack_texture(2048, rng, n_main=10, reach=0.30, width=3.0))
     ground_plane("Ground", P.mat_ground_crack("GroundM", crack, base=(0.016, 0.014, 0.012), glow=((0.55, 0.25, 0.85), 0.8),
@@ -1739,18 +1749,18 @@ def bg_tower(P_, h, w, rng, k):
 
 @scene("tower_evo", name="玲珑塔", samples=128, grade=dict(WARM_GRADE, exposure=1.0, bloom=0.42, sat=1.04))
 def build_tower_evo(draft):
-    """玲珑塔：一座高大的九层玲珑宝塔悬在半空，檐是鎏金的，塔身每扇窗都透出金光；四面的小妖被吸向塔身，
+    """玲珑塔：一座高大的九层密檐玲珑宝塔悬在半空，玉白的塔身、石绿的琉璃檐、檐口描金，每扇窗都透出金光；四面的小妖被吸向塔身，
     身后拖着一道道往塔去的气痕。镜头往上看，塔顶在画面上方中间。"""
     from mathutils import Vector  # noqa: PLC0415
 
     sky_gradient(lin("#0A0806"), lin("#3A2A16"), 0.6, ground=lin("#050403"))
     rng = np.random.default_rng(107)
-    wall = K.mat_lacquer("GoldWall", color=(0.16, 0.06, 0.03), rough=0.4, coat=0.5)
-    roof = K.mat_gold("GoldRoof", worn=0.35)
+    wall = P.mat_stone("JadeWall", color=(0.70, 0.74, 0.66), rough=0.35, scale=6.0, cavity=0.3, bump=0.2)
+    roof = P.mat_roof_tiles("JadeTiles", color=(0.06, 0.30, 0.22))
     trim = K.mat_gold("GoldTrim", worn=0.2)
-    window = P.mat_emit("GoldWindow", (1.0, 0.70, 0.30), 7.0)
-    root, H = pagoda("Tower", tiers=9, hs=0.34, body_h=0.21, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window, bell_m=trim,
-                     loc=(0.0, 0.0, -1.10), rot=(0, 0, math.radians(30)))
+    window = P.mat_emit("GoldWindow", (1.0, 0.72, 0.32), 7.0)
+    root, H = pagoda("Tower", tiers=9, hs=0.34, body_h=0.24, shrink=0.065, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window,
+                     bell_m=trim, dense=True, eave_trim=True, loc=(0.0, 0.0, -1.10), rot=(0, 0, math.radians(30)))
     K.point_light("TowerCore", (0.0, -0.3, 0.2), 200.0, radius=0.6, color=(1.0, 0.68, 0.28))
     # 四面的小妖被吸过来：每只身后一道往塔去的气痕
     for i in range(10):
@@ -1766,7 +1776,7 @@ def build_tower_evo(draft):
                  K.mat_wind(f"TrailM{i}", strength=1.3, seed=i * 1.3, color=(1.0, 0.78, 0.45)), index=3)
     K.area_light("Rim", (-3.0, 4.0, 3.0), (0, 0, 0.4), 600.0, 2.5, color=(0.62, 0.72, 1.0))
     K.area_light("Front", (1.5, -5.0, 0.5), (0, 0, 0.4), 60.0, 3.0, color=(1.0, 0.82, 0.60))
-    K.camera((0.2, -5.4, -0.55), (0.0, 0.0, 0.66), lens=30.0, fstop=8.0, focus=5.4)
+    K.camera((0.2, -4.1, -0.80), (0.0, 0.0, -0.02), lens=30.0, fstop=8.0, focus=4.1)
     _ = (root, H)
     return {"light": "warm"}
 
