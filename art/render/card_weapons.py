@@ -1763,7 +1763,7 @@ def build_bell_mut(draft):
         if n_cl >= 26:
             break
     # 圈边的碎冰（冻死的妖物碎成的冰块）：毛玻璃似的白冰
-    ice = K.mat_ice("IceChunk", rough=0.45, tint=(0.80, 0.88, 0.98))
+    ice = K.mat_snow("IceChunk")
     for k in range(26):
         a = rng.uniform(0, 2 * math.pi)
         r = rng.uniform(RF - 0.15, RF + 0.35)
@@ -1794,7 +1794,7 @@ def bg_bell_mut(P_, h, w, rng, k):
 # ====================================================================== 异化：铁鹤（纸鹤）
 
 
-def mat_cast_iron(name, tint=(0.40, 0.42, 0.45)):
+def mat_cast_iron(name, tint=(0.30, 0.31, 0.33)):
     """熟铁片：冷灰的金属，锤打的浅坑（Voronoi 凹凸），折缝和背光处泛一点铁锈（AO），面上细的磨痕。"""
     M = K.Mat(name)
     m = M.math
@@ -1807,8 +1807,8 @@ def mat_cast_iron(name, tint=(0.40, 0.42, 0.45)):
     cav = M.maprange(ao.outputs["AO"], 0.85, 0.35)
     rust = m("MULTIPLY", cav, M.maprange(n2.outputs["Fac"], 0.42, 0.62))
     col = M.mix(rust, (*tint, 1.0), (0.16, 0.075, 0.04, 1.0))
-    rough = M.maprange(n1.outputs["Fac"], 0.3, 0.7, 0.24, 0.42)
-    rough = m("ADD", rough, m("MULTIPLY", rust, 0.4))
+    rough = M.maprange(n1.outputs["Fac"], 0.3, 0.7, 0.32, 0.50)
+    rough = m("ADD", rough, m("MULTIPLY", rust, 0.35))
     nrm = M.bump(m("ADD", m("MULTIPLY", vor.outputs["Distance"], 0.6), m("MULTIPLY", n1.outputs["Fac"], 0.2)), strength=0.18, distance=0.002)
     bsdf = M.principled(Base_Color=col, Metallic=m("SUBTRACT", 1.0, m("MULTIPLY", rust, 0.7)), Roughness=rough, Normal=nrm)
     return M.surface(bsdf.outputs[0])
@@ -1817,7 +1817,7 @@ def mat_cast_iron(name, tint=(0.40, 0.42, 0.45)):
 @scene("crane_mut", name="铁鹤", samples=128, grade=dict(COLD_GRADE, exposure=1.04, bloom=0.34, sat=0.92))
 def build_crane_mut(draft):
     """铁鹤：纸鹤的样子折成了铁（同纸鹤卡的姿势：翅膀举成 V、鹤头朝右下一扑），身子是冷灰的铁片折的，
-    两翼换成一扇扇锋利的铁羽，从肩往外一片压一片排开；右翼前三片铁羽已经射了出去，拖着冷白的气痕。月光从后上方打轮廓。"""
+    两翼各是一扇七片锋利的铁羽（从肩上扇形排开，整扇还是纸鹤的三角翅）；三片小铁羽从右翼射出去，拖着冷白的气痕。月光从后上方打轮廓。"""
     from mathutils import Euler, Matrix, Vector  # noqa: PLC0415
 
     import card_passives as CP
@@ -1830,45 +1830,38 @@ def build_crane_mut(draft):
     body.rotation_euler = Euler((math.radians(8), math.radians(14), math.radians(-20)), "XYZ")
     K._bpy().context.view_layer.update()
     Mw = body.matrix_world.copy()
-    feather = lambda L, W: P.blade_build(L, W, 0.0035, tip=0.34, taper=0.45)  # noqa: E731
+    feather = lambda L, W: P.blade_build(L, W, 0.004, tip=0.42, taper=0.55)  # noqa: E731
     shots = []
     for sy in (1, -1):
         root = Vector((0.0, 0.012 * sy, 0.032))
-        v = (Vector((-0.08, 0.33 * sy, 0.385)) - root).normalized()  # 肩 → 翅尖（同纸鹤翅的方向）
+        tipv = Vector((-0.08, 0.33 * sy, 0.385))  # 纸鹤的翅尖（同纸鹤卡）
+        v = (tipv - root).normalized()
         u = Vector((-1.0, 0.0, 0.0))
         nw = u.cross(v).normalized() * sy
         u = (u - v * u.dot(v)).normalized()
-        n = 8
-        # 翅骨：一根扁铁条从肩伸到最外一片铁羽的根
-        arm = [tuple(root + v * (0.25 * t)) for t in np.linspace(0, 1, 10)]
-        make_obj(f"Arm{sy}", K.tube_uv(arm, 0.007, sides=6, radius_fn=lambda t: 1.0 - 0.4 * t, flat=0.5), iron, index=1, smooth=False)
-        ob = K._bpy().data.objects[f"Arm{sy}"]
-        ob.matrix_world = Mw @ ob.matrix_world
-        for k in range(n):
-            s_ = k / (n - 1)
-            att = root + v * (0.03 + 0.22 * s_)
-            phi = math.radians(12 + 80 * s_ ** 0.85)
-            d = (u * math.cos(phi) + v * math.sin(phi)).normalized()
-            L = 0.15 + 0.13 * s_ ** 1.2
+        span = (tipv - root).length
+        # 每翼七片宽铁羽，从肩上扇形排开：最前一片指向翅尖、最长，往后一片比一片短（整扇的轮廓还是纸鹤的三角翅）
+        for k in range(7):
+            phi = math.radians(3 + 12 * k)
+            d = (v * math.cos(phi) + u * math.sin(phi)).normalized()
+            L = span * (1.04 - 0.085 * k)
             wd = nw.cross(d).normalized()
-            Mf = Matrix.Translation(att + nw * (0.0025 * k)) @ CP.frame_quat(d, wd).to_matrix().to_4x4()
-            if sy < 0 and k >= n - 3:
-                shots.append((Mw @ Mf, L))  # 右翼最外三片射出去了
-                continue
-            fo = make_obj(f"Feather{sy}_{k}", feather(L, 0.044), iron, index=1, smooth=False)
+            Mf = Matrix.Translation(root + nw * (0.003 * k)) @ CP.frame_quat(d, wd).to_matrix().to_4x4()
+            fo = make_obj(f"Feather{sy}_{k}", feather(L, 0.070 - 0.004 * k), iron, index=1, smooth=False)
             fo.matrix_world = Mw @ Mf
-    # 射出去的铁羽：顺着各自的方向往右前方飞出一段，拖着冷白的气痕
+            if sy < 0 and k in (1, 3, 5):
+                shots.append((Mw @ Mf, L * 0.45))
+    # 射出去的铁羽：三片小的从右翼飞向右下方，拖着冷白的气痕
     for k, (Mf, L) in enumerate(shots):
         d0 = (Mf.to_3x3() @ Vector((1, 0, 0))).normalized()
-        fly = (d0 + Vector((0.9, -0.5, -0.35))).normalized()
-        p0 = Mf.translation
-        p1 = p0 + fly * (0.30 + 0.16 * k)
+        fly = (d0 * 0.3 + Vector((0.9, -0.5, -0.45))).normalized()
+        p1 = Mf @ Vector((L * 1.6, 0, 0)) + fly * (0.22 + 0.12 * k)
         q = CP.frame_quat(fly, Mf.to_3x3() @ Vector((0, 0, 1)))
-        fo = make_obj(f"Shot{k}", feather(L, 0.044), iron, index=1, smooth=False)
+        fo = make_obj(f"Shot{k}", feather(L, 0.040), iron, index=1, smooth=False)
         fo.rotation_mode = "QUATERNION"
         fo.location, fo.rotation_quaternion = tuple(p1), q
-        pts = [tuple(p1 - fly * (0.42 * t) + Vector((0, 0, 0.02 * math.sin(3 * t + k)))) for t in np.linspace(0, 1, 30)]
-        make_obj(f"Trail{k}", K.ribbon_uv(pts, 0.022, width_fn=lambda t: 1 - 0.85 * t),
+        pts = [tuple(p1 - fly * (0.40 * t) + Vector((0, 0, 0.015 * math.sin(3 * t + k)))) for t in np.linspace(0, 1, 30)]
+        make_obj(f"Trail{k}", K.ribbon_uv(pts, 0.020, width_fn=lambda t: 1 - 0.85 * t),
                  K.mat_wind(f"TrailM{k}", strength=1.5, seed=k * 1.7, color=(0.82, 0.90, 1.0)), index=3)
     # 几星打铁迸出的火花（冷光里一点暖）
     ember = K.mat_ember("Ember")
@@ -1877,7 +1870,7 @@ def build_crane_mut(draft):
         make_obj(f"Spark{k}", K.ico_cloud([(0, 0, 0)], [rng.uniform(0.0012, 0.0022)], 1), ember, loc=tuple(p), index=3)
     K.area_light("Moon", (-0.9, 1.0, 1.4), (0, 0, 0.1), 90.0, 1.4, color=(0.80, 0.88, 1.0))
     K.area_light("Rim", (1.1, 0.9, 0.4), (0, 0, 0.1), 40.0, 0.8, color=(0.66, 0.78, 1.0))
-    K.area_light("Sky", (0.0, -0.6, 1.6), (0, 0, 0.1), 30.0, 2.0, color=(0.70, 0.78, 0.95))
+    K.area_light("Sky", (0.0, -0.6, 1.6), (0, 0, 0.1), 10.0, 2.0, color=(0.70, 0.78, 0.95))
     K.area_light("Front", (-0.5, -1.5, 0.2), (0, 0, 0.1), 8.0, 1.2, color=(0.70, 0.76, 0.95))
     K.camera((0.05, -1.50, 0.24), (0.02, 0.0, 0.09), lens=50.0, fstop=4.0, focus=1.48)
     return {"light": "cold"}
@@ -1953,7 +1946,7 @@ def build_seal_mut(draft):
     bamboo = mat_bamboo_green("Bamboo")
     # 竹：从地下斜着冲上来（微弯），越往上略细
     R = 0.40
-    base, top = Vector((-0.20, 0.50, -0.8)), Vector((0.30, 0.30, 3.05))
+    base, top = Vector((-0.20, 0.50, -0.8)), Vector((0.30, 0.30, 3.45))
     axis = (top - base).normalized()
 
     def cpt(t):
@@ -2004,9 +1997,16 @@ def build_seal_mut(draft):
         sol = ob.modifiers.new("Sol", "SOLIDIFY")
         sol.thickness = 0.008
     # 石印：被竹梢顶住一角，往后翻，印面朝下、朝镜头斜着露出来
+    seal_at = top + Vector((-0.35, 0.10, 0.75))
     P.seal_block("Seal", size=1.7, height=1.8, stone_m=stone,
                  face_m=P.mat_seal_face("SealFace", face_img, stone=(0.05, 0.055, 0.05), paste=(0.40, 0.03, 0.02)),
-                 loc=tuple(top + Vector((-0.30, 0.10, 0.30))), rot=(math.radians(-36), math.radians(22), math.radians(-14)), index=1)
+                 loc=tuple(seal_at), rot=(math.radians(-50), math.radians(32), math.radians(-16)), index=1)
+    chip = P.mat_stone("Chip", color=(0.12, 0.13, 0.12), scale=8.0)
+    for i in range(16):  # 竹梢顶上去那一下，印角迸出的碎石
+        p = top + Vector((rng.normal(-0.1, 0.45), rng.normal(0.0, 0.3), rng.uniform(0.15, 0.9)))
+        ob = make_obj(f"Chip{i}", K.ico_cloud([(0, 0, 0)], [rng.uniform(0.025, 0.06)], 1), chip, loc=tuple(p), index=2, smooth=False)
+        ob.scale = tuple(rng.uniform(0.6, 1.4, 3))
+        ob.rotation_euler = tuple(rng.uniform(0, 6.28, 3))
     crack = K.np_image("crack_mut", P.crack_texture(2048, rng, n_main=12, reach=0.30, width=4.0))
     ground_plane("Ground", P.mat_ground_crack("GroundM", crack, base=(0.014, 0.012, 0.010), glow=((0.55, 0.85, 0.35), 0.35),
                                               uv_from_object=(14.0, 14.0), fade=2.5, spec=0.08), size=14.0, loc=(-0.2, 0.5, 0), index=0)
@@ -2039,7 +2039,7 @@ def build_seal_mut(draft):
     K.area_light("Rim", (5.0, 5.0, 3.0), (0, 0, 2.0), 320.0, 2.0, color=(0.62, 0.72, 1.0))
     K.area_light("Front", (-2.5, -6.5, 2.0), (0, 0, 1.6), 140.0, 4.0, color=(0.70, 0.76, 0.95))
     K.area_light("Under", (0.3, -2.2, 0.3), tuple(top + Vector((-0.3, 0.1, 0.3))), 90.0, 2.0, color=(1.0, 0.78, 0.55))
-    K.camera((0.5, -6.9, 0.50), (0.02, 0.3, 2.05), lens=28.0, fstop=8.0, focus=6.9)
+    K.camera((0.5, -7.2, 0.50), (0.02, 0.3, 2.35), lens=28.0, fstop=8.0, focus=7.2)
     return {"light": "earth"}
 
 
@@ -2047,10 +2047,8 @@ def build_seal_mut(draft):
 def bg_seal_mut(P_, h, w, rng, k):
     P_.fill_grad("#0D0F16", "#1A1714", cloud=0.12)
     K.bg_glow(P_, 0.50, 0.55, 0.55, 0.35, "#4E5A3A", 0.26)
-    K.bg_mountains(P_, [(0.80, [(0.12, 0.12, 0.12, 0.12), (0.34, 0.07, 0.12, 0.10), (0.80, 0.14, 0.12, 0.14), (0.97, 0.08, 0.10, 0.10)],
-                         "#2A2622", 0.7, 0.10, 6.0, "#7C6A56")], rng, k)
     bg_clouds(P_, rng, k, [(0.18, 0.03, 0.25, 0.80), (0.26, 0.02, 0.50, 0.95)], "#5A5248", 0.18)
-    K.bg_mist(P_, 0.80, 0.04, "#8C7A64", 0.18, rng, k)
+    K.bg_mist(P_, 0.80, 0.05, "#8C7A64", 0.20, rng, k)
     K.bg_ink(P_, [(0.02, 0.06, 0.26, 0.18, 0.2), (0.98, 0.08, 0.24, 0.18, -0.4)], 0.45)
 
 
@@ -2270,13 +2268,13 @@ def low_spec(mat, level=0.12):
 
 @scene("sword_grove", name="万剑冢", samples=128, grade=dict(COLD_GRADE, exposure=1.05, bloom=0.32), fog=(8.0, 18.0))
 def build_sword_grove(draft):
-    """万剑冢：一座土冢上插满了剑，剑柄高低错落像一片竹林；冢后一轮满月，剑林逆着月光，剑刃镶一线冷光，
-    长长的剑影朝镜头斜过来；近处左右几把大剑（剑格的金、剑穗的红一点亮）把画面框住。镜头贴地平看。"""
+    """万剑冢：一片插在地里的剑林，剑都比人高，剑柄高低错落像一片竹林，往远处一直插到土冢上；剑林后一轮满月，
+    剑刃逆光镶一线冷光，长长的剑影朝镜头斜过来；近处左右两把大剑（剑格的金、剑穗的红）把画面框住。镜头贴地往上看。"""
     from mathutils import Euler, Vector  # noqa: PLC0415
 
     sky_gradient(lin("#05080F"), lin("#33496C"), 0.9, ground=lin("#04060A"))
     rng = np.random.default_rng(41)
-    MC, MR, MH = Vector((0.0, 8.0)), (3.4, 2.6), 1.15  # 土冢：中心、半径、高
+    MC, MR, MH = Vector((0.0, 11.0)), (3.6, 2.4), 0.8  # 土冢（远处，作背景）：中心、半径、高
 
     def ground_z(x, y):
         return MH * math.exp(-(((x - MC.x) / MR[0]) ** 2 + ((y - MC.y) / MR[1]) ** 2)) + 0.04 * math.sin(x * 1.7 + y * 0.9)
@@ -2305,30 +2303,30 @@ def build_sword_grove(draft):
                 scale=scale, index=1, tassel=rng.random() < tassel_p)
         n[0] += 1
 
-    # 冢上的剑林：在土冢的椭圆里撒点（互相隔开），越靠冢顶越密
+    # 剑林：镜头前一片梯形的地上撒点（互相隔开），剑都比人高，剑柄高低错落；冢上再插一圈小的
     pts = []
-    for _ in range(4000):
-        u, v = rng.uniform(-1, 1, 2)
-        if u * u + v * v > 1.0:
-            continue
-        x, y = MC.x + u * MR[0] * 1.15, MC.y + v * MR[1] * 1.15
-        if any((x - a) ** 2 + (y - b) ** 2 < 0.36 ** 2 for a, b in pts):
+    for _ in range(6000):
+        y = rng.uniform(1.2, 9.0)
+        x = rng.uniform(-1, 1) * (0.6 + 0.62 * y)
+        if any((x - a) ** 2 + (y - b) ** 2 < (0.42 + 0.05 * y) ** 2 for a, b in pts):
             continue
         pts.append((x, y))
-        if len(pts) >= 70:
+        if len(pts) >= 64:
             break
     for x, y in pts:
-        plant(x, y, rng.uniform(0.05, 0.50), scale=rng.uniform(0.9, 1.25))
-    # 冢前散着的剑，和近处框住画面的几把大剑（斜插得厉害些）
-    for x, y in ((-2.6, 4.2), (2.4, 4.6), (-1.2, 5.0), (1.0, 4.4), (3.6, 6.0), (-3.8, 6.4)):
-        plant(x, y, rng.uniform(0.1, 0.4), tilt_sd=0.18)
-    for x, y, sc in ((-1.15, 1.5, 1.05), (1.25, 1.9, 1.0), (-2.0, 2.8, 1.0), (2.3, 3.0, 1.1)):
-        plant(x, y, rng.uniform(0.15, 0.30), tilt_sd=0.20, scale=sc, tassel_p=0.8)
+        plant(x, y, rng.uniform(0.05, 0.45), tilt_sd=0.07, scale=rng.uniform(1.5, 2.4), tassel_p=0.5)
+    for _ in range(40):
+        u, v = rng.uniform(-1, 1, 2)
+        if u * u + v * v < 1.0:
+            plant(MC.x + u * MR[0], MC.y + v * MR[1], rng.uniform(0.1, 0.5), scale=rng.uniform(1.0, 1.5), tassel_p=0.2)
+    # 近处框住画面的两把大剑（斜插）
+    for x, y, sc in ((-1.05, 0.95, 2.4), (1.15, 1.10, 2.3)):
+        plant(x, y, 0.25, tilt_sd=0.22, scale=sc, tassel_p=1.0)
     # 月光从冢后打来（略偏右），剑影朝镜头、往左斜
     K.sun_light("Moon", (-0.35, -1.0, -0.42), 2.2, angle_deg=0.8, color=(0.66, 0.78, 1.0))
     K.area_light("Front", (1.5, -4.0, 1.8), (0, 3.0, 0.6), 50.0, 4.0, color=(0.60, 0.72, 1.0))
     K.area_light("Glint", (0.5, 16.0, 2.6), (0, 5.0, 1.0), 900.0, 3.0, color=(0.70, 0.82, 1.0))
-    K.camera((0.25, -1.3, 0.50), (0.0, 6.0, 0.62), lens=30.0, fstop=8.0, focus=4.0)
+    K.camera((0.0, -0.7, 0.32), (0.0, 5.0, 1.30), lens=24.0, fstop=8.0, focus=3.0)
     return {"light": "cold"}
 
 

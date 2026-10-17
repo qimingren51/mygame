@@ -47,18 +47,11 @@
   每做完一个阶段写进本文件；正式渲染照旧拿渲染锁。
 - master 现在 cc2112f（含第 1 批 1d4ba49）；莲子定为 lotus（代码找 ui/icon_lotus、ui/card_lotus）。
 
-### 第 2 批（17 门心法）：正式渲染中
-- 17 张全部试渲过并定稿（card_passives.py）。正式渲染：回春、寒意、长明、炉心、磐石、厚德、载物、引魂、静心 已出；
-  第一个后台任务到时被停，剩下 灯芯、迅锋、剑意、聚魂、折纸、锐目、轻功 重开（scratchpad/l2/b2_final2.log）。
-- 疾行是前任 10-16 的定稿（card_art.py 里），缓存 _card_tmp/jixing.npz 还在；打包前 card_art.py --post jixing 放回 ui_cards。
-- 协调追加（跟第 2 批一起推）：hud_ult_tick 暗格提亮——wt 里 ui_lacquer.make_ult_tick("off") 改了（深褐底 #4A3924、旧金边 #A88A52），
-  新图已拷进 wt/assets/atlas/skin/hud_ult_tick.png（名字、尺寸不变）；wt 里 ui_skin.py + test_ui_skin.py 13/13；
-  对比图 scratchpad/l2/tick_cmp.png、tick_cmp720.png。主仓库的 ui_lacquer.py 已同步。wt 已 merge origin/master（a9c5a0e，含 88c0171）。
-- 莲子：先按 ui/card_lotus 画，协调在等架构定。
-- 协调追加（卡面插画几批之后做）：进阶属性图标 15–20 个，帧名 ui/stat_<icon>，64²，cards 页，和现有 19 个同风格，20/32px 认得出；
-  读 assets/data/stat_labels.ron 挑（击退、灼烧、冰冻、减速、弹速、持续、反应、照见圈、照见易伤、灯光、灯焰带、燃灯充能、闪避、魂火、
-  护盾、治疗、灯油、铜钱……），回报列“属性 → icon 名”表（架构照表在 stat_labels.ron 加 icon，有测试查图集）。
-
+### 第 2 批（17 门心法）：已推 847db87（2026-10-17，先 merge origin/master cc2112f → 0ccbab2）
+- 17 张正式渲染完（疾行用前任缓存 --post 重出）；cards 页 46 帧 4096×2048；原 29 帧逐像素不变，其余 186 个文件逐字节不变；
+  check_atlas 通过；lantern_ui lib 测试 63 个通过（CARGO_TARGET_DIR 借主仓库的 target）；test_ui_skin 13/13。
+- 同一提交带上 hud_ult_tick 暗格提亮。审图：art/out/review@2x/cards_b2_sheet.png、cards_b2_1080p.png。
+- 省额度的审图工具：scratchpad/l2/thumbs.py（只拼 1 倍缩略图，--draft 读试渲）。
 
 ### 第 3 批（5 异化 + 3 合璧 + 莲子、灯油）：场景代码改了一轮（还没推）
 - 第一轮试渲都不行，已重写：冰火两重天（冷暖两份火材质、霜纸带墨字、灯里冷暖两盏光分开、灯顶白汽团）——第二轮试渲已过；

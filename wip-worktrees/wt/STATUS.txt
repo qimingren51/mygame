@@ -1,9 +1,0 @@
-branch: playtest-r1-ui-lacquer
-base: 0ccbab2ccfe6ce767adf2e92cbfb9000a47ac068
- M art/post/ui_lacquer.py
- M art/render/card_props.py
- M art/render/card_weapons.py
- M assets/atlas/cards.json
- M assets/atlas/cards.png
- M assets/atlas/skin/hud_ult_tick.png
-?? art/render/card_passives.py
