@@ -101,16 +101,6 @@ art/.venv/bin/python art/post/test_vfx_textures.py   # 自检（尺寸、锚点�
 
 名字、尺寸、锚点与 `src/render/placeholders.ts` 的占位图一一对应。PNG 都是直通（非预乘）alpha，白色贴图在游戏里染色。
 
-**月夜（第 1 轮试玩，只在 2 倍；1 倍网页版的产物冻结、逐字节不变）**：`vfx/` 追加 `light_pool`（主角灯笼专用的光照池：0.4R 内平的 1.0，
-外圈半个余弦收到 0；其余光源仍用 `light`）；2 倍的 `ground/paper` 换成月夜版宣纸（亮度标准差 0.040，均值同第一版）；
-`grass_0..3`、`leaves_0..1`、`pebbles_0..1`、`qq_bamboo_leaves_0..2`、`qq_moss_0..1`、`qq_fox_tracks` 在生成处调浓一次（对纸面的 L* 反差目标 +12%）。
-候选和对比图（另两种灯光、另一种纸、1920×1080 模拟画面）：
-
-```bash
-art/.venv/bin/python art/post/moon_textures.py        # → out/moon/、review@2x/moon_compare.png、moon_light_curves.png
-art/.venv/bin/python art/post/test_moon_textures.py   # 管线产物 = 候选、只调浓一次、图集里也是这些
-```
-
 ## 法器、法术特效与拾取物贴图（post/weapon_textures.py）
 
 同样只用 Pillow + numpy，笔刷、噪声、直通 alpha 输出等工具直接复用 `vfx_textures.py`（只 import，不改它的产物）。
@@ -188,45 +178,6 @@ mkdir -p assets/atlas/skin && cp art/out/skin/* assets/atlas/skin/
 
 只给桌面版用，按 1080p 逻辑像素的 2 倍画，与 `LANTERN_ART_DENSITY` 无关。`ui_skin.nine_slice()` 按 Bevy `TextureSlicer` 的规则切图，审图和样张都用它。
 格式和 Bevy 端的用法见 `docs/DESIGN.md` 第 15 节。
-
-重新生成时，panel_dark、overlay_vignette、pill、pip、pip_on、toast、toast_big、menu_hl 和仓库里的有细微差别（生成器早就有的漂移，master 上的脚本也一样）。
-只换改过的件时按名字拷，不要整个目录覆盖。
-
-### 黑漆描金：升级卡与状态栏（post/ui_lacquer.py）
-
-试玩第 1 轮选定，升级卡和状态栏整套用黑漆描金。`ui_skin.py` 从 `ui_lacquer.py` 取这些件，每件的显示尺寸写在 skin.json 的 note 里：
-
-- 卡框 `card_fan/ling/xuan/tian/yi/he`：600×920（显示 300×460），切片 64，中间和四边平铺，漆面按 64 像素的周期做成无缝；`card_focus`：624×944。
-- 卡上的字要用纸色或淡金（skin.json 的 `text` 是 `#ede4cf`），不能再用墨色。
-- 状态栏 `hud_portrait`：208²，中间直径 156 的窗口透明，主角胸像画在下面；`hud_ult_tick`、`hud_ult_tick_on`、`hud_ult_tick_full`：34×20，十二格绕头像章；
-  `hud_level_seal`：60²；`hud_hp_track`：256×60；`hud_xp_track`：128×20；`bar_fill_trail`：掉血残影。
-- 法器格 `slot_l*`：128²（显示 64）；心法格 `slot_s*`：88²（显示 44）。`bar_track`、`bar_fill_hp/xp/shield`、`chip_dark` 也换成了漆面。
-
-```bash
-art/.venv/bin/python art/post/ui_lacquer.py   # 数值图标 → out/assets@2x/ui_stats/（19 张 64²）；审图 out/review@2x/lacquer_ui_review.png（约 1 分钟）
-art/.venv/bin/python art/post/pack_atlas.py --name cards --no-trim --out assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
-```
-
-数值图标 `ui/stat_<键>`、`ui/stat_group_<组>` 和卡面插画 `ui/card_<id>` 打在单独的 `cards` 页，`ui` 页不动。
-帧名仍以 `ui/` 开头，游戏会按名字在所有页里找。数值图标是黑漆小圆章加金线符号，不染色，显示 32（卡片）和 20（属性格）。
-
-### 卡面插画（render/card_art.py）
-
-升级卡上半张的插画：一件物件的特写，Blender（Cycles CPU）精细材质，配夜色水墨底。题材见 `docs/LORE-TEXT.md` 第 7 节。
-
-- 原图 480×360（4:3，不透明、满幅），界面铺满 268×201 的插画区、按圆角 6 裁切；左上压五行印、右上压品阶签，两个上角（原图约 70×70）不放主体。
-- 帧名：法器 `ui/card_<法器 id>`、`_evo`（进化）、`_mut`（异化）；合璧 `ui/card_<合璧 id>`；心法 `ui/card_<心法 id>`；补给 `ui/card_lotus`、`ui/card_oil`。
-- 场景：`card_art.py`（渲染、后期、样张三张）、`card_weapons.py`（法器、合璧）、`card_passives.py`（心法）；共用的道具和材质在 `card_props.py`。
-  每张用 `@scene` 注册 3D 场景、`@background` 注册水墨底；渲染缓存在 `out/_card_tmp/`，后期只用 numpy / Pillow。
-- 最终渲染包在 `bstyle.render_lock()` 里（几个代理同时出图时排队）。一张 960×720、128 采样约 0.5–2 分钟。
-
-```bash
-art/.venv/bin/python art/render/card_art.py sword --draft     # 半分辨率、少采样试渲 → out/_card_tmp/draft_card_art_sword.png
-art/.venv/bin/python art/render/card_art.py sword sword_evo    # 正式渲染 + 后期 → out/review@2x/card_art_<id>.png 和 out/assets@2x/ui_cards/card_<id>.png
-art/.venv/bin/python art/render/card_art.py --post sword       # 只重做后期（读缓存）
-```
-
-打包时 `ui_cards` 和 `ui_stats` 一起打进 `cards` 页（上面的命令）。
 
 ## 标题画面与主角头像（render/portrait.py、post/title_screen.py）
 

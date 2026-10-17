@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""moon_textures.py（“月夜”改版的候选与对比）和管线里月夜那几样的自检：纯 assert，不依赖 pytest。只测 2 倍（桌面版）。
+"""moon_textures.py（“月夜”改版的候选贴图）的自检：纯 assert，不依赖 pytest。只测 2 倍（桌面版）。
 
-管线（vfx_textures.py 2 倍）的产物缺失或过期时先跑一遍管线；moon_textures 的产物缺失或过期时再重新生成（约 3 分钟）。
---regen 强制重新生成 moon_textures 的产物，并核对它只写了 art/out/moon/ 和 review@2x/moon_*，
+产物缺失或比脚本旧时先重新生成（约 1.5 分钟）；--regen 强制重新生成，并核对只写了 art/out/moon/ 和 review@2x/moon_*，
 正式产物（assets/atlas/、art/out/assets@2x/vfx、ground）一个字节都没动。
-另外核对：管线里的 vfx/light_pool = light_a，2 倍的 ground/paper = paper_a，调浓的 14 帧 = 原图调浓一次（不重复压），
-别的地面帧没被调；打包过的图集（assets/atlas）里也是这些。
 
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/test_moon_textures.py
@@ -41,7 +38,7 @@ SNAPSHOT: dict[str, tuple[int, int]] = {}
 def outputs() -> list[Path]:
     out = [M.OUT / f"light_{k}.png" for k in LIGHTS] + [M.OUT / f"light_{k}_curve.png" for k in LIGHTS]
     out += [M.OUT / f"paper_{k}.png" for k in PAPERS] + [M.OUT / f"paper_{k}_tile2x2.png" for k in PAPERS]
-    out += [M.OUT / "ground_compare.png", M.OUT / "moon_report.json"]
+    out += [M.OUT_GROUND / f"{n}.png" for n in M.BOOST_FRAMES] + [M.OUT / "ground_compare.png", M.OUT / "moon_report.json"]
     out += [M.OUT / f"preview_{k}.png" for k in PANELS]
     out += [M.REVIEW / "moon_compare.png", M.REVIEW / "moon_light_curves.png"]
     return out
@@ -81,20 +78,8 @@ def regenerate() -> None:
         Path.write_text = orig_write  # type: ignore[method-assign]
 
 
-def ensure_pipeline() -> None:
-    """管线 2 倍的 vfx/、ground/ 缺失或比脚本旧时，先跑一遍 vfx_textures（这是管线自己的产物，不算 moon_textures 写的）。"""
-    newest = max((HERE / n).stat().st_mtime for n in ("vfx_textures.py", "ground_decor.py", "weapon_textures.py"))
-    newest = max(newest, (V.ART / "style" / "style.py").stat().st_mtime)
-    need = [V.VFX_DIR / "light_pool.png", V.VFX_DIR / "meta.json", V.GROUND_DIR / "paper.png", V.GROUND_DIR / "meta.json"]
-    need += [V.GROUND_DIR / f"{n}.png" for n in M.DECOR_NAMES]
-    if any(not p.exists() or p.stat().st_mtime < newest for p in need):
-        print("先跑管线（vfx_textures.py，2 倍）……")
-        V.main()
-
-
 def ensure_outputs(force: bool) -> None:
-    ensure_pipeline()
-    newest = max((HERE / n).stat().st_mtime for n in ("moon_textures.py", "vfx_textures.py", "ground_decor.py"))
+    newest = max((HERE / n).stat().st_mtime for n in ("moon_textures.py", "vfx_textures.py"))
     newest = max(newest, (V.ART / "style" / "style.py").stat().st_mtime)
     stale = [p for p in outputs() if not p.exists() or p.stat().st_mtime < newest]
     if force or stale:
@@ -189,7 +174,7 @@ def test_light_a_matches_spec():
         assert abs(got - want) < 0.005, f"light_a 在 {r}R 是 {got:.3f}，应约 {want}"
     assert float(c(np.array(1.0))) == 0.0
     r = np.linspace(0, 1, 2001)
-    base = V.raised_cos(r, 0.4, 1.0)
+    base = M.raised_cos(r, 0.4, 1.0)
     assert np.allclose(c(r)[r <= 0.97], base[r <= 0.97]) and (c(r) <= base + 1e-12).all(), "羽化只能在最外 3%、只能更暗"
 
 
@@ -247,10 +232,10 @@ def test_paper_seamless():
 
 
 def test_paper_tone():
-    """整体均值和第一版 2 倍宣纸（V.PAPER_MEAN_2X）逐通道相同（差 < 0.25/255，地面亮度不漂）；亮度标准差 0.035–0.045
-    （sRGB 亮度，0..1），按 L*/100 算也在 0.033–0.045；第一版约 0.013（对照）。"""
-    want = np.array(V.PAPER_MEAN_2X)
-    old = M.paper_stats(M.legacy_paper().astype(np.uint8))
+    """整体均值和现在的 paper.png 逐通道相同（差 < 0.25/255，地面亮度不漂）；亮度标准差 0.035–0.045（sRGB 亮度，0..1），
+    按 L*/100 算也在 0.033–0.045；现在的纸约 0.013（对照）。"""
+    want = M.current_paper().reshape(-1, 3).mean(0)
+    old = M.paper_stats(M.current_paper().astype(np.uint8))
     assert old["luma_std"] < 0.02
     for k in PAPERS:
         p = paper(k)
@@ -306,12 +291,11 @@ def test_paper_deterministic():
 
 
 def test_decor_boost():
-    """调浓（管线 2 倍的产物 vs 生成函数现画的原图）：同尺寸、RGBA；alpha 只增不减；全透明处（含外扩的颜色）一点不动；
+    """调浓的候选：和图集里的帧同尺寸、RGBA；alpha 只增不减；全透明处（含外扩的颜色）一点不动；
     对纸面的 L* 反差（游戏里平均 alpha）提高 5%–13%；压暗颜色的像素最多压到线性亮度的 70%（不往黑里压），色相不变（三通道等比）。"""
-    before = M.decor_before()
-    assert set(before) == set(M.DECOR_NAMES), f"decor_before 的帧和 DECOR_NAMES 不一致：{sorted(set(before) ^ set(M.DECOR_NAMES))}"
     for n in M.BOOST_FRAMES:
-        src, im = before[n], Image.open(V.GROUND_DIR / f"{n}.png")
+        src, _ = M.atlas_frame("ground", f"ground/{n}")
+        im = Image.open(M.OUT_GROUND / f"{n}.png")
         assert im.mode == "RGBA" and im.size == src.size, f"{n} 尺寸 {im.size} != {src.size}"
         a0, a1 = np.asarray(src).astype(np.int64), np.asarray(im).astype(np.int64)
         assert (a1[..., 3] >= a0[..., 3]).all(), f"{n} 有 alpha 变小的像素"
@@ -328,61 +312,8 @@ def test_decor_boost():
             q = M.to_lin(a1[..., :3][ch][big] / 255.0) / M.to_lin(a0[..., :3][ch][big] / 255.0)
             if len(q):
                 assert (q.max(1) / q.min(1)).max() <= 1.2, f"{n} 压暗时色相变了"
-
-
-def test_decor_boost_once():
-    """管线只调一次：2 倍产物 = boost_decor(原图)，逐字节相同（再调一次就会更浓，对不上）；没列在 MOON_BOOST_FRAMES 里的
-    （墨晕、竹笋）和原图逐字节相同（没被误调）。"""
-    before, after = M.decor_before(), M.decor_after()
-    for n in M.DECOR_NAMES:
-        disk = np.asarray(Image.open(V.GROUND_DIR / f"{n}.png").convert("RGBA"))
-        want = np.asarray(after[n])
-        assert (disk == want).all(), f"{n}：管线产物和“原图调浓一次”不同"
-        if n not in V.MOON_BOOST_FRAMES:
-            assert (disk == np.asarray(before[n])).all(), f"{n} 不该调浓"
-    twice = np.asarray(V.boost_decor(after["grass_0"]))
-    assert (twice != np.asarray(after["grass_0"])).any(), "对照：调两次应该和调一次不同"
-
-
-# ---------------------------------------------------------------- 管线与图集
-
-
-def test_pipeline_light_pool():
-    """管线里的 vfx/light_pool（2 倍）= 候选 light_a；meta：白色、染色、叠加、锚点居中、带说明；vfx/light 没变（其余光源还用它）。"""
-    pool = np.asarray(Image.open(V.VFX_DIR / "light_pool.png").convert("RGBA"))
-    assert (pool == np.asarray(Image.open(M.OUT / "light_a.png").convert("RGBA"))).all(), "vfx/light_pool 和 light_a 不同"
-    e = json.loads((V.VFX_DIR / "meta.json").read_text(encoding="utf-8"))["files"]["light_pool.png"]
-    assert (e["color"], e["blend"], e["tint"], tuple(e["anchor"]), tuple(e["size"])) == ("white", "add", True, (0.5, 0.5), (256, 256)) and e.get("note")
-    old = np.asarray(Image.open(V.VFX_DIR / "light.png").convert("RGBA"))
-    assert (old == np.asarray(V.make_light(np.random.default_rng(1001))[0])).all(), "vfx/light 不该变"
-
-
-def test_pipeline_paper():
-    """管线 2 倍的 ground/paper = 候选 paper_a；第一版 2 倍宣纸的均值 = V.PAPER_MEAN_2X（这个常数没抄错）。"""
-    disk = np.asarray(Image.open(V.GROUND_DIR / "paper.png").convert("RGB"))
-    assert (disk == np.asarray(Image.open(M.OUT / "paper_a.png").convert("RGB"))).all(), "2 倍的 ground/paper 和 paper_a 不同"
-    legacy = M.legacy_paper().reshape(-1, 3).mean(0)
-    assert np.abs(legacy - np.array(V.PAPER_MEAN_2X)).max() < 0.001, f"第一版宣纸均值 {legacy} 和 PAPER_MEAN_2X 不符"
-
-
-def test_atlas_packed():
-    """打包后的图集（assets/atlas）：paper.png 是月夜版；vfx 图集里有 vfx/light_pool（= light_a）；ground 图集里调浓的帧和管线产物一样。
-    还没重新打包时（图集里是第一版的纸）只提示、不算失败。"""
-    paper = np.asarray(Image.open(M.ATLAS / "paper.png").convert("RGB"))
-    if (paper == M.legacy_paper().astype(np.uint8)).all():
-        print("      （assets/atlas 还没按月夜重新打包，跳过）")
-        return
-    assert (paper == np.asarray(Image.open(V.GROUND_DIR / "paper.png").convert("RGB"))).all(), "图集里的 paper.png 不是管线的月夜版"
-    def same(a: np.ndarray, b: np.ndarray) -> bool:
-        """alpha 处处相同、看得见的像素颜色相同（裁掉的透明边在图集里是 0，源图里是外扩的颜色，不比）。"""
-        vis = (a[..., 3] > 0) | (b[..., 3] > 0)
-        return a.shape == b.shape and (a[..., 3] == b[..., 3]).all() and (a[vis] == b[vis]).all()
-
-    pool, anc = M.atlas_frame("vfx", "vfx/light_pool")
-    assert anc == (0.5, 0.5) and same(np.asarray(pool), np.asarray(Image.open(M.OUT / "light_a.png").convert("RGBA"))), "图集里的 light_pool 不对"
-    for n in M.BOOST_FRAMES:
-        f, _ = M.atlas_frame("ground", f"ground/{n}")
-        assert same(np.asarray(f), np.asarray(Image.open(V.GROUND_DIR / f"{n}.png").convert("RGBA"))), f"图集里的 {n} 不是调浓后的"
+    for n in M.WASH_FRAMES:
+        assert not (M.OUT_GROUND / f"{n}.png").exists(), f"墨晕 {n} 不出候选"
 
 
 # ---------------------------------------------------------------- 模拟画面
@@ -404,13 +335,8 @@ def test_previews():
         m = pv[k]
         assert m["ground_luma_median"]["月下 r>260"] >= 70, f"{k} 月下地面太暗"
         assert 195 <= m["ground_luma_median"]["灯下 r<60"] <= 235, f"{k} 灯下地面 {m['ground_luma_median']['灯下 r<60']}"
-        # 月下的妖物都比现状拉开至少 8；墨色的影妖、石妖至少差 15。赤面狐重画后（master e001d59）身上是浅的赭红，
-        # 和月下的纸面本来就近，只要求 10。
-        for kk, v in m["enemy_vs_ground_dL"].items():
-            if "月下" not in kk:
-                continue
-            assert v - now["enemy_vs_ground_dL"][kk] >= 8, f"{k} {kk} 只比现状多拉开 {v - now['enemy_vs_ground_dL'][kk]:.1f}"
-            assert v >= (10 if kk.startswith("fox") else 15), f"{k} 月下的 {kk} 和地面 L* 只差 {v:.1f}"
+        foes = [v for kk, v in m["enemy_vs_ground_dL"].items() if "月下" in kk]
+        assert min(foes) >= 15, f"{k} 月下的妖物和地面 L* 只差 {min(foes)}"
 
 
 def test_report():

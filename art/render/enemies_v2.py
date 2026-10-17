@@ -90,6 +90,11 @@ V2 = {
                         ("charge", 6, 10, {"loop": False, "windup_frames": 2, "loop_from": 2, "vertical_motion": True})],
               "radius": 30, "eye": "#FF4636", "glow": "#F7C978", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",),
               "shadow_units": 24, "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
+    # 石将：精英，石翁仲（3/4 侧面）；帧 320²、锚点 (0.5, 0.8)
+    "stonelord": {"module": "stonelord_v2", "build": "build_stonelord", "pose": "pose_stonelord", "size_1x": 160,
+                  "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 6, {})], "radius": 28, "eye": "#FFB46B",
+                  "glow": "#FFB46B", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",), "shadow_units": 22.5,
+                  "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
     # 赤面狐：精英，帧 320²、锚点 (0.5, 0.8)；扑击 2 帧蓄力
     "fox": {"module": "fox_v2", "build": "build_fox", "pose": "pose_fox", "size_1x": 160, "anchor": S.BIG_ENEMY_ANCHOR,
             "anims": [("move", 8, 12, {"vertical_motion": True}),  # 小跑一步一起伏 1.7 单位（自检不查逐帧身高）
