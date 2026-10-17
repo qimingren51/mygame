@@ -7,6 +7,7 @@
 //!   cargo run --release -p lantern-tools -- kite [--runs 40] [--seed 1] [--tier 1] [--meta none|half|full]
 //!       [--skill novice|regular|expert|circle] [--lamp <id>] [--school <流派>|all] [--combo <反应>|all]
 //!       [--fusion <合璧 ID>|all] [--transformations]（打开异化与合璧；内容里已默认打开，留着兼容旧命令）
+//!       [--unlock all|<法器 ID>,…]（解锁 run.ron 里还锁着的法器）
 //!       [--assert-build-pace]（检查 3／6／9 分钟的构筑节奏）
 //!       [--csv <目录>]（每 30 秒一行的 timeline.csv、每局一行的 runs.csv）[--jobs <线程数>]
 //!       [--endless]（无尽夜，最多打 40 分钟）[--god]（主角无敌）
@@ -1015,6 +1016,18 @@ pub fn kite_cmd(args: &[OsString]) -> Result<(), String> {
     if transformations {
         content.enable_transformations();
     }
+    let unlock = text("--unlock")?;
+    match unlock.as_deref() {
+        None => {}
+        Some("all") => content.unlock(None),
+        Some(list) => {
+            let ids: Vec<&str> = list.split(',').map(str::trim).collect();
+            if let Some(bad) = ids.iter().find(|id| !content.run.choices.locked.iter().any(|l| l == *id)) {
+                return Err(format!("--unlock：\"{bad}\" 不在 run.ron 的 choices.locked 里"));
+            }
+            content.unlock(Some(&ids));
+        }
+    }
     // 要跑的机器人：不带选卡偏好的一组，或者流派、组合（all 表示全部）
     let mut plans: Vec<Plan> = Vec::new();
     if let Some(name) = text("--school")? {
@@ -1051,6 +1064,9 @@ pub fn kite_cmd(args: &[OsString]) -> Result<(), String> {
         lamp.as_deref().unwrap_or("默认"),
         if transformations { "，异化与合璧打开" } else { "" }
     );
+    if let Some(u) = &unlock {
+        println!("解锁法器：{u}");
+    }
     let god = args.iter().any(|a| a == "--god");
     let base = Cfg {
         tier,

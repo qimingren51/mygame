@@ -17,6 +17,9 @@ use crate::stats::{Effects, Stats};
 use crate::weapons::drop::{Fissures, Wall};
 use crate::{GameContent, Health, HurtBy, Player, Pos, SimEvent, SimOutbox, SimRng, Tick};
 
+/// 击退速度每秒按 exp(-KNOCK_DECAY) 衰减；一下击退 v 总共滑 v / KNOCK_DECAY。
+pub(crate) const KNOCK_DECAY: f32 = 8.0;
+
 /// 以玩家为中心重建空间网格（妖物移动、互推之后，docs/DESIGN.md 第 6.3 节）。
 pub(crate) fn build_grid(
     view: Res<SimView>,
@@ -82,7 +85,7 @@ pub(crate) fn update_enemies(
     let held_tick = DT * (1.0 + 4.0 * resist);
     let pr = content.player.radius;
     let t = tick.secs();
-    let decay = ops::exp(-8.0 * DT);
+    let decay = ops::exp(-KNOCK_DECAY * DT);
     let relocate_dist = view.radius * content.run.spawn.relocate;
     let spread = content.run.spawn.relocate_spread;
     let face_angle = ops::atan2(player.facing.y, player.facing.x);

@@ -24,11 +24,32 @@ pub struct Plan {
 
 /// 八个流派：名字、灯、法器、心法、灯坠、五行。
 const SCHOOLS: [(&str, &str, &[&str], &[&str], &[&str], &[Element]); 8] = [
-    ("剑修", "mirror", &["sword"], &["jianyi", "ruimu", "xunfeng"], &["broken_sword"], &[Element::Metal]),
-    ("百鸟", "", &["crane"], &["zhezhi", "huichun", "jixing"], &["longevity"], &[Element::Wood]),
-    ("寒川", "frost", &["bell"], &["jingxin", "hanyi", "yinhun"], &["ice_soul"], &[Element::Water]),
-    ("星火", "red", &["lamp"], &["changming", "luxin", "dengxin"], &["wind_wheel"], &[Element::Fire]),
-    ("不动", "", &["seal"], &["houde", "panshi", "zaiwu"], &["pillar", "longevity"], &[Element::Earth]),
+    (
+        "剑修",
+        "mirror",
+        &["sword", "coin_sword"],
+        &["jianyi", "ruimu", "xunfeng"],
+        &["broken_sword"],
+        &[Element::Metal],
+    ),
+    ("百鸟", "", &["crane", "vine"], &["zhezhi", "huichun", "jixing"], &["longevity"], &[Element::Wood]),
+    ("寒川", "frost", &["bell", "wave"], &["jingxin", "hanyi", "yinhun"], &["ice_soul"], &[Element::Water]),
+    (
+        "星火",
+        "red",
+        &["lamp", "sky_lantern"],
+        &["changming", "luxin", "dengxin"],
+        &["wind_wheel"],
+        &[Element::Fire],
+    ),
+    (
+        "不动",
+        "",
+        &["seal", "tower"],
+        &["houde", "panshi", "zaiwu"],
+        &["pillar", "longevity"],
+        &[Element::Earth],
+    ),
     ("身法", "", &[], &["qinggong", "jixing"], &["wind_wheel"], &[]),
     ("照夜", "", &["lamp"], &["dengxin", "changming"], &["night_pearl"], &[]),
     ("太极", "", &["lamp", "sword", "bell", "crane", "seal"], &[], &["five_coins"], &Element::ALL),

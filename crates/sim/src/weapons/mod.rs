@@ -4,8 +4,14 @@
 //! - [`pulse`] 周期震波（霜铃 / 寒山钟）
 //! - [`seeker`] 扑击（纸鹤 / 千鹤引）
 //! - [`drop`] 落印（山印 / 镇岳），以及进化后的地裂
+//! - [`sweep`] 扇形挥击（铜钱剑 / 天罡）
+//! - [`sky_lantern`] 孔明灯（孔明灯 / 万灯升）
+//! - [`wave`] 推浪（沧浪 / 北冥潮）
+//! - [`vine`] 连藤（青藤 / 万木春）
+//! - [`tower`] 落塔（镇妖塔 / 玲珑塔）
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use bevy_math::{Vec2, ops};
 
 use lantern_content::{Content, WeaponBehavior, WeaponLevel};
@@ -23,7 +29,12 @@ pub mod drop;
 pub mod orbit;
 pub mod pulse;
 pub mod seeker;
+pub mod sky_lantern;
+pub mod sweep;
+pub mod tower;
+pub mod vine;
 pub mod volley;
+pub mod wave;
 
 pub(crate) const TAU: f32 = std::f32::consts::TAU;
 
@@ -234,6 +245,19 @@ impl Arsenal {
     }
 }
 
+/// 法器放到场上、之后各自更新的东西（飞剑、山印、孔明灯、浪、藤、塔、地裂）。
+/// 合成一个参数，免得 `update_weapons` 超过 Bevy 的参数个数上限。
+#[derive(SystemParam)]
+pub(crate) struct Props<'w> {
+    shots: ResMut<'w, volley::Shots>,
+    seals: ResMut<'w, drop::Seals>,
+    lanterns: ResMut<'w, sky_lantern::SkyLanterns>,
+    waves: ResMut<'w, wave::Waves>,
+    vines: ResMut<'w, vine::Vines>,
+    towers: ResMut<'w, tower::Towers>,
+    ground: ResMut<'w, drop::Fissures>,
+}
+
 /// 法器在一步里需要的东西。
 pub(crate) struct Ctx<'a> {
     pub content: &'a Content,
@@ -241,12 +265,22 @@ pub(crate) struct Ctx<'a> {
     pub grid: &'a Grid,
     pub en: &'a Enemies,
     pub player: Vec2,
+    /// 主角面向（移动方向），朝向类法器没有目标时用
+    pub facing: Vec2,
+    /// 这一步主角走动了（沧浪：站着不动时朝最近的妖物推浪）
+    pub moving: bool,
     pub secs: f32,
     pub rng: &'a mut lantern_core::Pcg32,
     pub hits: &'a mut HitQueue,
     pub strikes: &'a mut Strikes,
     pub shots: &'a mut volley::Shots,
     pub seals: &'a mut drop::Seals,
+    pub lanterns: &'a mut sky_lantern::SkyLanterns,
+    pub waves: &'a mut wave::Waves,
+    pub vines: &'a mut vine::Vines,
+    pub towers: &'a mut tower::Towers,
+    /// 排到下一步执行的动作（青藤回血）
+    pub actions: &'a mut crate::combat::ActionQueue,
     pub ground: &'a mut drop::Fissures,
     pub outbox: &'a mut SimOutbox,
     pub bamboo: &'a mut crate::bamboo::Bamboo,
@@ -257,16 +291,15 @@ pub(crate) fn update_weapons(
     content: Res<GameContent>,
     stats: Res<Stats>,
     tick: Res<Tick>,
-    player: Single<&Pos, With<Player>>,
+    player: Single<(&Pos, &Player)>,
     grid: Res<Grid>,
     mut en: ResMut<Enemies>,
     mut rng: ResMut<SimRng>,
     mut arsenal: ResMut<Arsenal>,
     mut hits: ResMut<HitQueue>,
     mut strikes: ResMut<Strikes>,
-    mut shots: ResMut<volley::Shots>,
-    mut seals: ResMut<drop::Seals>,
-    mut ground: ResMut<drop::Fissures>,
+    mut props: Props,
+    mut actions: ResMut<crate::combat::ActionQueue>,
     mut outbox: ResMut<SimOutbox>,
     mut bamboo: ResMut<crate::bamboo::Bamboo>,
     mut found: Local<Vec<u32>>,
@@ -274,10 +307,14 @@ pub(crate) fn update_weapons(
     let content = &content.0;
     let t = tick.secs();
     let en = &mut *en;
+    let (pos, hero) = *player;
+    let props = &mut props;
+    // 法器没了（合璧用掉）就把它的藤收掉
+    props.vines.0.retain(|v| arsenal.0.iter().any(|w| w.def == v.def));
     for slot in &mut arsenal.0 {
         if let WeaponBehavior::Orbit { .. } = slot.behavior(content) {
             // 灯火要写每只妖物的命中冷却，单独处理
-            orbit::update(content, &stats, &grid, en, player.0, t, slot, &mut hits, &mut bamboo, &mut found);
+            orbit::update(content, &stats, &grid, en, pos.0, t, slot, &mut hits, &mut bamboo, &mut found);
             continue;
         }
         let mut ctx = Ctx {
@@ -285,14 +322,21 @@ pub(crate) fn update_weapons(
             stats: &stats,
             grid: &grid,
             en,
-            player: player.0,
+            player: pos.0,
+            facing: hero.facing,
+            moving: hero.moved > 0.0,
             secs: t,
             rng: rng.0.get(lantern_core::Stream::Combat),
             hits: &mut hits,
             strikes: &mut strikes,
-            shots: &mut shots,
-            seals: &mut seals,
-            ground: &mut ground,
+            shots: &mut props.shots,
+            seals: &mut props.seals,
+            lanterns: &mut props.lanterns,
+            waves: &mut props.waves,
+            vines: &mut props.vines,
+            towers: &mut props.towers,
+            actions: &mut actions,
+            ground: &mut props.ground,
             outbox: &mut outbox,
             bamboo: &mut bamboo,
             found: &mut found,
@@ -303,8 +347,42 @@ pub(crate) fn update_weapons(
             WeaponBehavior::Pulse { .. } => pulse::update(&mut ctx, slot),
             WeaponBehavior::Seeker { .. } => seeker::update(&mut ctx, slot),
             WeaponBehavior::Drop { .. } => drop::update(&mut ctx, slot),
+            WeaponBehavior::Sweep { .. } => sweep::update(&mut ctx, slot),
+            WeaponBehavior::SkyLantern { .. } => sky_lantern::update(&mut ctx, slot),
+            WeaponBehavior::Wave { .. } => wave::update(&mut ctx, slot),
+            WeaponBehavior::Vine { .. } => vine::update(&mut ctx, slot),
+            WeaponBehavior::Tower { .. } => tower::update(&mut ctx, slot),
         }
     }
+}
+
+/// 妖物最密的地方（孔明灯、镇妖塔的落点）：在 around 附近 range 以内最近的 pick 只里，挑 cluster 以内同伴最多的那只（同伴一样多取更近的）；
+/// 离 avoid 里任何一个点不到 spread 的不要。found 是借来的缓冲。
+pub(crate) fn densest(
+    grid: &Grid,
+    en: &Enemies,
+    around: Vec2,
+    (range, pick, cluster, spread): (f32, u32, f32, f32),
+    avoid: &[Vec2],
+    found: &mut Vec<u32>,
+) -> Option<Vec2> {
+    grid.nearest_k(en, around.x, around.y, range, pick as usize, found);
+    let at = |i: u32| Vec2::new(en.x[i as usize], en.y[i as usize]);
+    let c2 = cluster * cluster;
+    let s2 = spread * spread;
+    let mut best: Option<(usize, Vec2)> = None;
+    for &i in found.iter() {
+        let p = at(i);
+        if avoid.iter().any(|a| a.distance_squared(p) < s2) {
+            continue;
+        }
+        let n = found.iter().filter(|&&j| at(j).distance_squared(p) <= c2).count();
+        // nearest_k 已按距离从近到远排好，只有更多同伴才换
+        if best.is_none_or(|(m, _)| n > m) {
+            best = Some((n, p));
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 /// 冷却计时：到点返回 true（调用方负责重置）。

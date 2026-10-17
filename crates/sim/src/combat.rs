@@ -98,6 +98,8 @@ pub struct Hit {
     /// 命中后（目标还活着时）附加的击晕、减速；冰冻在结算伤害之前附加（夜主免疫）
     pub stun: f32,
     pub freeze: f32,
+    /// 定身（万木春的缠绕）；和击晕一样在命中后附加
+    pub root: f32,
     pub slow: f32,
     pub slow_time: f32,
     pub source: Source,
@@ -105,6 +107,10 @@ pub struct Hit {
     pub element: Option<Element>,
     /// 直接点上几层灼烧（以这一击加成区之后的伤害为基数）
     pub ignite: f32,
+    /// 这一击额外加的暴击率（铜钱剑）
+    pub crit_bonus: f32,
+    /// 暴击时对同一只再斩一次的伤害倍率（天罡）；再斩的那一下是 0，不再触发
+    pub echo: f32,
 }
 
 impl Hit {
@@ -121,11 +127,14 @@ impl Hit {
             boss_cap: 0.0,
             stun: 0.0,
             freeze: 0.0,
+            root: 0.0,
             slow: 0.0,
             slow_time: 0.0,
             source,
             element: None,
             ignite: 0.0,
+            crit_bonus: 0.0,
+            echo: 0.0,
         }
     }
 
@@ -484,7 +493,11 @@ pub(crate) fn resolve_hits(
         let bonus = if dark > 0.0 && !reveal.covers(pos) { dmg_mult + dark } else { dmg_mult };
         let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * bonus };
         let crit = hit.flags & (HIT_NOCRIT | HIT_TRUE) == 0
-            && (rng.next_f32() < crit_chance || (en.stun[i] > 0.0 && stun_crit));
+            && (rng.next_f32() < crit_chance + hit.crit_bonus || (en.stun[i] > 0.0 && stun_crit));
+        // 天罡：暴击的那一下再斩一次，追加在队尾，本步一起结算
+        if crit && hit.echo > 0.0 {
+            list.push(Hit { damage: hit.damage * hit.echo, echo: 0.0, ..hit });
+        }
         let mut dmg = base;
         if hit.flags & HIT_TRUE == 0 {
             if crit {
@@ -599,6 +612,9 @@ pub(crate) fn resolve_hits(
         if en.hp[i] > 0.0 {
             if hit.stun > 0.0 {
                 apply_hard(en, i, rank, Hard::Stun, hit.stun);
+            }
+            if hit.root > 0.0 {
+                apply_hard(en, i, rank, Hard::Root, hit.root);
             }
             if hit.slow > 0.0 {
                 apply_slow(en, i, rank, &stats, hit.slow, hit.slow_time);
@@ -906,11 +922,14 @@ pub(crate) fn process_strikes(
                 boss_cap: s.boss_cap,
                 stun: s.stun,
                 freeze: s.freeze,
+                root: 0.0,
                 slow: s.slow,
                 slow_time: s.slow_time,
                 source: s.source,
                 element: s.element,
                 ignite: s.ignite,
+                crit_bonus: 0.0,
+                echo: 0.0,
             };
             // 燃灯对夜主：每次不超过它最大生命的一定比例
             if boss && s.boss_fraction > 0.0 {

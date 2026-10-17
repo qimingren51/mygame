@@ -121,6 +121,8 @@
         late_after: 180.0,
         weight_passive_up: 7.0,
         weight_new_passive: 5.0,
+        // 还没解锁、不进卡池的法器：v0.3 的五件新法器（按局解锁见 docs/PLAYTEST.md 第 9 项）
+        locked: ["coin_sword", "sky_lantern", "wave", "vine", "tower"],
         // 已到一阶的五行，选项权重 ×1.5
         owned_element_mult: 1.5,
         favor_mult: 1.3,

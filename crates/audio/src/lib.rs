@@ -759,6 +759,22 @@ fn play_sim_events(
                 let s = a.sfx.bamboo.clone();
                 a.play_at(&s, rate, -3.0, place(pos));
             }
+            // 新的三只小妖（试玩第 1 轮）：竹魅瞄准、射竹刺，讨封狐现形；都按位置放、限流，一群也不连成一片
+            SimEvent::EnemyAim { pos, .. } if a.can("enemy_aim", 0.25) => {
+                let rate = a.rate(0.94, 1.06);
+                let s = a.sfx.enemy_aim.clone();
+                a.play_at(&s, rate, -4.0, place(pos));
+            }
+            SimEvent::EnemyShot { pos, .. } if a.can("spike", 0.1) => {
+                let rate = a.rate(0.92, 1.1);
+                let s = a.sfx.spike.clone();
+                a.play_at(&s, rate, -4.0, place(pos));
+            }
+            SimEvent::Unmasked { pos, .. } if a.can("unmask", 0.3) => {
+                let rate = a.rate(0.95, 1.08);
+                let s = a.sfx.unmask.clone();
+                a.play_at(&s, rate, -2.0, place(pos));
+            }
             // 狐火烧平结界里的竹丛：跟着夜主登场的警报晚一点着起来
             SimEvent::BambooBurned { .. } => {
                 let s = a.sfx.burn.clone();
