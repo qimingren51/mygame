@@ -538,9 +538,6 @@ pub(crate) fn read_fx_events(
     }
 }
 
-/// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
-/// 把颜色在线性空间里提亮 k 倍：叠在自发光层上，峰值越过辉光阈值 1.0 才晕得开
-/// （试玩第 1 轮：钟鸣原来 0.55 × 1.5 ≈ 0.83，不发光）。
 /// 一组按序号编的帧（`<名字>_0`、`_1`……）；图集登记了同名动画就用动画。
 fn sequence(db: &AtlasDb, name: &str) -> Vec<FrameId> {
     if let Some(a) = db.anim(name) {
@@ -613,11 +610,14 @@ const VINE_BIND_RADIUS_PX: f32 = 56.0;
 /// 浪走到这一段以后换收尾的帧
 const WAVE_FADE_FROM: f32 = 0.8;
 
+/// 把颜色在线性空间里提亮 k 倍：叠在自发光层上，峰值越过辉光阈值 1.0 才晕得开
+/// （试玩第 1 轮：钟鸣原来 0.55 × 1.5 ≈ 0.83，不发光）。
 fn hdr(c: Color, k: f32) -> Color {
     let l = c.to_linear();
     Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
 }
 
+/// 法器、拾取物、弹幕、奇遇、一次性效果的绘制请求。
 pub(crate) fn collect_fx(
     // 三种时间：虚拟（随顿帧）、现实（燃灯节拍）、定步长（插值）
     (time, real, fixed): (Res<Time>, Res<Time<Real>>, Res<Time<Fixed>>),
