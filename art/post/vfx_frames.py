@@ -1222,9 +1222,9 @@ def make_react_liaoyuan() -> list[Image.Image]:
         tongues.append(dict(ang=ang, curl=float(rng.choice([-1.0, 1.0])) * rng.uniform(0.25, 0.45), seed=int(rng.integers(1 << 30))))
     licks = [(2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / 12, rng.uniform(0.8, 1.2), int(rng.integers(1 << 30))) for k in range(12)]
     embers = [(int(rng.integers(0, 3)), rng.uniform(0.2, 1.0), rng.uniform(-8, 8), rng.uniform(1.0, 1.6)) for _ in range(15)]
-    reach = [0.22, 0.6, 0.9, 1.0, 1.0, 0.96]
-    width = [15.0, 21.0, 20.0, 16.0, 10.0, 6.0]
-    core_r = [24.0, 36.0, 42.0, 36.0, 26.0, 14.0]
+    reach = [0.3, 0.72, 1.0, 1.08, 1.08, 1.04]  # 第二版：火舌更长、更细，火团小一点（灯下三道火舌要分得出来）
+    width = [8.0, 11.0, 10.5, 8.5, 6.0, 3.5]
+    core_r = [18.0, 26.0, 30.0, 26.0, 20.0, 11.0]
     env = [1.0, 1.0, 1.0, 0.85, 0.6, 0.32]
     out = []
     for i in range(6):
@@ -1234,7 +1234,7 @@ def make_react_liaoyuan() -> list[Image.Image]:
         r = np.hypot(X - c, Y - c)
         th = np.arctan2(Y - c, X - c)
         spokes = np.clip(0.55 + V.angular_noise(np.random.default_rng(9902), th, harmonics=(7, 11, 13, 17), amp=1.3), 0, 1)
-        acc.add(full, env[i] * np.exp(-((r / core_r[i]) ** 2)) * (0.6 + 0.4 * spokes), 1.0 - 0.12 * i)
+        acc.add(full, 0.75 * env[i] * np.exp(-((r / core_r[i]) ** 2)) * (0.6 + 0.4 * spokes), 1.0 - 0.12 * i)
         for ang, lf, sd in licks:  # 火团边上一圈短火苗，尖往上翘
             L = core_r[i] * 1.5 * lf
             u = np.array([math.cos(ang), math.sin(ang)])
@@ -1245,7 +1245,7 @@ def make_react_liaoyuan() -> list[Image.Image]:
             hw = 5.0 * (1 - tt) ** 0.7 + 0.2
             sl = acc.window(min(b[0], tip[0]) - 12, min(b[1], tip[1]) - 12, max(b[0], tip[0]) + 12, max(b[1], tip[1]) + 12)
             cov, f_ = V.brush_stroke(X[sl], Y[sl], pts, hw, np.random.default_rng(sd + i // 2), dry=0.3, dry_start=0.5, ss=SS)
-            acc.add(sl, env[i] * 0.9 * cov, np.clip(0.9 - 0.7 * f_["t"] - 0.1 * i, 0, 1))
+            acc.add(sl, env[i] * 0.6 * cov, np.clip(0.9 - 0.7 * f_["t"] - 0.1 * i, 0, 1))
         for tg in tongues:  # 三条大火舌
             L = R * reach[i]
             u = np.array([math.cos(tg["ang"]), math.sin(tg["ang"])])
@@ -1253,7 +1253,7 @@ def make_react_liaoyuan() -> list[Image.Image]:
             b = np.array([c, c]) + u * 10
             pts = V.bezier([b, b + u * L * 0.4 + nrm * L * 0.25, b + u * L * 0.8 + nrm * L * 0.2, b + u * L], 80)
             tt = np.linspace(0, 1, len(pts))
-            pts = pts + np.outer(6.0 * tt * np.sin(2 * math.pi * (1.5 * tt - 0.15 * i) + tg["seed"] % 5), [-u[1], u[0]])  # 火舌左右摆
+            pts = pts + np.outer(5.0 * tt * np.sin(2 * math.pi * (1.5 * tt - 0.15 * i) + tg["seed"] % 5), [-u[1], u[0]])  # 火舌左右摆
             hw = width[i] * (0.55 + 0.45 * np.sin(np.pi * np.clip(tt * 1.6, 0, 1))) * (1 - 0.75 * tt) + 0.3
             lo, hi = pts.min(0) - 24, pts.max(0) + 24
             sl = acc.window(lo[0], lo[1], hi[0], hi[1])
@@ -1265,10 +1265,10 @@ def make_react_liaoyuan() -> list[Image.Image]:
             acc.add(sl, env[i] * cov, np.clip(0.8 - 0.6 * f_["t"] - 0.08 * i, 0, 1))
             if i >= 2:  # 舌尖爆一小团火
                 tip = pts[-1]
-                k_ = [0, 0, 0.7, 1.0, 0.7, 0.35][i]
+                k_ = [0, 0, 0.6, 0.85, 0.6, 0.3][i]
                 sl = acc.window(tip[0] - 30, tip[1] - 34, tip[0] + 30, tip[1] + 24)
                 rr = np.hypot(X[sl] - tip[0], (Y[sl] - tip[1]) * 1.2)
-                acc.add(sl, k_ * np.exp(-((rr / 14.0) ** 2)) * (0.6 + 0.4 * dry(W.ptex(np.random.default_rng(9903), 12, 256, 8.0, 0.8),
+                acc.add(sl, k_ * np.exp(-((rr / 11.0) ** 2)) * (0.6 + 0.4 * dry(W.ptex(np.random.default_rng(9903), 12, 256, 8.0, 0.8),
                                                                                   0.0, np.arctan2(Y[sl] - tip[1], X[sl] - tip[0]) / 6.3, 0.2)), 0.6)
         for k, tpos, off, sz in embers:  # 火星顺着火舌飞
             if i == 0:
@@ -1725,7 +1725,8 @@ def make_react_duanmu() -> list[Image.Image]:
 LT_W, LT_H = 352, 320
 LT_ROOT = (176.0, 228.0)  # 锚点：地刺根部的地面中心（底边往上 92 像素，下面留给地缝和翻开的土）
 LT_R = 150  # 地刺丛的横向半径（裂土范围 60，1080p 下一比一）
-EARTH = {"lit": "#B08B60", "mid": "#8B6A47", "dark": "#5E4630", "hole": "#3E3227", "dust": "#A08462", "chip": "#4A3826"}
+EARTH = {"lit": "#8A6A48", "mid": "#6B5038", "dark": "#3E2E20", "hole": "#2E2318", "dust": "#8C7254", "chip": "#3A2C1E",
+         "tip": "#E8CC98"}  # 第二版压暗一档（灯下纸面上、赤地的光旁边要看得出），刺尖一道亮边
 
 
 def spike_shape(rng, H, wb, lean):
@@ -1806,7 +1807,7 @@ def make_react_lietu() -> list[Image.Image]:
             v = (Xs - b0[0]) * nv[0] + (Ys - b0[1]) * nv[1]  # 中脊右边为正（背光）
             k = smoothstep(-1.2, 1.2, v)  # 棱线分明
             colr = lit_c * (1 - k[..., None]) + dark_c * k[..., None]
-            colr = colr + (V.col("#C9A77A") - colr) * (0.5 * smoothstep(-7.0, -1.5, v) * (1 - k))[..., None]  # 受光面贴着棱线一道亮
+            colr = colr + (V.col("#A2805A") - colr) * (0.45 * smoothstep(-7.0, -1.5, v) * (1 - k))[..., None]  # 受光面贴着棱线一道亮
             colr = colr + (mid_c - colr) * np.clip(0.25 + 0.2 * mt[sl], 0, 0.6)[..., None]
             low = smoothstep(s["root"][1] - 0.3 * s["H"], s["root"][1], Ys)  # 根上暗一点
             colr = colr + (dark_c - colr) * (0.35 * low)[..., None]
@@ -1817,10 +1818,13 @@ def make_react_lietu() -> list[Image.Image]:
                 p1 = p0 + (nv * 0.55 - axv * 0.35) * s["wb"] * (1 - uq) * rr.uniform(0.8, 1.1)
                 d, uu = seg(Xs, Ys, *p0, *p1)
                 pt.over(sl, JIAO, OP[i] * 0.6 * cov * smoothstep(1.1, 0.3, d) * (1 - 0.6 * uu))
-            band = smoothstep(1.7, 0.6, np.abs(dd)) * (dd > -2.0) * smoothstep(s["root"][1] + 1.0, s["root"][1] - 1.0, Ys)
+            band = smoothstep(2.6, 1.1, np.abs(dd)) * (dd > -3.0) * smoothstep(s["root"][1] + 1.0, s["root"][1] - 1.0, Ys)  # 墨线加重
             tex = W.ptex(rr, ns=8, nt=128, along=5.0, across=0.8)
             per = (np.arctan2(Ys - (b0[1] + tip[1]) / 2, Xs - (b0[0] + tip[0]) / 2) / (2 * math.pi)) % 1
-            pt.over(sl, JIAO, OP[i] * 0.92 * band * (0.55 + 0.45 * dry(tex, 0.0 * per, per, 0.35)))
+            pt.over(sl, JIAO, OP[i] * band * (0.72 + 0.28 * dry(tex, 0.0 * per, per, 0.35)))
+            uq = ((Xs - b0[0]) * axv[0] + (Ys - b0[1]) * axv[1]) / max(np.linalg.norm(tip - b0), 1e-6)  # 沿刺 0（根）→ 1（尖）
+            rim = smoothstep(-5.0, -3.4, dd) * smoothstep(-1.6, -2.6, dd) * smoothstep(0.55, 0.85, uq) * (1 - 0.5 * k)
+            pt.over(sl, V.col(EARTH["tip"]), OP[i] * 0.85 * rim * cov)  # 刺尖一道亮边（受光那边亮些）
             if i >= 4:  # 裂开：一道横着的折线缝
                 yk = b0 + (tip - b0) * s["frac"]
                 pts = jag_path(rr, yk - nv * s["wb"] * 1.2, math.atan2(nv[1], nv[0]) + rr.uniform(-0.25, 0.25), 2.4 * s["wb"], n=6, jitter=0.5)
