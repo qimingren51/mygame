@@ -74,6 +74,10 @@ pub struct Sfx {
     pub spike: StaticSoundData,
     /// 讨封狐现形：“噗”的一团烟，一声短的狐叫（往上挑再落下），一点亮的铃
     pub unmask: StaticSoundData,
+    /// 铜钱剑挥一下：“唰”的一声金属风，尾巴上两枚铜钱叮的一下
+    pub coin_sweep: StaticSoundData,
+    /// 天罡绕身一圈：风声转一圈（先往上再往下），铜钱一串叮当
+    pub coin_whirl: StaticSoundData,
     // 下面四个是界面上的事（卷轴、灯驿），界面发 UiCue 来播
     /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
     pub scroll_unroll: StaticSoundData,
@@ -263,6 +267,8 @@ impl Sfx {
             &self.enemy_aim,
             &self.spike,
             &self.unmask,
+            &self.coin_sweep,
+            &self.coin_whirl,
             &self.scroll_unroll,
             &self.scroll_line,
             &self.lamp_lit,
@@ -546,6 +552,53 @@ impl Sfx {
                 b.osc(Wave::Triangle, 1150.0, 0.14, 0.26, 0.04, Some((520.0, 0.24)), 0.01);
                 b.bell(jiao(17), 0.02, 0.03, 0.5);
             }),
+            // 铜钱剑一秒左右挥一下，比符剑的出鞘声厚一点、低一点；铜钱用角调的高音，轻
+            coin_sweep: render(0.6, |b| {
+                b.noise(
+                    0.0,
+                    0.15,
+                    0.1,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1800.0,
+                        slide: Some(5200.0),
+                        q: 1.6,
+                        attack: 0.015,
+                    },
+                );
+                b.noise(0.03, 0.08, 0.04, noise(FilterKind::High, 6500.0));
+                b.bell(jiao(19) * 2.0, 0.07, 0.022, 0.25);
+                b.bell(jiao(22) * 2.0, 0.11, 0.016, 0.22);
+            }),
+            coin_whirl: render(1.0, |b| {
+                b.noise(
+                    0.0,
+                    0.22,
+                    0.09,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1400.0,
+                        slide: Some(4800.0),
+                        q: 1.4,
+                        attack: 0.03,
+                    },
+                );
+                b.noise(
+                    0.2,
+                    0.2,
+                    0.07,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 4800.0,
+                        slide: Some(1600.0),
+                        q: 1.4,
+                        attack: 0.01,
+                    },
+                );
+                for (k, d) in [17, 19, 20, 22].into_iter().enumerate() {
+                    b.bell(jiao(d) * 2.0, 0.06 + k as f32 * 0.06, 0.018, 0.25);
+                }
+            }),
             scroll_unroll: render(3.4, |b| {
                 b.pluck(jiao(5), 0.0, 0.11, 2.6);
                 b.pluck(jiao(10), 0.02, 0.05, 2.2);
@@ -726,6 +779,8 @@ mod tests {
             ("enemy_aim", &s.enemy_aim),
             ("spike", &s.spike),
             ("unmask", &s.unmask),
+            ("coin_sweep", &s.coin_sweep),
+            ("coin_whirl", &s.coin_whirl),
             ("scroll_unroll", &s.scroll_unroll),
             ("scroll_line", &s.scroll_line),
             ("lamp_lit", &s.lamp_lit),
