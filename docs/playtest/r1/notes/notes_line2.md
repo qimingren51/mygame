@@ -101,3 +101,9 @@
 | GoldGain | coin |
 | ChestMin、ChestLuck | chest |
 可沿用原有的：Regen → regen，ArmorToDamage → armor，SummonMult → count，MovingDamage → speed。其余不写 icon。
+
+### 第 3 批 + 锐目重画 + 新法器图标 + 进阶属性图标：已推 9993d6c（2026-10-17，先 merge origin/master ae434c4 → 6149a30）
+- cards 页 86 帧 4096×2048；原 46 帧除锐目外逐像素不变；其余 186 个图集文件逐字节不变；check_atlas、test_ui_icons_new（两种密度）、
+  test_ui_skin 13/13、lantern_ui 63 个通过。
+- 审图：art/out/review@2x/cards_b3_sheet.png、cards_b3_1080p.png（锐目标“重画（第 2 批）”）、icons_new_weapons.png、stats_advanced.png。
+- 剩第 4 批：新法器卡面 10 张（试渲中，l2/b4_draft.log）。

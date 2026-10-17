@@ -67,7 +67,15 @@ STONES = {
 JOINTS = {"leg_n": (-0.18, 0.04, 0.14), "leg_f": (0.18, 0.07, 0.14), "s0": (0.0, 0.02, 0.44),
           "s1": (0.0, 0.10, 0.915), "s2": (0.0, -0.30, 0.86), "s3": (0.02, 0.16, 1.207), "s4": (0.0, 0.18, 1.318),
           "arm_n": (-0.42, -0.06, 0.90), "arm_f": (0.42, 0.04, 0.90)}
-SEAMS = [("s0", "s1", (0.25, 0.26), 0.6875), ("s1", "s3", (0.10, 0.12), 1.141)]  # (下, 上, 半径, 高)
+SEAMS = [("s0", "s1", (0.27, 0.28), 0.6875), ("s1", "s3", (0.11, 0.13), 1.141)]  # (下, 上, 半径, 高)
+# 收尾修整（缝里的光）：腿石和肚石、头石和背石、两臂各节之间也夹着魂；(挂在哪, 位置（相对那个关节）, 半径 (x, y, z))
+SEAMS2 = [("leg_n", (0.0, 0.0, 0.11), (0.115, 0.125, 0.02)), ("leg_f", (0.0, 0.0, 0.11), (0.115, 0.125, 0.02)),
+          ("s1", (0.0, -0.33, -0.03), (0.15, 0.02, 0.12)),
+          ("arm_n", (0.01, -0.04, -0.14), (0.09, 0.09, 0.022)), ("arm_n", (0.02, -0.11, -0.40), (0.1, 0.1, 0.022)),
+          ("arm_f", (-0.01, -0.04, -0.14), (0.09, 0.09, 0.022)), ("arm_f", (-0.02, -0.11, -0.40), (0.1, 0.1, 0.022))]
+# 大石头上的裂缝（E 向画面上、相对那块石头的包围盒：0..1），缝里透魂光
+CRACKS = {"Belly": [(0.30, 0.95), (0.36, 0.72), (0.31, 0.55), (0.40, 0.34), (0.35, 0.12)],
+          "Back": [(0.62, 0.92), (0.55, 0.70), (0.60, 0.52), (0.52, 0.30)]}
 
 
 BOXY = 0.72  # 超椭球的指数（<1 越方）
@@ -120,11 +128,13 @@ def build_golem():
         obs[nm] = B.mesh_object(f"Golem{nm}", chisel_rock(r, seed, chip), stone, "outer", joints[jn], loc=c,
                                 rot=tuple(math.radians(a) for a in rot), sharp_deg=18, cun=True)
     # 石缝里的魂：夹在两块石头之间的一片发光的扁饼（只从缝里露出一线）
-    m_seam = V2.glow_flat("GolemSeam", SEAM_DAY, 0.55)
+    m_seam = V2.glow_flat("GolemSeam", SEAM_DAY, 1.0)
     for lo, hi, (sx, sy), z in SEAMS:
         jl = joints[lo]
         p = Vector((0.0, (JOINTS[lo][1] + JOINTS[hi][1]) / 2, z)) - Vector(JOINTS[lo])
-        B.mesh_object(f"GolemSeam_{lo}", K.ellipsoid((sx, sy, 0.014)), m_seam, "none", jl, loc=p)
+        B.mesh_object(f"GolemSeam_{lo}", K.ellipsoid((sx, sy, 0.022)), m_seam, "none", jl, loc=p)
+    for k, (jn, p, r) in enumerate(SEAMS2):
+        B.mesh_object(f"GolemSeam2_{k}", K.ellipsoid(r), m_seam, "none", joints[jn], loc=Vector(p))
     # 头石正面：一道焦墨深缝（眉下），缝里两只眼
     head = joints["s2"]
     m_hollow = B.flat_material("GolemHollow", I["jiao"])
@@ -140,6 +150,18 @@ def build_golem():
         V2.design_patch(f"GolemEye{k}", tree, _ellipse(ex, ey, hl, hh, tilt), m_eye, head, lift=0.006, spacing=0.25)
         V2.design_patch(f"GolemEyeHot{k}", tree, _ellipse(ex + 0.1, ey + 0.05, hl * 0.45, hh * 0.45, tilt), m_hot, head,
                         lift=0.007, spacing=0.2)
+    # 大石头上的裂缝：一道焦墨的细缝，夜里缝里透出魂光
+    m_crack = V2.glow_flat("GolemCrack", SEAM_DAY, 1.0)
+    right, up, _ = B.camera_basis()
+    for nm, rel in CRACKS.items():
+        ob = obs[nm]
+        mw = ob.matrix_world
+        xy = np.array([(25.0 * (mw @ v.co).dot(right), 25.0 * (mw @ v.co).dot(up)) for v in ob.data.vertices])
+        lo_, hi_ = xy.min(0), xy.max(0)
+        pts = [(lo_[0] + (hi_[0] - lo_[0]) * u, lo_[1] + (hi_[1] - lo_[1]) * v) for u, v in rel]
+        st = V2.bvh_world(ob)
+        V2.design_outline(f"GolemCrack{nm}", st, pts, [0.25, 0.55, 0.6, 0.45, 0.2][:len(pts)], m_crack, ob,
+                          lift=0.004, closed=False, step=0.25)
     sock = B.empty("GolemSocketEyes", head)
     e0, e1 = eyes[0][0], eyes[1][0]
     hits = V2.project_design(tree, [(e0[0] * 0.6 + e1[0] * 0.4, e0[1] * 0.6 + e1[1] * 0.4)])

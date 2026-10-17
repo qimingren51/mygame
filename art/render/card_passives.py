@@ -2085,7 +2085,8 @@ def build_lotus(draft):
     # 荷叶：一大片圆叶托底（边缘起伏、叶脉放射）；压低镜面，免得反出一大片光
     from card_weapons import low_spec  # noqa: PLC0415
 
-    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.006, 0.022, 0.010), tip=(0.014, 0.040, 0.016), vein=(0.030, 0.070, 0.030)), 0.10)
+    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.006, 0.022, 0.010), tip=(0.014, 0.040, 0.016), vein=(0.030, 0.070, 0.030)),
+                      0.10)
 
     def lotus_leaf(bm):
         uvl = bm.loops.layers.uv.new("UVMap")

@@ -82,7 +82,9 @@ def build_boss():
                               edge=0.1)
     M_cream = V2.paint_material("JWCream", [(0.0, "#9AA6B0"), (0.4, "#D6DEE2"), (0.7, "#EEF2F2"), (1.0, WHITE)],
                                 wash=0.2, seed=14.0, edge=0.1)
-    M_fire = B.emissive_material("JWTailFire", FIRE, 1.0)  # 尾尖一截：青火
+    # 尾尖一截：青火（不用发光材质：发光层按物体分，整条尾巴都会算进去；这里走 AOV，只有尾尖亮）
+    M_fire = V2.paint_material("JWTailFire", FIRE_STOPS, wash=0.2, seed=10.0, edge=0.0, bias=0.35)
+    V2.add_glow_const(M_fire, 1.0)
     M_eye = B.emissive_material("JWEye", EYE, 1.0)
     M_hot = B.emissive_material("JWEyeHot", EYE_HOT, 1.0)
     M_mark = B.emissive_material("JWMark", EYE, 1.0)

@@ -77,3 +77,17 @@ Blender 最终渲染包在 B.render_lock() 里；每完成一项推一次、Send
 - 审图摆法加了 air（54）、low（26）抬高；草稿工具 $SP/tools/preview_src.py（源图）、night_row.py（几组帧排一行）。
 - 图集 4096² 83%（238 帧），第三批反应大概会分到第二页（pack_atlas 自动分页，游戏和脚本都支持）。
 - 反应的范围（BALANCE 7.2）：燎原 60、赤地 50、凝霜 50、滋生 50、蒸腾 70、裂土 60、淤泥 70；熔金、断木单体；铸兵三片金刃。
+
+## 8. 特效第三批：十种反应（完成，playtest-r1-vfx dd489c1；合 origin/master 5b63336 后 dae166e，已推）
+- vfx_frames.py BATCH3（批名 b3），make_react_*；新 helper：Paint（普通混合的上色层，预乘叠画）、lerp_col、jag_path、polyline_dist、
+  smooth_stroke（实心笔触）、curl_blade（羊角螺线卷草）、spike_shape（棱角石刺）。
+- 画布 / 锚点 / radius_px（看得见的横向半径，≈ 反应范围 × 2.57）：燎原 384² 中心 R150；赤地 384×240 中心 R135 flat hold；
+  铸兵 256² 中心；凝霜 384×240 中心 R150 flat hold；滋生 320×288 (0.5, 0.6806) R128 hold；蒸腾 448² (0.5, 0.625) R160；
+  熔金 128² (0.5, 0.4531) R30 循环 10 帧/秒；断木 256² 中心；裂土 352×320 (0.5, 0.7125) R150；淤泥 416×272 中心 R172 flat hold。
+- 审图 main：INGAME[key] 可以是 {后缀: 摆法}；b3 出 vfx_frames_b3_ingame.png（叠加六种）、_ingame2.png（普通四种）。
+- test_vfx_frames 35 项（+13：颜色、位置、大小、留帧、三条火舌、金刃外飞、霜花、熔金循环、断木交叉、卷草、汽往上、地刺、泥摊）；
+  --regen 全跑约 15 分钟（b1 90 秒、b2 180 秒、b3 170 秒，确定性再一遍）。
+- 打包：vfx 超过 4096²，pack_atlas 自动分两页 vfx_0（4096×2048，164 帧）、vfx_1（4096²，133 帧），删了旧单页 vfx.json/png；
+  compare_pack2：旧 238 帧逐像素逐字段不变、新增 59 帧和素材一致。打包前备份 $SP/atlas_before_b3。
+- 草稿：$SP/try_b3.py <组,…> [缩放] → $SP/b3_try/strip_*.png（夜色底叠加 / 纸夜各半的普通混合）。
+- 合 master：无冲突（master 上 actors 变回单页、新 cards 图集）；合后 check_atlas、两套测试都过。
