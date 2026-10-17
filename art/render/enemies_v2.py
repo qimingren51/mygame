@@ -92,11 +92,13 @@ V2 = {
               "shadow_units": 24, "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
     # 石将：精英，石翁仲（3/4 侧面）；帧 320²、锚点 (0.5, 0.8)
     "stonelord": {"module": "stonelord_v2", "build": "build_stonelord", "pose": "pose_stonelord", "size_1x": 160,
-                  "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 6, {})], "radius": 28, "eye": "#FFB46B",
+                  # move 一步一沉（石头人落脚重，盔顶跟着上下，自检只查 x 配准；游戏不读）
+                  "anchor": S.BIG_ENEMY_ANCHOR, "anims": [("move", 8, 6, {"vertical_motion": True})], "radius": 28,
+                  "eye": "#FFB46B",
                   "glow": "#FFB46B", "lines": (2.2, 1.25, 0.85), "sockets": ("eyes",), "shadow_units": 22.5,
                   "meta": {"category": "elite", "anchor_kind": "big_enemy", "default_anim": "move"}},
-    # 金蟾：三足、衔钱、一蹦一蹦（vertical_motion）；帧 160²、锚点 (0.5, 0.875)
-    "toad": {"module": "toad_v2", "build": "build_toad", "pose": "pose_toad", "size_1x": 80, "anchor": S.ANCHOR,
+    # 金蟾：三足、衔钱、一蹦一蹦（vertical_motion）；帧 192²（原 160²）、锚点 (0.5, 0.875)
+    "toad": {"module": "toad_v2", "build": "build_toad", "pose": "pose_toad", "size_1x": 96, "anchor": S.ANCHOR,
              "anims": [("move", 6, 10, {})], "radius": 14, "eye": "#FFF1C2", "glow": "#FFF1C2", "lines": (1.6, 1.0, 0.75),
              "sockets": ("eyes",), "shadow_units": 11.25,
              "meta": {"category": "enemy", "vertical_motion": True, "default_anim": "move"}},

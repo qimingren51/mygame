@@ -1995,14 +1995,14 @@ def build_ruimu(draft):
     lid_m = P.mat_stone("LidDark", color=(0.012, 0.010, 0.010), rough=0.9, scale=40.0, bump=0.0)
     lid = make_obj("Lids", eyelid_build(), lid_m, index=1)
     # 瞳孔里的北斗七钱：真的小方孔钱，贴着瞳孔、钱面朝镜头；斗口朝上、斗柄往右
-    rp, rc = 0.0032, 0.00047
+    rp, rc = 0.0032, 0.00052
     pts = np.array(P.DIPPER, float)
     pts = pts - (pts.min(0) + pts.max(0)) / 2
     k = (rp - rc * 1.15) / np.hypot(pts[:, 0], pts[:, 1]).max()
     ang = math.radians(-8)
     rot = np.array([[math.cos(ang), -math.sin(ang)], [math.sin(ang), math.cos(ang)]])
     pts = (pts * k) @ rot.T
-    coin_m = P.mat_coin("PupilCoin", gilt=0.7, rough=0.22, emit=((1.0, 0.72, 0.36), 0.9))
+    coin_m = P.mat_coin("PupilCoin", gilt=1.0, rough=0.28, emit=((1.0, 0.58, 0.16), 0.55))
     sc = rc / 0.022
     for j, (x, y) in enumerate(pts):
         zc = math.sqrt(max(EYE_R ** 2 - x * x - y * y, 0.0)) + 0.00004
@@ -2011,9 +2011,9 @@ def build_ruimu(draft):
         ob.rotation_euler = (math.radians(90), 0, 0)
     # 月光：一道横的长条光，只照亮眼睛这一条；另一盏小的给铜钱点高光
     K.area_light("Key", (-0.05, -0.24, 0.035), (0, 0, 0.001), 0.35, 0.22, size_y=0.010, color=(0.78, 0.88, 1.0))
-    K.area_light("Glint", (0.03, -0.20, 0.03), (0, 0, 0.0), 0.05, 0.02, color=(1.0, 0.92, 0.80))
+    K.area_light("Glint", (0.03, -0.20, 0.03), (0, 0, 0.0), 0.02, 0.02, color=(1.0, 0.85, 0.60))
     K.area_light("Rim", (0.10, 0.15, 0.06), (0, 0, 0), 0.03, 0.10, color=(0.55, 0.68, 1.0))
-    K.camera((0.002, -0.080, 0.003), (0.0004, 0.0, 0.0006), lens=85.0)
+    K.camera((0.0015, -0.062, 0.0024), (0.0003, 0.0, 0.0005), lens=85.0)
     return {"light": "cold"}
 
 
@@ -2045,12 +2045,12 @@ def mat_lotus_seed(name, glow=0.0, peeled=False):
     M = K.Mat(name)
     oc = M.coord("Object")
     nz = M.noise(oc, scale=300.0, detail=4.0)
-    base = (0.82, 0.86, 0.72) if peeled else (0.16, 0.30, 0.10)
+    base = (0.66, 0.84, 0.70) if peeled else (0.16, 0.30, 0.10)
     nrm = M.bump(nz.outputs["Fac"], strength=0.08, distance=0.0005)
     bsdf = M.principled(Base_Color=(*base, 1.0), Roughness=0.30 if not peeled else 0.5, Coat_Weight=0.6 if not peeled else 0.0,
                         Subsurface_Weight=0.5, Subsurface_Radius=(0.004, 0.006, 0.005), Subsurface_Scale=0.5, Normal=nrm)
     if glow:
-        bsdf.inputs["Emission Color"].default_value = (0.50, 1.0, 0.86, 1.0)
+        bsdf.inputs["Emission Color"].default_value = (0.30, 1.0, 0.72, 1.0)
         bsdf.inputs["Emission Strength"].default_value = glow
     return M.surface(bsdf.outputs[0])
 
@@ -2082,7 +2082,7 @@ def build_lotus(draft):
     # 荷叶：一大片圆叶托底（边缘起伏、叶脉放射）；压低镜面，免得反出一大片光
     from card_weapons import low_spec  # noqa: PLC0415
 
-    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.010, 0.036, 0.015), tip=(0.020, 0.060, 0.022)), 0.10)
+    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.006, 0.022, 0.010), tip=(0.014, 0.040, 0.016)), 0.10)
 
     def lotus_leaf(bm):
         uvl = bm.loops.layers.uv.new("UVMap")
@@ -2100,11 +2100,13 @@ def build_lotus(draft):
             for i in range(ns):
                 i1 = (i + 1) % ns
                 f = bm.faces.new((rows[j][i], rows[j][i1], rows[j + 1][i1], rows[j + 1][i]))
-                for lp, uv in zip(f.loops, ((j / nr, i / ns), (j / nr, (i + 1) / ns), ((j + 1) / nr, (i + 1) / ns), ((j + 1) / nr, i / ns))):
+                v0 = (i * 12 / ns) % 1.0  # 一圈 12 道叶脉（ns 是 12 的倍数，每格不跨接缝）
+                v1 = v0 + 12 / ns
+                for lp, uv in zip(f.loops, ((j / nr, v0), (j / nr, v1), ((j + 1) / nr, v1), ((j + 1) / nr, v0))):
                     lp[uvl].uv = uv
     make_obj("Leaf", lotus_leaf, leaf_m, index=0)
     # 散在叶上的莲子：两颗剥了皮发光
-    glow_m = mat_lotus_seed("SeedGlow", glow=0.8, peeled=True)
+    glow_m = mat_lotus_seed("SeedGlow", glow=0.55, peeled=True)
     for k, (x, y, g) in enumerate(((0.085, -0.045, True), (0.125, 0.015, False), (0.050, -0.090, True), (-0.105, -0.060, False),
                                    (0.140, -0.075, True), (-0.060, -0.105, False))):
         ob = make_obj(f"Seed{k}", K.ico_cloud([(0, 0, 0)], [0.011], 3), glow_m if g else seed_m, loc=(x, y, 0.0 + 0.10 * ((x * x + y * y) / 0.09) - 0.02 + 0.011),
@@ -2115,7 +2117,7 @@ def build_lotus(draft):
     for k, (x, y, r) in enumerate(((-0.14, 0.06, 0.012), (0.20, 0.10, 0.008))):
         make_obj(f"Drop{k}", K.ico_cloud([(0, 0, 0)], [r], 3), glass, loc=(x, y, 0.10 * ((x * x + y * y) / 0.09) - 0.02 + r * 0.6),
                  scale=(1.0, 1.0, 0.6), index=3)
-    K.area_light("Key", (0.30, 0.25, 0.80), (0, 0, 0.03), 9.0, 0.35, color=(0.90, 0.95, 1.0))
+    K.area_light("Key", (0.30, 0.25, 0.80), (0, 0, 0.03), 5.0, 0.35, color=(0.90, 0.95, 1.0))
     K.area_light("Rim", (0.5, 0.6, 0.4), (0, 0, 0.03), 8.0, 0.4, color=(0.70, 0.95, 0.85))
     K.area_light("Fill", (0.3, -0.6, 0.3), (0, 0, 0.03), 1.5, 0.6, color=(0.80, 0.90, 1.0))
     K.camera((0.03, -0.40, 0.42), (0.015, 0.0, 0.035), lens=50.0, fstop=4.0, focus=0.57)
@@ -2140,7 +2142,7 @@ def mat_glaze(name, color=(0.30, 0.12, 0.05)):
     cr = M.maprange(craze.outputs["Distance"], 0.0, 0.03, 1.0, 0.0)
     col = M.mix(M.maprange(nz.outputs["Fac"], 0.35, 0.65), (color[0] * 0.6, color[1] * 0.6, color[2] * 0.6, 1.0), (*color, 1.0))
     col = M.mix(m("MULTIPLY", cr, 0.25), col, (0.05, 0.03, 0.02, 1.0))
-    bsdf = M.principled(Base_Color=col, Roughness=0.18, Coat_Weight=0.8, Coat_Roughness=0.05)
+    bsdf = M.principled(Base_Color=col, Roughness=0.30, Coat_Weight=0.45, Coat_Roughness=0.12)
     return M.surface(bsdf.outputs[0])
 
 

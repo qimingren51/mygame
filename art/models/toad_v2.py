@@ -7,7 +7,7 @@
 上眼皮耷拉下来、眼珠斜着往后瞟（贼）；背上嵌着七枚铜钱当疙瘩；前面两条短胳膊，后面只有一条后腿（三足金蟾）。
 动画（只画 E）move 6 帧（10 fps）：一蹦一蹦地逃：0 蹲下蓄劲、1 后腿一蹬、2 腾空（背上掉下一枚钱）、
 3 往下落、4 落地压扁、5 收腿；掉下来的钱在后面翻着落地。
-帧 160²（2 倍），锚点 (0.5, 0.875)。挂点 eyes。
+帧 192²（2 倍；原 160²，一蹦一落、掉钱要地方），锚点 (0.5, 0.875)。挂点 eyes。
 
     root, parts, sockets = build_toad()
     pose_toad(parts, "move", i, 6)
@@ -66,6 +66,9 @@ def pose_params(i, n=6):
             "ph": 2 * math.pi * i / n}
 
 
+BACK_Z = 3.5  # 整个往后（离镜头远）挪一点：锚点下方地方少，近镜头的那只手不能出画
+
+
 class Pose:
     """身子局部（x 前、y 上、z 左右；静止时肚皮贴地）→ 设计稿三维：绕肚子中心仰、压扁、抬高。"""
 
@@ -73,7 +76,7 @@ class Pose:
         self.c = np.array([0.0, 8.0, 0.0])
         self.R = _rot_z(p["tilt"])
         self.sq = np.array([1.0 / math.sqrt(p["squash"]), p["squash"], 1.0 / math.sqrt(p["squash"])])
-        self.lift = np.array([0.0, p["lift"], 0.0])
+        self.lift = np.array([0.0, p["lift"], BACK_Z])
 
     def fwd(self, P):
         P = np.asarray(P, np.float64)

@@ -1816,62 +1816,68 @@ def mat_cast_iron(name, tint=(0.30, 0.31, 0.33)):
 
 @scene("crane_mut", name="铁鹤", samples=128, grade=dict(COLD_GRADE, exposure=1.04, bloom=0.34, sat=0.92))
 def build_crane_mut(draft):
-    """铁鹤：纸鹤的样子折成了铁（同纸鹤卡的姿势：翅膀举成 V、鹤头朝右下一扑），身子是冷灰的铁片折的，
-    两翼各是一扇七片锋利的铁羽（从肩上扇形排开，整扇还是纸鹤的三角翅）；三片小铁羽从右翼射出去，拖着冷白的气痕。月光从后上方打轮廓。"""
-    from mathutils import Euler, Matrix, Vector  # noqa: PLC0415
+    """铁鹤：纸鹤的样子折成了铁（同纸鹤卡的姿势：翅膀举成 V、鹤头朝右下一扑），冷灰的熟铁片，棱上一线亮；
+    两翼后缘剪成一排锋利的铁羽（锯齿），三支铁羽从翼下射出去，拖着冷白的气痕。月亮在后面，铁鹤逆着月光。"""
+    from mathutils import Euler, Vector  # noqa: PLC0415
 
     import card_passives as CP
 
     sky_gradient(lin("#05070C"), lin("#2C3648"), 0.7, ground=lin("#04050A"))
     rng = np.random.default_rng(29)
     iron = mat_cast_iron("Iron")
-    body = make_obj("Crane", P.crane_build(neck_up=0.20, tail_up=0.20, wings=False), iron, smooth=False, index=1,
-                    bevel=(0.0012, 1))
+    wing_up, sweep = 0.34, -0.05
+    body = make_obj("Crane", P.crane_build(wing_up=wing_up, wing_sweep=sweep, neck_up=0.20, tail_up=0.20, wing_bend=0.05), iron,
+                    smooth=False, index=1, bevel=(0.0012, 1))
     body.rotation_euler = Euler((math.radians(8), math.radians(14), math.radians(-20)), "XYZ")
     K._bpy().context.view_layer.update()
     Mw = body.matrix_world.copy()
-    feather = lambda L, W: P.blade_build(L, W, 0.004, tip=0.42, taper=0.55)  # noqa: E731
-    shots = []
+    # 翼后缘的铁羽：沿后缘（翼根后端 → 翼尖）一排三角的刃，往后外方伸出，越近翼尖越长
     for sy in (1, -1):
-        root = Vector((0.0, 0.012 * sy, 0.032))
-        tipv = Vector((-0.08, 0.33 * sy, 0.385))  # 纸鹤的翅尖（同纸鹤卡）
-        v = (tipv - root).normalized()
-        u = Vector((-1.0, 0.0, 0.0))
-        nw = u.cross(v).normalized() * sy
-        u = (u - v * u.dot(v)).normalized()
-        span = (tipv - root).length
-        # 每翼七片宽铁羽，从肩上扇形排开：最前一片指向翅尖、最长，往后一片比一片短（整扇的轮廓还是纸鹤的三角翅）
-        for k in range(7):
-            phi = math.radians(3 + 12 * k)
-            d = (v * math.cos(phi) + u * math.sin(phi)).normalized()
-            L = span * (1.04 - 0.085 * k)
-            wd = nw.cross(d).normalized()
-            Mf = Matrix.Translation(root + nw * (0.003 * k)) @ CP.frame_quat(d, wd).to_matrix().to_4x4()
-            fo = make_obj(f"Feather{sy}_{k}", feather(L, 0.070 - 0.004 * k), iron, index=1, smooth=False)
-            fo.matrix_world = Mw @ Mf
-            if sy < 0 and k in (1, 3, 5):
-                shots.append((Mw @ Mf, L * 0.45))
-    # 射出去的铁羽：三片小的从右翼飞向右下方，拖着冷白的气痕
-    for k, (Mf, L) in enumerate(shots):
-        d0 = (Mf.to_3x3() @ Vector((1, 0, 0))).normalized()
-        fly = (d0 * 0.3 + Vector((0.9, -0.5, -0.45))).normalized()
-        p1 = Mf @ Vector((L * 1.6, 0, 0)) + fly * (0.22 + 0.12 * k)
-        q = CP.frame_quat(fly, Mf.to_3x3() @ Vector((0, 0, 1)))
-        fo = make_obj(f"Shot{k}", feather(L, 0.040), iron, index=1, smooth=False)
+        r1 = Vector((-0.072, 0.004 * sy, 0.028))
+        wt = Vector((-0.03 + sweep, 0.33 * sy, wing_up + 0.045))
+        crease = Vector((-0.01 + sweep * 0.5, 0.17 * sy, (wing_up + 0.045) * 0.5 + 0.02 - 0.05))
+        nrm = (wt - r1).cross(crease - r1).normalized()
+        edge = (wt - r1)
+        out = nrm.cross(edge).normalized()
+        if out.dot(Vector((-1.0, 0.0, 0.0))) < 0:
+            out = -out
+
+        def teeth(bm, r1=r1, edge=edge, out=out, nrm=nrm):
+            n = 7
+            for k in range(n):
+                t0, t1 = (k + 0.05) / n, (k + 0.95) / n
+                a, b_ = r1 + edge * t0, r1 + edge * t1
+                L = 0.030 + 0.040 * ((k + 0.5) / n) ** 1.3
+                tip = (a + b_) / 2 + out * L + edge.normalized() * (L * 0.55)
+                vs = [bm.verts.new(tuple(v)) for v in (a, b_, tip)]
+                bm.faces.new(vs)
+                vs2 = [bm.verts.new(tuple(v - nrm * 0.0025)) for v in (a, b_, tip)]
+                bm.faces.new(list(reversed(vs2)))
+
+        ob = make_obj(f"Teeth{sy}", teeth, iron, smooth=False, index=1)
+        ob.matrix_world = Mw
+    # 射出去的三支铁羽：从近侧翼下往右下方飞，拖着冷白的气痕
+    feather = P.blade_build(0.12, 0.030, 0.004, tip=0.45, taper=0.5)
+    for k in range(3):
+        p0 = Mw @ Vector((0.02 - 0.04 * k, -0.20, 0.10 + 0.02 * k))
+        fly = Vector((0.85, -0.35, -0.42 + 0.12 * k)).normalized()
+        p1 = p0 + fly * (0.26 + 0.10 * k)
+        fo = make_obj(f"Shot{k}", feather, iron, index=1, smooth=False)
         fo.rotation_mode = "QUATERNION"
-        fo.location, fo.rotation_quaternion = tuple(p1), q
-        pts = [tuple(p1 - fly * (0.40 * t) + Vector((0, 0, 0.015 * math.sin(3 * t + k)))) for t in np.linspace(0, 1, 30)]
-        make_obj(f"Trail{k}", K.ribbon_uv(pts, 0.020, width_fn=lambda t: 1 - 0.85 * t),
+        fo.location, fo.rotation_quaternion = tuple(p1), CP.frame_quat(fly, (0, 0, 1))
+        pts = [tuple(p1 - fly * (0.36 * t) + Vector((0, 0, 0.012 * math.sin(3 * t + k)))) for t in np.linspace(0, 1, 30)]
+        make_obj(f"Trail{k}", K.ribbon_uv(pts, 0.018, width_fn=lambda t: 1 - 0.85 * t),
                  K.mat_wind(f"TrailM{k}", strength=1.5, seed=k * 1.7, color=(0.82, 0.90, 1.0)), index=3)
     # 几星打铁迸出的火花（冷光里一点暖）
     ember = K.mat_ember("Ember")
     for k in range(10):
         p = Vector((rng.normal(0.30, 0.15), rng.normal(-0.05, 0.1), rng.normal(0.05, 0.12)))
         make_obj(f"Spark{k}", K.ico_cloud([(0, 0, 0)], [rng.uniform(0.0012, 0.0022)], 1), ember, loc=tuple(p), index=3)
-    K.area_light("Moon", (-0.9, 1.0, 1.4), (0, 0, 0.1), 90.0, 1.4, color=(0.80, 0.88, 1.0))
-    K.area_light("Rim", (1.1, 0.9, 0.4), (0, 0, 0.1), 40.0, 0.8, color=(0.66, 0.78, 1.0))
-    K.area_light("Sky", (0.0, -0.6, 1.6), (0, 0, 0.1), 10.0, 2.0, color=(0.70, 0.78, 0.95))
-    K.area_light("Front", (-0.5, -1.5, 0.2), (0, 0, 0.1), 8.0, 1.2, color=(0.70, 0.76, 0.95))
+    # 逆光：月亮在右后上方，给铁的棱镶一道冷边；前面一盏很弱的补光看得出折面
+    K.area_light("Moon", (0.55, 2.4, 0.55), (0.02, 0, 0.09), 60.0, 0.8, color=(0.82, 0.88, 1.0))
+    K.area_light("Rim", (-1.0, 0.9, 0.8), (0, 0, 0.1), 30.0, 0.8, color=(0.66, 0.78, 1.0))
+    K.area_light("Top", (0.1, 0.2, 1.4), (0, 0, 0.1), 22.0, 1.0, color=(0.70, 0.78, 0.95))
+    K.area_light("Front", (-0.5, -1.5, 0.3), (0, 0, 0.1), 11.0, 1.2, color=(0.70, 0.76, 0.95))
     K.camera((0.05, -1.50, 0.24), (0.02, 0.0, 0.09), lens=50.0, fstop=4.0, focus=1.48)
     return {"light": "cold"}
 
@@ -1997,7 +2003,7 @@ def build_seal_mut(draft):
         sol = ob.modifiers.new("Sol", "SOLIDIFY")
         sol.thickness = 0.008
     # 石印：被竹梢顶住一角，往后翻，印面朝下、朝镜头斜着露出来
-    seal_at = top + Vector((-0.35, 0.10, 0.75))
+    seal_at = top + Vector((-0.40, 0.10, 1.15))
     P.seal_block("Seal", size=1.7, height=1.8, stone_m=stone,
                  face_m=P.mat_seal_face("SealFace", face_img, stone=(0.05, 0.055, 0.05), paste=(0.40, 0.03, 0.02)),
                  loc=tuple(seal_at), rot=(math.radians(-50), math.radians(32), math.radians(-16)), index=1)
@@ -2030,6 +2036,11 @@ def build_seal_mut(draft):
         ob = make_obj(f"Clod{i}", K.ico_cloud([(0, 0, 0)], [sz], 1), soil, loc=tuple(p), index=2, smooth=False)
         ob.scale = tuple(rng.uniform(0.6, 1.4, 3))
         ob.rotation_euler = tuple(rng.uniform(0, 6.28, 3))
+    for i in range(24):  # 跟着竹子一起冲上来的泥块（高一些）
+        a = rng.uniform(0, 2 * math.pi)
+        p = cpt(rng.uniform(0.35, 0.75)) + Vector((rng.uniform(0.55, 1.3) * math.cos(a), rng.uniform(0.3, 0.8) * math.sin(a), 0.0))
+        ob = make_obj(f"Fly{i}", K.ico_cloud([(0, 0, 0)], [rng.uniform(0.03, 0.09)], 1), soil, loc=tuple(p), index=2, smooth=False)
+        ob.scale = tuple(rng.uniform(0.6, 1.4, 3))
     for i in range(30):
         t = rng.uniform(0.22, 0.42)
         a = rng.uniform(0, 2 * math.pi)
@@ -2039,7 +2050,7 @@ def build_seal_mut(draft):
     K.area_light("Rim", (5.0, 5.0, 3.0), (0, 0, 2.0), 320.0, 2.0, color=(0.62, 0.72, 1.0))
     K.area_light("Front", (-2.5, -6.5, 2.0), (0, 0, 1.6), 140.0, 4.0, color=(0.70, 0.76, 0.95))
     K.area_light("Under", (0.3, -2.2, 0.3), tuple(top + Vector((-0.3, 0.1, 0.3))), 90.0, 2.0, color=(1.0, 0.78, 0.55))
-    K.camera((0.5, -7.2, 0.50), (0.02, 0.3, 2.35), lens=28.0, fstop=8.0, focus=7.2)
+    K.camera((0.5, -8.2, 0.55), (0.02, 0.3, 2.60), lens=28.0, fstop=8.0, focus=8.2)
     return {"light": "earth"}
 
 
