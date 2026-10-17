@@ -933,7 +933,7 @@ def build_coin_sword(draft):
     K.area_light("Key", (-0.9, -1.2, 1.2), (0, 0, 0), 85.0, 1.0, color=(1.0, 0.86, 0.66))
     K.area_light("Rim", (1.0, 1.2, 0.8), (0, 0, 0), 40.0, 0.8, color=(0.62, 0.74, 1.0))
     K.area_light("Fill", (0.5, -1.4, -0.6), (0, 0, 0), 6.0, 1.0, color=(0.70, 0.75, 1.0))
-    K.camera((0.0, -1.16, 0.08), (0.0, 0.0, 0.0), lens=50.0, fstop=5.6, focus=1.15)
+    K.camera((0.0, -1.26, 0.08), (0.0, 0.0, 0.0), lens=50.0, fstop=5.6, focus=1.25)
     return {"light": "warm"}
 
 
@@ -989,7 +989,7 @@ def build_coin_sword_evo(draft):
     # 头顶七枚大钱：北斗，斗柄指向右上
     coin_m = P.mat_coin("BigCoin", K.np_image("coin_face_big2", P.coin_face_texture("天下太平")), base=(0.62, 0.42, 0.16), patina_amt=0.12,
                         rough=0.22, gilt=0.7, emit=((1.0, 0.70, 0.30), 0.12))
-    cb = P.coin_build(r=0.065, t=0.006, hole=0.026, rim_w=0.008, rim_h=0.0012)
+    cb = P.coin_build(r=0.088, t=0.008, hole=0.035, rim_w=0.011, rim_h=0.0016)
     pos = []
     for i, (dx, dz) in enumerate(P.DIPPER):
         p = Vector((-0.52 + dx * 0.38, 0.05 - 0.04 * dx, 0.90 + (dz - 0.3) * 0.28 + 0.06 * dx))
@@ -1184,23 +1184,6 @@ def curl_wave_build(L=3.0, H=0.9, nu=140, nv=56, curl_fn=None, height_fn=None, b
     return build
 
 
-def foam_texture(w=1024, h=512, seed=4):
-    """浪面上的泡沫：越靠浪峰、舌尖（v 大）越多，沿浪长拉出一道道白纹。返回 (h, w) 0..1（v 方向从下往上 = 图里从下到上）。"""
-    rng = np.random.default_rng(seed)
-    V = K.vfx()
-    v = np.linspace(0, 1, h)[::-1][:, None] * np.ones((1, w))
-    n1 = V.fft_blur(rng.standard_normal((h, w)), (40.0, 3.0))
-    n1 = n1 / (n1.std() + 1e-9)
-    n2 = V.fft_blur(rng.standard_normal((h, w)), (14.0, 1.2))
-    n2 = n2 / (n2.std() + 1e-9)
-    vv = 1 - np.abs(v - 0.5) * 2  # 1 = 舌尖
-    band = np.clip((vv - 0.42) / 0.35, 0, 1) ** 1.2
-    tipz = np.clip((vv - 0.76) / 0.20, 0, 1)
-    f = np.clip(band * (0.55 + 0.35 * n1 + 0.25 * n2) + tipz * 0.9, 0, 1)
-    lace = np.clip(np.tanh(1.5 * (n2 - 0.8)), 0, 1) * np.clip((vv - 0.30) / 0.4, 0, 1) * 0.45
-    return np.clip(np.maximum(f, lace), 0, 1)
-
-
 @scene("wave", name="沧浪", samples=128, grade=dict(COLD_GRADE, bloom=0.30, sat=1.02))
 def build_wave(draft):
     """沧浪：一道卷起的月牙浪头（左边卷得最狠、往右渐成涌浪），浪尖碎成白沫往前飞溅；浪里卷着几只小妖（暗身、亮眼）。
@@ -1209,8 +1192,7 @@ def build_wave(draft):
 
     sky_gradient(lin("#05080F"), lin("#2B4A60"), 0.9, ground=lin("#03060A"))
     rng = np.random.default_rng(83)
-    foam = K.np_image("wave_foam", foam_texture())
-    water = P.mat_water("Water", color=(0.008, 0.060, 0.075), foam_img=foam, emit=0.05, transmission=0.25, rough=0.24)
+    water = mat_crest_water("Water", 0.42, 0.88, color=(0.006, 0.040, 0.070))  # 浪身深蓝，往上盖满白沫
     ob = make_obj("Wave", curl_wave_build(L=3.6, H=1.0, curl_fn=lambda u: K.smoothstep(0.05, 0.75, u),
                                          height_fn=lambda u: K.smoothstep(0.0, 0.55, u) * (1.0 - 0.25 * K.smoothstep(0.85, 1.0, u)),
                                          bend=0.45), water, index=1)
@@ -1228,10 +1210,10 @@ def build_wave(draft):
         y = -0.32 * h * c - abs(rng.normal(0.0, 0.25)) * c + 0.45 * (2 * u - 1) ** 2
         z = h * (0.82 + abs(rng.normal(0.0, 0.18)))
         pts_.append((x + rng.normal(0, 0.04), y, z))
-        rad_.append(rng.uniform(0.004, 0.016))
+        rad_.append(rng.uniform(0.006, 0.022))
     make_obj("Spray", K.ico_cloud(pts_, rad_, 1), fm, index=3)
     # 浪里卷着的小妖（在浪舌底下）
-    for i, (u, z, sz) in enumerate(((0.62, 0.36, 0.07), (0.78, 0.50, 0.06), (0.92, 0.30, 0.055))):
+    for i, (u, z, sz) in enumerate(((0.60, 0.40, 0.10), (0.76, 0.55, 0.09), (0.90, 0.34, 0.085))):
         x = (u - 0.5) * 3.6
         P.imp(f"Imp{i}", size=sz, loc=(x, -0.16 + 0.45 * (2 * u - 1) ** 2, z), rot=tuple(rng.uniform(-1.0, 1.0, 3)), rng=rng)
     K.area_light("Moon", (1.0, 4.0, 2.4), (0.6, 0, 0.6), 700.0, 1.5, color=(0.62, 0.78, 1.0))
@@ -1251,6 +1233,26 @@ def bg_wave(P_, h, w, rng, k):
 
 
 # ====================================================================== 北冥潮
+
+
+def mat_crest_water(name, z0, z1, color=(0.008, 0.050, 0.070)):
+    """一圈浪：下面是深青的水（不透、略毛），往上（物体坐标 z 从 z0 到 z1）渐渐盖满白沫，白沫被噪声打成一缕缕。"""
+    M = K.Mat(name)
+    m = M.math
+    oc = M.coord("Object")
+    sep = M.n("ShaderNodeSeparateXYZ")
+    M.l(oc, sep.inputs[0])
+    nz = M.noise(oc, scale=9.0, detail=6.0, rough=0.62)
+    nz2 = M.noise(oc, scale=40.0, detail=4.0)
+    foam = m("MULTIPLY", M.maprange(sep.outputs["Z"], z0, z1), M.maprange(m("ADD", nz.outputs["Fac"], m("MULTIPLY", nz2.outputs["Fac"], 0.4)),
+                                                                           0.45, 0.85))
+    foam = m("ADD", foam, M.maprange(sep.outputs["Z"], z1, z1 + 0.08), clamp=True)
+    col = M.mix(foam, (*color, 1.0), (0.80, 0.88, 0.94, 1.0))
+    nrm = M.bump(m("ADD", nz.outputs["Fac"], m("MULTIPLY", foam, 0.5)), strength=0.3, distance=0.02)
+    bsdf = M.principled(Base_Color=col, Roughness=M.mixf(foam, 0.30, 0.75), Normal=nrm, Specular_IOR_Level=0.35)
+    bsdf.inputs["Emission Color"].default_value = (0.10, 0.30, 0.38, 1.0)
+    M.l(m("MULTIPLY", m("SUBTRACT", 1.0, foam), 0.05), bsdf.inputs["Emission Strength"])
+    return M.surface(bsdf.outputs[0])
 
 
 def fish_shadow_texture(size=1024, seed=3):
@@ -1289,7 +1291,7 @@ def build_wave_evo(draft):
     prof = [(0.0, -0.16), (0.5, -0.15), (0.9, -0.10), (1.15, 0.02), (1.30, 0.20), (1.40, 0.42), (1.47, 0.60), (1.56, 0.72),
             (1.68, 0.74), (1.80, 0.68), (1.90, 0.56), (1.94, 0.46), (1.90, 0.40), (1.84, 0.38), (1.88, 0.30), (2.05, 0.14),
             (2.35, 0.04), (2.8, 0.0)]
-    water = P.mat_water("RingWater", color=(0.010, 0.065, 0.085), transmission=0.20, rough=0.26, emit=0.04)
+    water = mat_crest_water("RingWater", 0.30, 0.62)
     make_obj("RingWave", K.lathe_uv(prof, segments=240, radial=lambda th, z, i: 1 + 0.03 * math.sin(5 * th + 1) * (z > 0.1) +
                                     0.015 * math.sin(13 * th) * (z > 0.2)), water, index=1)
     # 浪头的冰：一圈冰壳 + 冰晶
@@ -1338,7 +1340,7 @@ def build_wave_evo(draft):
     wn = sm.noise(oc, scale=2.2, detail=5.0, rough=0.6)
     nrm = sm.bump(wn.outputs["Fac"], strength=0.35, distance=0.05)
     rough = sm.mixf(fsc.outputs[0], 0.16, 0.6)
-    bsdf = sm.principled(Base_Color=col, Roughness=rough, Normal=nrm)
+    bsdf = sm.principled(Base_Color=col, Roughness=rough, Normal=nrm, Specular_IOR_Level=0.05)
     bsdf.inputs["Emission Color"].default_value = (0.10, 0.30, 0.40, 1.0)  # 冰海底下透上来的一点青光，鲲的影子挡住它
     sm.l(sm.math("MULTIPLY", sm.math("SUBTRACT", 1.0, fsc.outputs[0]), sm.maprange(nz.outputs["Fac"], 0.3, 0.7, 0.08, 0.20)),
          bsdf.inputs["Emission Strength"])
@@ -1362,7 +1364,7 @@ def build_wave_evo(draft):
                 bm.faces.new((top[j], bot[j], bot[(j + 1) % len(pts)], top[(j + 1) % len(pts)]))
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         make_obj(f"Floe{i}", slab, floe, loc=p, rot=(0, 0, rng.uniform(0, 6.28)), index=2, smooth=False)
-    K.area_light("Moon", (-4.0, 9.0, 6.0), (0, 2.0, 0), 1800.0, 3.0, color=(0.62, 0.76, 1.0))
+    K.area_light("Moon", (-7.0, 1.0, 7.0), (0, 2.0, 0), 1800.0, 3.0, color=(0.62, 0.76, 1.0))
     K.area_light("Front", (1.0, -5.0, 4.0), (0, 0, 0), 120.0, 3.0, color=(0.60, 0.72, 1.0))
     K.camera((0.3, -2.7, 5.6), (0.15, 1.2, 0.0), lens=30.0, fstop=11.0, focus=6.8)
     return {"light": "cold"}
@@ -1450,7 +1452,7 @@ def build_vine(draft):
     vine_m = mat_vine("Vine")
     a, b = S(0.04, 0.96, 1.75), S(0.72, 0.34, 1.45)
     path = [Vector(p) for p in CP.bez([tuple(S(-0.06, 1.08, 1.85)), tuple(a)], n=10)[:-1]]
-    path += helix_path(a, b, 0.11, 1.8, n=220, phase=0.4, taper=0.55, up=(0.0, -1.0, 0.0))
+    path += helix_path(a, b, 0.16, 1.6, n=220, phase=0.4, taper=0.50, up=(0.0, -1.0, 0.0))
     # 藤尖：往上打一个小卷
     tip0, d0 = path[-1], (path[-1] - path[-4]).normalized()
     side = d0.cross(Vector((0, -1, 0))).normalized()
@@ -1459,7 +1461,7 @@ def build_vine(draft):
         r = 0.045 * (1 - 0.75 * t)
         path.append(tip0 + d0 * (0.05 * math.sin(ang) * (1 - 0.3 * t) + 0.01 * t) + side * (0.03 - r * math.cos(ang)))
     pts = [tuple(p) for p in path]
-    make_obj("Vine", K.tube_uv(pts, 0.020, sides=20, radius_fn=lambda t: 1.0 - 0.80 * t ** 0.9), vine_m, index=1)
+    make_obj("Vine", K.tube_uv(pts, 0.032, sides=20, radius_fn=lambda t: 1.0 - 0.80 * t ** 0.9), vine_m, index=1)
     # 新叶：沿藤每隔一段一片，叶面朝镜头一侧
     leaf_m = CP.mat_young_leaf("Leaf")
     cam = Vector((0, 0, 0))
@@ -1468,7 +1470,7 @@ def build_vine(draft):
         tang = (Vector(pts[i + 2]) - Vector(pts[i - 2])).normalized()
         out = (p - Vector(a).lerp(Vector(b), i / len(pts))).normalized()
         d = (out * 0.8 + tang * 0.6 + Vector(rng.normal(0, 0.15, 3))).normalized()
-        L = 0.085 - 0.006 * k
+        L = 0.125 - 0.008 * k
         ob = make_obj(f"Leaf{k}", K.leaf_build(L, L * 0.48, fold=0.18, curl=0.18, twist=rng.normal(0, 0.3)), leaf_m, index=2)
         zh = (cam - p).normalized() + Vector(rng.normal(0, 0.2, 3))
         CP.orient(ob, tuple(p + d * 0.006), d, zh)
@@ -1481,8 +1483,8 @@ def build_vine(draft):
         e1 = tang.cross(Vector((0, -1, 0))).normalized()
         e2 = tang.cross(e1)
         ph = t * 2 * math.pi * 7
-        flow.append(tuple(q + e1 * (0.030 * math.cos(ph)) + e2 * (0.030 * math.sin(ph))))
-    make_obj("Flow", K.ribbon_uv(flow[::-1], 0.016, width_fn=lambda t: 0.6 + 0.4 * math.sin(math.pi * t)),
+        flow.append(tuple(q + e1 * (0.045 * math.cos(ph)) + e2 * (0.045 * math.sin(ph))))
+    make_obj("Flow", K.ribbon_uv(flow[::-1], 0.022, width_fn=lambda t: 0.6 + 0.4 * math.sin(math.pi * t)),
              mat_life_stream("FlowM", strength=5.0, beads=46.0), index=4)
     sparkle_m = P.mat_emit("Mote", (0.55, 1.0, 0.62), 10.0)
     for k in range(18):
@@ -1523,8 +1525,8 @@ def build_vine_evo(draft):
     stamen = CP.mat_petal("Stamen", color=(0.95, 0.90, 0.80), heart=(0.95, 0.85, 0.75))
     imps = [Vector((-0.30, 0.05, 0.0)), Vector((0.28, 0.12, 0.0)), Vector((0.0, 0.42, 0.0))]
     for i, c in enumerate(imps):
-        P.imp(f"Imp{i}", size=0.13, loc=tuple(c + Vector((0, 0, 0.12))), rot=(0, 0, rng.uniform(-0.6, 0.6)), rng=rng)
-    cam = Vector((0.0, -2.2, 2.0))
+        P.imp(f"Imp{i}", size=0.17, loc=tuple(c + Vector((0, 0, 0.15))), rot=(0, 0, rng.uniform(-0.6, 0.6)), rng=rng)
+    cam = Vector((0.0, -1.75, 1.55))
     n_v = 0
     for i, c in enumerate(imps):
         for j in range(3):  # 每只妖三根藤：从远处地缝里来，贴地爬到它脚下，再绕着身子往上缠
@@ -1537,7 +1539,7 @@ def build_vine_evo(draft):
                               phase=a, taper=0.15)
             path = crawl + coil[3:]
             pts = [tuple(p) for p in path]
-            make_obj(f"Vine{n_v}", K.tube_uv(pts, 0.014, sides=14, radius_fn=lambda t: 1.0 - 0.6 * t), vine_m, index=1)
+            make_obj(f"Vine{n_v}", K.tube_uv(pts, 0.020, sides=14, radius_fn=lambda t: 1.0 - 0.6 * t), vine_m, index=1)
             for k_ in range(4):
                 idx = int(rng.uniform(0.1, 0.75) * len(pts))
                 p = Vector(pts[idx])
@@ -1549,13 +1551,13 @@ def build_vine_evo(draft):
                     CP.orient(ob, tuple(p), d, (cam - p).normalized())
                 else:
                     nrm = (cam - p).normalized() + Vector((0, 0, 0.5))
-                    CP.blossom(f"Flower{n_v}_{k_}", tuple(p + Vector((0, 0, 0.012))), nrm, 0.024, petal, center, stamen, rng=rng,
+                    CP.blossom(f"Flower{n_v}_{k_}", tuple(p + Vector((0, 0, 0.014))), nrm, 0.034, petal, center, stamen, rng=rng,
                                spin=rng.uniform(0, 1))
             n_v += 1
     K.area_light("Moon", (-3.0, 3.0, 4.0), (0, 0.2, 0), 260.0, 2.5, color=(0.70, 0.85, 1.0))
     K.area_light("Front", (1.5, -3.0, 2.0), (0, 0.2, 0.1), 40.0, 2.5, color=(0.85, 0.95, 0.85))
     K.point_light("Life", (0.0, 0.2, 0.6), 6.0, radius=0.4, color=(0.55, 1.0, 0.60))
-    K.camera(tuple(cam), (0.0, 0.25, 0.12), lens=34.0, fstop=8.0, focus=3.0)
+    K.camera(tuple(cam), (0.0, 0.22, 0.14), lens=34.0, fstop=8.0, focus=2.35)
     return {"light": "wood"}
 
 
@@ -1608,9 +1610,9 @@ def eave_build(hs_out, hs_in, h, curl=0.25, n=16, nv=8):
 
 
 def pagoda(name, *, tiers=7, hs=0.30, body_h=0.20, shrink=0.085, wall_m=None, roof_m=None, trim_m=None, window_m=None,
-           bell_m=None, loc=(0, 0, 0), rot=(0, 0, 0), index=1):
+           bell_m=None, loc=(0, 0, 0), rot=(0, 0, 0), index=1, dense=False, eave_trim=False):
     """方塔（底在 z=0）：每层一段塔身（四面各一扇窗）+ 一层翘角的檐，檐角各挂一只小铜铃；顶上塔刹（相轮几圈 + 宝珠）。
-    返回 (父物体, 塔高)。"""
+    dense=True 是密檐塔：第一层塔身高（四面一扇大门），往上各层塔身很矮、檐一层压一层。返回 (父物体, 塔高)。"""
     bpy = K._bpy()
     root = bpy.data.objects.new(name, None)
     K.link(root)
@@ -1623,17 +1625,27 @@ def pagoda(name, *, tiers=7, hs=0.30, body_h=0.20, shrink=0.085, wall_m=None, ro
         f = (1 - shrink) ** k
         half = hs * f
         bh = body_h * (1 - 0.04 * k)
+        if dense:
+            bh = body_h * 2.0 if k == 0 else body_h * 0.42
         make_obj(f"{name}_Body{k}", K.box_build(half * 2, half * 2, bh), wall_m, parent=root, loc=(0, 0, z + bh / 2), index=index,
                  smooth=False)
         for sx, sy, rz in ((0, -1, 0.0), (0, 1, 0.0), (-1, 0, math.pi / 2), (1, 0, math.pi / 2)):
-            make_obj(f"{name}_Win{k}_{sx}{sy}", K.box_build(half * 0.55, 0.012, bh * 0.55), window_m, parent=root,
+            ww, wh = (half * 0.55, bh * 0.55) if not dense or k == 0 else (half * 0.30, bh * 0.50)
+            make_obj(f"{name}_Win{k}_{sx}{sy}", K.box_build(ww, 0.012, wh), window_m, parent=root,
                      loc=(sx * (half + 0.002), sy * (half + 0.002), z + bh * 0.5), rot=(0, 0, rz), index=index, smooth=False)
         z += bh
         hs_out = half * 1.75
         hs_in = hs * (1 - shrink) ** (k + 1) * 0.98
-        eh = body_h * 0.42
+        eh = body_h * (0.30 if dense else 0.42)
         make_obj(f"{name}_Eave{k}", eave_build(hs_out, hs_in, eh, curl=0.10 * f + 0.03), roof_m, parent=root, loc=(0, 0, z), index=index)
         lift = 0.10 * f + 0.03
+        if eave_trim:  # 檐口描金：沿檐口一圈细金边（跟着四角翘）
+            rim = []
+            for (ax, ay), (bx, by) in zip(((1, -1), (1, 1), (-1, 1), (-1, -1)), ((1, 1), (-1, 1), (-1, -1), (1, -1))):
+                for t in np.linspace(0, 1, 24, endpoint=False):
+                    rim.append((hs_out * (ax + (bx - ax) * t), hs_out * (ay + (by - ay) * t), z + lift * abs(2 * t - 1) ** 4 + 0.004))
+            rim.append(rim[0])
+            make_obj(f"{name}_Rim{k}", K.tube_uv(rim, 0.007, sides=6), trim_m, parent=root, index=index)
         for sx in (-1, 1):
             for sy in (-1, 1):
                 c = (sx * hs_out * 0.99, sy * hs_out * 0.99, z + lift - 0.012)
@@ -1691,7 +1703,7 @@ def spiral_in(c, r0, r1, turns, z0, z1, phase, n=120):
 
 @scene("tower", name="镇妖塔", samples=128, grade=dict(EARTH_GRADE, exposure=1.02, bloom=0.36))
 def build_tower(draft):
-    """镇妖塔：一座七层小宝塔从天上压下来（略斜，塔底离地还有一截），每层翘角檐下挂着小铜铃；塔底下地上一圈旋涡，
+    """镇妖塔：一座七层密檐小宝塔从天上压下来（略斜，塔底离地还有一截），每层翘角檐下挂着小铜铃；塔底下地上一圈旋涡，
     几缕墨色的妖气被卷着往塔底吸，旋涡心透出一点暗紫的光。镜头低一点往上看。"""
     from mathutils import Vector  # noqa: PLC0415
 
@@ -1700,8 +1712,9 @@ def build_tower(draft):
     wall = K.mat_lacquer("TowerWall", color=(0.10, 0.035, 0.025), rough=0.5, coat=0.3)
     roof = P.mat_roof_tiles("TowerTiles", color=(0.045, 0.045, 0.05))
     trim = P.mat_bronze("TowerBronze", base=(0.30, 0.20, 0.09), patina_amt=0.6)
-    window = P.mat_emit("TowerWindow", (1.0, 0.55, 0.22), 2.5)
-    root, H = pagoda("Tower", tiers=7, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window, bell_m=trim, loc=(0.0, 0.0, 0.85),
+    window = P.mat_emit("TowerWindow", (1.0, 0.55, 0.22), 4.0)
+    root, H = pagoda("Tower", tiers=7, hs=0.36, body_h=0.26, shrink=0.07, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window,
+                     bell_m=trim, dense=True, loc=(0.0, 0.0, 0.80),
                      rot=(math.radians(-6), math.radians(5), math.radians(28)))
     crack = K.np_image("crack_tower", P.crack_texture(2048, rng, n_main=10, reach=0.30, width=3.0))
     ground_plane("Ground", P.mat_ground_crack("GroundM", crack, base=(0.016, 0.014, 0.012), glow=((0.55, 0.25, 0.85), 0.8),
@@ -1719,8 +1732,8 @@ def build_tower(draft):
     K.point_light("VortexGlow", (0.0, 0.0, 0.10), 18.0, radius=0.4, color=(0.55, 0.25, 0.85))
     K.area_light("Moon", (-4.0, 6.0, 7.0), (0, 0, 1.4), 900.0, 3.0, color=(0.66, 0.76, 1.0))
     K.area_light("Rim", (5.0, 5.0, 3.0), (0, 0, 1.6), 300.0, 2.0, color=(0.62, 0.72, 1.0))
-    K.area_light("Front", (-2.0, -6.0, 1.5), (0, 0, 1.4), 90.0, 4.0, color=(0.75, 0.72, 0.85))
-    K.camera((0.6, -5.2, 0.55), (0.0, 0.2, 1.62), lens=30.0, fstop=8.0, focus=5.3)
+    K.area_light("Front", (-2.0, -6.0, 1.5), (0, 0, 1.4), 170.0, 4.0, color=(0.75, 0.72, 0.85))
+    K.camera((0.55, -4.3, 0.55), (0.0, 0.2, 1.70), lens=30.0, fstop=8.0, focus=4.4)
     _ = (root, H, Vector)
     return {"light": "earth"}
 
@@ -1736,19 +1749,19 @@ def bg_tower(P_, h, w, rng, k):
 
 @scene("tower_evo", name="玲珑塔", samples=128, grade=dict(WARM_GRADE, exposure=1.0, bloom=0.42, sat=1.04))
 def build_tower_evo(draft):
-    """玲珑塔：一座高大的九层玲珑宝塔悬在半空，檐是鎏金的，塔身每扇窗都透出金光；四面的小妖被吸向塔身，
+    """玲珑塔：一座高大的九层密檐玲珑宝塔悬在半空，玉白的塔身、石绿的琉璃檐、檐口描金，每扇窗都透出金光；四面的小妖被吸向塔身，
     身后拖着一道道往塔去的气痕。镜头往上看，塔顶在画面上方中间。"""
     from mathutils import Vector  # noqa: PLC0415
 
     sky_gradient(lin("#0A0806"), lin("#3A2A16"), 0.6, ground=lin("#050403"))
     rng = np.random.default_rng(107)
-    wall = K.mat_lacquer("GoldWall", color=(0.16, 0.06, 0.03), rough=0.4, coat=0.5)
-    roof = K.mat_gold("GoldRoof", worn=0.35)
+    wall = P.mat_stone("JadeWall", color=(0.70, 0.74, 0.66), rough=0.35, scale=6.0, cavity=0.3, bump=0.2)
+    roof = P.mat_roof_tiles("JadeTiles", color=(0.06, 0.30, 0.22))
     trim = K.mat_gold("GoldTrim", worn=0.2)
-    window = P.mat_emit("GoldWindow", (1.0, 0.70, 0.30), 7.0)
-    root, H = pagoda("Tower", tiers=9, hs=0.34, body_h=0.21, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window, bell_m=trim,
-                     loc=(0.0, 0.0, -1.10), rot=(0, 0, math.radians(30)))
-    K.point_light("TowerCore", (0.0, -0.3, 0.2), 120.0, radius=0.6, color=(1.0, 0.68, 0.28))
+    window = P.mat_emit("GoldWindow", (1.0, 0.72, 0.32), 7.0)
+    root, H = pagoda("Tower", tiers=9, hs=0.34, body_h=0.24, shrink=0.065, wall_m=wall, roof_m=roof, trim_m=trim, window_m=window,
+                     bell_m=trim, dense=True, eave_trim=True, loc=(0.0, 0.0, -1.10), rot=(0, 0, math.radians(30)))
+    K.point_light("TowerCore", (0.0, -0.3, 0.2), 200.0, radius=0.6, color=(1.0, 0.68, 0.28))
     # 四面的小妖被吸过来：每只身后一道往塔去的气痕
     for i in range(10):
         a = rng.uniform(0, 2 * math.pi)
@@ -1757,13 +1770,13 @@ def build_tower_evo(draft):
         if p.y < -0.6 and abs(p.x) < 0.6:
             continue
         to = (Vector((0, 0, p.z * 0.6 + 0.1)) - p).normalized()
-        P.imp(f"Imp{i}", size=rng.uniform(0.07, 0.10), loc=tuple(p), rot=tuple(rng.uniform(-1.0, 1.0, 3)), rng=rng)
+        P.imp(f"Imp{i}", size=rng.uniform(0.10, 0.14), loc=tuple(p), rot=tuple(rng.uniform(-1.0, 1.0, 3)), rng=rng)
         pts = [tuple(p - to * (0.55 * t) + Vector((0, 0, 0.05 * math.sin(4 * t + i)))) for t in np.linspace(0, 1, 30)]
         make_obj(f"Trail{i}", K.ribbon_uv(pts, 0.05, width_fn=lambda t: 1 - 0.8 * t),
                  K.mat_wind(f"TrailM{i}", strength=1.3, seed=i * 1.3, color=(1.0, 0.78, 0.45)), index=3)
     K.area_light("Rim", (-3.0, 4.0, 3.0), (0, 0, 0.4), 600.0, 2.5, color=(0.62, 0.72, 1.0))
     K.area_light("Front", (1.5, -5.0, 0.5), (0, 0, 0.4), 60.0, 3.0, color=(1.0, 0.82, 0.60))
-    K.camera((0.2, -6.6, -0.65), (0.0, 0.0, 0.62), lens=30.0, fstop=8.0, focus=6.6)
+    K.camera((0.2, -4.1, -0.80), (0.0, 0.0, -0.02), lens=30.0, fstop=8.0, focus=4.1)
     _ = (root, H)
     return {"light": "warm"}
 
