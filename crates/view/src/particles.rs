@@ -55,6 +55,110 @@ pub(crate) struct PFrames {
     /// 美术的竹叶 `vfx/bamboo_leaf_0..3`；图集里没有时是灰片，拉长了当竹叶
     pub leaves: [FrameId; 4],
     pub real_leaves: bool,
+    /// 美术的羽毛、纸屑 `vfx/feather_0..3`（纸鹤命中翻飞用）；没有时用灰片
+    pub feathers: Option<[FrameId; 4]>,
+}
+
+/// 美术的逐帧特效（docs/FEEL.md 第 12 节），都是 24 帧 / 秒、播一次。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum Fx {
+    #[default]
+    None,
+    HitMetal,
+    HitWood,
+    HitWater,
+    HitFire,
+    HitEarth,
+    Crit,
+    Slash,
+    KillInk,
+    Shockwave,
+    FireBurst,
+    FireSmoke,
+    IceShatter,
+    Evolve,
+    Pillar,
+}
+
+impl Fx {
+    const ALL: [Fx; 15] = [
+        Fx::None,
+        Fx::HitMetal,
+        Fx::HitWood,
+        Fx::HitWater,
+        Fx::HitFire,
+        Fx::HitEarth,
+        Fx::Crit,
+        Fx::Slash,
+        Fx::KillInk,
+        Fx::Shockwave,
+        Fx::FireBurst,
+        Fx::FireSmoke,
+        Fx::IceShatter,
+        Fx::Evolve,
+        Fx::Pillar,
+    ];
+
+    /// 图集里的帧名前缀（后面接 `_0`、`_1`……）
+    fn name(self) -> &'static str {
+        match self {
+            Fx::None => "",
+            Fx::HitMetal => "vfx/hit_metal",
+            Fx::HitWood => "vfx/hit_wood",
+            Fx::HitWater => "vfx/hit_water",
+            Fx::HitFire => "vfx/hit_fire",
+            Fx::HitEarth => "vfx/hit_earth",
+            Fx::Crit => "vfx/crit",
+            Fx::Slash => "vfx/slash",
+            Fx::KillInk => "vfx/kill_ink",
+            Fx::Shockwave => "vfx/shockwave",
+            Fx::FireBurst => "vfx/fire_burst",
+            Fx::FireSmoke => "vfx/fire_burst_smoke",
+            Fx::IceShatter => "vfx/ice_shatter",
+            Fx::Evolve => "vfx/evolve",
+            Fx::Pillar => "vfx/evolve_pillar",
+        }
+    }
+
+    /// 普通混合的帧（墨溅、墨烟）画在暗层之下，其余叠加、画在暗层之上
+    fn glow(self) -> bool {
+        !matches!(self, Fx::KillInk | Fx::FireSmoke)
+    }
+
+    fn hit(e: Option<Element>) -> Fx {
+        match e {
+            Some(Element::Metal) => Fx::HitMetal,
+            Some(Element::Wood) => Fx::HitWood,
+            Some(Element::Water) => Fx::HitWater,
+            Some(Element::Fire) => Fx::HitFire,
+            Some(Element::Earth) => Fx::HitEarth,
+            None => Fx::None,
+        }
+    }
+}
+
+/// 逐帧特效的帧率（美术统一按 24 帧画）
+const ANIM_FPS: f32 = 24.0;
+
+/// 逐帧特效第 t 秒画哪一帧、淡到多少：按 24 帧换帧，淡入淡出画在图里；
+/// 寿命比动画长的，停在最后一帧，在多出来的那段里淡掉。
+fn anim_frame(frames: &[FrameId], t: f32, life: f32) -> (FrameId, f32) {
+    let i = ((t * ANIM_FPS) as usize).min(frames.len() - 1);
+    let len = frames.len() as f32 / ANIM_FPS;
+    let hold = if t > len && life > len { (1.0 - (t - len) / (life - len)).max(0.0) } else { 1.0 };
+    (frames[i], hold.sqrt())
+}
+
+/// 从图集里按名字收齐每段逐帧特效（`fx::sequence`：图集登记了动画就用动画，否则按 `_0`、`_1`……找）；
+/// 缺的段是空的，调用处退回代码画的粒子。
+fn load_anims(db: &AtlasDb) -> Vec<Vec<FrameId>> {
+    Fx::ALL
+        .iter()
+        .map(|fx| match *fx {
+            Fx::None => Vec::new(),
+            fx => crate::fx::sequence(db, fx.name()),
+        })
+        .collect()
 }
 
 fn hash(x: i32, y: i32, seed: u32) -> f32 {
@@ -229,7 +333,13 @@ pub(crate) fn setup_particles(
             dot: f("fx/dot"),
             leaves: [0, 1, 2, 3].map(|i| db.find(&format!("vfx/bamboo_leaf_{i}")).unwrap_or(f("fx/ash"))),
             real_leaves: db.find("vfx/bamboo_leaf_0").is_some(),
+            feathers: [0, 1, 2, 3]
+                .map(|i| db.find(&format!("vfx/feather_{i}")))
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .and_then(|v| v.try_into().ok()),
         },
+        anims: load_anims(&db),
     });
 }
 
@@ -275,6 +385,8 @@ pub(crate) struct P {
     pub align: bool,
     /// 落地后留下墨点
     pub splat: bool,
+    /// 播一段逐帧特效（`Fx::None` 时画 `frame`）
+    pub anim: Fx,
 }
 
 impl P {
@@ -306,6 +418,7 @@ impl P {
             flip: false,
             align: false,
             splat: false,
+            anim: Fx::None,
         }
     }
 }
@@ -320,6 +433,8 @@ pub(crate) struct Particles {
     priority: Priority,
     category: Category,
     spawned: [u32; Priority::ALL.len()],
+    /// 逐帧特效的帧，按 `Fx` 的顺序（`load_anims`）
+    anims: Vec<Vec<FrameId>>,
 }
 
 impl Particles {
@@ -513,12 +628,18 @@ impl Particles {
                     p.accel = Vec2::NEG_Y * 150.0;
                 }
                 Some(Crane) => {
-                    p.frame = self.f.ash;
+                    // 美术的羽毛、纸屑四种随机挑；没有时用灰片
+                    p.frame = self.f.feathers.map_or(self.f.ash, |f| f[self.rng.below(4) as usize]);
+                    if self.f.feathers.is_some() {
+                        // 32×16 像素的羽毛：画到 7 个世界单位上下，染成青绿的纸色
+                        p.size = (0.9, 0.6);
+                        p.color = color.mix(&Color::srgb(0.93, 0.9, 0.84), 0.45);
+                    }
                     p.glow = false;
                     p.z = layer::ACTORS + 1.5;
                     p.accel = d.perp() * 180.0 + Vec2::NEG_Y * 55.0;
                     p.spin = if k % 2 == 0 { 18.0 } else { -16.0 };
-                    p.stretch = 1.8;
+                    p.stretch = if self.f.feathers.is_some() { 1.0 } else { 1.8 };
                     p.drag = 4.0;
                 }
                 Some(Seal) => {
@@ -900,6 +1021,37 @@ impl Particles {
         }
     }
 
+    /// 播一段美术的逐帧特效：`scale` 相对美术原尺寸，`hold` 是播完以后停在最后一帧、慢慢淡掉的秒数，
+    /// `delay` 秒后才开始。图集里没有这段时返回 false，调用处画代码的粒子。
+    #[allow(clippy::too_many_arguments)]
+    pub fn anim(
+        &mut self,
+        fx: Fx,
+        at: Vec2,
+        scale: f32,
+        rot: f32,
+        color: Color,
+        z: f32,
+        hold: f32,
+        delay: f32,
+    ) -> bool {
+        let Some(&first) = self.anims.get(fx as usize).and_then(|v| v.first()) else { return false };
+        let len = self.anims[fx as usize].len() as f32 / ANIM_FPS;
+        // 地上的墨溅随机左右镜像，一片片不重样
+        let flip = fx == Fx::KillInk && self.rng.chance(0.5);
+        self.spawn(P {
+            size: (scale, scale),
+            color,
+            rot,
+            glow: fx.glow(),
+            anim: fx,
+            delay,
+            flip,
+            ..P::new(first, at, len + hold, z)
+        });
+        true
+    }
+
     /// 地上一圈扩开的光（升级、点灯）。
     pub fn halo(&mut self, frame: FrameId, at: Vec2, from: f32, to: f32, life: f32, color: Color) {
         let p = P { size: (from, to), color, glow: true, ..P::new(frame, at, life, layer::EMISSIVE - 0.5) };
@@ -965,6 +1117,7 @@ pub(crate) fn update_particles(
         };
         parts.spawn(p);
     }
+    let anims = &parts.anims;
     for p in &mut parts.list {
         // 落地墨点在本轮推进后生成，也从第一次绘制后开始计时。
         p.fresh = false;
@@ -975,6 +1128,11 @@ pub(crate) fn update_particles(
         let size = p.size.0 + (p.size.1 - p.size.0) * u;
         let fade_in = if p.fade_in > 0.0 { (u / p.fade_in).min(1.0) } else { 1.0 };
         let fade_out = if u > 0.5 { 1.0 - (u - 0.5) / 0.5 } else { 1.0 };
+        // 逐帧特效：按 24 帧换帧，淡入淡出画在图里；播完停在最后一帧的，停的这段里淡掉
+        let (frame, fade_out) = match anims.get(p.anim as usize).filter(|_| p.anim != Fx::None) {
+            Some(frames) if !frames.is_empty() => anim_frame(frames, p.t, p.life),
+            _ => (p.frame, fade_out),
+        };
         let alpha = p.color.alpha()
             * fade_in
             * fade_out
@@ -991,12 +1149,16 @@ pub(crate) fn update_particles(
             (p.rot, Vec2::splat(size) * Vec2::new(p.stretch, 1.0))
         };
         let pos = (p.pos + Vec2::new(0.0, p.h)).extend(p.z);
-        // 地上的墨点画成扁的
-        let scale = if p.z < layer::SHADOW { Vec2::new(scale.x, scale.y * 0.62) } else { scale };
-        if p.glow {
-            glow.add_flipped(p.frame, pos, scale, rot, color, p.flip);
+        // 地上的墨点画成扁的（逐帧特效的地面帧美术已经压扁了）
+        let scale = if p.z < layer::SHADOW && p.anim == Fx::None {
+            Vec2::new(scale.x, scale.y * 0.62)
         } else {
-            pools.fx.push(Draw { scale, rot, color, flip: p.flip, ..Draw::new(p.frame, pos) });
+            scale
+        };
+        if p.glow {
+            glow.add_flipped(frame, pos, scale, rot, color, p.flip);
+        } else {
+            pools.fx.push(Draw { scale, rot, color, flip: p.flip, ..Draw::new(frame, pos) });
         }
     }
 }
@@ -1082,26 +1244,39 @@ pub(crate) fn particle_events(
         parts.embers(hero_at, 40.0, GOLD, 30);
         parts.ink(hero_at + Vec2::Y * 6.0, 20, 2.2);
         parts.dust(hero_at, 8, 1.6, INK.with_alpha(0.5));
+        // 美术的进化爆发（一朵放射的光，512 像素 = 128 个世界单位）和脚下升起的光柱（锚点在底边）
+        parts.anim(
+            Fx::Evolve,
+            hero_at + Vec2::Y * 16.0,
+            1.4,
+            0.0,
+            hdr(Color::WHITE, 1.3),
+            layer::EMISSIVE + 1.3,
+            0.0,
+            0.0,
+        );
+        parts.anim(Fx::Pillar, hero_at, 1.2, 0.0, hdr(Color::WHITE, 1.2), layer::EMISSIVE + 1.25, 0.0, 0.0);
     }
     for &index in &feedback.selected {
         let Some(ev) = outbox.0.get(index) else { continue };
         parts.priority = Priority::of(ev);
         parts.category = Category::of(ev);
         match *ev {
-            SimEvent::Hit { impact_pos, incoming_dir, crit, kind, element, weapon, source, .. } => {
+            SimEvent::Hit {
+                impact_pos, incoming_dir, crit, kind, element, weapon, source, damage, ..
+            } => {
                 let at = to_screen(impact_pos);
                 let identity = WeaponIdentity::resolve(&content.0, weapon);
-                let color = element_glow(
-                    element
-                        .or_else(|| weapon.and_then(|i| content.0.weapons.get(i as usize).map(|w| w.element)))
-                        .or_else(|| match source {
-                            lantern_sim::combat::Source::Burn => Some(Element::Fire),
-                            lantern_sim::combat::Source::Reaction(i) => {
-                                content.0.elements.reactions.get(i as usize).map(|r| r.b)
-                            }
-                            _ => None,
-                        }),
-                );
+                let element = element
+                    .or_else(|| weapon.and_then(|i| content.0.weapons.get(i as usize).map(|w| w.element)))
+                    .or_else(|| match source {
+                        lantern_sim::combat::Source::Burn => Some(Element::Fire),
+                        lantern_sim::combat::Source::Reaction(i) => {
+                            content.0.elements.reactions.get(i as usize).map(|r| r.b)
+                        }
+                        _ => None,
+                    });
+                let color = element_glow(element);
                 if matches!(kind, HitKind::Dot | HitKind::Reaction) {
                     if pulses < 12 {
                         pulses += 1;
@@ -1117,12 +1292,79 @@ pub(crate) fn particle_events(
                 }
                 let fallback = (at - hero_at).normalize_or_zero() * 0.7;
                 parts.impact(at, to_screen(incoming_dir), fallback, identity, color, crit);
+                // 美术的命中爆点：五行各一种，按五行色染、推过辉光阈值；暴击换成白金的大闪，
+                // 符剑的暴击再沿来势划一道刀光（弧心在命中点后面，弧的中段正好扫过妖物）
+                let d = to_screen(incoming_dir).normalize_or(if fallback == Vec2::ZERO {
+                    Vec2::X
+                } else {
+                    fallback
+                });
+                let rot = d.y.atan2(d.x);
+                if crit {
+                    let big = damage >= 1000.0;
+                    parts.anim(
+                        Fx::Crit,
+                        at,
+                        if big { 1.3 } else { 1.0 },
+                        rot,
+                        hdr(Color::WHITE, 1.2),
+                        layer::EMISSIVE + 1.3,
+                        0.0,
+                        0.0,
+                    );
+                    if identity == Some(WeaponIdentity::Sword) {
+                        // vfx/slash：弧心在锚点、弧半径 50 个世界单位（radius_px 200 ÷ 4），这里画成 26
+                        let k = 26.0 / 50.0;
+                        parts.anim(
+                            Fx::Slash,
+                            at - d * 26.0,
+                            k,
+                            rot,
+                            hdr(color, 1.4),
+                            layer::EMISSIVE + 1.25,
+                            0.0,
+                            0.0,
+                        );
+                    }
+                } else {
+                    parts.anim(
+                        Fx::hit(element),
+                        at,
+                        1.0,
+                        rot,
+                        hdr(color, 1.3),
+                        layer::EMISSIVE + 1.2,
+                        0.0,
+                        0.0,
+                    );
+                }
             }
             SimEvent::Kill { pos, kind, rank, .. } => {
                 let def = &content.0.enemies[kind as usize];
                 let at = to_screen(pos);
                 let body = at + Vec2::new(0.0, def.radius.max(8.0));
                 let eye = hex(&def.eye);
+                // 美术的击杀墨溅：一滴墨砸在地上开花，停在最后一帧慢慢淡掉（地上那一层，暗处看不见，灯下才看得见）
+                let (ink, hold) = match rank {
+                    Rank::Boss => (2.6, 2.0),
+                    Rank::Elite => (1.3, 1.2),
+                    _ => ((def.radius / 20.0).clamp(0.5, 0.9), 0.6),
+                };
+                parts.anim(
+                    Fx::KillInk,
+                    at,
+                    ink,
+                    0.0,
+                    Color::WHITE.with_alpha(0.9),
+                    layer::GROUND + 0.95,
+                    hold,
+                    0.0,
+                );
+                // 精英、夜主倒下：地上一圈冲击波荡开
+                if rank != Rank::Normal {
+                    let k = if rank == Rank::Boss { 4.5 } else { 1.4 };
+                    parts.anim(Fx::Shockwave, at, k, 0.0, hdr(SHOCK, 1.3), layer::EMISSIVE - 0.4, 0.0, 0.0);
+                }
                 match rank {
                     Rank::Elite => {
                         parts.ink(body, 16, 1.6);
@@ -1156,6 +1398,18 @@ pub(crate) fn particle_events(
                         let k = if evolved { 1.6 } else { 1.0 };
                         parts.dust(at, (10.0 * k) as u32, radius / 40.0 * k, DUST);
                         parts.ink(at, (6.0 * k) as u32, 1.3 * k);
+                        // 落印的冲击波按落印半径（美术的环 radius_px 220 = 55 个世界单位），染土色
+                        let earth = element_glow(Some(Element::Earth));
+                        parts.anim(
+                            Fx::Shockwave,
+                            at,
+                            radius / 55.0,
+                            0.0,
+                            hdr(earth, 1.3),
+                            layer::EMISSIVE - 0.4,
+                            0.0,
+                            0.0,
+                        );
                     }
                     StrikeFx::Bamboo => {
                         parts.dust(at, 12, radius / 40.0, DUST);
@@ -1169,9 +1423,68 @@ pub(crate) fn particle_events(
                         let c = if b == BlastKind::Ice { element_glow(Some(Element::Water)) } else { FIRE };
                         parts.sparks(at, c, 8, 200.0, Vec2::ZERO);
                         parts.embers(at, radius * 0.4, c, 4);
+                        // 美术的火爆（radius_px 144 = 36 个世界单位，颜色画在图里），第 5 帧起墨烟跟上、留一会儿；
+                        // 冰爆是冰碎（192 像素 = 48 个世界单位，染冰蓝）
+                        if b == BlastKind::Ice {
+                            let ice = Color::srgb(0.8, 0.92, 1.0);
+                            parts.anim(
+                                Fx::IceShatter,
+                                at,
+                                radius / 24.0,
+                                0.0,
+                                hdr(ice, 1.3),
+                                layer::EMISSIVE + 1.1,
+                                0.0,
+                                0.0,
+                            );
+                        } else if parts.anim(
+                            Fx::FireBurst,
+                            at,
+                            radius / 36.0,
+                            0.0,
+                            hdr(Color::WHITE, 1.2),
+                            layer::EMISSIVE + 1.1,
+                            0.0,
+                            0.0,
+                        ) {
+                            parts.anim(
+                                Fx::FireSmoke,
+                                at,
+                                radius / 36.0,
+                                0.0,
+                                Color::WHITE.with_alpha(0.8),
+                                layer::ACTORS + 1.45,
+                                0.5,
+                                5.0 / ANIM_FPS,
+                            );
+                        }
                     }
-                    StrikeFx::Quake => parts.dust(at, 18, radius / 40.0, DUST),
-                    StrikeFx::Ult => parts.ult(at, radius),
+                    StrikeFx::Quake => {
+                        parts.dust(at, 18, radius / 40.0, DUST);
+                        parts.anim(
+                            Fx::Shockwave,
+                            at,
+                            (radius / 55.0).min(6.0),
+                            0.0,
+                            hdr(SHOCK, 1.1),
+                            layer::EMISSIVE - 0.4,
+                            0.0,
+                            0.0,
+                        );
+                    }
+                    StrikeFx::Ult => {
+                        parts.ult(at, radius);
+                        parts.anim(
+                            Fx::Shockwave,
+                            at,
+                            (radius / 55.0).min(8.0),
+                            0.0,
+                            hdr(GOLD, 1.5),
+                            layer::EMISSIVE - 0.4,
+                            0.0,
+                            0.0,
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -1407,12 +1720,15 @@ const FOXFIRE: Color = Color::srgb(1.0, 0.42, 0.35);
 /// 一帧最多放几丛竹子的碎叶（一刀砍倒一片竹林时）
 const BAMBOO_BUDGET: u32 = 6;
 const FIRE: Color = Color::srgb(1.0, 0.55, 0.22);
+/// 冲击波环的颜色（美术建议的染色）
+const SHOCK: Color = Color::srgb(1.0, 0.886, 0.659);
 
 /// 在线性空间里推亮（超过 1 的部分过辉光阈值、晕开）。
 fn hdr(c: Color, k: f32) -> Color {
     let l = c.to_linear();
     Color::linear_rgba(l.red * k, l.green * k, l.blue * k, l.alpha)
 }
+
 /// 孔明灯烧焦的红纸片、镇妖塔崩出的碎石
 const LANTERN_PAPER: Color = Color::srgb(0.62, 0.2, 0.12);
 const TOWER_STONE: Color = Color::srgb(0.45, 0.38, 0.3);
@@ -1560,8 +1876,24 @@ mod tests {
                 slash: frame,
                 leaves: [frame; 4],
                 real_leaves: false,
+                feathers: None,
             },
+            anims: Vec::new(),
         }
+    }
+
+    /// 逐帧特效 24 帧换一帧，播完停在最后一帧；停的那段里淡掉，没有停的不淡。
+    #[test]
+    fn anim_frames_advance_at_24_fps_and_hold_the_last_one() {
+        let frames: Vec<FrameId> = (10..16).map(FrameId).collect();
+        let len = 6.0 / ANIM_FPS;
+        assert_eq!(anim_frame(&frames, 0.0, len), (FrameId(10), 1.0));
+        assert_eq!(anim_frame(&frames, 2.5 / ANIM_FPS, len).0, FrameId(12));
+        assert_eq!(anim_frame(&frames, len * 0.99, len), (FrameId(15), 1.0));
+        // 墨溅：多停 0.6 秒，停到一半时还剩根号 0.5
+        let (frame, a) = anim_frame(&frames, len + 0.3, len + 0.6);
+        assert_eq!(frame, FrameId(15));
+        assert!((a - 0.5f32.sqrt()).abs() < 1e-4);
     }
 
     #[test]
