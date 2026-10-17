@@ -1708,6 +1708,9 @@ impl HubWhen {
 #[serde(deny_unknown_fields)]
 pub struct StatGroupDef {
     pub name: String,
+    /// 组的图标：图集里的 `ui/stat_group_<icon>`；不写就只写名字
+    #[serde(default)]
+    pub icon: String,
     /// 总是全部列出（基础）；其余组默认只列和基础值不同的
     #[serde(default)]
     pub always: bool,
@@ -1723,6 +1726,9 @@ pub struct StatLabelDef {
     /// 悬停说明，不超过 16 个字
     pub hint: String,
     pub format: StatFormat,
+    /// 图标：图集里的 `ui/stat_<icon>`（属性面板、心法卡的收益行）；不写就只写字
+    #[serde(default)]
+    pub icon: String,
     /// 并进来一起显示的倍率（灯焰带的 FlameBandMult）
     #[serde(default)]
     pub times: Option<Stat>,

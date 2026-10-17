@@ -1360,6 +1360,21 @@ impl Content {
             if g.name.trim().is_empty() || g.stats.is_empty() {
                 return c.fail("stat_labels.ron", "每组要有名字和至少一项属性".into());
             }
+            // 图标名拼进帧名，只许小写字母、数字和下划线
+            let bad_icon =
+                |i: &str| !i.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
+            if bad_icon(&g.icon) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{} 的图标名“{}”只能用小写字母、数字和下划线", g.name, g.icon),
+                );
+            }
+            if let Some(l) = g.stats.iter().find(|l| bad_icon(&l.icon)) {
+                return c.fail(
+                    "stat_labels.ron",
+                    format!("{:?} 的图标名“{}”只能用小写字母、数字和下划线", l.stat, l.icon),
+                );
+            }
             for l in &g.stats {
                 listed.push(l.stat);
                 listed.extend(l.times);

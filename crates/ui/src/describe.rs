@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use lantern_content::{Content, Element, WeaponLevel};
+use lantern_content::{Content, Effect, Element, PassiveDef, WeaponLevel};
 use lantern_sim::{Arsenal, Build, Offer};
 
 /// 品阶。
@@ -65,6 +65,8 @@ pub(crate) struct OfferInfo {
     pub name: String,
     /// 卡面那一行收益（LORE-TEXT 第 6 节，≤ 12 字）
     pub gain: String,
+    /// 收益前面的数值图标（`ui/stat_*`）：心法按它第一条属性效果取，其余没有
+    pub gain_icon: Option<String>,
     /// 完整说明：聚焦时卡片下方显示一行，图鉴里也是它
     pub desc: String,
     /// 卡面插画的帧名（`ui/card_<id>`）；图集里没有就放大图标
@@ -168,6 +170,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
         art: format!("ui/card_{id}"),
         level: None,
         pair: None,
+        gain_icon: None,
         element: None,
     };
     match offer {
@@ -208,6 +211,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}_evo", def.id),
                 level: None,
                 pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -226,6 +230,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}_mut", def.id),
                 level: None,
                 pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -250,6 +255,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}", f.id),
                 level: None,
                 pair: None,
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -267,6 +273,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}", def.id),
                 level: Some((1, def.levels.len() as u32)),
                 pair: weapon_pair(c, build, d),
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -287,6 +294,7 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}", def.id),
                 level: Some((w.level + 1, def.levels.len() as u32)),
                 pair: weapon_pair(c, build, w.def),
+                gain_icon: None,
                 element: Some(def.element),
             }
         }
@@ -311,10 +319,20 @@ pub(crate) fn offer_info(c: &Content, arsenal: &Arsenal, build: &Build, offer: O
                 art: format!("ui/card_{}", def.id),
                 level: Some((level, def.max_level)),
                 pair: passive_pair(c, arsenal, p),
+                gain_icon: passive_stat_icon(c, def),
                 element: def.element,
             }
         }
     }
+}
+
+/// 心法的主属性图标：每级效果（或第一级效果）里第一条加减属性的那一项，`stat_labels.ron` 给了图标才有。
+fn passive_stat_icon(c: &Content, def: &PassiveDef) -> Option<String> {
+    let first = def.per_level.iter().chain(def.levels.iter().flatten()).find_map(|e| match e {
+        Effect::Add(s, _) | Effect::Mul(s, _) => Some(*s),
+        _ => None,
+    })?;
+    c.stat_icon(first).map(|i| format!("ui/stat_{i}"))
 }
 
 /// 卡面收益下面那一行：共鸣、进化、异化、合璧亮色写；普通的只写五行点数变化，细节放进聚焦说明。
@@ -464,5 +482,16 @@ mod tests {
     fn missing_short_falls_back_to_the_first_clause() {
         assert_eq!(short_or("暴击率 +5%", "暴击率 +5%，别的"), "暴击率 +5%");
         assert_eq!(short_or("", "魂火价值 +6%，升级时 5% 概率多一个选项。"), "魂火价值 +6%");
+    }
+
+    /// 心法卡的收益图标取第一条属性效果：每级都加的、逐级写的都算；没画图标的属性不画。
+    #[test]
+    fn passive_gain_icon_follows_its_first_stat() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
+        let c = Content::load(&root).unwrap();
+        let icon = |id: &str| passive_stat_icon(&c, &c.passives[c.passive_index(id).unwrap()]);
+        assert_eq!(icon("jixing").as_deref(), Some("ui/stat_speed"));
+        assert_eq!(icon("zhezhi").as_deref(), Some("ui/stat_count"));
+        assert_eq!(icon("xunfeng"), None);
     }
 }

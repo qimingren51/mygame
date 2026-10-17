@@ -177,14 +177,24 @@ fn stats_panel_with_every_stat_fits_after_resize() {
             |mut commands: Commands,
              c: Res<lantern_sim::GameContent>,
              fonts: Res<Fonts>,
-             skin: Res<skin::Skin>| {
+             skin: Res<skin::Skin>,
+             db: Res<AtlasDb>| {
                 let c = &c.0;
                 let mut arsenal = Arsenal::default();
                 for id in ["lamp", "sword", "bell", "crane", "seal"] {
                     arsenal.0.push(lantern_sim::weapons::WeaponSlot::new(c.weapon_index(id).unwrap()));
                 }
                 let stats = lantern_sim::Stats::base(c);
-                stats_panel::spawn_preview(&mut commands, c, &fonts, &skin, &stats, &arsenal, true);
+                stats_panel::spawn_preview(
+                    &mut commands,
+                    c,
+                    &fonts,
+                    &skin,
+                    Some(&db),
+                    &stats,
+                    &arsenal,
+                    true,
+                );
             },
         )
         .unwrap();
@@ -330,4 +340,24 @@ fn hud_top_clusters_stay_apart_in_every_window() {
 
 fn single<C: Component>(world: &mut World) -> Entity {
     world.query_filtered::<Entity, With<C>>().single(world).unwrap()
+}
+
+/// stat_labels.ron 写的图标在图集里都有（组 `ui/stat_group_*`、属性 `ui/stat_*`），法器组也是。
+#[test]
+fn stat_icons_named_in_the_data_are_in_the_atlas() {
+    let mut app = setup();
+    let world = app.world_mut();
+    let c = world.resource::<lantern_sim::GameContent>().0.clone();
+    let db = world.resource::<AtlasDb>();
+    let mut names = vec!["ui/stat_group_weapons".to_string()];
+    for g in &c.stat_labels {
+        if !g.icon.is_empty() {
+            names.push(format!("ui/stat_group_{}", g.icon));
+        }
+        names.extend(g.stats.iter().filter(|l| !l.icon.is_empty()).map(|l| format!("ui/stat_{}", l.icon)));
+    }
+    assert!(names.len() >= 19);
+    for n in names {
+        assert!(db.find(&n).is_some(), "图集里没有 {n}");
+    }
 }

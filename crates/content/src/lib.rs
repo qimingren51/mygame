@@ -124,6 +124,15 @@ impl Content {
         Ok(content)
     }
 
+    /// 属性的图标名（`stat_labels.ron` 的 icon，帧名是 `ui/stat_<icon>`）；没写的是 None。
+    pub fn stat_icon(&self, stat: Stat) -> Option<&str> {
+        self.stat_labels
+            .iter()
+            .flat_map(|g| &g.stats)
+            .find(|l| l.stat == stat && !l.icon.is_empty())
+            .map(|l| l.icon.as_str())
+    }
+
     /// 解锁法器（`choices.locked` 里的 ID；`None` 是全部）。工具、测试用；内容哈希跟着变。
     pub fn unlock(&mut self, ids: Option<&[&str]>) {
         let before = self.run.choices.locked.len();
@@ -297,6 +306,14 @@ mod tests {
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
         let mut bad = c.clone();
         bad.stat_labels[0].stats[0].label = "命".into();
+        assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
+        // 基础 12 项和每组都有图标；图标名不能带路径
+        assert!(c.stat_labels[0].stats.iter().all(|l| !l.icon.is_empty()));
+        assert!(c.stat_labels.iter().all(|g| !g.icon.is_empty()));
+        assert_eq!(c.stat_icon(Stat::Speed), Some("speed"));
+        assert_eq!(c.stat_icon(Stat::LotusHeal), None);
+        let mut bad = c.clone();
+        bad.stat_labels[0].stats[0].icon = "../health".into();
         assert!(bad.validate(Path::new("data")).unwrap_err().to_string().contains("stat_labels.ron"));
         use StatFormat::*;
         for (f, v, shown) in [
