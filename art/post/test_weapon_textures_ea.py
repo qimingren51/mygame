@@ -36,7 +36,17 @@ SPEC = {
     "coin_spark": (5, (128, 128), "add", False),
     "coin_whirl": (6, (1024, 1024), "add", True),
     "coin_cross": (4, (160, 160), "add", True),
+    "wave_front": (4, (448, 128), "add", True),
+    "wave_front_fade": (3, (448, 128), "add", True),
+    "wave_trail": (1, (448, 256), "add", True),
+    "vine": (3, (512, 40), "add", True),
+    "vine_pulse": (3, (128, 48), "add", True),
+    "vine_bind": (4, (192, 192), "add", True),
 }
+# 不是 24 帧/秒一次播完的：(fps, loop)
+PLAY = {"wave_front": (12, True), "wave_front_fade": (12, False), "vine": (8, True), "vine_pulse": (24, True), "vine_bind": (8, False)}
+LOOPS = {n for n, (_f, lp) in PLAY.items() if lp}
+STILLS = {n for n, spec in SPEC.items() if spec[0] == 1}  # 只有一张的（拉伸用的带子）
 # 跟半径走的帧：1080p 下按这些半径（世界单位）缩放时，缩放比例要在 0.8–1.25 之间（约一比一，不靠放大）
 RADII = {"coin_slash": (140.0, 170.0), "coin_whirl": (200.0,)}
 PEAK8 = round(F.PEAK * 255)
@@ -130,6 +140,11 @@ def centroid(a: np.ndarray) -> tuple[float, float]:
     return float((a.sum(0) * (np.arange(w) + 0.5)).sum() / tot), float((a.sum(1) * (np.arange(h) + 0.5)).sum() / tot)
 
 
+def bbox(a: np.ndarray) -> tuple[int, int, int, int]:
+    ys, xs = np.nonzero(a)
+    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
 def polar(name: str):
     """以锚点为原点的半径和角度（度，顺时针为正：图里 y 向下）。"""
     w, h = SPEC[name][1]
@@ -151,16 +166,17 @@ def test_spec_matches_list():
 
 
 def test_meta_fields():
-    """meta.json：name = weapons（帧名 weapons/<名字>_<帧号>）、4 像素 / 世界单位；每帧 anim/frame/frames、fps 24、不循环；同组锚点一样。"""
+    """meta.json：name = weapons（帧名 weapons/<名字>_<帧号>）、4 像素 / 世界单位；每帧 anim/frame/frames、fps、loop（默认 24、不循环）；同组锚点一样。"""
     m = meta()
     assert m["name"] == "weapons" and m["px_per_unit"] == 4 and m["generator"] == E.GENERATOR
     for name, (n, size, blend, tint) in SPEC.items():
         anchors = set()
+        fps, loop = PLAY.get(name, (24, False))
         for i in range(n):
             info = m["files"][f"{name}_{i}.png"]
             assert info["size"] == list(size) and info["blend"] == blend and info["tint"] is tint, f"{name}_{i}: {info}"
             assert info["anim"] == name and info["frame"] == i and info["frames"] == n, f"{name}_{i} 的 anim/frame/frames 不对"
-            assert info["fps"] == 24 and info["loop"] is False and info["note"], f"{name}_{i}: fps {info['fps']} loop {info['loop']}"
+            assert info["fps"] == fps and info["loop"] is loop and info["note"], f"{name}_{i}: fps {info['fps']} loop {info['loop']}"
             anchors.add(tuple(info["anchor"]))
         assert len(anchors) == 1, f"{name} 各帧锚点不一样：{anchors}"
     pngs = {p.name for p in E.OUT.glob("*.png")}
@@ -222,17 +238,31 @@ def test_peak_alpha():
     for name in SPEC:
         peaks = [alpha(name, i).max() for i in frames_of(name)]
         assert max(peaks) <= PEAK8 + 2, f"{name} 最亮 {max(peaks):.0f} 超过 {PEAK8}"
-        assert max(peaks) >= PEAK8 - 12, f"{name} 最亮只有 {max(peaks):.0f}"
+        floor = PEAK8 - 70 if name in STILLS else PEAK8 - 40 if name == "wave_front_fade" else PEAK8 - 12  # 淡带子、散掉的不用到顶
+        assert max(peaks) >= floor, f"{name} 最亮只有 {max(peaks):.0f}"
 
 
 def test_frames_change_and_fade():
-    """相邻两帧不一样；一次性的：最亮的帧在前一半，末帧淡到三成五以下。"""
+    """相邻两帧不一样；一次性的：最亮的帧在前一半，末帧淡到三成五以下（散掉、缠住留着的除外）；
+    循环的：首尾接得上（末帧到首帧的变化和相邻两帧差不多），亮度一帧帧差不多（±25%）。"""
     for name in SPEC:
+        if name in STILLS:
+            continue
         sums = [alpha(name, i).sum() for i in frames_of(name)]
-        for i in frames_of(name)[1:]:
-            d = np.abs(alpha(name, i) - alpha(name, i - 1)).mean()
-            assert d > 0.02, f"{name}_{i - 1} 和 {name}_{i} 几乎一样"
-        assert int(np.argmax(sums)) < len(sums) / 2 + 0.5, f"{name} 最亮的帧太靠后：{[round(s / 255) for s in sums]}"
+        diffs = [np.abs(alpha(name, i) - alpha(name, i - 1)).mean() for i in frames_of(name)[1:]]
+        assert min(diffs) > 0.02, f"{name} 有两帧几乎一样：{[round(d, 3) for d in diffs]}"
+        if name in LOOPS:
+            wrap = np.abs(alpha(name, 0) - alpha(name, len(sums) - 1)).mean()
+            assert wrap <= 1.6 * max(diffs), f"{name} 循环首尾接不上：首尾差 {wrap:.2f}，相邻 {[round(d, 2) for d in diffs]}"
+            assert min(sums) >= 0.75 * max(sums), f"{name} 循环里亮度跳：{[round(x / max(sums), 2) for x in sums]}"
+            continue
+        if name == "wave_front_fade":  # 接在循环后面散掉：一帧比一帧淡
+            assert all(a > b for a, b in zip(sums, sums[1:])) and sums[-1] <= 0.6 * sums[0], f"浪头散掉应该越来越淡：{sums}"
+            continue
+        if meta()["files"][f"{name}_0.png"].get("hold_last"):  # 末帧留着的：长到最后
+            assert int(np.argmax(sums)) >= len(sums) - 2, f"{name} 应该越长越满：{[round(x / 255) for x in sums]}"
+            continue
+        assert int(np.argmax(sums)) < len(sums) / 2 + 0.5, f"{name} 最亮的帧太靠后：{[round(x / 255) for x in sums]}"
         assert 0 < sums[-1] <= 0.35 * max(sums), f"{name} 末帧 {sums[-1] / max(sums):.2f}"
 
 
@@ -326,6 +356,78 @@ def test_coin_cross_two_strokes():
     a1, b1 = along(1, 38), along(1, 142)
     assert a0 > 4 * b0, f"第 0 帧应该只有一道：{a0 / 255:.0f} vs {b0 / 255:.0f}"
     assert 0.5 <= b1 / a1 <= 2.0, f"第 1 帧两道应该差不多：{a1 / 255:.0f} vs {b1 / 255:.0f}"
+
+
+# ---------------------------------------------------------------- 沧浪
+
+
+def test_wave_front_crescent():
+    """浪头：横着的月牙，往 +y 推进——正中最靠前（锚点在正中前沿），两头往后（−y）弯；铺满差不多整张宽；
+    散掉的三帧和循环同画布、同锚点。"""
+    w, h = SPEC["wave_front"][1]
+    info = meta()["files"]["wave_front_0.png"]
+    assert info["points"] == "+y" and info["half_width_px"] == int(E.WAVE_SPAN / 2) and info["loop"] is True
+    assert meta()["files"]["wave_front_fade_0.png"]["anchor"] == info["anchor"]
+    ay = info["anchor"][1] * h
+
+    def front_y(a, x0, x1):  # 这几列里浪唇（每列最亮处）的平均 y
+        return float(np.mean(np.argmax(a[:, x0:x1], axis=0)))
+
+    for i in frames_of("wave_front"):
+        a = alpha("wave_front", i)
+        mid, left, right = front_y(a, w // 2 - 20, w // 2 + 20), front_y(a, 40, 70), front_y(a, w - 70, w - 40)
+        assert abs(mid - ay) <= 6, f"wave_front_{i} 正中前沿 {mid:.0f}，锚点 {ay:.0f}"
+        assert left < mid - 20 and right < mid - 20, f"wave_front_{i} 两头应该往后弯：{left:.0f} / {mid:.0f} / {right:.0f}"
+        x0, _, x1, _ = bbox(a > 0.25 * PEAK8)
+        assert x1 - x0 >= 0.85 * w, f"wave_front_{i} 不够宽：{x1 - x0}"
+
+
+def test_wave_trail_fades_backward():
+    """泡沫痕：锚点在下边正中，靠浪头这头（下）最亮，往远处（上）淡下去。"""
+    a = alpha("wave_trail", 0)
+    info = meta()["files"]["wave_trail_0.png"]
+    assert info["anchor"] == [0.5, 1.0] and info["stretch"] == "y"
+    h = a.shape[0]
+    near, far = a[int(h * 0.7) : int(h * 0.95)].sum(), a[int(h * 0.05) : int(h * 0.3)].sum()
+    assert near > 3 * far, f"泡沫痕应该越远越淡：近 {near / 255:.0f}，远 {far / 255:.0f}"
+
+
+# ---------------------------------------------------------------- 青藤
+
+
+def test_vine_spans_and_anchors():
+    """藤：锚点在右端正中；横向铺满（两端几像素淡掉），两端落在中线上（接主角和妖物）；整张高 = 10 世界单位。"""
+    w, h = SPEC["vine"][1]
+    info = meta()["files"]["vine_0.png"]
+    assert info["anchor"] == [1.0, 0.5] and info["stretch"] == "x" and info["height_units"] == 10
+    for i in frames_of("vine"):
+        a = alpha("vine", i)
+        cols = (a > 0.25 * PEAK8).any(0)
+        assert cols[16 : w - 16].mean() >= 0.97, f"vine_{i} 中间断了"
+        for x0, x1 in ((6, 22), (w - 22, w - 6)):
+            c = a[:, x0:x1]
+            cy = float((c.sum(1) * (np.arange(h) + 0.5)).sum() / max(c.sum(), 1))
+            assert abs(cy - h / 2) <= 2.5, f"vine_{i} 端头不在中线上：{cy:.1f}"
+
+
+def test_vine_pulse_head_forward():
+    """回血的绿光：最亮处在锚点（光头），尾巴拖在 −x 那边。"""
+    w, h = SPEC["vine_pulse"][1]
+    ax, ay = (np.array(meta()["files"]["vine_pulse_0.png"]["anchor"]) * [w, h]).tolist()
+    for i in frames_of("vine_pulse"):
+        a = alpha("vine_pulse", i)
+        yy, xx = np.unravel_index(np.argmax(a), a.shape)
+        assert math.hypot(xx + 0.5 - ax, yy + 0.5 - ay) <= 4, f"vine_pulse_{i} 最亮处 ({xx}, {yy}) 不在光头"
+        cx, _ = centroid(a)
+        assert cx < ax - 8, f"vine_pulse_{i} 尾巴应该在 −x：质心 {cx:.0f}"
+
+
+def test_vine_bind_grows_up():
+    """万木春缠绕：藤从脚下往上长（质心一帧比一帧高、亮的范围变高），第 3 帧留着（hold_last）。"""
+    info = meta()["files"]["vine_bind_0.png"]
+    assert info["hold_last"] is True and info["radius_px"] == int(E.BIND_R)
+    tops = [bbox(alpha("vine_bind", i) > 0.25 * PEAK8)[1] for i in frames_of("vine_bind")]
+    assert tops[0] > tops[1] > tops[2], f"缠绕应该越长越高：顶 {tops}"
 
 
 # ---------------------------------------------------------------- 其他
