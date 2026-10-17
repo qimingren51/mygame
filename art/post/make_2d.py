@@ -3,11 +3,14 @@
   vfx_textures.py（vfx/ + ground/，含 ground_decor.py）→ weapon_textures.py（weapons/）
   → ui_icons.py（ui/：界面图标，并调用 ui_seals.py 画朱砂印章、ui_icons_m25.py 画 M2.5 图标）
   → review_additions.py（检查图，含 ui_icons_more.png）→ review_m25.py（M2.5 检查图 m25_additions.png）
+  → 只在 2 倍：vfx_frames.py（逐帧特效 vfx/hit_*、crit、slash、kill_ink、shockwave 等，和审图）
+    → weapon_textures_ea.py（抢先体验新法器的贴图 weapons/coin_* 等，和审图）
 
 用法（在仓库根目录下）：
   art/.venv/bin/python art/post/make_2d.py            # 1 倍 + 2 倍
   art/.venv/bin/python art/post/make_2d.py 2          # 只出 2 倍
-测试另跑：test_vfx_textures.py / test_weapon_textures.py / test_ui_icons.py（各自自动测两种密度）。
+测试另跑：test_vfx_textures.py / test_weapon_textures.py / test_ui_icons.py（各自自动测两种密度）、
+test_vfx_frames.py / test_weapon_textures_ea.py（只有 2 倍）。
 """
 
 from __future__ import annotations
@@ -20,13 +23,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["vfx_textures.py", "weapon_textures.py", "ui_icons.py", "review_additions.py", "review_m25.py"]
+STEPS_2X = ["vfx_frames.py", "weapon_textures_ea.py"]  # 只出桌面版的
 
 
 def main() -> int:
     densities = sys.argv[1:] or ["1", "2"]
     for d in densities:
         env = {**os.environ, "LANTERN_ART_DENSITY": d}
-        for step in STEPS:
+        for step in STEPS + (STEPS_2X if d == "2" else []):
             t0 = time.perf_counter()
             r = subprocess.run([sys.executable, str(HERE / step)], env=env, stdout=subprocess.DEVNULL)
             print(f"[{d}x] {step:22s} {'OK' if r.returncode == 0 else 'FAILED'}  {time.perf_counter() - t0:5.1f} s", flush=True)

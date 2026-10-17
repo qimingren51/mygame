@@ -541,7 +541,7 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `actors` | 主角（不含灯笼头，见下面“灯笼叠层”）、妖物（影妖 shade、疾影 wisp、金蟾 toad、石妖 golem、赤面狐 fox、青面鬼 ghoul、石将 stonelord；青丘的狐火 fox_wisp、竹魅 bamboo_wraith、讨封狐 taofeng_fox）、场景道具（山石 rock_a/b/c、石灯笼 stone_lantern（点亮）和 stone_lantern_dark（熄灭）、古灯 ancient_lamp、血祭坛 blood_altar、货郎担 merchant；青丘的竹丛 bamboo_clump 和砍倒的 bamboo_clump_broken、狐仙祠 fox_shrine、石狐 stone_fox、狐灯 fox_lanterns；狐祠庭院的大狐仙祠 fox_shrine_grand、石牌坊 fox_gate、檐下留灯 fox_eave_lamp 和 fox_eave_lamp_lit），含 `_flash`、`_emit` 帧；放不下一页时自动分页 |
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
-  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片） |
+  | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`（见下面“抢先体验的新法器”） |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
@@ -620,6 +620,33 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
 - **冲锋预警**：`weapons/charge_line` 是车道，锚点在起点（左端、竖向居中），沿 +X 拉伸到“冲锋长度 − `head_len_px`”再旋转；沿 X 透明度一致，拉多长都不走样，宽 `width_px`（2 倍下 28 像素）。`weapons/charge_line_head` 是箭头，锚点在箭头底边正中，放在车道末端、同样旋转、不拉伸，箭尖离锚点 `head_len_px`（2 倍下 51 像素）。两张都是白色、叠加、可染色，建议染 `#FF4A3A`。
 - **反应区域**：`ground/zone_*` 已经压扁成地面透视（纵横比约 0.62），meta 里有 `radius_px`（2 倍像素），按反应半径缩放即可。
 - **铜钱**：`vfx/coin` 普通混合、不染色，2 倍下 64×52（宽约 11 个世界单位），方孔透明；`vfx/coin_emit` 叠加，在暗处也看得见。
+- **逐帧特效**（试玩第 1 轮，质感会话的清单分批出图，`art/post/vfx_frames.py`）：
+  - 帧名 `vfx/<名字>_<帧号>`，帧号从 0 起、一位数；同一组每帧的原画布一样大、锚点一样（打包裁了边，按 `spriteSourceSize` 还原，同 `weapons/foxfire_*`）。
+  - `meta.lantern.frames` 里每帧有 `anim`（组名）、`frame`、`frames`、`fps`（都是 24）、`loop`（第一、二批都是 false，播完就没）、`kind: "fx"`；五行命中另有 `element`，可染的有建议颜色 `tint_hint`。播放时 t 秒取第 ⌊t × fps⌋ 帧，过了最后一帧就不画（`hold_last` 的除外）。几种挑着用的粒子（羽毛纸屑）不是动画，写 `variant`、`variants`。
+  - 叠加帧最亮处 alpha 约 0.8，亮度留给 `EMIT_HDR` 和辉光；可染的帧 RGB 恒为白，乘五行色：金 #E9D9A6、木 #6FD6A0、水 #6FB8FF、火 #FF8A3D、土 #C9925A。
+
+  | 帧 | 帧数 | 原画布（2 倍） | 锚点 | 混合 | 颜色 | 说明 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `vfx/hit_{metal,wood,water,fire,earth}_0..4` | 5 | 128² | 中心 | 叠加 | 白，可染（`element` 是哪一系） | 五行命中：金是细长十字闪加斜的剑痕碎光；木是叶片、纸屑翻飞；水是一圈水花加冰晶；火是小燃爆、火舌往上卷；土是闷的爆点，碎石蹦起再落下 |
+  | `vfx/crit_0..3` | 4 | 192² | 中心 | 叠加 | 白金 #FFF3D6，不染 | 暴击：四芒星大闪加两道交叉的笔锋，第 0 帧最大最亮 |
+  | `vfx/slash_0..5` | 6 | 256×448 | 弧心 `(0.0625, 0.5)` | 叠加 | 白，可染 | 月牙刀光：扇形朝 +X 张开 120°（`points: "+x"`、`angle_deg: 120`），笔锋沿弧从上往下扫（图里 y 向下），收笔甩出几点火星。`radius_px: 200` 是外沿半径：缩放 = 想要的半径 ÷（200 ÷ `pxPerUnit`），再转到出手方向；反手的一刀上下镜像。清单原写 256×128，放大了会糊，改成了这个尺寸。铜钱剑半径翻倍后另用 `weapons/coin_slash` |
+  | `vfx/kill_ink_0..5` | 6 | 192² | 中心 | 普通 | 焦墨 #17140F，不染 | 击杀墨花：画在地上（妖物之下），已压扁（`flat: 0.62`）；`hold_last: true`，末帧留着，由游戏淡出 |
+  | `vfx/shockwave_0..5` | 6 | 512×320 | 中心 | 叠加 | 白，可染，建议 #FFE2A8 | 贴地的冲击波环，已压扁（`flat: 0.62`）；`radius_px: 220` 是末帧亮环的横向半径，按想要的半径缩放，各帧用同一个缩放 |
+  | `vfx/fire_burst_0..6` | 7 | 384² | 爆点 `(0.5, 0.625)` | 叠加 | 自带火色（芯 #FFF1C2 → #FF8A3D → 边 #C2361E），不染 | 火爆：火的死亡爆炸、孔明灯落地、残灯爆燃。第 0 帧爆点一闪，1–3 帧炸成一团火、大火舌往上卷，4–6 帧芯空、火舌越卷越细往上飘。`radius_px: 144`，按爆燃半径缩放（1080p 下 56 单位一比一）；清单写 256²，放大一倍半会糊，改成了这个尺寸 |
+  | `vfx/fire_burst_smoke_0..1` | 2 | 384² | 同上 | 普通 | 焦墨 #17140F，不染 | 火爆尾巴火舌尖上的墨烟（叠加帧画不出墨色，单独一组）：`follows: "fire_burst"`、`start_frame: 5`，和 fire_burst 同锚点、同缩放（`radius_px` 一样），从它的第 5 帧开始一起播；`hold_last: true`，末帧可以留一下再淡出 |
+  | `vfx/ice_shatter_0..5` | 6 | 192² | 中心 | 叠加 | 白，可染，建议 #CDEBFF | 冰碎：一块六角冰晶裂开，七片尖碎片飞散，碎片边亮，一圈碎霜往外扩；原大 |
+  | `vfx/feather_0..3` | 4 种 | 32×16 | 中心 | 普通 | 白，可染，建议纸白 #EDE6D6 | 散开用的粒子，不是动画（meta 写 `variant`、`variants`，没有 `anim`），规则同 `vfx/bamboo_leaf_0..3`：尖 / 长边朝 +X（`points: "+x"`）。0、1 是羽毛（细长、羽轴微弯、根上绒羽），2 是对折的纸片，3 是撕下的纸屑；小图不抖动 |
+  | `vfx/evolve_0..7` | 8 | 512² | 中心 | 叠加 | 自带金色 #FFE7A8，不染 | 进化爆发：莲花 / 日轮一样的放射光，两圈尖瓣、九道笔锋光芒、一圈日芒，0–3 帧开花，末两帧光芒干成一截截、散成光点；原大 |
+  | `vfx/evolve_pillar_0..5` | 6 | 128×512 | 底边中点 `(0.5, 1.0)` | 叠加 | 自带金色 #FFE7A8，不染 | 进化光柱：从地面升起，第 0 帧到三分之一高，1–2 帧冲到顶，之后从下往上收细、变淡，光点往上飘；原大 |
+- **抢先体验的新法器**（docs/BALANCE.md 6.3 节的“画面”，`art/post/weapon_textures_ea.py`）：帧名 `weapons/<名字>_<帧号>`，在 vfx 图集里；动画帧的 meta（`anim`、`frame`、`frames`、`fps`、`loop`）和播法同上面的“逐帧特效”。可染的建议颜色写在 `tint_hint`。
+  - 跟玩法半径走的大帧按 1080p 下约一比一出图（1 世界单位 ≈ 2.57 屏幕像素），不按 4 像素 / 单位画小了再放大；单帧不超过 1024²。meta 的 `radius_px` 是外沿半径，缩放 = 想要的半径 ÷（`radius_px` ÷ `pxPerUnit`）。vfx 图集因此从 2048² 变成 4096²。
+
+  | 帧 | 帧数 | 原画布 | 锚点 | 混合 | 颜色 | 说明 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `weapons/coin_slash_0..5` | 6 | 512×896 | 弧心 `(0.03125, 0.5)` | 叠加 | 白，可染，建议 #F2C46A | 铜钱剑的挥击：120° 扇形剑气朝 +X 张开（`points: "+x"`、`angle_deg: 120`），笔锋从上往下扫（图里 y 向下，反手上下镜像），刃口闪出一枚枚铜钱的影子；0–2 帧扫完，3–5 帧收尾。`radius_px: 440`，按扫击半径（140–170）缩放（1080p 下 171 单位一比一），转到出手方向 |
+  | `weapons/coin_spark_0..4` | 5 | 128² | 接触点 `(0.375, 0.46875)` | 叠加 | 自带铜金色，不染 | 铜钱剑命中：接触点一闪，火星朝 +X 溅（`points: "+x"`，按入射方向转），两枚小铜钱翻着飞；约 16 个世界单位，原大 |
+  | `weapons/coin_whirl_0..5` | 6 | 1024² | 中心 | 叠加 | 白，可染，建议 #F2C46A | 天罡：周身一圈旋风刀光，顺时针转（图里 y 向下），三道主刀光的笔锋上各带一枚铜钱影子，0.25 秒；`radius_px: 464`，缩放 = 200 ÷（464 ÷ `pxPerUnit`）（1080p 下放大约 1.1 倍） |
+  | `weapons/coin_cross_0..3` | 4 | 160² | 中心 | 叠加 | 白，可染，建议 #F2C46A | 天罡的再斩：目标身上的十字斩痕，第 0 帧一道、第 1 帧交叉上第二道；约 30 个世界单位，原大 |
 - **界面图集 `ui`**：用 `pack_atlas.py --no-trim` 打包，每帧的 `frame` 矩形就是整张原图（`spriteSourceSize` 恒为 `(0, 0, 原图宽, 原图高)`），界面代码直接按矩形取图。全部普通混合、不染色，按 1080p 逻辑像素的 2 倍绘制（128² 的图标在 1080p 下显示 64 像素最清楚）。帧名里的 id 和网页版数据一致：
 
   | 类别 | 帧 | 尺寸 |
