@@ -128,6 +128,11 @@ pub struct Audio {
 }
 
 impl Audio {
+    /// 只看同名音效过没过最短间隔，不记时间（两道节流都过了再用 [`Self::can`] 记）。
+    fn ready(&self, name: &'static str, gap: f64) -> bool {
+        self.last.iter().find(|(n, _)| *n == name).is_none_or(|(_, t)| self.now - *t >= gap)
+    }
+
     /// 同名音效的最短间隔。
     fn can(&mut self, name: &'static str, gap: f64) -> bool {
         let now = self.now;
@@ -712,9 +717,12 @@ fn play_sim_events(
                     let s = a.sfx.resonance.clone();
                     a.foreground(&s);
                 }
+                // 两道节流都过了才记时间，不然被总节流挡下的那一种也白白占了自己的 0.15 秒
                 if let (Some(s), Some(&id)) = (a.sfx.reactions.get(k).cloned(), sfx::REACTION_IDS.get(k))
-                    && (first || (a.can(id, 0.15) && a.can("react", 0.06)))
+                    && (first || (a.ready(id, 0.15) && a.ready("react", 0.06)))
                 {
+                    a.can(id, 0.0);
+                    a.can("react", 0.0);
                     a.play_at(&s, 1.0, if first { -2.0 } else { -6.0 }, place(pos));
                 }
             }
