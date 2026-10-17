@@ -14,7 +14,7 @@
   sweep  6 帧（不循环，2 帧蓄力）：0 伏低、九尾往上收拢；1 九尾从背上往前拱、尾火大盛（预警期间停在这一帧）；
          2 往前下方一扫；3 扫到身前低处；4、5 收回扇面。
   summon 4 帧（不循环）：昂头，九尾张到最开、尾尖青火腾起（召狐火），3 稍落。
-帧 768²（2 倍；原 640²，扇面放不下），锚点 (0.5, 0.8)（大妖物）。挂点 eyes。
+帧 896²（2 倍；原 640²，扇面放不下），锚点 (0.5, 0.8)（大妖物）。挂点 eyes。
 坐标：设计稿三维（单位；x 前、y 上、z 左右，z 负 = 近镜头），用 v2kit.d3m 换到模型坐标。
 
     root, parts, sockets = build_boss()
@@ -451,16 +451,17 @@ def tail_layout(anim, frame, n):
             d["ang"] = ang + 2.5 * math.sin(ph + 0.7 * k)
         elif anim == "sweep":
             # 0 往上收拢；1 从背上往前拱（尖朝前，预警停在这）；2 往前下方砸；3 扫到身前低处；4、5 收回扇面
-            a0, turn, bw, lk, puff, fire = [(102 + 24 * s, -14.0, -10.0, 0.96, 1.1, 1.2),
-                                            (96 + 16 * s, -150.0, 0.0, 1.0, 1.25, 1.7),
-                                            (72 + 14 * s, -175.0, 0.0, 1.05, 1.2, 1.6),
-                                            (52 + 12 * s, -150.0, 0.0, 1.05, 1.1, 1.3),
-                                            (104 + 40 * s, -60.0, -10.0, 1.0, 1.0, 1.1),
+            # 出手时尾巴猛地抻长（妖力），才够得着身前
+            a0, turn, bw, lk, puff, fire = [(104 + 24 * s, -14.0, -10.0, 0.96, 1.1, 1.2),
+                                            (96 + 18 * s, -125.0, 0.0, 1.22, 1.25, 1.7),
+                                            (72 + 14 * s, -122.0, 0.0, 1.5, 1.2, 1.6),
+                                            (42 + 12 * s, -112.0, 0.0, 1.45, 1.1, 1.3),
+                                            (104 + 40 * s, -60.0, -10.0, 1.08, 1.0, 1.1),
                                             (ang - 3.0, -8.0, bow, 1.0, 1.0, 1.0)][frame]
             d.update(ang=a0, turn=turn, bow=bw, ln=ln * lk, puff=puff, fire=fire, wave=2.0, ph=ph + 0.5 * k)
         else:  # summon：张到最开、尾尖青火一盏盏腾起来
-            spread = [1.0, 1.1, 1.13, 1.05][frame]
-            d.update(ang=FAN_MID + (ang - FAN_MID) * spread, bow=bow * 0.7, wave=3.0, ph=ph + 0.5 * k,
+            spread = [1.0, 1.07, 1.09, 1.04][frame]  # 身子后仰会带着尾巴往后转，这里先抵掉大半
+            d.update(ang=min(FAN_MID + (ang - FAN_MID) * spread, 194.0) - 0.8 * [3.0, 6.0, 7.0, 4.0][frame], bow=bow * 0.7, wave=3.0, ph=ph + 0.5 * k,
                      puff=1.0 + 0.12 * (frame in (1, 2)), fire=[1.2, 1.6, 1.9, 1.4][frame])
         out.append(d)
     return out
@@ -537,7 +538,8 @@ def tail_flames(c, fire, ph, z):
         x, y = tip - d * 2.0
         L = 13.0 * fire * lj
         for q in np.linspace(0, 1, 9):
-            aa = math.radians(a0 + (90.0 - a0) * 0.35 * q * q + 12.0 * math.sin(ph + 3 * q + j))
+            rise = min(0.9, 0.35 + 0.5 * max(0.0, fire - 1.0))  # 火越大越往上腾
+            aa = math.radians(a0 + (90.0 - a0) * rise * (2 * q - q * q) + 12.0 * math.sin(ph + 3 * q + j))
             pts.append((x, y))
             x += math.cos(aa) * L / 8
             y += math.sin(aa) * L / 8
