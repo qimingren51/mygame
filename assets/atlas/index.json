@@ -11,7 +11,8 @@
  "paper": true,
  "pages": {
   "actors": [
-   "actors.json"
+   "actors_0.json",
+   "actors_1.json"
   ],
   "vfx": [
    "vfx_0.json",
@@ -24,7 +25,8 @@
    "ui.json"
   ],
   "boss": [
-   "boss.json"
+   "boss_0.json",
+   "boss_1.json"
   ],
   "lanterns": [
    "lanterns.json"

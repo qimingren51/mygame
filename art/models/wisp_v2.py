@@ -119,9 +119,38 @@ def _stroke(ctrl, widths, lat, amp, ph, n=36):
     return _to_model(_wave(c, amp, ph), w, lat)
 
 
+VOL_STOPS = [(0.00, I["jiao"]), (0.25, I["nong"]), (0.5, S.mix(I["nong"], I["zhong"], 0.6)), (0.72, I["zhong"]),
+             (0.9, S.mix(I["zhong"], COOL, 0.7)), (1.0, S.mix(COOL, I["qing"], 0.4))]
+
+
+def _volume(ph):
+    """收尾修整（体积感）：笔画底下一条圆滚滚的薄烟——沿主笔中线的管（卷云头粗、往尾收细），
+    明暗按主光（上亮下暗）、边上一圈冷的轮廓光；正对镜头的地方半透明（薄），往尾渐淡、拉出几道缝。"""
+    c, w, lock = main_path(1.0 + 0.035 * math.sin(ph))
+    c = _T(_wave(c, 1.1, ph, lock + 6))
+    w = np.asarray(w) * WS
+    # 卷云头那几圈只取外圈（中线从漩涡外沿开始），不然管子在头里打结
+    k0 = int(lock * 0.55)
+    c, w = c[k0:], w[k0:]
+    lat = 0.13  # 整根管放在笔画后面（墨笔压在上面），画面上的高低差抵掉
+    pts = [d2m(x, y - 25.0 * math.sin(math.radians(S.CAMERA_PITCH_DEG)) * lat, lat) for x, y in c[::2]]
+    ww = w[::2]
+    nrm = np.linspace(0, 1, len(ww))
+
+    def prof(t):
+        r = float(np.interp(t, nrm, ww)) * 0.62 / 25.0
+        return r * 0.8, r * 25.0 / VZ, r * 25.0 / VZ
+    return V2.tube_arrays(pts, prof, nu=16, nv=max(24, len(pts)), cap0=True, cap1=True)
+
+
 def build_wisp():
     root = B.empty("WispRoot")
     body = B.empty("WispBody", root)
+    m_vol = V2.paint_material("WispVolume", VOL_STOPS, wash=0.3, wash_scale=3.0, seed=9.0, rim_hex=RIM, rim=0.7,
+                              rim_power=2.0, value_var=0.05, edge=0.3, bias=-0.05, glow_attr=None)
+    V2.membrane_alpha(m_vol, center=0.42, power=1.3)
+    V2.alpha_streak(m_vol, start=0.45, end=1.0, solid_until=0.3, streak=0.45, scale=(3.0, 20.0), seed=2.0)
+    vol = V2.mesh_from_arrays("WispVolume", *_volume(0.0)[:2], m_vol, "none", body, attrs=_volume(0.0)[2])
     ramps = {"dark": DARK_RAMP, "mid": MID_RAMP, "pale": PALE_RAMP}
     m_main = V2.brush_material("WispMain", MAIN_RAMP, alpha=1.0, streak=0.62, streak_from=0.40, scale=(2.2, 26.0),
                                fade_from=0.80, seed=3.0, comb=10.0, glow=0.3, glow_to=0.22, edge_soft=0.12,
@@ -152,7 +181,8 @@ def build_wisp():
     if hits[0][0] is not None:
         sock.location = body.matrix_world.inverted() @ hits[0][0]
     B.set_direction(root, "S")
-    parts = {"root": root, "body": body, "main": main, "strokes": strokes, "flecks": flecks, "sockets": {"eyes": sock}}
+    parts = {"root": root, "body": body, "main": main, "strokes": strokes, "flecks": flecks, "vol": vol,
+             "sockets": {"eyes": sock}}
     bpy.context.view_layer.update()
     return root, parts, parts["sockets"]
 
@@ -168,6 +198,8 @@ def _eye_poly(ex, ey, hl, hh, tilt):
 
 def pose_wisp(parts, anim, frame, n):
     ph = 2 * math.pi * (frame % n) / n
+    Vv, Fv, Av = _volume(ph)
+    K.replace_mesh(parts["vol"], V2.arrays_build(Vv, Fv), smooth=True, attrs=Av)
     V_, F_, A_s = V2.strip_arrays(*_main(ph))
     K.replace_mesh(parts["main"], V2.arrays_build(V_, F_), smooth=False, attrs=A_s)
     for ob, (ctrl, widths, rk, lat, amp, ph0, comb) in zip(parts["strokes"], STROKES):

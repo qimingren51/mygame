@@ -415,7 +415,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad  # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad,boss  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
@@ -429,13 +429,14 @@ art/.venv/bin/python art/post/check_atlas.py
 | `render/enemies_v2.py` | V2 表（素材 → 模型、帧尺寸、锚点、动画、挂点、碰撞半径、眼色）；出帧、逐帧挂点、meta（`style: "paint"`、`contact_radius`） |
 | `models/v2kit.py` | 公共件：多档带色相偏移的绘画感材质（明暗和毛色分区走同一条色带）、轮廓光、AOV 缝光（夜里透出的微光）、按设计稿投到表面上的贴片（眼、裂缝；`design_patch` 做任意形状的整块贴片，例如脸谱）、离光越远越粗的墨线、设计稿平面里的笔画扁带和 `brush_material`（飞白、散锋，疾影、狐火用）、后期（不吸附调色板） |
 | `models/shade_v2.py` `fox_v2.py` | 影妖、赤面狐 |
-| `models/wisp_v2.py` | 疾影：卷云头 + 被风扯长的几笔薄墨（扁带），不描线 |
-| `models/golem_v2.py` | 石妖：斧劈块面的山石垒起来，石缝里夹一片发光的魂 |
-| `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带） |
+| `models/wisp_v2.py` | 疾影：卷云头 + 被风扯长的几笔薄墨（扁带），不描线；外面裹一层半透明的烟管（沿主笔的管，边上被啃毛），有体积感 |
+| `models/golem_v2.py` | 石妖：斧劈块面的山石垒起来，石缝里夹一片发光的魂（腿和肚、头和背、两臂各节之间都有），肚石、背石上几道裂缝，夜里缝里透光 |
+| `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带），尾巴外沿一排火舌、往后上方再窜出两条大火舌 |
 | `models/bamboo_v2.py` | 竹魅：一节节竹段（段间墨色竹节）拼成的细长人形，头是一蓬披下来的竹叶（叶缝里焦墨的空、两点眼），手是三根挂竹叶的细竹枝；射刺像拉弓，竹节裂开、节缝透光 |
 | `models/taofeng_v2.py` | 讨封狐：扮人是斗笠（顶上三片竹叶）、三层蓑衣、竹杖，蓑衣底下露一截尾巴；现形是穿旧靛蓝袍、长袖的直立狐狸，斗笠挂在背上，眯眼笑（头、耳、尾借用赤面狐） |
 | `models/stonelord_v2.py` | 石将：隐式曲面凿出来的石翁仲（3/4 侧面），圆顶盔、护心镜、披膊、鱼鳞甲裙（刻槽走 zone 属性）、双手拄长刀；风化起伏、雨痕、青苔从脚往上爬（moss 属性），落脚两帧崩石屑 |
 | `models/toad_v2.py` | 金蟾：圆胖的金身子（一身小疙瘩）、背上嵌七枚铜钱、嘴里衔一枚、三条腿（一条后腿），耷拉眼皮斜眼瞟（贼）；一蹦一蹦，身后掉钱；夜里眼珠和铜钱泛金光 |
+| `models/boss_v2.py` | 九尾（夜主）：身子、四条腿、头都是隐式曲面——胸厚腰细，后腿大腿肌肉饱满、飞节往后折，前腿细长带腕和爪；颈长、往前探，头低；脸窄吻长，丹凤眼上挑带墨勾，额心青火印，大耳带内耳白毛；胸前颈下一圈柔的毛领（边上笔触尖毛收）；九条尾巴在身后摊成扇面（前亮后暗两层，S 形，根细中蓬尖收，轮廓一簇簇尖毛），尾尖一截青火（AOV）带火舌；扫尾时九尾拱成一道浪、抻长越过头顶往前下砸，召唤时张到最开、尾火往上腾 |
 | `models/ghoul_v2.py` | 青面鬼：隐式曲面捏出来的驼背大鬼（躯干、大肚子、四肢、头各一块），肚皮发白、透着魂光（AOV），獠牙、黑爪、铁箍、焦墨乱发、暗红破布 |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
@@ -446,6 +447,10 @@ art/.venv/bin/python art/post/check_atlas.py
 - 竹魅：帧 320²、锚点 (0.5, 0.875)，挂点 eyes、muzzle（蓄力时在竹刺尖上）。讨封狐：帧 256²（原 224²），reveal 写了 `vertical_motion`
   （一跳、蓑衣掀起，身高一帧一个样）。青面鬼：帧 320²、锚点 (0.5, 0.8)，身子整体往后挪，锚点在身子中心底下；move、charge 都写了
   `vertical_motion`（一步一沉）。
+- 九尾：帧 896²（原 640²，扇面放不下）、锚点 (0.5, 0.8)（boss 图集，`atlas_swap.py --name boss`，放不下自动分成 `boss_0`、`boss_1`），
+  整体放大靠 `JWBody` 的缩放（`G`），头是建一次的静止网格、每帧按颈端摆位置和角度（眼、额印投在上面一起走）。
+  `register_x_only`，配准只取躯干那一段（`register_band: [0.30, 0.42]`：锚点正上方最高的是扇面里的尾巴）。
+  尾尖的火不能用发光材质（发光层按物体分，整条尾巴都会进去），走 AOV（`mix_attr` 混色 + `glow_attr`）。毛领不勾里线，只算进整体剪影。
 - 石将：帧 320²、锚点 (0.5, 0.8)，move 写了 `vertical_motion`（落脚一沉，盔顶跟着上下）。金蟾：帧 192²（原 160²），整体往后（离镜头远）挪 3.5 单位，
   近镜头那只手才不出画；`vertical_motion`（蹦）。
 - `v2kit.sdf_mesh`：隐式曲面网格化（surface nets，纯 numpy），配 `smin`、`sd_round_cone`、`sd_ellipsoid` 捏肌肉、肚子这种圆滚滚的形体；
