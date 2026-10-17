@@ -13,13 +13,13 @@ use bevy::math::URect;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use lantern_content::{BlastKind, Element, Rank, WeaponIdentity};
+use lantern_content::{BlastKind, Element, Rank, ReactionEffect, WeaponIdentity};
 use lantern_core::Pcg32;
 use lantern_sim::bamboo::{Bamboo, ClumpState};
 use lantern_sim::combat::StrikeFx;
 use lantern_sim::{Arsenal, Director, Enemies, GameContent, HitKind, Player, RunState, SimEvent, SimOutbox};
 
-use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools};
+use crate::actors::{ActorFrames, Draw, GlowRequests, HeroView, Pools, sort_z};
 use crate::atlas::{AtlasDb, FrameId};
 use crate::feedback::{Category, Feedback, Priority, eviction};
 use crate::fx::{ULT_END, ULT_FLASH, hex};
@@ -60,6 +60,7 @@ pub(crate) struct PFrames {
 }
 
 /// 美术的逐帧特效（docs/FEEL.md 第 12 节），都是 24 帧 / 秒、播一次。
+/// 熔金是挂在妖物身上的循环印记，不在这里，在 `fx.rs` 里跟着妖物画。
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Fx {
     #[default]
@@ -83,10 +84,19 @@ pub(crate) enum Fx {
     CoinSpark,
     CoinCross,
     TowerDust,
+    ReactLiaoyuan,
+    ReactRongyan,
+    ReactZhubing,
+    ReactNingshuang,
+    ReactZisheng,
+    ReactZhengteng,
+    ReactDuanmu,
+    ReactLietu,
+    ReactYuni,
 }
 
 impl Fx {
-    const ALL: [Fx; 20] = [
+    const ALL: [Fx; 29] = [
         Fx::None,
         Fx::HitMetal,
         Fx::HitWood,
@@ -107,6 +117,15 @@ impl Fx {
         Fx::CoinSpark,
         Fx::CoinCross,
         Fx::TowerDust,
+        Fx::ReactLiaoyuan,
+        Fx::ReactRongyan,
+        Fx::ReactZhubing,
+        Fx::ReactNingshuang,
+        Fx::ReactZisheng,
+        Fx::ReactZhengteng,
+        Fx::ReactDuanmu,
+        Fx::ReactLietu,
+        Fx::ReactYuni,
     ];
 
     /// 图集里的帧名前缀（后面接 `_0`、`_1`……）
@@ -132,12 +151,46 @@ impl Fx {
             Fx::CoinSpark => "weapons/coin_spark",
             Fx::CoinCross => "weapons/coin_cross",
             Fx::TowerDust => "weapons/tower_dust",
+            Fx::ReactLiaoyuan => "vfx/react_liaoyuan",
+            Fx::ReactRongyan => "vfx/react_rongyan",
+            Fx::ReactZhubing => "vfx/react_zhubing",
+            Fx::ReactNingshuang => "vfx/react_ningshuang",
+            Fx::ReactZisheng => "vfx/react_zisheng",
+            Fx::ReactZhengteng => "vfx/react_zhengteng",
+            Fx::ReactDuanmu => "vfx/react_duanmu",
+            Fx::ReactLietu => "vfx/react_lietu",
+            Fx::ReactYuni => "vfx/react_yuni",
         }
     }
 
-    /// 普通混合的帧（墨溅、墨烟）画在暗层之下，其余叠加、画在暗层之上
+    /// 反应的 id（`elements.ron`）对应的逐帧图；熔金和不认识的返回 `None`
+    fn reaction(id: &str) -> Fx {
+        match id {
+            "liaoyuan" => Fx::ReactLiaoyuan,
+            "rongyan" => Fx::ReactRongyan,
+            "zhubing" => Fx::ReactZhubing,
+            "ningshuang" => Fx::ReactNingshuang,
+            "zisheng" => Fx::ReactZisheng,
+            "zhengteng" => Fx::ReactZhengteng,
+            "duanmu" => Fx::ReactDuanmu,
+            "lietu" => Fx::ReactLietu,
+            "yuni" => Fx::ReactYuni,
+            _ => Fx::None,
+        }
+    }
+
+    /// 普通混合的帧（墨溅、墨烟、灵草、地刺、泥、蒸汽）进精灵池，其余叠加、画在暗层之上
     fn glow(self) -> bool {
-        !matches!(self, Fx::KillInk | Fx::FireSmoke | Fx::TowerDust)
+        !matches!(
+            self,
+            Fx::KillInk
+                | Fx::FireSmoke
+                | Fx::TowerDust
+                | Fx::ReactZisheng
+                | Fx::ReactZhengteng
+                | Fx::ReactLietu
+                | Fx::ReactYuni
+        )
     }
 
     fn hit(e: Option<Element>) -> Fx {
@@ -330,6 +383,7 @@ pub(crate) fn setup_particles(
     );
     db.add_page(images.add(image), PAGE, &frames, &mut layouts);
     let f = |name: &str| db.find(name).expect("粒子贴图");
+    let anims = load_anims(&db);
     commands.insert_resource(Particles {
         list: Vec::with_capacity(CAP),
         rng: Pcg32::new(0x0b1a_5e20, 5),
@@ -354,7 +408,8 @@ pub(crate) fn setup_particles(
                 .collect::<Option<Vec<_>>>()
                 .and_then(|v| v.try_into().ok()),
         },
-        anims: load_anims(&db),
+        anim_r: anims.iter().map(|v| v.first().and_then(|&f| db.frame(f).radius)).collect(),
+        anims,
     });
 }
 
@@ -450,6 +505,8 @@ pub(crate) struct Particles {
     spawned: [u32; Priority::ALL.len()],
     /// 逐帧特效的帧，按 `Fx` 的顺序（`load_anims`）
     anims: Vec<Vec<FrameId>>,
+    /// 每段逐帧特效在缩放为 1 时的有效半径（世界单位，图集的 radius_px），没写的是 `None`
+    anim_r: Vec<Option<f32>>,
 }
 
 impl Particles {
@@ -1073,6 +1130,11 @@ impl Particles {
         })
     }
 
+    /// 把逐帧特效缩放到有效半径 `r`（世界单位）要乘的倍数；图集没写 radius_px 的按原尺寸。
+    fn fit(&self, fx: Fx, r: f32) -> f32 {
+        self.anim_r.get(fx as usize).copied().flatten().map_or(1.0, |a| r / a)
+    }
+
     /// 地上一圈扩开的光（升级、点灯）。
     pub fn halo(&mut self, frame: FrameId, at: Vec2, from: f32, to: f32, life: f32, color: Color) {
         let p = P { size: (from, to), color, glow: true, ..P::new(frame, at, life, layer::EMISSIVE - 0.5) };
@@ -1668,6 +1730,54 @@ pub(crate) fn particle_events(
                 parts.dust(at, 22, radius / 25.0, DUST);
                 parts.ink(at, 16, 2.0);
             }
+            // 五行反应：美术的逐帧图。有范围的按玩法半径画，看得出罩住了哪一片；铸兵、断木按原尺寸画在妖物身上。
+            // 凝霜停到减速结束、滋生停到缠绕结束；赤地、淤泥播完很快淡掉，交给 fx.rs 画的持续区域
+            SimEvent::Reaction { kind, pos, first, .. } => {
+                let Some(def) = content.0.elements.reactions.get(usize::from(kind)) else { continue };
+                let fx = Fx::reaction(&def.id);
+                let at = to_screen(pos);
+                let (radius, hold) = match def.effect {
+                    ReactionEffect::Spread { radius, .. } | ReactionEffect::Steam { radius, .. } => {
+                        (Some(radius), 0.0)
+                    }
+                    ReactionEffect::Zone { radius, .. } => (Some(radius), 0.3),
+                    ReactionEffect::Frost { radius, slow_time, .. } => (Some(radius), slow_time),
+                    ReactionEffect::Bloom { radius, root, .. } => (Some(radius), root),
+                    ReactionEffect::Rupture { radius, .. } => (Some(radius), 0.2),
+                    ReactionEffect::Blades { .. }
+                    | ReactionEffect::Melt { .. }
+                    | ReactionEffect::Sever { .. } => (None, 0.0),
+                };
+                let scale = radius.map_or(1.0, |r| parts.fit(fx, r));
+                let spin = parts.rng.range_f32(0.0, TAU);
+                let tilt = parts.rng.range_f32(-0.4, 0.4);
+                let (z, rot, color) = match fx {
+                    // 贴地的亮纹（赤地的裂缝、凝霜的霜花）美术已经压扁，不转
+                    Fx::ReactRongyan | Fx::ReactNingshuang => {
+                        (layer::EMISSIVE - 2.5, 0.0, hdr(Color::WHITE, 1.2))
+                    }
+                    // 泥摊在 fx.rs 的泥沼之上；灵草从地里长出来，在妖物脚下
+                    Fx::ReactYuni | Fx::ReactZisheng => (layer::GROUND + 0.9, 0.0, Color::WHITE),
+                    // 地刺立着，和妖物一起按脚底排前后
+                    Fx::ReactLietu => (sort_z(layer::ACTORS, pos.y), 0.0, Color::WHITE),
+                    // 白汽画在暗层之上（美术的建议），不然夜里是灰的；淡一点，不盖死妖物
+                    Fx::ReactZhengteng => (layer::DARKNESS + 2.0, 0.0, Color::WHITE.with_alpha(0.7)),
+                    // 断木两刀交叉，只微微转一点，保持斜劈的样子
+                    Fx::ReactDuanmu => (layer::EMISSIVE + 0.6, tilt, hdr(Color::WHITE, 1.3)),
+                    _ => (layer::EMISSIVE + 0.5, spin, hdr(Color::WHITE, 1.3)),
+                };
+                let drawn = parts.anim(fx, at, scale, rot, color, z, hold, 0.0);
+                let tint = element_glow(Some(def.b));
+                // 头一回见到这种反应：再推一圈染成反应色的冲击波
+                if first {
+                    let k = parts.fit(Fx::Shockwave, radius.unwrap_or(40.0));
+                    parts.anim(Fx::Shockwave, at, k, 0.0, hdr(tint, 1.3), layer::EMISSIVE - 0.4, 0.0, 0.0);
+                }
+                // 熔金的印记在 fx.rs 里跟着妖物画，这里只迸一点火星；图集里没有反应图时也是火星
+                if !drawn {
+                    parts.sparks(at, hdr(tint, 1.4), 10, 260.0, Vec2::ZERO);
+                }
+            }
             // 铜钱剑：刀光从主角腰间挥出去（判定在地面，画面抬到腰的高度）
             SimEvent::Sweep { pos, dir, arc, radius, evolved, .. } => {
                 let d = (to_screen(pos + dir) - to_screen(pos)).normalize_or(Vec2::X);
@@ -2023,6 +2133,7 @@ mod tests {
                 feathers: None,
             },
             anims: Vec::new(),
+            anim_r: Vec::new(),
         }
     }
 
@@ -2044,6 +2155,20 @@ mod tests {
     #[test]
     fn fx_table_follows_the_enum_order() {
         assert!(Fx::ALL.iter().enumerate().all(|(i, f)| *f as usize == i));
+    }
+
+    /// 十种反应除了熔金（挂在妖物身上，在 fx.rs 里画），每种都有自己的逐帧图
+    #[test]
+    fn every_reaction_but_melt_has_its_own_burst() {
+        let content = lantern_content::Content::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"),
+        )
+        .unwrap();
+        assert_eq!(content.elements.reactions.len(), 10);
+        for r in &content.elements.reactions {
+            let melt = matches!(r.effect, ReactionEffect::Melt { .. });
+            assert_eq!(Fx::reaction(&r.id) == Fx::None, melt, "{}", r.id);
+        }
     }
 
     /// 逐帧特效 24 帧换一帧，播完停在最后一帧；停的那段里淡掉，没有停的不淡。
