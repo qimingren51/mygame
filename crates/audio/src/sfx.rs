@@ -92,6 +92,8 @@ pub struct Sfx {
     pub tower_land: StaticSoundData,
     /// 玲珑塔炸开：锣、鼓、碎石
     pub tower_burst: StaticSoundData,
+    /// 十种五行反应各自的声音，按 `elements.ron` 里反应的顺序（[`REACTION_IDS`]）
+    pub reactions: [StaticSoundData; 10],
     // 下面四个是界面上的事（卷轴、灯驿），界面发 UiCue 来播
     /// 开场卷轴展开：一声低的拨弦，纸沙沙地推开，推到头轴头一磕
     pub scroll_unroll: StaticSoundData,
@@ -101,6 +103,158 @@ pub struct Sfx {
     pub lamp_lit: StaticSoundData,
     /// 灯驿远山晨光铺开：一串往上走的拨弦，末尾几声鸟叫
     pub dawn_spread: StaticSoundData,
+}
+
+/// `Sfx::reactions` 的顺序，和 `elements.ron` 的反应顺序一致（测试核对）；也当节流的键
+pub const REACTION_IDS: [&str; 10] = [
+    "liaoyuan",
+    "rongyan",
+    "zhubing",
+    "ningshuang",
+    "zisheng",
+    "zhengteng",
+    "rongjin",
+    "duanmu",
+    "lietu",
+    "yuni",
+];
+
+/// 十种反应。一局几千次、一秒好几下，所以都短、都轻，各有一个一听就认得的质地：
+/// 火呼、地裂、金鸣、冰脆、叶响、汽嘶、熔滋、双斩、地刺、泥噗。前 0.3 秒的响度对齐到原来那声铃（`bell_pulse`）上下。
+fn reaction_sounds() -> [StaticSoundData; 10] {
+    [
+        // 燎原：呼地往外窜，几下火星噼啪
+        render(0.6, |b| {
+            b.noise(
+                0.0,
+                0.32,
+                0.55,
+                NoiseOpts {
+                    kind: FilterKind::Low,
+                    freq: 350.0,
+                    slide: Some(2600.0),
+                    attack: 0.03,
+                    ..Default::default()
+                },
+            );
+            for k in 0..4 {
+                let t = 0.06 + k as f32 * 0.06 + (k * 37 % 5) as f32 * 0.01;
+                b.noise(t, 0.012, 0.08, noise(FilterKind::High, 3600.0));
+            }
+        }),
+        // 赤地：一声闷的裂响，地缝里滋滋地烧
+        render(0.8, |b| {
+            b.drum(0.0, 0.08, 70.0);
+            b.wood(0.0, 0.03, 300.0);
+            b.noise(
+                0.03,
+                0.55,
+                0.035,
+                NoiseOpts { kind: FilterKind::Band, freq: 2200.0, slide: Some(1200.0), q: 2.0, attack: 0.05 },
+            );
+        }),
+        // 铸兵：三片金刃先后出鞘，金属的鸣响
+        render(0.7, |b| {
+            b.noise(0.0, 0.06, 0.08, noise(FilterKind::High, 5200.0));
+            for (k, d) in [19, 22, 24].into_iter().enumerate() {
+                b.bell(jiao(d) * 2.0, k as f32 * 0.035, 0.042, 0.35);
+            }
+        }),
+        // 凝霜：冰一下子结上，脆的高音往上挑，几粒冰碴
+        render(0.7, |b| {
+            b.osc(Wave::Sine, jiao(20) * 2.0, 0.0, 0.25, 0.06, Some((jiao(24) * 2.0, 0.08)), 0.003);
+            for k in 0..5 {
+                b.noise(0.02 + k as f32 * 0.035, 0.01, 0.08, noise(FilterKind::High, 6800.0));
+            }
+            b.bell(jiao(22) * 2.0, 0.05, 0.04, 0.5);
+        }),
+        // 滋生：叶子沙沙地长出来，两声往上的轻拨弦
+        render(0.7, |b| {
+            b.noise(
+                0.0,
+                0.4,
+                0.05,
+                NoiseOpts { kind: FilterKind::Band, freq: 2600.0, slide: Some(3600.0), q: 1.2, attack: 0.12 },
+            );
+            b.pluck(jiao(12), 0.02, 0.06, 0.5);
+            b.pluck(jiao(15), 0.1, 0.05, 0.5);
+        }),
+        // 蒸腾：“噗”一声闷炸，跟着一长串白汽的嘶声
+        render(0.9, |b| {
+            b.noise(0.0, 0.12, 0.12, noise(FilterKind::Low, 500.0));
+            b.noise(
+                0.0,
+                0.7,
+                0.07,
+                NoiseOpts {
+                    kind: FilterKind::High,
+                    freq: 3200.0,
+                    slide: Some(5200.0),
+                    attack: 0.02,
+                    ..Default::default()
+                },
+            );
+        }),
+        // 熔金：烧红的金属滋的一下，一声发闷的低铃
+        render(0.8, |b| {
+            b.noise(
+                0.0,
+                0.25,
+                0.07,
+                NoiseOpts { kind: FilterKind::Band, freq: 4200.0, slide: Some(2400.0), q: 2.5, attack: 0.01 },
+            );
+            b.bell(jiao(5) * 2.0, 0.02, 0.055, 0.7);
+        }),
+        // 断木：两刀交叉“唰唰”，一声木头断开
+        render(0.5, |b| {
+            for k in 0..2 {
+                b.noise(
+                    k as f32 * 0.07,
+                    0.06,
+                    0.17,
+                    NoiseOpts {
+                        kind: FilterKind::Band,
+                        freq: 1600.0,
+                        slide: Some(5200.0),
+                        q: 1.6,
+                        attack: 0.005,
+                    },
+                );
+            }
+            b.wood(0.12, 0.15, 900.0);
+        }),
+        // 裂土：地底一声闷响，地刺破土，碎石落下
+        render(0.9, |b| {
+            b.drum(0.0, 0.07, 55.0);
+            b.noise(
+                0.0,
+                0.3,
+                0.05,
+                NoiseOpts { kind: FilterKind::Low, freq: 900.0, slide: Some(140.0), ..Default::default() },
+            );
+            for k in 0..5 {
+                let t = 0.06 + k as f32 * 0.05 + (k * 29 % 7) as f32 * 0.008;
+                b.wood(t, 0.03 - k as f32 * 0.004, 520.0 + (k * 83 % 5) as f32 * 90.0);
+            }
+        }),
+        // 淤泥：“噗叽”一声闷的泥响，冒个泡
+        render(0.6, |b| {
+            b.noise(
+                0.0,
+                0.18,
+                0.14,
+                NoiseOpts {
+                    kind: FilterKind::Low,
+                    freq: 600.0,
+                    slide: Some(180.0),
+                    attack: 0.01,
+                    ..Default::default()
+                },
+            );
+            b.osc(Wave::Sine, 95.0, 0.0, 0.18, 0.11, Some((50.0, 0.15)), 0.004);
+            b.osc(Wave::Sine, 260.0, 0.22, 0.06, 0.04, Some((420.0, 0.05)), 0.004);
+        }),
+    ]
 }
 
 /// 一声鸟叫：两三个快速上滑的短音。
@@ -300,6 +454,7 @@ impl Sfx {
         ]
         .into_iter()
         .chain(self.chest.iter())
+        .chain(self.reactions.iter())
         .chain(self.impacts.iter().flatten().flatten())
         .map(|s| s.frames.len() * size_of::<kira::Frame>())
         .sum()
@@ -702,6 +857,7 @@ impl Sfx {
                 b.wood(0.0, 0.1, 260.0);
                 b.bell(jiao(3), 0.06, 0.07, 1.5);
             }),
+            reactions: reaction_sounds(),
             tower_burst: render(2.6, |b| {
                 b.gong(65.0, 0.0, 0.2);
                 b.drum(0.0, 0.7, 62.0);
@@ -930,12 +1086,29 @@ mod tests {
             ("warn_big", &s.warn_big),
             ("hurt", &s.hurt),
         ];
-        for (name, sound) in all {
+        let reactions = REACTION_IDS.iter().zip(s.reactions.iter()).map(|(id, s)| (*id, s));
+        for (name, sound) in all.into_iter().chain(reactions) {
             let peak = sound.frames.iter().map(|f| f.left.abs()).fold(0.0, f32::max);
             let clipped = sound.frames.iter().filter(|f| f.left.abs() >= 0.999).count();
             assert!(peak > 0.01, "{name} 没有声音（峰值 {peak}）");
             assert!(clipped <= 2, "{name} 削波 {clipped} 个采样（峰值 {peak}）");
         }
+    }
+}
+
+#[cfg(test)]
+mod reaction_tests {
+    use super::*;
+
+    /// `Sfx::reactions` 按反应在 `elements.ron` 里的下标取声音，顺序要对得上
+    #[test]
+    fn reaction_sounds_follow_the_content_order() {
+        let content = lantern_content::Content::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/data"),
+        )
+        .unwrap();
+        let ids: Vec<&str> = content.elements.reactions.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, REACTION_IDS);
     }
 }
 
