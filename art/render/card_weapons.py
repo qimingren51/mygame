@@ -1486,12 +1486,12 @@ def build_lamp_mut(draft):
         ob.rotation_mode = "QUATERNION"
         ob.rotation_quaternion = d.to_track_quat("Z", "Y")
     # 冷热交界的白汽：从灯顶一团团往上翻，越高越大越淡；左边映冷光、右边映暖光
-    steam = mat_puff("Steam", alpha=0.62, emit=0.35)
+    steam = mat_puff("Steam", alpha=0.50, emit=0.28)
     for k in range(7):
         t = k / 6
-        c = Vector((rng.normal(0.0, 0.025) * (1 + t), rng.normal(-0.02, 0.02), 0.175 + 0.15 * t ** 0.9))
+        c = Vector((rng.normal(0.0, 0.025) * (1 + t), rng.normal(-0.02, 0.02), 0.172 + 0.125 * t ** 0.9))
         n = 5 + k
-        r0 = 0.020 + 0.022 * t
+        r0 = 0.018 + 0.018 * t
         pts = [tuple(rng.normal(0, r0 * 0.9, 3) * (1.6, 0.8, 0.7)) for _ in range(n)]
         rads = [r0 * rng.uniform(0.6, 1.1) for _ in range(n)]
         make_obj(f"Steam{k}", K.ico_cloud(pts, rads, 2), steam, loc=tuple(c), index=4)
@@ -2147,6 +2147,10 @@ def build_phoenix(draft):
         make_obj(nm, K.ribbon_uv(pts, width * W, ups=[(0, 1, 0)] * len(pts), width_fn=wfn),
                  mat_flame_feather(nm + "M", strength=strength, seed=n_f[0] * 1.37, **kw), index=4)
 
+    def bez2(ctrl, n):
+        """画面坐标（二维）的 Catmull-Rom 折线。"""
+        return [(x, y) for x, y, _ in CP.bez([(x, y, 0.0) for x, y in ctrl], n=n)]
+
     def curve(p0, d, L, bend, n=36):
         d = np.asarray(d, float)
         d = d / np.linalg.norm(d)
@@ -2155,7 +2159,7 @@ def build_phoenix(draft):
 
     # 两翼：翅骨从肩往外上拱到翅尖；火羽从翅骨披下来，内侧朝下、外侧朝外下，越往外越长
     for sg in (-1, 1):
-        arm = CP.bez([(0.50 + sg * 0.035, 0.45), (0.50 + sg * 0.15, 0.31), (0.50 + sg * 0.27, 0.255), (0.50 + sg * 0.36, 0.27)], n=80)
+        arm = bez2([(0.50 + sg * 0.035, 0.45), (0.50 + sg * 0.15, 0.31), (0.50 + sg * 0.27, 0.255), (0.50 + sg * 0.36, 0.27)], n=80)
         nf = 15
         for k in range(nf):
             s_ = k / (nf - 1)
@@ -2182,7 +2186,7 @@ def build_phoenix(draft):
         make_obj(f"TailEye{k}", K.torus_build(0.012 * W, 0.0045 * W, 24, 8), P.mat_emit(f"TailEyeM{k}", (1.0, 0.80, 0.40), 14.0),
                  loc=tuple(eye), rot=(math.radians(90), 0, 0), index=4)
     # 身子、颈：一束往上弯的火，头朝左
-    neck = CP.bez([(0.50, 0.60), (0.505, 0.48), (0.49, 0.34), (0.46, 0.26), (0.445, 0.215)], n=50)
+    neck = bez2([(0.50, 0.60), (0.505, 0.48), (0.49, 0.34), (0.46, 0.26), (0.445, 0.215)], n=50)
     plume(neck, 0.085, strength=12.0, depth=D - 0.04, wfn=lambda t: (1.0 - 0.62 * t) * (0.7 + 0.3 * math.sin(math.pi * min(1, t * 2))))
     core = S(0.50, 0.50, D - 0.05)
     make_obj("Core", K.ico_cloud([(0, 0, 0)], [1.0], 3), P.mat_emit("CoreM", (1.0, 0.80, 0.45), 9.0), loc=tuple(core),
