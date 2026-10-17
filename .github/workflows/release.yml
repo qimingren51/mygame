@@ -1,5 +1,6 @@
 # 打包桌面版。
 # - 推送 v* 标签（例如 v0.1.0）：打包 Linux 和 Windows 版本，发布到 GitHub Releases（标记为预发布）。
+#   在网页的 Releases 页新建发布、顺带建标签也行：工作流把安装包补到这个发布上。
 # - 在 Actions 页面手动运行：只打包，安装包在这次运行的 Artifacts 里下载，适合测试。
 # - Windows 签名需要同时配置 WINDOWS_CERT_PFX_BASE64 和 WINDOWS_CERT_PASSWORD 两个仓库 secrets。
 name: Release
@@ -123,8 +124,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "提灯夜行 $GITHUB_REF_NAME" \
-            --generate-notes \
-            --prerelease
+          files=(dist/*.zip dist/*.tar.gz dist/SHA256SUMS.txt)
+          # 在网页上新建发布（顺带建标签）时，发布已经存在：只把安装包补上去，说明保留网页上写的
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "提灯夜行 $GITHUB_REF_NAME" \
+              --generate-notes \
+              --prerelease
+          fi
