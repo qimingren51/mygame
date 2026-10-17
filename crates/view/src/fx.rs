@@ -147,6 +147,8 @@ const ZONE_HERB_R: f32 = 39.5;
 const REACT_LEAD: f32 = 0.25;
 /// 熔金印记在缩放为 1 时罩住的妖物半径（美术的 radius_px 30）
 const MELT_R: f32 = 7.5;
+/// 同时画熔金印记的妖物上限（离主角近的优先）
+const MELT_MAX: usize = 64;
 
 pub(crate) fn build_fx_frames(mut commands: Commands, db: Res<AtlasDb>, content: Res<GameContent>) {
     let need = |name: &str| db.find(name).unwrap_or_else(|| panic!("图集里缺少帧 {name}"));
@@ -1230,24 +1232,33 @@ pub(crate) fn collect_fx(
         }
     }
 
-    // ---- 熔金：易伤的妖物身上一枚循环的熔金印记，罩住妖物，最后 0.3 秒淡掉；“隐”着的不画
+    // ---- 熔金：易伤的妖物身上一枚循环的熔金印记，罩住妖物，最后 0.5 秒淡掉；“隐”着的不画。
+    // 同时熔金的可能很多，只画离主角最近的 MELT_MAX 只
     if let Some(en) = &res.enemies
         && !f.melt.is_empty()
     {
         let r0 = db.frame(f.melt[0]).radius.unwrap_or(MELT_R);
-        for i in en.iter_alive() {
-            if en.melt_t[i] <= 0.0 || en.cloaked[i] {
-                continue;
-            }
-            // 每只错开相位，不一起闪
+        let mut melted: Vec<(f32, usize, Vec2)> = en
+            .iter_alive()
+            .filter(|&i| en.melt_t[i] > 0.0 && !en.cloaked[i])
+            .map(|i| {
+                let p = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
+                (p.distance_squared(hero), i, p)
+            })
+            .collect();
+        if melted.len() > MELT_MAX {
+            melted.select_nth_unstable_by(MELT_MAX, |a, b| a.0.total_cmp(&b.0));
+            melted.truncate(MELT_MAX);
+        }
+        for (_, i, p) in melted {
+            // 每只错开相位，不一起闪；重复挂上熔金时不从头播
             let Some(frame) = looped(&f.melt, now + en.wob[i], 10.0) else { continue };
-            let p = lerp(Vec2::new(en.px[i], en.py[i]), Vec2::new(en.x[i], en.y[i]));
             glow.add(
                 frame,
                 p.extend(layer::EMISSIVE - 0.3),
                 Vec2::splat(en.r[i] / r0),
                 0.0,
-                hdr(Color::WHITE, 1.2).with_alpha((en.melt_t[i] / 0.3).min(1.0) * 0.9),
+                hdr(Color::WHITE, 1.2).with_alpha((en.melt_t[i] / 0.5).min(1.0) * 0.9),
             );
         }
     }
