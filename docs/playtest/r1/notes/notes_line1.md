@@ -9,7 +9,7 @@ scratchpad = /tmp/claude-0/-home-user-mygame/01f265ce-5196-560e-be75-2f924c080bf
 ## 顺序（协调者第 3 次调整，2026-10-17，接手的子代理）
 1. 铜钱剑按新半径重画（coin_slash 独立出图 140–170，coin_whirl 200）—— **完成**，已推 3ffa25f
 2. 特效第二批（fire_burst、ice_shatter、feather、evolve、evolve_pillar）—— **完成**，已推 b6ab5c8
-3. 四件新法器的持续画面（沧浪、青藤 **完成**，已推 49e5d1a；孔明灯、镇妖塔下一步）：weapons/sky_lantern（Blender 纸灯笼，飘 4 + 坠 3）、wave_front（月牙浪头 4 循环 + 散 3，叠加可染）、
+3. 四件新法器的持续画面（沧浪、青藤 **完成** 49e5d1a；孔明灯、镇妖塔 **完成** f0a1e7e）：weapons/sky_lantern（Blender 纸灯笼，飘 4 + 坠 3）、wave_front（月牙浪头 4 循环 + 散 3，叠加可染）、
    vine（锚点右端、沿 X 拉伸、粗约 10、叶子 3 帧）、tower（镇妖塔 R45 宽 40 高 70；玲珑塔 R60 宽 56 高 96；落 3、立 2 循环、收 3）
    + 各自事件的一次性特效（落点圈、火海贴花 4 循环、泡沫痕、绿光回流、尘土冲击波、金色冲击波，能复用就复用）
 4. 特效第三批（十种反应 react_*）
@@ -65,3 +65,15 @@ Blender 最终渲染包在 B.render_lock() 里；每完成一项推一次、Send
 - vfx_frames_review.ingame 的摆法第 6 项：size_units（不等比拉伸）、to + h_units（从锚点拉到目标并转向）、face（+X 朝目标）。
 - test_weapon_textures_ea：PLAY（fps、loop）、LOOPS、STILLS；循环首尾、浪头月牙、泡沫痕、藤、绿光、缠绕的专项。全跑约 4.5 分钟。
 - 草稿：$SP/tools/try_ea.py <件> [组…] → $SP/ea_try/<件>/strip.png、ingame*.png。
+
+## 7. 孔明灯、镇妖塔（完成，playtest-r1-vfx f0a1e7e）
+- 协调者新规矩（额度预警，用完停到 22 号）：每做完一件就提交推送、回报哈希帧名尺寸；审图看缩略图或裁一小块，参数一次改到位；
+  阶段写进本笔记；最终渲染拿渲染锁。合并候选 m2 由协调者做（质感在合 playtest-r1-vfx-m1 f19cfc0）。
+- Blender：art/models/ea_weapons.py（BUILDERS：sky_lantern float 4 + fall 3；tower、tower_gold 只渲 idle 2 帧），
+  art/render/weapons_ea_render.py --only … → out/assets@2x/ea_<名字>/（pipeline.render_asset，S 一个朝向，自带渲染锁）；
+  灯 22 秒、塔 46 秒、金塔 75 秒。纸是 kit.flame_material（fade = 离灯里那团火的距离），烧穿用材质里的 BurnT 节点。
+- weapon_textures_ea.py：lantern（sky_lantern*、lantern_mark、fire_sea）、tower（tower*、tower_gold*、tower_dust、tower_vortex）；
+  塔的落下 / 收走是 2D（shift_scale、消散 + 金边）；发光层 soften_emit 压亮度；_emit 组 meta 写 layer_of。
+- 审图摆法加了 air（54）、low（26）抬高；草稿工具 $SP/tools/preview_src.py（源图）、night_row.py（几组帧排一行）。
+- 图集 4096² 83%（238 帧），第三批反应大概会分到第二页（pack_atlas 自动分页，游戏和脚本都支持）。
+- 反应的范围（BALANCE 7.2）：燎原 60、赤地 50、凝霜 50、滋生 50、蒸腾 70、裂土 60、淤泥 70；熔金、断木单体；铸兵三片金刃。

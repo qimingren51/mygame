@@ -42,8 +42,15 @@
 - 审图：art/out/review@2x/cards_b1_sheet.png、cards_b1_1080p.png
 - Rust 测试没跑：没有测试读 cards 页（只有 Windows/Xvfb 的冒烟测试），改动只有资源。
 
-### 第 2 批（17 门心法）：进行中
-- card_passives.py：回春、寒意、长明、炉心、磐石 已试渲（满意，等正式渲染）；其余在写。
+### 协调新规矩（2026-10-17 10:40 UTC 起，账号 7 天额度预警，用完五个会话都停到 22 号）
+- 每批做完就推，不攒；省额度：审图先看 1 倍缩略图或裁局部，大图别反复打开；同一张别反复重渲，参数一次改到位；
+  每做完一个阶段写进本文件；正式渲染照旧拿渲染锁。
+- master 现在 cc2112f（含第 1 批 1d4ba49）；莲子定为 lotus（代码找 ui/icon_lotus、ui/card_lotus）。
+
+### 第 2 批（17 门心法）：正式渲染中
+- 17 张全部试渲过并定稿（card_passives.py）。正式渲染：回春、寒意、长明、炉心、磐石、厚德、载物、引魂、静心 已出；
+  第一个后台任务到时被停，剩下 灯芯、迅锋、剑意、聚魂、折纸、锐目、轻功 重开（scratchpad/l2/b2_final2.log）。
+- 疾行是前任 10-16 的定稿（card_art.py 里），缓存 _card_tmp/jixing.npz 还在；打包前 card_art.py --post jixing 放回 ui_cards。
 - 协调追加（跟第 2 批一起推）：hud_ult_tick 暗格提亮——wt 里 ui_lacquer.make_ult_tick("off") 改了（深褐底 #4A3924、旧金边 #A88A52），
   新图已拷进 wt/assets/atlas/skin/hud_ult_tick.png（名字、尺寸不变）；wt 里 ui_skin.py + test_ui_skin.py 13/13；
   对比图 scratchpad/l2/tick_cmp.png、tick_cmp720.png。主仓库的 ui_lacquer.py 已同步。wt 已 merge origin/master（a9c5a0e，含 88c0171）。
@@ -52,3 +59,13 @@
   读 assets/data/stat_labels.ron 挑（击退、灼烧、冰冻、减速、弹速、持续、反应、照见圈、照见易伤、灯光、灯焰带、燃灯充能、闪避、魂火、
   护盾、治疗、灯油、铜钱……），回报列“属性 → icon 名”表（架构照表在 stat_labels.ron 加 icon，有测试查图集）。
 
+
+### 第 3 批（5 异化 + 3 合璧 + 莲子、灯油）：场景代码改了一轮（还没推）
+- 第一轮试渲都不行，已重写：冰火两重天（冷暖两份火材质、霜纸带墨字、灯里冷暖两盏光分开、灯顶白汽团）——第二轮试渲已过；
+  赤霄（烧红的剑横过画面 + 白烟蛇被斩成两截）——第二轮试渲已过，蛇再淡一点、头大一点（已改）；
+  冻土（霜铃悬在冻裂的地面上方，裂缝冰蓝光、冰晶簇）——第二轮还要改：裂缝光太白、冰晶太碎太蓝、碎冰发黑（已改，待试渲）；
+  铁鹤（纸鹤的形折成铁，两翼换成一扇扇铁羽，右翼三片射出去）、竹印（碗口粗的巨竹 + 笋箨 + 掀起的地皮，印面朝下露“山”）、
+  百鸟朝凤（火羽一片片的凤 + 朝凤的纸鹤 + 背景墨点小鸟）、万剑冢（土冢上的剑林逆着满月）、
+  霜天剑雨（近处整把冰剑 + 远处四角攒尖钟亭）、莲子（莲蓬顶面朝镜头）、灯油（深褐釉壶、镜头退后）——都待试渲。
+- card_weapons.py 新增：wind_bell（霜铃的铃，build_bell 改用它，结果不变）、mat_puff、mat_snake_smoke、mat_hot_steel(L)、
+  mat_flame_feather、feather_width、pavilion_roof_build、low_spec、mat_sheath；crane_build 加 wings 参数（默认不变）。

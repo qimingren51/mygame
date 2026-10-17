@@ -67,7 +67,7 @@ WIP：试玩第 1 轮美术快照（子代理进行中，未审）
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_016wrsqW1m7DE4TZou4HCj3C
 EOF
-  git show --stat --format='%h %s' HEAD | tail -n +1 | head -80
+  git show --stat --format='%h %s' HEAD | tail -n 3 || true
   for i in 0 2 4 8 16; do
     sleep $i
     if git push -q origin "HEAD:$BR"; then echo "pushed $(git rev-parse --short HEAD)"; break; fi
