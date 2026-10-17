@@ -978,3 +978,88 @@ def sdf_mesh(fn, lo, hi, step=0.015, project=2):
         g = np.stack([(fn(V + np.eye(3)[k] * h) - fn(V - np.eye(3)[k] * h)) / (2 * h) for k in range(3)], -1)
         V = V - (f0 / np.maximum((g * g).sum(-1), 1e-9))[:, None] * g
     return V, [tuple(int(x) for x in f) for f in Fq]
+
+
+def sd_box(p, c, half, rot=None, r=0.0):
+    """圆角长方体（中心 c、半边长 half、rot 是 3×3 旋转：局部 → 世界、圆角 r）的有符号距离。"""
+    q = p - np.asarray(c, np.float64)
+    if rot is not None:
+        q = q @ np.asarray(rot, np.float64)
+    d = np.abs(q) - (np.asarray(half, np.float64) - r)
+    return np.linalg.norm(np.maximum(d, 0.0), axis=-1) + np.minimum(d.max(-1), 0.0) - r
+
+
+def wave_noise(p, scale=1.0, n=7, seed=0):
+    """便宜的三维起伏噪声（几道随机方向的正弦叠起来，约 -1..1）：风化、疙瘩用。"""
+    rng = np.random.default_rng(seed)
+    out = np.zeros(p.shape[:-1])
+    amp = 0.0
+    for k in range(n):
+        d = rng.normal(size=3)
+        d /= np.linalg.norm(d)
+        f = scale * (1.0 + 0.7 * k)
+        a = 1.0 / (1.0 + 0.6 * k)
+        out += a * np.sin(p @ d * f + rng.uniform(0, 6.283))
+        amp += a
+    return out / amp
+
+
+def rot_y(deg):
+    """绕竖直轴（设计稿三维的 y）转的 3×3 矩阵（局部 → 世界）。"""
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def d3m(P):
+    """设计稿三维（x 前、y 上、z 左右，都是单位；z 负 = 近镜头）→ 模型坐标（米），可以是一批点 (..., 3)。
+    z = 0、y 上的点正好落在画面上的 (x, y)（同 d2m）。"""
+    P = np.asarray(P, np.float64)
+    return np.stack([P[..., 2] / 25.0, -P[..., 0] / 25.0, P[..., 1] / VZ], -1)
+
+
+def sdf_arrays(fn, lo, hi, step=0.45, attr_fn=None, project=2):
+    """设计稿三维里的隐式曲面 → 模型坐标的 (顶点, 面, 属性)。换坐标时左右手互换，面翻过来保持朝外。"""
+    V, F = sdf_mesh(fn, lo, hi, step, project=project)
+    A = attr_fn(V) if attr_fn else {}
+    return d3m(V), [f[::-1] for f in F], A
+
+
+def merge_arrays(arrs):
+    """几组 (顶点, 面, 属性) 合成一组；某组缺的属性补 0。"""
+    V, F, A = [], [], {}
+    keys = set()
+    for _, _, a in arrs:
+        keys |= set(a)
+    for v, f, a in arrs:
+        o = len(V)
+        n = len(v)
+        V.extend(list(v))
+        F.extend([tuple(i + o for i in ff) for ff in f])
+        for k in keys:
+            A.setdefault(k, []).extend(list(a.get(k, [0.0] * n)))
+    return V, F, A
+
+
+def prism_arrays(outline, z0, z1, xform, edge_thin=0.0):
+    """设计稿二维的闭合轮廓（凸的，局部 x-y）挤出成薄片（局部 z 从 z0 到 z1），xform 把局部点（N,3）换到设计稿三维。
+    edge_thin > 0：轮廓边上的厚度收薄（刀刃）。返回模型坐标的 (顶点, 面, 属性 su：沿轮廓 0..1)。"""
+    P = np.asarray(outline, np.float64)
+    n = len(P)
+    c = P.mean(0)
+    zm = (z0 + z1) / 2
+    top, bot = [], []
+    for x, y in P:
+        top.append((x, y, zm + (z1 - zm) * (1 - edge_thin)))
+        bot.append((x, y, zm + (z0 - zm) * (1 - edge_thin)))
+    pts = top + bot + [(c[0], c[1], z1), (c[0], c[1], z0)]
+    ct, cb = 2 * n, 2 * n + 1
+    F = []
+    for i in range(n):
+        j = (i + 1) % n
+        F.append((ct, i, j))
+        F.append((cb, n + j, n + i))
+        F.append((i, n + i, n + j, j))
+    V = d3m(xform(np.asarray(pts)))
+    su = [i / n for i in range(n)] * 2 + [0.0, 0.0]
+    return V, F, {"su": su}
