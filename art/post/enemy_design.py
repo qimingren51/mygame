@@ -119,6 +119,53 @@ FOX_NOSE = _hx([(22.5, 28.2)])[0]
 FOX_MASK_BRIDGE = _hx([(14.2, 35.0), (16.0, 33.6), (18.4, 31.4), (20.8, 29.8)])
 FOX_MASK_CHEEK = _hx([(20.6, 29.0), (18.8, 29.3), (16.8, 29.1), (14.6, 28.2), (12.8, 27.0)])
 FOX_BROW = _hx([(19.0, 31.6), (17.6, 32.4), (16.2, 33.1), (14.8, 34.1)])  # 戏台上的浓眉，往后上挑
+
+
+def stroke_poly(path, widths):
+    """一笔（折线 + 逐点宽度，单位）→ 闭合轮廓（两侧各偏半宽，宽度 0 的头尾收成尖）。"""
+    p = np.asarray(path, np.float64)
+    w = np.interp(np.linspace(0, 1, len(p)), np.linspace(0, 1, len(widths)), widths)
+    t = np.gradient(p, axis=0)
+    t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
+    nrm = np.stack([-t[:, 1], t[:, 0]], -1)
+    left = p + nrm * (w / 2)[:, None]
+    right = p - nrm * (w / 2)[:, None]
+    return [tuple(q) for q in np.vstack([left, right[::-1]])]
+
+
+# 朱砂红脸（戏台脸谱；第二批改）：一整块边缘清楚的红。额上一道火苗形挑到两耳之间，顺鼻梁抹到鼻尖前收住；
+# 下沿从鼻梁前端沿颊往后扫，收成往后上挑的尖。眼在红里：眼周一圈米白（脸谱的眼窝），墨勾丹凤眼（眼尾往后上挑），
+# 眉是一笔浓墨往后上挑。都是 E 向画面上的形状（投到头上）。1080p 下头约 40 像素宽，形状要大、要简单。
+FOX_MASK = _hx([(15.0, 34.15),  # 额上的火苗尖（两耳之间）
+                (15.9, 33.55), (17.3, 32.25), (18.6, 31.05), (20.2, 29.95), (21.5, 29.25),  # 上沿：顺额、鼻梁
+                (21.85, 28.85),  # 前端（鼻尖前留一点米白）
+                (21.2, 28.45), (19.9, 28.2), (18.3, 28.05), (16.6, 27.85), (14.9, 27.5), (13.4, 27.15),  # 下沿：沿颊往后
+                (12.7, 27.5),  # 颊尖（往后上挑）
+                (14.0, 28.35), (14.9, 29.2), (14.75, 30.6), (14.5, 32.0), (14.55, 33.2)])  # 后沿：眼后往上回到额
+FOX_EYE2 = (_hx([(17.4, 30.5)])[0], 1.8 * FOX_HEAD_S, 0.72 * FOX_HEAD_S, -16.0)  # 近眼（放大）：眼尾往后上挑
+
+
+def fox_eye_poly(scale=1.0, kind="eye"):
+    """近眼的形状：eye 眼仁（发光）；ink 墨勾的眼眶（比眼大一圈，眼尾拖出往后上挑的一笔）；window 眼周的米白。"""
+    (ex, ey), hl, hh, tilt = FOX_EYE2
+    a = math.radians(tilt)
+    if kind == "eye":
+        pts = [(hl, 0.0), (hl * 0.35, hh * 0.95), (-hl * 0.4, hh * 0.85), (-hl, hh * 0.2), (-hl * 0.45, -hh * 0.75),
+               (hl * 0.4, -hh * 0.8)]
+    elif kind == "ink":
+        pts = [(hl * 1.14, -hh * 0.05), (hl * 0.4, hh * 1.25), (-hl * 0.45, hh * 1.18), (-hl * 1.2, hh * 0.8),
+               (-hl * 1.85, hh * 1.45), (-hl * 1.2, hh * 0.1), (-hl * 0.5, -hh * 1.05), (hl * 0.45, -hh * 1.1)]
+    else:
+        pts = [(hl * 1.3, -hh * 0.1), (hl * 0.45, hh * 1.7), (-hl * 0.5, hh * 1.6), (-hl * 1.35, hh * 0.4),
+               (-hl * 0.55, -hh * 1.45), (hl * 0.5, -hh * 1.4)]
+    return [(ex + scale * (x * math.cos(a) - y * math.sin(a)), ey + scale * (x * math.sin(a) + y * math.cos(a)))
+            for x, y in pts]
+
+
+FOX_EYE_INK = fox_eye_poly(1.0, "ink")
+FOX_EYE_WINDOW = fox_eye_poly(1.0, "window")
+FOX_BROW_POLY = stroke_poly(_hx([(19.3, 31.55), (18.1, 32.05), (16.8, 32.65), (15.6, 33.45), (14.9, 34.2)]),
+                            [0.55, 1.0, 1.05, 0.7, 0.0])  # 浓眉：前头圆、往后上挑出尖
 FOX_HEAD_PTS = {"cheek_low": _hx([(23.0, 27.9), (20.4, 28.4), (17.4, 28.6), (14.6, 28.0), (12.0, 27.2), (10.8, 25.4),
                                   (12.8, 24.0), (15.0, 24.0), (17.6, 24.8), (20.0, 25.9), (22.2, 26.8)]),
                 "crown": _hx([(10.8, 29.6), (11.6, 32.6), (13.6, 34.4), (16.0, 33.8), (18.6, 31.4), (21.2, 29.6)]),
@@ -184,12 +231,50 @@ def fox_move_pose(i, n):
             a1 = rest[1] - 10 * sw - 12 * lift
             a2 = rest[2] + 8 * sw - 48 * lift
         legs[(name, far)] = [a0, a1, a2]
-    bob = 0.55 * math.cos(2 * ph)
-    return {"body": (0.0, bob, 0.8 * math.sin(2 * ph), 1.0, 1.0),
-            "head": (-1.2 * math.sin(2 * ph + 0.6), 0.0, -0.25 * math.cos(2 * ph)),
+    # 一步一起伏（第二批加大）：腿从身子底下过的时候最高（= 静止高度），两对腿前后叉开时最低（低 1.7 单位）；
+    # 站地的腿按 fox_leg_ground 收短，脚不陷进地里
+    bob = -0.85 + 0.85 * math.cos(2 * ph)
+    return {"body": (0.0, bob, 1.4 * math.sin(2 * ph), 1.0, 1.0),
+            "head": (-1.6 * math.sin(2 * ph + 0.6), 0.0, -0.35 * bob),
             "ears": 0.0,
             "legs": legs,
             "tail": (FOX_TAIL_ANGLE, FOX_TAIL_CURL, 5.0, ph, False)}
+
+
+FOX_GROUND = 0.95  # 掌尖着地时的高度（单位；掌底比掌尖低约 0.9）
+
+
+def fox_body_xform(p, body):
+    """设计稿上的点跟着身体走：body = (dx, dy, rot, sx, sy)，绕 FOX_PIVOT 先伸缩、再逆时针转 rot 度、再平移。
+    （和 fox_v2.pose_fox 的身体矩阵一致）"""
+    dx, dy, rot, sx, sy = body
+    px, py = FOX_PIVOT
+    x, y = (p[0] - px) * sx, (p[1] - py) * sy
+    r = math.radians(rot)
+    return (px + dx + x * math.cos(r) - y * math.sin(r), py + dy + x * math.sin(r) + y * math.cos(r))
+
+
+def fox_leg_ground(root, segs, angs, kind, ground=FOX_GROUND):
+    """站地的腿收短：掌尖低于地面时按腿的弯法加大弯曲（前腿：上臂往后、前臂往前；后腿：大腿往前、小腿往后），
+    二分到掌尖正好落在 ground。掌尖本来就在地面以上（抬着的腿）不动。返回新的角度。"""
+    def bend(d):
+        a0, a1, a2 = angs
+        if kind == "front":
+            return [a0 - 0.9 * d, a1 + 1.25 * d, a2 + 0.5 * d]
+        return [a0 + 0.9 * d, a1 - 1.3 * d, a2 + 0.35 * d]
+
+    def tip_y(d):
+        return fox_leg(root, segs, bend(d))[-1][1]
+    if tip_y(0.0) >= ground:
+        return list(angs)
+    lo, hi = 0.0, 70.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if tip_y(mid) < ground:
+            lo = mid
+        else:
+            hi = mid
+    return bend(hi)
 
 
 def fox_pounce_pose(i):
