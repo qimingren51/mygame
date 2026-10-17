@@ -411,7 +411,7 @@ mkdir -p assets/atlas/screens/hub && cp art/out/screens/hub/* assets/atlas/scree
 素材名、动画名、方向、挂点都不变，游戏按名字取图，不用改代码。
 
 ```bash
-LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul  # 正式出图（V2 表里的素材走 enemies_v2）
+LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/produce.py --only shade,fox,wisp,golem,fox_wisp,bamboo_wraith,taofeng_fox,ghoul,stonelord,toad  # 正式出图（V2 表里的素材走 enemies_v2）
 LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/enemies_v2.py --preview fox:pounce:3 out.png   # 单帧预览（3 倍）
 art/.venv/bin/python art/post/check_asset.py art/out/assets@2x/shade art/out/assets@2x/fox
 art/.venv/bin/python art/post/enemy_review.py b1 shade fox   # 审图 → review@2x/redo_b1_*（和现版并排、1080p 实际大小、3 倍）、redo_<素材>_<动画>.gif
@@ -430,6 +430,8 @@ art/.venv/bin/python art/post/check_atlas.py
 | `models/fox_wisp_v2.py` | 狐火：发光的火球头（明暗按视线，芯最亮）+ 立起来的火狐尾（扁带） |
 | `models/bamboo_v2.py` | 竹魅：一节节竹段（段间墨色竹节）拼成的细长人形，头是一蓬披下来的竹叶（叶缝里焦墨的空、两点眼），手是三根挂竹叶的细竹枝；射刺像拉弓，竹节裂开、节缝透光 |
 | `models/taofeng_v2.py` | 讨封狐：扮人是斗笠（顶上三片竹叶）、三层蓑衣、竹杖，蓑衣底下露一截尾巴；现形是穿旧靛蓝袍、长袖的直立狐狸，斗笠挂在背上，眯眼笑（头、耳、尾借用赤面狐） |
+| `models/stonelord_v2.py` | 石将：隐式曲面凿出来的石翁仲（3/4 侧面），圆顶盔、护心镜、披膊、鱼鳞甲裙（刻槽走 zone 属性）、双手拄长刀；风化起伏、雨痕、青苔从脚往上爬（moss 属性），落脚两帧崩石屑 |
+| `models/toad_v2.py` | 金蟾：圆胖的金身子（一身小疙瘩）、背上嵌七枚铜钱、嘴里衔一枚、三条腿（一条后腿），耷拉眼皮斜眼瞟（贼）；一蹦一蹦，身后掉钱；夜里眼珠和铜钱泛金光 |
 | `models/ghoul_v2.py` | 青面鬼：隐式曲面捏出来的驼背大鬼（躯干、大肚子、四肢、头各一块），肚皮发白、透着魂光（AOV），獠牙、黑爪、铁箍、焦墨乱发、暗红破布 |
 | `post/enemy_design.py` | 设计稿（二维，纯数据）：比例、眼、裂缝、朱砂红脸的位置；赤面狐的骨架和每帧姿态 |
 | `post/enemy_review.py` | 按批审图（现版备份在 `out/assets@2x_old/`） |
@@ -440,8 +442,11 @@ art/.venv/bin/python art/post/check_atlas.py
 - 竹魅：帧 320²、锚点 (0.5, 0.875)，挂点 eyes、muzzle（蓄力时在竹刺尖上）。讨封狐：帧 256²（原 224²），reveal 写了 `vertical_motion`
   （一跳、蓑衣掀起，身高一帧一个样）。青面鬼：帧 320²、锚点 (0.5, 0.8)，身子整体往后挪，锚点在身子中心底下；move、charge 都写了
   `vertical_motion`（一步一沉）。
+- 石将：帧 320²、锚点 (0.5, 0.8)，move 写了 `vertical_motion`（落脚一沉，盔顶跟着上下）。金蟾：帧 192²（原 160²），整体往后（离镜头远）挪 3.5 单位，
+  近镜头那只手才不出画；`vertical_motion`（蹦）。
 - `v2kit.sdf_mesh`：隐式曲面网格化（surface nets，纯 numpy），配 `smin`、`sd_round_cone`、`sd_ellipsoid` 捏肌肉、肚子这种圆滚滚的形体；
-  设计稿三维（x 前、y 上、z 左右，单位）里建，换到模型坐标时注意左右手互换（面要翻过来，见 ghoul_v2._sdf_arrays）。
+  设计稿三维（x 前、y 上、z 左右，单位）里建，`d3m` 换到模型坐标、`sdf_arrays` 换坐标时把面翻过来（左右手互换）；
+  还有 `sd_box`（圆角长方体）、`wave_noise`（几道正弦叠的起伏，风化、疙瘩用）、`prism_arrays`（轮廓挤出的薄片：刀）。
 - 疾影、狐火：帧 224²（原 160²），锚点 (0.5, 0.875)，悬浮。石妖：帧 224²、锚点 (0.5, 0.8)，`register_x_only`
   （锚点正上方是驼背的斜坡，不是头顶）。赤面狐 move 一步一起伏 1.7 单位，写了 `vertical_motion`（自检不查逐帧身高；游戏不读）。
 - `contact_radius`：量法同 `docs/PLAYTEST.md` 的表（朝东的帧，锚点往上 52 单位内每行最靠前的点，取第 90 百分位，各帧取中位数），
