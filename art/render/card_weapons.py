@@ -1584,8 +1584,8 @@ def mat_snake_smoke(name, glow=0.35):
     M.l(uv, mp2.inputs["Vector"])
     mp2.inputs["Scale"].default_value = (7.0, 1.5, 1.0)
     nz = M.noise(mp2.outputs["Vector"], scale=1.0, detail=5.0, rough=0.6)
-    dens = m("MULTIPLY", m("ADD", 0.22, m("MULTIPLY", m("POWER", face, 1.2), 0.78)), m("ADD", 0.5, m("MULTIPLY", M.maprange(nz.outputs["Fac"], 0.35, 0.65), 0.5)))
-    a_ = m("MULTIPLY", dens, 0.95, clamp=True)
+    dens = m("MULTIPLY", m("POWER", face, 1.5), m("ADD", 0.45, m("MULTIPLY", M.maprange(nz.outputs["Fac"], 0.35, 0.65), 0.55)))
+    a_ = m("MULTIPLY", dens, 1.05, clamp=True)
     col = M.mix(m("MULTIPLY", scl, 0.55), (0.92, 0.92, 0.88, 1.0), (0.46, 0.47, 0.50, 1.0))
     bsdf = M.principled(Base_Color=col, Roughness=0.9, Specular_IOR_Level=0.2)
     M.l(col, bsdf.inputs["Emission Color"])
@@ -1630,18 +1630,18 @@ def build_sword_mut(draft):
     hd = (Vector(up_pts[-1]) - Vector(up_pts[-6])).normalized()
     hq = CP.frame_quat(hd, (0.0, -0.2, 1.0))
     jaw_q = hq @ Quaternion((0.0, 1.0, 0.0), math.radians(32))
-    head = make_obj("SnakeHead", K.ico_cloud([(0, 0, 0)], [1.0], 3), snake, loc=tuple(hp + hd * 0.020 + (hq @ Vector((0, 0, 0.006)))),
-                    scale=(0.040, 0.024, 0.014), index=3)
+    head = make_obj("SnakeHead", K.ico_cloud([(0, 0, 0)], [1.0], 3), snake, loc=tuple(hp + hd * 0.024 + (hq @ Vector((0, 0, 0.007)))),
+                    scale=(0.050, 0.030, 0.018), index=3)
     head.rotation_mode = "QUATERNION"
     head.rotation_quaternion = hq
-    jaw = make_obj("SnakeJaw", K.ico_cloud([(0, 0, 0)], [1.0], 3), snake, loc=tuple(hp + hd * 0.016 + (hq @ Vector((0, 0, -0.008)))),
-                   scale=(0.034, 0.019, 0.007), index=3)
+    jaw = make_obj("SnakeJaw", K.ico_cloud([(0, 0, 0)], [1.0], 3), snake, loc=tuple(hp + hd * 0.020 + (hq @ Vector((0, 0, -0.010)))),
+                   scale=(0.042, 0.024, 0.009), index=3)
     jaw.rotation_mode = "QUATERNION"
     jaw.rotation_quaternion = jaw_q
     eye = P.mat_emit("SnakeEye", (1.0, 0.20, 0.06), 16.0)
     for sg in (-1, 1):
-        make_obj(f"SnakeEye{sg}", K.ico_cloud([(0, 0, 0)], [0.0042], 2), eye,
-                 loc=tuple(hp + hd * 0.030 + (hq @ Vector((0.0, 0.016 * sg, 0.011)))), index=3)
+        make_obj(f"SnakeEye{sg}", K.ico_cloud([(0, 0, 0)], [0.0050], 2), eye,
+                 loc=tuple(hp + hd * 0.038 + (hq @ Vector((0.0, 0.020 * sg, 0.014)))), index=3)
     # 断口：焦红的一圈 + 往外迸的火星（顺着剑走的方向多一些）
     burn = P.mat_emit("Burn", (1.0, 0.36, 0.06), 9.0)
     for nm, pt, nb in (("CutUp", up_pts[0], up_pts[2]), ("CutLo", lo_pts[0], lo_pts[2])):
@@ -1662,10 +1662,11 @@ def build_sword_mut(draft):
         ob.rotation_mode = "QUATERNION"
         ob.rotation_quaternion = dd.to_track_quat("Z", "Y")
     # 几缕从蛇身上散开的烟
-    wisp = CP.mat_smoke("Wisp", color=(0.90, 0.90, 0.88), alpha=0.45)
-    for k in range(7):
-        src = Vector((up_pts if k < 3 else lo_pts)[rng.integers(10, 60)])
-        pts = [tuple(src + Vector((0.10 * t + 0.02 * math.sin(7 * t + k), 0.02 * t, 0.06 * t + 0.015 * math.sin(5 * t + k))))
+    wisp = CP.mat_smoke("Wisp", color=(0.90, 0.90, 0.88), alpha=0.50)
+    for k in range(12):
+        src = Vector((up_pts if k < 5 else lo_pts)[rng.integers(5, 85)])
+        L = rng.uniform(0.10, 0.20)
+        pts = [tuple(src + Vector((L * t + 0.02 * math.sin(7 * t + k), 0.02 * t, 0.5 * L * t + 0.015 * math.sin(5 * t + k))))
                for t in np.linspace(0, 1, 30)]
         make_obj(f"Wisp{k}", K.ribbon_uv(pts, rng.uniform(0.012, 0.024), width_fn=lambda t: 0.5 + 1.2 * t, ups=[(0, -1, 0)] * 30),
                  wisp, index=4)
@@ -1734,33 +1735,35 @@ def build_bell_mut(draft):
     h_ = m("SUBTRACT", m("ADD", m("MULTIPLY", n1.outputs["Fac"], 0.3), m("MULTIPLY", n2.outputs["Fac"], 0.25)), m("MULTIPLY", ck, 1.0))
     nrm = M.bump(m("ADD", h_, m("MULTIPLY", fr, 0.25)), strength=0.6, distance=0.02)
     bsdf = M.principled(Base_Color=col, Roughness=M.mixf(fr, 0.92, 0.50), Normal=nrm, Specular_IOR_Level=0.35)
-    bsdf.inputs["Emission Color"].default_value = (0.26, 0.62, 1.0, 1.0)
+    bsdf.inputs["Emission Color"].default_value = (0.12, 0.42, 1.0, 1.0)
     glow = m("MULTIPLY", M.maprange(ck, 0.45, 0.95), M.maprange(rad, 0.2, RF + 0.2, 1.0, 0.25))
-    M.l(m("MULTIPLY", m("POWER", glow, 1.6), 9.0), bsdf.inputs["Emission Strength"])
+    M.l(m("MULTIPLY", m("POWER", glow, 1.8), 3.2), bsdf.inputs["Emission Strength"])
     ground_plane("Ground", M.surface(bsdf.outputs[0]), size=14.0, index=0)
     # 冰晶：沿裂缝一簇簇往上长（在贴图上挑裂缝像素），越近中心越高；每簇三五根，往外斜
-    ice = K.mat_ice("Ice", tint=(0.78, 0.90, 1.0))
-    ys, xs = np.nonzero(crack[::8, ::8] > 0.55)
+    ice = K.mat_ice("Ice", rough=0.10, tint=(0.88, 0.94, 1.0))
+    ys, xs = np.nonzero(crack[::8, ::8] > 0.6)
     order = rng.permutation(len(xs))
-    n_cl = 0
+    n_cl, placed = 0, []
     for i in order:
         x, y = (xs[i] * 8 / 2048 - 0.5) * SPAN, (0.5 - ys[i] * 8 / 2048) * SPAN
         r = math.hypot(x, y)
-        if r > RF or r < 0.16 or rng.random() > 1.25 - r / RF:
+        if r > RF * 0.95 or r < 0.22 or any((x - a) ** 2 + (y - b) ** 2 < 0.20 ** 2 for a, b in placed):
             continue
+        placed.append((x, y))
         out = Vector((x, y, 0.0)).normalized()
-        base_L = 0.30 * (1.0 - r / RF) ** 1.2 + 0.04
-        for j in range(int(rng.integers(3, 6))):
-            L = base_L * rng.uniform(0.45, 1.0)
-            dd = (Vector((0, 0, 1.0)) + out * rng.uniform(0.2, 0.8) + Vector((*rng.normal(0, 0.35, 2), 0))).normalized()
-            ob = make_obj(f"Xtal{n_cl}_{j}", P.crystal_build(L, L * rng.uniform(0.12, 0.18)), ice,
-                          loc=(x + rng.normal(0, 0.015), y + rng.normal(0, 0.015), -0.01), index=3, smooth=False)
+        base_L = 0.42 * (1.0 - r / RF) ** 1.1 + 0.06
+        for j in range(int(rng.integers(3, 7))):
+            L = base_L * rng.uniform(0.4, 1.0)
+            dd = (Vector((0, 0, 1.0)) + out * rng.uniform(0.2, 0.9) + Vector((*rng.normal(0, 0.4, 2), 0))).normalized()
+            ob = make_obj(f"Xtal{n_cl}_{j}", P.crystal_build(L, L * rng.uniform(0.13, 0.20)), ice,
+                          loc=(x + rng.normal(0, 0.02), y + rng.normal(0, 0.02), -0.01), index=3, smooth=False)
             ob.rotation_mode = "QUATERNION"
             ob.rotation_quaternion = dd.to_track_quat("Z", "Y")
         n_cl += 1
-        if n_cl >= 70:
+        if n_cl >= 26:
             break
-    # 圈边的碎冰（冻死的妖物碎成的冰块）
+    # 圈边的碎冰（冻死的妖物碎成的冰块）：毛玻璃似的白冰
+    ice = K.mat_ice("IceChunk", rough=0.45, tint=(0.80, 0.88, 0.98))
     for k in range(26):
         a = rng.uniform(0, 2 * math.pi)
         r = rng.uniform(RF - 0.15, RF + 0.35)
@@ -1768,7 +1771,7 @@ def build_bell_mut(draft):
         make_obj(f"Shard{k}", P.crystal_build(L, L * rng.uniform(0.35, 0.6)), ice, loc=(r * math.cos(a), r * math.sin(a), 0.0),
                  rot=(rng.uniform(1.0, 1.8), rng.uniform(-0.4, 0.4), rng.uniform(0, 6.28)), index=3, smooth=False)
     # 霜铃：低低悬在圈心上方，铃舌一荡；挂绳往上出画
-    root, H = wind_bell("Bell", loc=(0.0, 0.0, 0.42), rot=(math.radians(-8), math.radians(-12), math.radians(20)), scale=2.0)
+    root, H = wind_bell("Bell", loc=(0.0, 0.0, 0.46), rot=(math.radians(-8), math.radians(-12), math.radians(20)), scale=2.4)
     cord_m = P.mat_silk("Cord", (0.42, 0.03, 0.02))
     K._bpy().context.view_layer.update()
     top = root.matrix_world @ Vector((0.0, 0.0, H + 0.05))
@@ -2340,8 +2343,8 @@ def bg_sword_grove(P_, h, w, rng, k):
 # ====================================================================== 合璧：霜天剑雨（霜铃 + 符剑）
 
 
-def mat_ice_blade(name, glow=1.2):
-    """冰剑：透明的冰（折射）+ 刃口和棱一线冷光（Layer Weight 的边缘发光）。"""
+def mat_ice_blade(name, glow=1.2, body=0.0):
+    """冰剑：透明的冰（折射）+ 刃口和棱一线冷光（Layer Weight 的边缘发光）；body>0 时冰里透一层淡淡的冷光，暗处也看得出剑身。"""
     M = K.Mat(name)
     m = M.math
     oc = M.coord("Object")
@@ -2351,61 +2354,114 @@ def mat_ice_blade(name, glow=1.2):
     lw = M.n("ShaderNodeLayerWeight", Blend=0.3)
     rim = m("POWER", lw.outputs["Facing"], 2.0)
     emi = M.n("ShaderNodeEmission", Color=(0.65, 0.88, 1.0, 1.0))
-    M.l(m("MULTIPLY", rim, glow), emi.inputs["Strength"])
+    M.l(m("ADD", m("MULTIPLY", rim, glow), m("MULTIPLY", M.maprange(nz.outputs["Fac"], 0.3, 0.7, 0.6, 1.0), body)), emi.inputs["Strength"])
     add = M.n("ShaderNodeAddShader")
     M.l(glass.outputs[0], add.inputs[0])
     M.l(emi.outputs[0], add.inputs[1])
     return M.surface(add.outputs[0])
 
 
-@scene("frost_rain", name="霜天剑雨", samples=128, grade=dict(COLD_GRADE, exposure=1.04, bloom=0.40))
+def pavilion_roof_build(hs=1.55, h=1.15, curl=0.30, n=24, nv=18):
+    """攒尖顶（四角亭的顶）：方的，四面往里凹，檐口四角翘起；原点在檐口中心，顶尖朝 +Z。UV：u 沿一圈（每面 0..1），v 檐 → 顶。"""
+    def build(bm):
+        uvl = bm.loops.layers.uv.new("UVMap")
+        corners = [(1, -1), (1, 1), (-1, 1), (-1, -1)]
+        rings = []
+        for iv in range(nv + 1):
+            v = iv / nv
+            half = hs * (1 - v) ** 1.45 + 0.03
+            z = h * (1 - (1 - v) ** 1.25)
+            ring = []
+            for side in range(4):
+                (ax, ay), (bx, by) = corners[side], corners[(side + 1) % 4]
+                for i in range(n):
+                    t = i / n
+                    lift = curl * (1 - v) ** 3 * abs(2 * t - 1) ** 4
+                    ring.append(bm.verts.new((half * (ax + (bx - ax) * t), half * (ay + (by - ay) * t), z + lift)))
+            rings.append(ring)
+        N = len(rings[0])
+        for iv in range(nv):
+            for k in range(N):
+                k1 = (k + 1) % N
+                f = bm.faces.new((rings[iv][k], rings[iv][k1], rings[iv + 1][k1], rings[iv + 1][k]))
+                u0, u1 = (k % n) / n, (k % n + 1) / n
+                for lp, uv in zip(f.loops, ((u0 * 4, iv / nv), (u1 * 4, iv / nv), (u1 * 4, (iv + 1) / nv), (u0 * 4, (iv + 1) / nv))):
+                    lp[uvl].uv = uv
+
+    return build
+
+
+@scene("frost_rain", name="霜天剑雨", samples=128, grade=dict(COLD_GRADE, exposure=1.02, bloom=0.40), fog=(12.0, 32.0))
 def build_frost_rain(draft):
-    """霜天剑雨：夜空里冰剑如雨，从左上斜斜落下，每把拖着一道冷白的光痕，近大远小；远处山寺的钟楼下挂一口钟，
-    钟声化作一圈白霜寒波，从钟口往四外荡开。"""
+    """霜天剑雨：夜空里冰剑如雨，从左上斜斜落下，每把拖着一道冷白的光痕；近处几把大的看得清剑格剑柄。
+    远处坡上一座四角攒尖的钟亭，亭里挂一口钟，钟声化作一圈白霜寒波，从亭下往四外荡开。"""
     from mathutils import Vector  # noqa: PLC0415
 
     sky_gradient(lin("#05080F"), lin("#2E4466"), 0.8, ground=lin("#04060A"))
     rng = np.random.default_rng(57)
-    ice = mat_ice_blade("IceBlade")
-    gb = ghost_sword_build(L=0.66, W=0.030, T=0.008)
     fall = Vector((0.45, 0.10, -1.0)).normalized()
-    for k in range(46):
-        depth = rng.uniform(2.0, 11.0)
-        p = Vector((rng.uniform(-0.55, 0.55) * depth * 0.9, depth, rng.uniform(-0.2, 0.55) * depth * 0.75 + 0.6))
-        ob = make_obj(f"Ice{k}", gb, ice, smooth=False, loc=tuple(p), index=2)
-        ob.rotation_mode = "QUATERNION"
-        ob.rotation_quaternion = fall.to_track_quat("X", "Z")
-        sc = 1.0 + depth * 0.05
+    q_fall = fall.to_track_quat("X", "Z").to_euler()
+    ice = mat_ice_blade("IceBlade", glow=1.4, body=0.10)
+    ice_near = mat_ice_blade("IceNear", glow=1.8, body=0.22)
+
+    def trail(nm, p, wd, L):
+        pts = [tuple(p - fall * (0.04 + L * t)) for t in np.linspace(0, 1, 20)]
+        make_obj(nm, K.ribbon_uv(pts, wd, width_fn=lambda t: 1 - 0.9 * t),
+                 K.mat_wind(nm + "M", strength=rng.uniform(0.9, 1.5), seed=rng.uniform(0, 9), color=(0.72, 0.88, 1.0)), index=3)
+
+    # 近处的大冰剑：整把（剑身、剑格、剑柄都是冰）
+    S = ScreenCam(lens=30.0)
+    for k, (x, y, dep) in enumerate(((0.22, 0.46, 1.9), (0.66, 0.30, 2.4), (0.44, 0.70, 2.2), (0.84, 0.62, 2.8), (0.30, 0.22, 3.4))):
+        p = S(x, y, dep) + Vector((0.0, 0.0, 1.10))
+        P.sword(f"Near{k}", L=0.66, W=0.034, T=0.009, steel=ice_near, gold=ice_near, grip_m=ice_near, loc=tuple(p), rot=q_fall, index=2,
+                tassel=False)
+        trail(f"NearTrail{k}", p, 0.030, 0.9)
+    # 远处的冰剑雨
+    gb = ghost_sword_build(L=0.66, W=0.030, T=0.008)
+    for k in range(52):
+        depth = rng.uniform(3.5, 13.0)
+        p = Vector((rng.uniform(-0.55, 0.55) * depth * 1.1, depth, rng.uniform(-0.15, 0.55) * depth * 0.75 + 0.9))
+        ob = make_obj(f"Ice{k}", gb, ice, smooth=False, loc=tuple(p), rot=q_fall, index=2)
+        sc = 1.0 + depth * 0.04
         ob.scale = (sc, sc, sc)
-        tail = [tuple(p - fall * (0.05 + 0.9 * t)) for t in np.linspace(0, 1, 20)]
-        make_obj(f"Trail{k}", K.ribbon_uv(tail, 0.020 * sc, width_fn=lambda t: 1 - 0.9 * t),
-                 K.mat_wind(f"TrailM{k}", strength=rng.uniform(0.8, 1.4), seed=k * 0.7, color=(0.72, 0.88, 1.0)), index=3)
-    # 远处的钟：钟楼（两根柱、一道梁、一片顶）下挂一口钟；钟口一圈寒波
-    bell_c = Vector((2.4, 9.0, 0.9))
+        trail(f"Trail{k}", p, 0.020 * sc, 0.9 * sc)
+    # 钟亭：台基、四根朱漆柱、檐下一圈枋、攒尖顶 + 宝顶；亭心挂钟
+    pc = Vector((2.4, 16.0, 0.0))
+    stone = low_spec(P.mat_stone("Plinth", color=(0.12, 0.13, 0.15), scale=3.0), 0.2)
+    make_obj("Plinth", K.box_build(3.0, 3.0, 0.40), stone, loc=tuple(pc + Vector((0, 0, 0.20))), index=1, smooth=False, bevel=(0.02, 1))
+    red = K.mat_lacquer("Pillar", color=(0.16, 0.025, 0.018), rough=0.4, coat=0.3)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            make_obj(f"Post{sx}{sy}", K.lathe_uv([(0.0, 0.0), (0.085, 0.0), (0.075, 2.0), (0.0, 2.0)], segments=16), red,
+                     loc=tuple(pc + Vector((sx * 1.05, sy * 1.05, 0.40))), index=1)
+    make_obj("Lintel", K.box_build(2.35, 2.35, 0.20), red, loc=tuple(pc + Vector((0, 0, 2.32))), index=1, smooth=False)
+    tiles = P.mat_roof_tiles("Tiles", snow=0.55)
+    make_obj("Roof", pavilion_roof_build(), tiles, loc=tuple(pc + Vector((0, 0, 2.42))), index=1)
+    make_obj("Finial", K.lathe_uv([(0.0, 0.0), (0.10, 0.0), (0.13, 0.10), (0.06, 0.22), (0.09, 0.32), (0.0, 0.48)], segments=24),
+             K.mat_gold("FinialGold", worn=0.6), loc=tuple(pc + Vector((0, 0, 3.55))), index=1)
     bronze = P.mat_bronze("Bronze", base=(0.28, 0.18, 0.08), patina_amt=0.7)
-    prof = [(0.0, 0.0), (0.42, 0.0), (0.44, 0.05), (0.36, 0.30), (0.33, 0.70), (0.25, 0.86), (0.0, 0.90)]
-    make_obj("Bell", K.lathe_uv(prof, segments=64, cap_bottom=False), bronze, loc=tuple(bell_c), index=1)
-    wood = K.mat_wood("Wood")
-    for sx in (-0.9, 0.9):
-        make_obj(f"Post{sx}", K.box_build(0.14, 0.14, 2.4), wood, loc=tuple(bell_c + Vector((sx, 0, 0.6))), index=1, smooth=False)
-    make_obj("Beam", K.box_build(2.3, 0.18, 0.18), wood, loc=tuple(bell_c + Vector((0, 0, 1.15))), index=1, smooth=False)
-    make_obj("Roof", P.roof_build(w=2.6, d=1.4, h=0.55, curl=0.18, wall_h=0.0), P.mat_roof_tiles("Tiles", snow=0.6), loc=tuple(bell_c +
-             Vector((0, 0, 1.75))), index=1)
-    P.frost_wave("Wave", tuple(bell_c + Vector((0, 0, 0.02))), 1.6, strength=0.9, seed=3.0)
-    P.frost_wave("Wave2", tuple(bell_c + Vector((0, 0, 0.02))), 3.0, strength=0.5, seed=7.0, echo=False)
-    ground_plane("Ground", P.mat_stone("Snow", color=(0.20, 0.24, 0.30), scale=3.0, bump=0.4), size=40.0, loc=(0, 10, -0.05), index=0)
-    K.area_light("Moon", (-5.0, 12.0, 8.0), (0, 5.0, 1.0), 2400.0, 3.0, color=(0.66, 0.78, 1.0))
-    K.area_light("Front", (0.0, -4.0, 3.0), (0, 4.0, 1.0), 120.0, 4.0, color=(0.62, 0.74, 1.0))
-    K.camera((0.0, -1.2, 1.1), (0.4, 6.0, 1.5), lens=30.0, fstop=8.0, focus=4.0)
+    prof = [(0.0, 0.0), (0.46, 0.0), (0.48, 0.05), (0.40, 0.30), (0.37, 0.70), (0.28, 0.88), (0.0, 0.92)]
+    bell_z = 1.05
+    make_obj("Bell", K.lathe_uv(prof, segments=64), bronze, loc=tuple(pc + Vector((0, 0, bell_z))), index=1)
+    make_obj("BellRod", K.tube_uv([tuple(pc + Vector((0, 0, bell_z + 0.9))), tuple(pc + Vector((0, 0, 2.3)))], 0.03, sides=8), red, index=1)
+    P.frost_wave("Wave", tuple(pc + Vector((0, 0, 0.42))), 2.2, strength=1.0, seed=3.0)
+    P.frost_wave("Wave2", tuple(pc + Vector((0, 0, 0.42))), 4.2, strength=0.55, seed=7.0, echo=False)
+    snow = low_spec(P.mat_stone("Frost", color=(0.10, 0.12, 0.16), scale=3.0, bump=0.4), 0.25)
+    ground_plane("Ground", snow, size=60.0, loc=(0, 12, 0.0), index=0)
+    K.area_light("Moon", (-6.0, 22.0, 10.0), (1.0, 12.0, 1.0), 3000.0, 3.0, color=(0.66, 0.78, 1.0))
+    K.area_light("Front", (0.0, -4.0, 3.0), (0, 6.0, 1.0), 160.0, 4.0, color=(0.62, 0.74, 1.0))
+    K.point_light("BellGlow", tuple(pc + Vector((0, -1.2, 1.2))), 30.0, radius=0.5, color=(0.65, 0.82, 1.0))
+    S.place(lens=30.0, fstop=8.0, focus=3.0)
+    K._bpy().context.scene.camera.location = (0.0, 0.0, 1.10)
     return {"light": "cold"}
 
 
 @background("frost_rain")
 def bg_frost_rain(P_, h, w, rng, k):
     P_.fill_grad("#0A1222", "#111C30", cloud=0.12)
-    K.bg_glow(P_, 0.65, 0.55, 0.45, 0.35, "#40597E", 0.30)
+    K.bg_glow(P_, 0.62, 0.50, 0.45, 0.35, "#40597E", 0.30)
     bg_clouds(P_, rng, k, [(0.16, 0.03, 0.10, 0.80), (0.24, 0.02, 0.40, 0.98)], "#5B7194", 0.20)
-    K.bg_mountains(P_, [(0.62, [(0.12, 0.12, 0.12, 0.10), (0.40, 0.08, 0.14, 0.12), (0.82, 0.14, 0.14, 0.14)], "#1B2840", 0.8, 0.08, 5.0)],
+    K.bg_mountains(P_, [(0.56, [(0.12, 0.12, 0.12, 0.10), (0.40, 0.08, 0.14, 0.12), (0.82, 0.14, 0.14, 0.14)], "#1B2840", 0.8, 0.08, 5.0)],
                    rng, k)
-    K.bg_mist(P_, 0.64, 0.05, "#8FB0D0", 0.18, rng, k)
+    K.bg_mist(P_, 0.58, 0.05, "#8FB0D0", 0.18, rng, k)
     K.bg_ink(P_, [(0.02, 0.06, 0.26, 0.18, 0.2), (0.98, 0.08, 0.24, 0.18, -0.4)], 0.45)

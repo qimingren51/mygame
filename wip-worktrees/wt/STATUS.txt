@@ -1,0 +1,4 @@
+branch: playtest-r1-ui-lacquer
+base: a9c5a0e22a677f9f785ff2a5d06a6d59480d34ed
+ M art/post/ui_lacquer.py
+ M assets/atlas/skin/hud_ult_tick.png

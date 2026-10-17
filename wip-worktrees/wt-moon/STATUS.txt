@@ -1,0 +1,11 @@
+branch: playtest-r1-vfx
+base: 49e5d1a249b4bb01d8e82fb762c5c18f9d823b03
+ M art/README.md
+ M art/post/test_weapon_textures_ea.py
+ M art/post/vfx_frames_review.py
+ M art/post/weapon_textures_ea.py
+ M assets/atlas/vfx.json
+ M assets/atlas/vfx.png
+ M docs/DESIGN.md
+?? art/models/ea_weapons.py
+?? art/render/weapons_ea_render.py

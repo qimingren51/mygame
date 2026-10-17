@@ -114,7 +114,7 @@ def tapered_box(p, y0, y1, h0, h1, cx=0.0, r=1.2):
 def upper_sdf(p):
     """甲裙、躯干、腰带、披膊、两臂、两手、颈、盔、脸（都在上半身局部里）。"""
     d = tapered_box(p, 7.2, 25.0, (9.8, 11.0), (7.0, 8.8), cx=0.6, r=2.8)  # 甲裙（往下张）
-    d = np.minimum(d, V2.sd_box(p, (9.3, 15.6, 0.0), (1.1, 7.6, 3.4), rot=_rot_z(-8.0), r=0.6))  # 前裆（一块护腹的长甲）
+    d = np.minimum(d, V2.sd_box(p, (9.0, 15.6, 0.0), (1.0, 7.4, 2.8), rot=_rot_z(-8.0), r=0.6))  # 前裆（一块护腹的长甲）
     d = V2.smin(d, tapered_box(p, 24.0, 42.0, (6.6, 8.6), (7.2, 9.8), cx=0.4, r=2.2), 1.2)  # 躯干
     d = np.minimum(d, V2.sd_box(p, (0.6, 25.4, 0.0), (8.2, 1.6, 10.2), r=0.8))  # 腰带
     for z in (-1, 1):
@@ -319,7 +319,7 @@ def pose_stonelord(parts, anim, frame, n):
 
     def blade_face(P):  # 轮廓（z, y）+ 厚度（挤出方向当 x）→ 局部点：刀面朝前，刀身在手前面 x≈10.6
         P = np.asarray(P, np.float64)
-        return blade_xf(np.stack([10.6 + P[:, 2], P[:, 1], P[:, 0]], -1))
+        return blade_xf(np.stack([10.6 - P[:, 2], P[:, 1], P[:, 0]], -1))  # （x 取负：保持右手系，面朝外）
     V_, F_, A_ = V2.prism_arrays(blade_outline(), -0.34, 0.34, blade_face, edge_thin=0.55)
     A_["zone"] = [0.0] * len(V_)
     groups["Blade"].append((V_, F_, A_))

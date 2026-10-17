@@ -1,0 +1,54 @@
+# 第二阶段笔记（黑漆描金量产）
+
+## 已有（样张阶段，主仓库 /home/user/mygame 未提交的文件）
+- art/render/card_art.py：Blender 插画（lamp、bell_evo、jixing 三个场景 + 后期），缓存 art/out/_card_tmp/*.npz
+- art/post/card_frames.py：卡框（漆、绢）+ 样张拼图；件在 art/out/skin_card/
+- art/post/hud_frames.py：状态栏样张；件在 art/out/skin_hud/
+- 样张：art/out/review@2x/card_sample_*.png、hud_sample_*.png、card_art_*.png
+
+## 用户选定：黑漆描金。绢本不再做。
+## 顺序：1 卡框 → 2 数值图标 → 3 状态栏皮肤 →（推一次）→ 4 插画三批（每批推一次）
+## 推送：scratchpad 里的 git worktree，基于 origin/master，分支 playtest-r1-ui-lacquer，不推 master
+
+## 第 1–3 步：已推（2026-10-16）
+- 分支 playtest-r1-ui-lacquer，提交 0ad8f75（基于 origin/master 840514f），worktree：scratchpad/wt
+- 皮肤：改 card_fan/ling/xuan/tian/focus、slot_l*、slot_s*（88²）、bar_track、bar_fill_hp/xp/shield、chip_dark；
+  新 card_yi、card_he、hud_portrait、hud_ult_tick/_on/_full、hud_level_seal、hud_hp_track、hud_xp_track、bar_fill_trail
+- 其余件保留 master 原图（panel_dark 等 8 件重生成有漂移，master 脚本同样漂移，已核实）
+- cards 页：19 个数值图标 ui/stat_*（meta name "ui"），index.json 已加 cards
+- 检查：check_atlas 通过；test_ui_skin 13/13（art/out）；组合后 12/13（只差确定性，原因同上）；cards 帧逐像素一致
+- 审图：art/out/review@2x/lacquer_1080p.png（脚本 scratchpad/review_1080.py，依赖 card_frames.py 的文字工具）
+- 要告诉协调：卡面字色改纸色/淡金（choice.rs 的 INK）、card_skin 让 Yi→card_yi、He→card_he、按钮字用 INK 在浓墨按钮上看不清（原有）、
+  DESIGN.md 第 15 节要补新皮肤名（架构的文件）、Rust 测试本机没跑（缺 alsa/udev、没缓存；分支推送不触发 CI）
+
+## 第 4 步：插画（进行中）
+
+（2026-10-17 容器重启后由新的子代理接手；以下是接手后的记录）
+- 工作区：scratchpad/wt（分支 playtest-r1-ui-lacquer）。先快进到 origin 的 12cfadb（临时审图提交），再 merge origin/master → be4947d。
+- 审图工具（scratchpad/l2/）：cardrev.py（拼图 cards_<批>_sheet.png：1 倍整卡 + 2 倍插画；1080p 升级界面 cards_<批>_1080p.png，四张卡）、
+  look.py（试渲快看：1 倍 + 2 倍，带五行印、品阶签；--draft 读 _card_tmp/draft_*）、cmp_cards.py（cards 页打包前后逐像素核对）。
+  在仓库根目录运行：art/.venv/bin/python scratchpad/l2/cardrev.py b1 lamp ... --screen a,b,c,d
+- 打包：pack_atlas.py --name cards --no-trim --out <wt>/assets/atlas art/out/assets@2x/ui_stats art/out/assets@2x/ui_cards
+  ui_cards 里只放已定稿的卡（jixing 先挪到 scratchpad/l2/hold/，第 2 批再放回）；card_art.write_meta() 按目录重写 meta。
+- 莲子：界面代码 describe.rs 用的是 ui/card_heal（supply id "heal"），任务和 DESIGN.md 写 ui/card_lotus —— 按任务出 card_lotus，回报时提醒架构。
+
+### 第 1 批（5 件法器本体 + 进化）：已推 1d4ba49（2026-10-17）
+- 重画：sword_evo（剑影改成一股斜着涌向右上的宽带，剑都顺着带子指向同一处；领头剑贴黄符）、bell（铃身提亮、更多铜青，
+  去掉褐色风摆，改铃舌下垂一束红穗）、crane（侧面看、双翅高举成 V）、seal（青石更粗粝、朱砂压暗、地面压暗 spec=0.08、镜头近一点）。
+  其余 6 张沿用前任 19:3x 的定稿。
+- card_props：mat_stone 加 bump_dist；mat_ground_crack 加 spec；新增 metaball 手（hand / hand_points / HAND_OPEN / HAND_FIST）和 mat_skin。
+- card_art：寒山钟的钟身抽成 temple_bell(frost)（静心要用不结霜的钟）；mat_bronze_bell 加 frost。
+- cards 页 2048×2048（29 帧）；check_atlas 通过；19 个数值图标逐像素不变；其余 188 个文件逐字节不变。
+- 审图：art/out/review@2x/cards_b1_sheet.png、cards_b1_1080p.png
+- Rust 测试没跑：没有测试读 cards 页（只有 Windows/Xvfb 的冒烟测试），改动只有资源。
+
+### 第 2 批（17 门心法）：进行中
+- card_passives.py：回春、寒意、长明、炉心、磐石 已试渲（满意，等正式渲染）；其余在写。
+- 协调追加（跟第 2 批一起推）：hud_ult_tick 暗格提亮——wt 里 ui_lacquer.make_ult_tick("off") 改了（深褐底 #4A3924、旧金边 #A88A52），
+  新图已拷进 wt/assets/atlas/skin/hud_ult_tick.png（名字、尺寸不变）；wt 里 ui_skin.py + test_ui_skin.py 13/13；
+  对比图 scratchpad/l2/tick_cmp.png、tick_cmp720.png。主仓库的 ui_lacquer.py 已同步。wt 已 merge origin/master（a9c5a0e，含 88c0171）。
+- 莲子：先按 ui/card_lotus 画，协调在等架构定。
+- 协调追加（卡面插画几批之后做）：进阶属性图标 15–20 个，帧名 ui/stat_<icon>，64²，cards 页，和现有 19 个同风格，20/32px 认得出；
+  读 assets/data/stat_labels.ron 挑（击退、灼烧、冰冻、减速、弹速、持续、反应、照见圈、照见易伤、灯光、灯焰带、燃灯充能、闪避、魂火、
+  护盾、治疗、灯油、铜钱……），回报列“属性 → icon 名”表（架构照表在 stat_labels.ron 加 icon，有测试查图集）。
+

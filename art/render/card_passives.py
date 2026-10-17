@@ -2141,8 +2141,8 @@ def mat_lotus_seed(name, glow=0.0, peeled=False):
 
 @scene("lotus", name="莲子", samples=128, grade=dict(WOOD_GRADE, exposure=1.04, bloom=0.40))
 def build_lotus(draft):
-    """莲子：一只剥开的莲蓬斜躺在一片荷叶上（顶面一个个孔，掰开的一角露出里面），几颗莲子散在旁边，
-    其中剥了皮的两颗乳白、发着淡青的光；荷叶上滚着两滴水。"""
+    """莲子：一只莲蓬斜躺在一片荷叶上，顶面朝镜头（一个个孔，有的孔空了），剥出来的莲子散在旁边，
+    其中剥了皮的三颗乳白、发着淡青的光；荷叶上滚着两滴水。俯看。"""
     from mathutils import Vector  # noqa: PLC0415
 
     K.set_world(lin("#060A0A"), 1.0)
@@ -2161,10 +2161,12 @@ def build_lotus(draft):
         if k % 3 != 2:  # 有的孔里还嵌着莲子（只露个顶）
             make_obj(f"SeedIn{k}", K.ico_cloud([(0, 0, 0)], [0.0078], 2), seed_m, parent=pod, loc=(x, y, 0.024), scale=(1.0, 1.0, 0.8),
                      index=1)
-    pod.location = (-0.02, 0.02, 0.06)
-    pod.rotation_euler = (math.radians(-35), math.radians(12), math.radians(20))
-    # 荷叶：一大片圆叶托底（边缘起伏、叶脉放射）
-    leaf_m = mat_young_leaf("LotusLeaf", color=(0.03, 0.12, 0.04), tip=(0.06, 0.18, 0.05))
+    pod.location = (-0.035, 0.035, 0.065)
+    pod.rotation_euler = (math.radians(42), math.radians(-8), math.radians(14))
+    # 荷叶：一大片圆叶托底（边缘起伏、叶脉放射）；压低镜面，免得反出一大片光
+    from card_weapons import low_spec  # noqa: PLC0415
+
+    leaf_m = low_spec(mat_young_leaf("LotusLeaf", color=(0.02, 0.075, 0.03), tip=(0.04, 0.12, 0.035)), 0.15)
 
     def lotus_leaf(bm):
         uvl = bm.loops.layers.uv.new("UVMap")
@@ -2186,19 +2188,21 @@ def build_lotus(draft):
                     lp[uvl].uv = uv
     make_obj("Leaf", lotus_leaf, leaf_m, index=0)
     # 散在叶上的莲子：两颗剥了皮发光
-    glow_m = mat_lotus_seed("SeedGlow", glow=2.5, peeled=True)
-    for k, (x, y, g) in enumerate(((0.09, -0.05, True), (0.13, 0.02, False), (0.05, -0.11, True), (-0.10, -0.08, False), (0.16, -0.08, False))):
+    glow_m = mat_lotus_seed("SeedGlow", glow=1.2, peeled=True)
+    for k, (x, y, g) in enumerate(((0.085, -0.045, True), (0.125, 0.015, False), (0.050, -0.090, True), (-0.105, -0.060, False),
+                                   (0.140, -0.075, True), (-0.060, -0.105, False))):
         ob = make_obj(f"Seed{k}", K.ico_cloud([(0, 0, 0)], [0.011], 3), glow_m if g else seed_m, loc=(x, y, 0.0 + 0.10 * ((x * x + y * y) / 0.09) - 0.02 + 0.011),
                       scale=(1.0, 1.0, 1.25), rot=(rng.uniform(0, 1.5), 0, rng.uniform(0, 6)), index=2)
         if g:
-            K.point_light(f"SeedL{k}", tuple(Vector(ob.location) + Vector((0, 0, 0.01))), 0.25, radius=0.01, color=(0.45, 0.95, 0.85))
+            K.point_light(f"SeedL{k}", tuple(Vector(ob.location) + Vector((0, 0, 0.012))), 0.12, radius=0.01, color=(0.45, 0.95, 0.85))
     glass = mat_glass("Drop")
     for k, (x, y, r) in enumerate(((-0.14, 0.06, 0.012), (0.20, 0.10, 0.008))):
         make_obj(f"Drop{k}", K.ico_cloud([(0, 0, 0)], [r], 3), glass, loc=(x, y, 0.10 * ((x * x + y * y) / 0.09) - 0.02 + r * 0.6),
                  scale=(1.0, 1.0, 0.6), index=3)
-    K.area_light("Key", (-0.5, -0.4, 0.7), (0, 0, 0.03), 18.0, 0.5, color=(0.90, 0.95, 1.0))
-    K.area_light("Rim", (0.5, 0.6, 0.4), (0, 0, 0.03), 12.0, 0.4, color=(0.70, 0.95, 0.85))
-    K.camera((0.06, -0.52, 0.34), (0.02, 0.0, 0.02), lens=45.0, fstop=4.0, focus=0.62)
+    K.area_light("Key", (-0.45, -0.25, 0.75), (0, 0, 0.03), 9.0, 0.35, color=(0.90, 0.95, 1.0))
+    K.area_light("Rim", (0.5, 0.6, 0.4), (0, 0, 0.03), 8.0, 0.4, color=(0.70, 0.95, 0.85))
+    K.area_light("Fill", (0.3, -0.6, 0.3), (0, 0, 0.03), 1.5, 0.6, color=(0.80, 0.90, 1.0))
+    K.camera((0.03, -0.40, 0.42), (0.015, 0.0, 0.035), lens=50.0, fstop=4.0, focus=0.57)
     return {"light": "wood"}
 
 
@@ -2244,7 +2248,7 @@ def build_oil(draft):
     upd()
     oil_z = -0.30 + 0.342
     # 壶：倒过来斜着（壶身 + 壶颈 + 壶嘴 + 把手）
-    jar_m = mat_glaze("Glaze")
+    jar_m = mat_glaze("Glaze", color=(0.13, 0.055, 0.025))
     jar = K._bpy().data.objects.new("Jar", None)
     K.link(jar)
     prof = [(0.0, 0.0), (0.040, 0.0), (0.060, 0.02), (0.072, 0.06), (0.068, 0.10), (0.050, 0.13), (0.030, 0.145), (0.028, 0.165),
@@ -2255,7 +2259,7 @@ def build_oil(draft):
     handle = [(-0.05, 0.0, 0.14), (-0.10, 0.0, 0.13), (-0.11, 0.0, 0.07), (-0.065, 0.0, 0.04)]
     make_obj("Handle", K.tube_uv(K.catmull(handle, n=30), 0.008, sides=12), jar_m, parent=jar, index=1)
     jar.rotation_euler = (0.0, math.radians(-58), math.radians(-12))
-    jar.location = (0.12, 0.02, oil_z + 0.24)
+    jar.location = (0.13, 0.02, oil_z + 0.21)
     upd()
     mouth = jar.matrix_world @ Vector((0.132, 0.0, 0.181))
     # 油线：从壶嘴落到灯盏（抛物线，越往下越细）
@@ -2272,7 +2276,7 @@ def build_oil(draft):
     K.point_light("Warm", (-0.10, -0.15, oil_z + 0.12), 6.0, radius=0.03, color=(1.0, 0.66, 0.34))
     K.area_light("Rim", (0.3, 0.4, oil_z + 0.3), (0.05, 0, oil_z + 0.1), 6.0, 0.4, color=(0.55, 0.65, 1.0))
     K.area_light("Fill", (0.2, -0.5, oil_z + 0.1), (0.05, 0, oil_z + 0.08), 3.0, 0.5, color=(1.0, 0.82, 0.60))
-    K.camera((-0.02, -0.52, oil_z + 0.16), (0.05, 0.0, oil_z + 0.11), lens=45.0, fstop=5.6, focus=0.52)
+    K.camera((-0.03, -0.70, oil_z + 0.17), (0.06, 0.0, oil_z + 0.13), lens=45.0, fstop=5.6, focus=0.70)
     return {"light": "warm"}
 
 

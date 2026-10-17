@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""hub_scroll.py（灯驿长卷）的自检：纯 assert，不依赖 pytest。只有桌面版（2 倍）。
+
+产物缺失或比脚本旧时先重新生成（约 1.5 分钟）；--regen 强制重新生成；
+确定性测试另画两遍到临时目录（并行，约 2 分钟），逐字节比对；--quick 跳过这一项。
+
+用法（在仓库根目录下）：
+  art/.venv/bin/python art/post/test_hub_scroll.py
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import traceback
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import hub_scroll as H  # noqa: E402
+
+OUT = H.OUT
+MAN = OUT / "hub.json"
+REVIEWS = [H.REVIEW / f"hub_review_{k}.png" for k in ("states", "figures", "ui_720")]
+SAFE = (96, 128, 1728, 824)  # 16:10 与 21:9 铺满后都留得住的区域（x, y, w, h）
+FOUR_THREE = (240, 1680)  # 4:3 铺满后剩下的 x 范围：四个人物要在里面
+_cache: dict[str, object] = {}
+
+
+def ensure_outputs(force: bool) -> None:
+    srcs = [HERE / n for n in ("hub_scroll.py", "title_screen.py", "scroll_qingqiu.py", "vfx_textures.py", "ui_fonts.py")]
+    srcs += [H.ART / "style" / "style.py", H.META_RON]
+    newest = max(p.stat().st_mtime for p in srcs)
+    outs = [MAN, OUT / "hub.png"] + REVIEWS
+    stale = [p for p in outs if not p.exists() or p.stat().st_mtime < newest]
+    if force or stale:
+        print("重新生成灯驿长卷……")
+        H.main([])
+
+
+def man() -> dict:
+    if "man" not in _cache:
+        _cache["man"] = json.loads(MAN.read_text(encoding="utf-8"))
+    return _cache["man"]
+
+
+def img(name: str, mode: str | None = None) -> np.ndarray:
+    key = f"{name}:{mode}"
+    if key not in _cache:
+        im = Image.open(OUT / name)
+        _cache[key] = np.asarray(im.convert(mode) if mode else im, np.float64) / 255.0
+    return _cache[key]
+
+
+def base() -> np.ndarray:
+    return img("hub.png", "RGB")
+
+
+def lum(a: np.ndarray) -> np.ndarray:
+    return a @ np.array([0.299, 0.587, 0.114])
+
+
+def layers():
+    """所有叠层：(名字, 层信息)，层信息里有 file、rect、blend。"""
+    m = man()
+    for lid, e in m["lamps"].items():
+        for part, v in e.items():
+            yield f"心灯 {lid}.{part}", v
+    for rid, e in m["dawn"].items():
+        yield f"晨光 {rid}", {"file": e["file"], "rect": e["rect"], "blend": e.get("blend", "normal")}
+        yield f"晨光 {rid}.mask", {"file": e["mask"], "rect": e["rect"], "blend": "mask"}
+        yield f"晨光 {rid}.glow", e["glow"]
+
+
+def inside(r, box) -> bool:
+    x, y, w, h = r
+    bx, by, bw, bh = box
+    return x >= bx and y >= by and x + w <= bx + bw and y + h <= by + bh
+
+
+def blend(canvas: np.ndarray, layer: dict) -> None:
+    """按游戏的规则叠一层：normal = 直通 alpha 覆盖；add = 画面 += RGB × alpha。"""
+    x, y, w, h = layer["rect"]
+    a = img(layer["file"], "RGBA")
+    sub = canvas[y:y + h, x:x + w]
+    if layer.get("blend", "normal") == "add":
+        sub += a[..., :3] * a[..., 3:4]
+    else:
+        sub[:] = sub * (1 - a[..., 3:4]) + a[..., :3] * a[..., 3:4]
+
+
+def composite(lamps: list[str], dawns: list[str]) -> np.ndarray:
+    m = man()
+    out = base().copy()
+    for lid in lamps:
+        blend(out, m["lamps"][lid]["body"])
+    for lid in lamps:
+        blend(out, m["lamps"][lid]["flame"])
+    for lid in lamps:
+        blend(out, m["lamps"][lid]["core"])
+        blend(out, m["lamps"][lid]["glow"])
+    out = np.clip(out, 0, 1)
+    for rid in dawns:
+        blend(out, {"file": m["dawn"][rid]["file"], "rect": m["dawn"][rid]["rect"]})
+    for rid in dawns:
+        blend(out, m["dawn"][rid]["glow"])
+    return np.clip(out, 0, 1)
+
+
+def rect_mask(rects) -> np.ndarray:
+    m = np.zeros((H.H, H.W), bool)
+    for (x, y, w, h) in rects:
+        m[y:y + h, x:x + w] = True
+    return m
+
+
+# ============================================================== 清单与文件
+
+
+def test_manifest_files_and_sizes():
+    """hub.json 里的每个文件都在、尺寸等于 rect 的宽高、模式对；目录里没有清单之外的 PNG。"""
+    m = man()
+    assert m["size"] == [1920, 1080], f"size 应为 [1920, 1080]：{m['size']}"
+    assert m["safe"] == list(SAFE), f"safe 应为 {list(SAFE)}：{m['safe']}"
+    b = Image.open(OUT / "hub.png")
+    assert b.size == (1920, 1080) and b.mode == "RGB", f"hub.png 应为 1920×1080 不透明 RGB（{b.size} {b.mode}）"
+    used = {"hub.png"}
+    for name, v in layers():
+        p = OUT / v["file"]
+        assert p.exists(), f"{name} 的 {v['file']} 不存在"
+        used.add(v["file"])
+        with Image.open(p) as im:
+            want = "L" if v["blend"] == "mask" else "RGBA"
+            assert im.mode == want, f"{v['file']} 应为 {want}，实际 {im.mode}"
+            assert list(im.size) == v["rect"][2:], f"{v['file']} 尺寸 {im.size} 与 rect {v['rect']} 不一致"
+        assert v["blend"] in ("normal", "add", "mask"), f"{name} 的 blend 不对：{v['blend']}"
+    extra = {p.name for p in OUT.glob("*.png")} - used
+    assert not extra, f"目录里有清单之外的文件：{sorted(extra)}"
+    for lid, e in m["lamps"].items():
+        assert e["body"]["blend"] == "normal" and e["flame"]["blend"] == "normal", f"{lid}：灯身、火苗应为普通混合"
+        assert e["core"]["blend"] == "add" and e["glow"]["blend"] == "add", f"{lid}：内圈、外圈应为叠加"
+    for rid, e in m["dawn"].items():
+        assert e["glow"]["blend"] == "add", f"{rid}：晨光金线应为叠加"
+
+
+def test_ids_match_content():
+    """心灯与 meta.ron 的节点一一对应（按文件顺序，每盏四层），人物与 hub.ron 的顺序一致；画里的挂灯位置数等于节点数。"""
+    m = man()
+    nodes = re.findall(r'\(id: "([a-z0-9_]+)"', H.META_RON.read_text(encoding="utf-8"))
+    assert list(m["lamps"]) == nodes, f"lamps {list(m['lamps'])} 应与 meta.ron {nodes} 一致"
+    assert len(H.LAMP_SLOTS) == len(nodes), f"meta.ron 有 {len(nodes)} 个节点，画里有 {len(H.LAMP_SLOTS)} 个挂灯位置"
+    for lid, e in m["lamps"].items():
+        assert set(e) == {"body", "flame", "core", "glow"}, f"{lid} 应有 body、flame、core、glow 四层：{sorted(e)}"
+    hub = re.findall(r'\(id: "([a-z0-9_]+)", name: "([^"]+)"', (H.ROOT / "assets" / "data" / "hub.ron").read_text(encoding="utf-8"))
+    chars = [(c["id"], c["name"]) for c in m["characters"]]
+    assert chars == hub, f"characters {chars} 应与 hub.ron {hub} 一致"
+    assert list(m["dawn"]) == list(H.REGIONS), f"dawn 的地区 {list(m['dawn'])} 不对"
+
+
+def test_rects_inside_image():
+    """每一层、每个人物的点击区 / 名字 / 聚光中心、每个文字安全区都在 1920×1080 里。"""
+    full = (0, 0, 1920, 1080)
+    for name, v in layers():
+        assert inside(v["rect"], full), f"{name} 的 rect {v['rect']} 超出画面"
+    for c in man()["characters"]:
+        assert inside(c["rect"], full), f"{c['id']} 的 rect 超出画面"
+        for (x, y) in (c["label"], c["light"][:2]):
+            assert 0 <= x < 1920 and 0 <= y < 1080, f"{c['id']} 的 label / light 超出画面"
+    for r in man()["text_safe"]:
+        assert inside(r, full), f"text_safe {r} 超出画面"
+
+
+def test_safe_area():
+    """心灯（四层）、人物（点击区、名字、聚光中心）、文字安全区都在 safe 里；四个人物在 4:3 的 x 240–1680 里。"""
+    m = man()
+    for lid, e in m["lamps"].items():
+        for part, v in e.items():
+            assert inside(v["rect"], SAFE), f"心灯 {lid}.{part} 的 rect {v['rect']} 不在 safe 里"
+    x0, x1 = FOUR_THREE
+    for c in m["characters"]:
+        x, y, w, h = c["rect"]
+        assert inside(c["rect"], SAFE), f"{c['id']} 的点击区不在 safe 里"
+        for (px, py) in (c["label"], c["light"][:2]):
+            assert inside((px, py, 0, 0), SAFE), f"{c['id']} 的 label / light 不在 safe 里"
+        assert x >= x0 and x + w <= x1, f"{c['id']} 的点击区 x {x}–{x + w} 超出 4:3 的 {x0}–{x1}"
+    for r in m["text_safe"]:
+        assert inside(r, SAFE), f"text_safe {r} 不在 safe 里"
+    for rid, e in m["dawn"].items():
+        x, y, w, h = e["rect"]
+        assert x >= SAFE[0] and x + w <= SAFE[0] + SAFE[2], f"晨光 {rid} 的 x 超出 safe"
+
+
+# ============================================================== 心灯
+
+
+def test_lamp_layers_stay_local():
+    """每盏灯的四层叠上去，只改变它自己几个 rect 里的像素；每一层都确实改变了一些像素。"""
+    m = man()
+    b = base()
+    for lid, e in m["lamps"].items():
+        out = composite([lid], [])
+        changed = np.abs(out - b).max(-1) > 1.5 / 255
+        own = rect_mask([v["rect"] for v in e.values()])
+        assert not (changed & ~own).any(), f"心灯 {lid} 改到了自己的 rect 以外（{(changed & ~own).sum()} 个像素）"
+        for part, v in e.items():
+            a = img(v["file"], "RGBA")[..., 3]
+            assert (a > 0.1).sum() >= 20, f"心灯 {lid}.{part} 几乎是空的"
+        # 灯身亮起来：灯身中心比底图亮得多、偏暖
+        x, y, hy, kind = H.LAMP_SLOTS[list(m["lamps"]).index(lid)]
+        c0 = b[int(y) - 3:int(y) + 4, int(x) - 3:int(x) + 4].reshape(-1, 3).mean(0)
+        c1 = out[int(y) - 3:int(y) + 4, int(x) - 3:int(x) + 4].reshape(-1, 3).mean(0)
+        assert lum(c1) > lum(c0) + 0.25 and c1[0] > c1[2] + 0.15, f"心灯 {lid} 点亮后不够亮 / 不够暖：{c0.round(2)} → {c1.round(2)}"
+        # 亮起时游戏把叠加层放大到 1.4 倍：灯身不能整个冲成白的
+        flash = base().copy()
+        for k in ("body", "flame"):
+            blend(flash, e[k])
+        for k in ("core", "glow"):
+            v = e[k]
+            x0, y0, w0, h0 = v["rect"]
+            a = img(v["file"], "RGBA")
+            flash[y0:y0 + h0, x0:x0 + w0] += a[..., :3] * a[..., 3:4] * 1.4
+        bx, by, bw, bh = e["body"]["rect"]
+        inner = img(e["body"]["file"], "RGBA")[..., 3] > 0.5
+        hot = np.clip(flash[by:by + bh, bx:bx + bw], 0, 1).min(-1) > 0.97
+        assert (hot & inner).sum() < 0.5 * inner.sum(), f"心灯 {lid} 放大 1.4 倍时灯身大半冲白了（{(hot & inner).sum() / inner.sum():.0%}）"
+
+
+def test_additive_layers():
+    """叠加层（灯的内圈、外圈，晨光金线）：alpha 峰值 ≤ 0.75，四边裁到 0；颜色暖而不太饱和（R ≥ G ≥ B，不是纯白）。"""
+    for name, v in layers():
+        if v["blend"] != "add":
+            continue
+        a = img(v["file"], "RGBA")
+        al = a[..., 3]
+        assert al.max() <= 0.75 + 1e-9, f"{name} 的 alpha 峰值 {al.max():.3f} > 0.75"
+        assert al.max() >= 0.3, f"{name} 太淡（峰值 {al.max():.3f}）"
+        edge = np.concatenate([al[0], al[-1], al[:, 0], al[:, -1]])
+        assert edge.max() <= 1.5 / 255, f"{name} 的裁边处 alpha 没有落到 0（{edge.max() * 255:.0f}/255）"
+        rgb = (a[..., :3] * al[..., None]).sum((0, 1)) / max(al.sum(), 1e-9)
+        assert rgb[0] >= rgb[1] >= rgb[2] and rgb[2] < 0.8 and rgb[2] > 0.3, f"{name} 的颜色不对：{rgb.round(3)}"
+
+
+def test_flame_base():
+    """火苗的 base（底部中点）在火苗的 rect 里、靠近底边，base 上方就是火苗。"""
+    for lid, e in man()["lamps"].items():
+        v = e["flame"]
+        x, y, w, h = v["rect"]
+        bx, by = v["base"]
+        assert x <= bx <= x + w and y <= by <= y + h, f"心灯 {lid} 的火苗 base {v['base']} 不在 rect {v['rect']} 里"
+        assert y + h - by <= 6, f"心灯 {lid} 的火苗 base 离 rect 底边太远（{y + h - by:.1f}）"
+        a = img(v["file"], "RGBA")[..., 3]
+        col = a[:, int(round(bx - x)) - 1:int(round(bx - x)) + 2]
+        ys = np.nonzero(col.max(1) > 0.5)[0]
+        assert ys.size and abs((ys.max() + y) - by) <= 5, f"心灯 {lid} 的火苗底部和 base 对不上"
+        tip = ys.min() + y
+        assert by - tip >= 12, f"心灯 {lid} 的火苗太矮（{by - tip:.0f}）"
+
+
+# ============================================================== 晨光
+
+
+def test_dawn_masks():
+    """晨光的“先亮哪里”：单通道、与晨光图同尺寸，在有晨光的地方用满 0–255 的大部分；没有晨光的地方是白（最后）。"""
+    m = man()
+    for rid, e in m["dawn"].items():
+        mk = Image.open(OUT / e["mask"])
+        dw = Image.open(OUT / e["file"])
+        assert mk.mode == "L", f"{e['mask']} 应为单通道 L：{mk.mode}"
+        assert mk.size == dw.size, f"{e['mask']} {mk.size} 与 {e['file']} {dw.size} 尺寸不同"
+        v = np.asarray(mk)
+        a = np.asarray(dw)[..., 3]
+        on = a > 0
+        lo, hi = np.percentile(v[on], [2, 98])
+        assert v[on].min() <= 5 and v[on].max() >= 250, f"{rid} 的 mask 没有用到两头（{v[on].min()}–{v[on].max()}）"
+        assert hi - lo >= 160, f"{rid} 的 mask 范围太窄（2–98% 分位 {lo:.0f}–{hi:.0f}）"
+        assert len(np.unique(v[on])) >= 200, f"{rid} 的 mask 灰阶太少（{len(np.unique(v[on]))}）"
+        assert (v[~on] == 255).all(), f"{rid} 的 mask 在没有晨光的地方应为 255"
+        # 山脊（金线最亮处）比远处的天、山脚先亮
+        g = e["glow"]
+        ga = img(g["file"], "RGBA")[..., 3]
+        gx, gy = g["rect"][0] - e["rect"][0], g["rect"][1] - e["rect"][1]
+        full = np.zeros(v.shape)
+        ys, xs = np.nonzero(ga > 0.5 * ga.max())
+        ys, xs = ys + gy, xs + gx
+        ok = (ys >= 0) & (xs >= 0) & (ys < v.shape[0]) & (xs < v.shape[1])
+        full[ys[ok], xs[ok]] = 1
+        ridge_t = v[(full > 0) & on].mean()
+        assert ridge_t < np.median(v[on]), f"{rid}：山脊应比别处先亮（山脊 {ridge_t:.0f}，中位 {np.median(v[on]):.0f}）"
+
+
+def test_dawn_stays_on_its_mountain():
+    """晨光（普通 + 金线）看得见的部分（alpha > 0.02）只在它那座山的窗口里、墙头以上，各地区之间不重叠，
+    也不落在心灯、人物和文字安全区上。"""
+    m = man()
+    keep_off = rect_mask([c["rect"] for c in m["characters"]] + m["text_safe"])
+    for e in m["lamps"].values():  # 灯身、火苗本身（不透明的部分）
+        for k in ("body", "flame"):
+            x, y, w, h = e[k]["rect"]
+            keep_off[y:y + h, x:x + w] |= img(e[k]["file"], "RGBA")[..., 3] > 0.1
+    seen = np.zeros((H.H, H.W), int)
+    for rid, e in m["dawn"].items():
+        lay, cx, hgt, wl, wr, sharp, half = H.REGIONS[rid]
+        vis = np.zeros((H.H, H.W), bool)
+        for v in (e, e["glow"]):
+            x, y, w, h = v["rect"]
+            vis[y:y + h, x:x + w] |= img(v["file"], "RGBA")[..., 3] > 0.02
+        ys, xs = np.nonzero(vis)
+        assert xs.min() >= cx - half - 8 and xs.max() <= cx + half + 8, f"{rid} 的晨光超出了那座山（x {xs.min()}–{xs.max()}）"
+        assert ys.max() < H.WALL_TOP - 10, f"{rid} 的晨光落到了墙头以下（y {ys.max()}）"
+        assert not (vis & keep_off).any(), f"{rid} 的晨光落在心灯 / 人物 / 文字区上"
+        seen += vis
+    assert (seen > 1).sum() == 0, f"几处晨光互相重叠（{(seen > 1).sum()} 个像素）"
+
+
+# ============================================================== 底图
+
+
+def test_text_safe_quiet():
+    """文字安全区安静、够暗：笔触细节（高通能量）远少于画面主体，没有明显的线，纸色字对比够；点满灯、晨光全亮也一样。"""
+    for label, a in (("底图", base()), ("全亮", composite(list(man()["lamps"]), list(man()["dawn"])))):
+        L = lum(a)
+        hp = np.abs(L - H.blur(L, 6.0))
+        fine = np.abs(L - H.blur(L, 1.2))
+        body = hp[300:880, 150:1800].mean()
+        for (x, y, w, h) in man()["text_safe"]:
+            b = hp[y:y + h, x:x + w]
+            assert b.mean() < 0.2 * body, f"{label}：text_safe {[x, y, w, h]} 太花（高通 {b.mean():.4f}，主体 {body:.4f}）"
+            assert fine[y:y + h, x:x + w].max() < 0.05, f"{label}：text_safe {[x, y, w, h]} 里有明显的线（{fine[y:y + h, x:x + w].max():.3f}）"
+            m = L[y:y + h, x:x + w].mean()
+            assert (lum(H.PAPER) + 0.05) / (m + 0.05) > 3.0, f"{label}：text_safe {[x, y, w, h]} 不够暗（平均亮度 {m:.2f}）"
+            assert L[y:y + h, x:x + w].std() < 0.04, f"{label}：text_safe {[x, y, w, h]} 浓淡不匀（标准差 {L[y:y + h, x:x + w].std():.3f}）"
+
+
+def test_ink_only_except_lights():
+    """长夜的底图只有墨：离四个人的灯远的地方都是纸墨的暖灰（彩度低），全图没有偏青 / 偏绿的像素；
+    灯边是暖的。朱砂印除外。"""
+    b = base()
+    yy, xx = np.mgrid[0:H.H, 0:H.W]
+    far = np.ones((H.H, H.W), bool)
+    for c in man()["characters"]:
+        x, y, r = c["light"]
+        far &= np.hypot(xx - x, yy - y) > 2.0 * r + 60
+    sx, sy = H.SEAL_AT
+    seal = (xx >= sx - 4) & (xx < sx + H.SEAL_PX + 4) & (yy >= sy - 4) & (yy < sy + H.SEAL_PX + 4)
+    far &= ~seal
+    assert far.mean() > 0.25, "离灯远的区域太少，测不出来"
+    chroma = b.max(-1) - b.min(-1)
+    p = np.percentile(chroma[far], 99.9)
+    assert p <= 0.14, f"离灯远的地方有颜色（彩度 99.9 分位 {p:.3f}）"
+    cool = ((b[..., 2] > b[..., 0] + 0.02) | (b[..., 1] > b[..., 0] + 0.02)) & ~seal
+    assert cool.mean() < 0.0005, f"有偏青 / 偏绿的像素（{cool.mean():.4f}）"
+    for c in man()["characters"]:
+        x, y, r = c["light"]
+        near = (np.hypot(xx - x, yy - y) < r) & ~seal
+        warm = (b[..., 0] - b[..., 2])[near].mean()
+        assert warm > 0.08, f"{c['id']} 的灯边不够暖（R−B {warm:.3f}）"
+
+
+def test_size_on_disk():
+    """hub.png < 3 MB，整个目录 < 5 MB。"""
+    kb = (OUT / "hub.png").stat().st_size / 1024
+    assert kb < 3 * 1024, f"hub.png {kb:.0f} KB 太大"
+    total = sum(p.stat().st_size for p in OUT.iterdir()) / 1024 / 1024
+    assert total < 5.0, f"screens/hub/ 共 {total:.2f} MB 太大"
+
+
+def test_review_images():
+    """审图都在：三种状态、人物特写、720p 界面样张。"""
+    for p in REVIEWS:
+        assert p.exists(), f"缺审图 {p.name}"
+        with Image.open(p) as im:
+            assert im.width >= 1280, f"{p.name} 太小（{im.size}）"
+
+
+def test_determinism():
+    """固定种子：另画两遍到临时目录（并行），所有文件逐字节相同，也和 screens/hub/ 里的相同（--quick 跳过）。"""
+    if "--quick" in sys.argv:
+        print("      （跳过：--quick）")
+        return
+    with tempfile.TemporaryDirectory() as ta, tempfile.TemporaryDirectory() as tb:
+        cmd = [sys.executable, str(HERE / "hub_scroll.py"), "--no-review", "--out"]
+        procs = [subprocess.Popen(cmd + [t], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) for t in (ta, tb)]
+        for pr in procs:
+            _, err = pr.communicate()
+            assert pr.returncode == 0, f"生成失败：{err.decode(errors='replace')[-500:]}"
+        fa = sorted(p.name for p in Path(ta).iterdir())
+        fb = sorted(p.name for p in Path(tb).iterdir())
+        assert fa == fb, "两次生成的文件列表不同"
+        ours = sorted(p.name for p in OUT.iterdir())
+        assert fa == ours, f"文件列表和 screens/hub/ 不同：{set(fa) ^ set(ours)}"
+        diff = [n for n in fa if (Path(ta) / n).read_bytes() != (Path(tb) / n).read_bytes()]
+        assert not diff, f"两次生成不一致：{diff[:5]}"
+        diff = [n for n in fa if (Path(ta) / n).read_bytes() != (OUT / n).read_bytes()]
+        assert not diff, f"和 screens/hub/ 里的不一致：{diff[:5]}"
+
+
+def main() -> int:
+    ensure_outputs("--regen" in sys.argv)
+    tests = [(k, v) for k, v in globals().items() if k.startswith("test_") and callable(v)]
+    failed = 0
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"PASS  {name}")
+        except AssertionError as e:
+            failed += 1
+            print(f"FAIL  {name}: {e}")
+        except Exception:  # noqa: BLE001
+            failed += 1
+            print(f"ERROR {name}")
+            traceback.print_exc()
+    print(f"\n{len(tests) - failed}/{len(tests)} 通过")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
