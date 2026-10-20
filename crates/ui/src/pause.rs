@@ -1,4 +1,4 @@
-//! 暂停：继续、属性（`stats_panel.rs`）、设置项（四类音量、画面、按键）、回到标题。
+//! 暂停：继续、属性（`stats_panel.rs`）、开发者（`dev_panel.rs`，设置里打开了才有）、设置项（四类音量、画面、按键）、回到标题。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
@@ -10,10 +10,19 @@ use crate::settings_ui::{self, ITEMS, PrimaryWindowQuery};
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, overlay_vignette, text};
 
-/// 菜单行：继续、属性、设置项、回到标题。
-const ROWS: usize = ITEMS.len() + 3;
-/// 第一个设置项的行号
-const FIRST_ITEM: usize = 2;
+/// 菜单行：继续、属性、（开发者）、设置项、回到标题。开发者那一行只在设置里打开了开发者选项时有。
+#[derive(Clone, Copy)]
+struct Rows {
+    dev: Option<usize>,
+    /// 第一个设置项的行号
+    first_item: usize,
+    count: usize,
+}
+
+fn rows(settings: &Settings) -> Rows {
+    let first_item = 2 + usize::from(settings.dev_tools);
+    Rows { dev: settings.dev_tools.then_some(2), first_item, count: first_item + ITEMS.len() + 1 }
+}
 
 #[derive(Resource, Default)]
 pub(crate) struct PauseUi {
@@ -65,7 +74,7 @@ fn focus(skin: &Skin, i: usize) -> impl Bundle {
     )
 }
 
-fn spawn(
+pub(crate) fn spawn(
     mut commands: Commands,
     fonts: Res<Fonts>,
     skin: Res<Skin>,
@@ -73,11 +82,17 @@ fn spawn(
     mut ui: ResMut<PauseUi>,
 ) {
     *ui = PauseUi::default();
+    let lay = rows(&settings);
     commands
         .spawn((
             PauseRoot,
             DespawnOnExit(RunState::Paused),
             GlobalZIndex(30),
+            // 菜单比默认画布高（开发者那一行再高一截），窗口矮时整页等比缩小，背景照样铺满
+            crate::responsive::FitViewport::Fixed(Vec2::new(
+                1280.0,
+                if lay.dev.is_some() { 800.0 } else { 760.0 },
+            )),
             Node {
                 position_type: PositionType::Absolute,
                 width: percent(100),
@@ -127,20 +142,37 @@ fn spawn(
                     ));
                 });
                 hook(&mut stats, 1);
+                if let Some(i) = lay.dev {
+                    let mut dev = p.spawn(row_node());
+                    dev.with_children(|r| {
+                        r.spawn(focus(&skin, i));
+                        r.spawn(text(&fonts.title, 28.0, INK, "开发者"));
+                        r.spawn((
+                            text(&fonts.body, 14.0, INK_DIM, "F1"),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                right: px(18),
+                                top: px(12),
+                                ..default()
+                            },
+                        ));
+                    });
+                    hook(&mut dev, i);
+                }
                 for (k, &item) in ITEMS.iter().enumerate() {
                     let mut row = p.spawn(row_node());
                     row.with_children(|r| {
-                        r.spawn(focus(&skin, k + FIRST_ITEM));
+                        r.spawn(focus(&skin, k + lay.first_item));
                         settings_ui::spawn_row(r, &fonts, &settings, item);
                     });
-                    hook(&mut row, k + FIRST_ITEM);
+                    hook(&mut row, k + lay.first_item);
                 }
                 let mut quit = p.spawn(row_node());
                 quit.with_children(|r| {
-                    r.spawn(focus(&skin, ROWS - 1));
+                    r.spawn(focus(&skin, lay.count - 1));
                     r.spawn(text(&fonts.title, 28.0, INK, "回到标题"));
                 });
-                hook(&mut quit, ROWS - 1);
+                hook(&mut quit, lay.count - 1);
                 p.spawn(Node { height: px(8), ..default() });
                 p.spawn(text(&fonts.body, 14.0, INK_DIM, "回到标题时，这一局不计灯油"));
                 p.spawn(crate::prompts::hint(
@@ -160,16 +192,18 @@ pub(crate) fn input(
     mut settings: ResMut<Settings>,
     mut controls: ResMut<crate::controls::Controls>,
     mut stats: ResMut<crate::stats_panel::StatsPanel>,
+    mut dev: ResMut<crate::dev_panel::DevPanel>,
     mut window: PrimaryWindowQuery,
     mut next_run: ResMut<NextState<RunState>>,
     mut next_app: ResMut<NextState<AppState>>,
     mut cues: MessageWriter<UiCue>,
 ) {
-    if controls.is_open() || transition.active() || stats.open {
+    if controls.is_open() || transition.active() || stats.open || dev.open {
         ui.clicked = None;
         ui.hovered = None;
         return;
     }
+    let lay = rows(&settings);
     let before_selected = ui.selected;
     if let Some(h) = ui.hovered.take()
         && actions.pointer_moved
@@ -177,24 +211,26 @@ pub(crate) fn input(
         ui.selected = h;
     }
     if actions.nav.y != 0 {
-        ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(ROWS as i32) as usize;
+        ui.selected = (ui.selected as i32 + actions.nav.y).rem_euclid(lay.count as i32) as usize;
     }
     let clicked = ui.clicked.take();
     if let Some(c) = clicked {
         ui.selected = c;
     }
     let sel = ui.selected;
-    if actions.quit_to_title || ((actions.confirm || clicked.is_some()) && sel == ROWS - 1) {
+    if actions.quit_to_title || ((actions.confirm || clicked.is_some()) && sel == lay.count - 1) {
         next_app.set(AppState::Title);
     } else if actions.pause || actions.back || ((actions.confirm || clicked.is_some()) && sel == 0) {
         next_run.set(RunState::Playing);
     } else if actions.stats_toggle || ((actions.confirm || clicked.is_some()) && sel == 1) {
         stats.show();
-    } else if (FIRST_ITEM..FIRST_ITEM + ITEMS.len()).contains(&sel) {
+    } else if lay.dev == Some(sel) && (actions.confirm || clicked.is_some()) {
+        dev.show(false);
+    } else if (lay.first_item..lay.first_item + ITEMS.len()).contains(&sel) {
         let mut a = *actions;
         // 点击设置项等同回车（全屏切换），音量用左右键
         a.confirm |= clicked.is_some();
-        settings_ui::adjust(ITEMS[sel - FIRST_ITEM], &a, &mut settings, &mut window, &mut controls);
+        settings_ui::adjust(ITEMS[sel - lay.first_item], &a, &mut settings, &mut window, &mut controls);
     }
     if actions.pause || actions.back || actions.quit_to_title {
         cues.write(UiCue::Back);
@@ -208,6 +244,7 @@ pub(crate) fn input(
 fn highlight(
     ui: Res<PauseUi>,
     stats: Res<crate::stats_panel::StatsPanel>,
+    dev: Res<crate::dev_panel::DevPanel>,
     mut q: Query<(&PauseFocus, &mut Visibility), Without<PauseRoot>>,
     mut root: Query<&mut Visibility, With<PauseRoot>>,
 ) {
@@ -215,7 +252,7 @@ fn highlight(
         v.set_if_neq(if f.0 == ui.selected { Visibility::Inherited } else { Visibility::Hidden });
     }
     for mut v in &mut root {
-        v.set_if_neq(if stats.open { Visibility::Hidden } else { Visibility::Inherited });
+        v.set_if_neq(if stats.open || dev.open { Visibility::Hidden } else { Visibility::Inherited });
     }
 }
 
@@ -231,6 +268,7 @@ mod tests {
             .init_resource::<Settings>()
             .init_resource::<crate::controls::Controls>()
             .init_resource::<crate::stats_panel::StatsPanel>()
+            .init_resource::<crate::dev_panel::DevPanel>()
             .init_resource::<crate::transition::InkTransition>()
             .init_resource::<NextState<RunState>>()
             .init_resource::<NextState<AppState>>()

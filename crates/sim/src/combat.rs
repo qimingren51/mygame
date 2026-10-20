@@ -447,7 +447,7 @@ pub(crate) fn resolve_hits(
     effects: Res<Effects>,
     reveal: Res<Reveal>,
     grid: Res<Grid>,
-    progress: Res<Progress>,
+    (progress, dev): (Res<Progress>, Res<crate::dev::Dev>),
     tick: Res<Tick>,
     mut rng: ResMut<SimRng>,
     mut hits: ResMut<HitQueue>,
@@ -492,6 +492,8 @@ pub(crate) fn resolve_hits(
         // 加成区；夜签“无月”：照见圈外（也不在光区里）的妖物再加一截
         let bonus = if dark > 0.0 && !reveal.covers(pos) { dmg_mult + dark } else { dmg_mult };
         let base = if hit.flags & (HIT_RAW | HIT_TRUE) != 0 { hit.damage } else { hit.damage * bonus };
+        // 开发者选项的伤害倍率乘在最外面，原样伤害、真实伤害也算
+        let base = base * dev.damage;
         let crit = hit.flags & (HIT_NOCRIT | HIT_TRUE) == 0
             && (rng.next_f32() < crit_chance + hit.crit_bonus || (en.stun[i] > 0.0 && stun_crit));
         // 天罡：暴击的那一下再斩一次，追加在队尾，本步一起结算

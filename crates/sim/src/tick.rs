@@ -103,6 +103,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     };
     commands.insert_resource(ids);
     commands.insert_resource(Tick(0));
+    commands.insert_resource(crate::dev::Dev::default());
     commands.insert_resource(SimRng(rng));
     commands.insert_resource(plan);
     commands.insert_resource(SimView::new(c));
@@ -237,6 +238,7 @@ pub(crate) struct HashParams<'w, 's> {
     plan: Res<'w, RunPlan>,
     flow: Res<'w, crate::flow::Flow>,
     bamboo: Res<'w, crate::bamboo::Bamboo>,
+    dev: Res<'w, crate::dev::Dev>,
     q: Query<'w, 's, (&'static SimId, &'static Pos, Option<&'static Health>, Option<&'static Player>)>,
 }
 
@@ -311,6 +313,11 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     p.plan.hash_into(&mut h);
     p.progress.hash_into(&mut h);
     hash_flow(&p.flow, &mut h);
+    // 开发者选项只在用过时写入：没用过的局，哈希和以前一样
+    if p.dev.used {
+        h.write_u32(1);
+        h.write_f32(p.dev.damage);
+    }
     // 叙事只在启用（回放带了 StorySeed）时写入；旧路径的黄金哈希不变。
     p.story.hash_into(&p.rng, &mut h);
     log.0.push(HashCheckpoint { tick: p.tick.0, hash: h.finish() });

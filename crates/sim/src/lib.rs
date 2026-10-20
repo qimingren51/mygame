@@ -21,6 +21,7 @@ pub mod charms;
 pub mod combat;
 pub mod components;
 mod crowd;
+pub mod dev;
 pub mod encounters;
 pub mod enemies;
 pub mod flow;
@@ -47,6 +48,7 @@ pub mod weapons;
 
 pub use build::{Build, Offer};
 pub use components::*;
+pub use dev::{Dev, DevCommand};
 pub use enemies::Enemies;
 pub use flow::{AppState, Flow, RunResult, RunState, SimPhase};
 pub use gems::Gems;
@@ -198,6 +200,7 @@ impl Plugin for SimPlugin {
             .init_resource::<InputFrame>()
             .init_resource::<SimCommands>()
             .init_resource::<SimOutbox>()
+            .init_resource::<Dev>()
             .configure_sets(
                 FixedUpdate,
                 (
