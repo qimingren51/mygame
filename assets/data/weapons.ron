@@ -21,7 +21,7 @@
         evolution: Some((
             name: "不夜城", passive: "changming",
             desc: "十盏灯笼环城而行，内圈多一层火海。", short: "十盏灯环身，内圈火海",
-            flavor: "东莱有座不夜城，相传古时夜里出过太阳。十盏灯围成一圈，圈里亮得跟白天一样。",
+            flavor: "东莱夜里出过太阳。十盏灯围一圈，圈里跟白天一样。",
             // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
                             inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
@@ -63,7 +63,7 @@
         )),
         mutation: Some((
             name: "赤霄", desc: "赤剑命中熔金易伤，击杀分作两剑，分剑不再分裂。舍弃无限穿透与合璧，追逐残血妖群。", short: "熔金易伤，击杀分剑",
-            flavor: "符剑在火里烧得通红，有人说像汉高祖斩白蛇的那把赤霄。",
+            flavor: "符剑在火里烧得通红，像汉高祖斩白蛇的那把赤霄。",
             // 熔金：易伤 30%、4 秒；击杀时朝 460 内最近的两只各分一剑，伤害为这一击的 60%
             behavior: Volley(range: 460.0, speed: 400.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
                 knockback: 25.0, spread: 0.14, retry: 0.2,
@@ -110,7 +110,7 @@
     (
         id: "crane", name: "纸鹤", icon: "鹤", element: Wood,
         desc: "纸鹤自动扑向妖物，撞击后折返。", short: "纸鹤自动扑击",
-        flavor: "纸扎铺的白鹤，本是出殡时送魂上路的，守灯人拿来找妖。",
+        flavor: "纸扎铺的白鹤，出殡时送魂上路用的，如今拿来找妖。",
         // 平时绕身（半径 34）；随机扑向 340 内最近 3 只之一，撞到即伤害，休息 0.35 秒；速度 250 + 6·等级
         behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.35,
                          knockback: 50.0, speed: (250.0, 6.0, 0.0), steer: 7.0, reach: 6.0),
@@ -135,7 +135,7 @@
         )),
         mutation: Some((
             name: "铁鹤", desc: "鹤群收为五只铁鹤，单次伤害三倍，扑击射出穿透铁羽；斩杀两成血以下小妖。数量加成失效，不能合璧。", short: "五只铁鹤，伤害 ×3",
-            flavor: "纸鹤让金气浸透，翅膀成了铁片，只剩五只，啄一下能穿透。",
+            flavor: "纸鹤浸了金气，翅膀成了铁片，只剩五只，一啄就穿。",
             // 铁羽：穿透 5、速度 480、存活 0.6 秒，伤害为扑击的 30%（全额会远超进化的伤害预算）
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 360.0, pick: 3, rest: 0.5,
                 knockback: 25.0, speed: (350.0, 0.0, 0.0), steer: 7.0, reach: 8.0,
@@ -215,7 +215,7 @@
     (
         id: "sky_lantern", name: "孔明灯", icon: "孔", element: Fire,
         desc: "放飞孔明灯，飘向妖物最密的地方，落地爆燃，留下火海。", short: "灯飘向妖群，落地爆燃",
-        flavor: "狐村孩子放来的那盏，专往妖多的地方飘，飘够了往下落。",
+        flavor: "狐村孩子放来的那盏，往妖多处飘，飘够了往下落。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "狐村放来一盏灯",
         // 落点：360 以内最近的 24 只里，挑 100 以内同伴最多的那只；几盏至少隔开 120。灯每秒飘 60，3 秒后落地。
@@ -300,7 +300,7 @@
     (
         id: "tower", name: "镇妖塔", icon: "塔", element: Earth,
         desc: "在妖物最密的地方落下宝塔，砸晕一片，再把周围的妖物吸到塔下。", short: "落塔吸妖，聚成一团",
-        flavor: "土伯压门缝用的七层小塔，借了一座出来。落了地，妖都往塔底下钻。",
+        flavor: "土伯压门缝的七层小塔，借来一座。妖都往塔底下钻。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "土伯借你一座塔",
         // 落点：300 以内最近的 24 只里，挑 100 以内同伴最多的那只（几座至少隔开 120）；预警 0.5 秒，落地击晕 0.5 秒。
@@ -320,7 +320,7 @@
         evolution: Some((
             name: "玲珑塔", passive: "panshi",
             desc: "每 10 秒落一座，把几乎全屏的妖物吸到塔下，4 秒后一起炸开。", short: "全屏吸妖，到时炸开",
-            flavor: "托塔天王手里那一座。整片的妖收进去，再一起炸出来。",
+            flavor: "托塔天王手里那一座。整片的妖收进去，一起炸出来。",
             // 吸的范围 64 × 7.8 ≈ 500，每秒 140；到时间炸开：半径 140，伤害 200，击晕 1 秒
             behavior: Tower(range: 300.0, pick: 24, cluster: 100.0, spread: 120.0, warn: 0.5, stun: 0.5, life: 4.0,
                             pull: 7.8, pull_speed: 140.0, tick: 0.5, tick_scale: 0.15,

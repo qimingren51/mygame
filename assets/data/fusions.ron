@@ -4,7 +4,7 @@
     (
         id: "phoenix", name: "百鸟朝凤", weapons: ("crane", "lamp"),
         desc: "群鹤化火凤，扑击炸开留下火海，一只巨凤绕身护行。把追兵引入凤火，双系各留四点，腾出一格。", short: "群鹤化凤，扑击留火海",
-        flavor: "凤凰见则天下安宁，长夜里一直没来。纸鹤沾了火，飞成了凤的样子。",
+        flavor: "凤凰见则天下安宁。纸鹤沾了火，飞成了凤的样子。",
         behavior: Seeker(orbit_radius: 42.0, orbit_spin: 2.0, range: 380.0, pick: 5, rest: 0.6,
             knockback: 40.0, speed: (350.0, 0.0, 0.0), steer: 7.0, reach: 8.0,
             on_hit: Some((radius: 52.0, ratio: 0.6,

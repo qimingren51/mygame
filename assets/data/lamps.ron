@@ -1,7 +1,7 @@
 // 灯（docs/GAMEPLAY.md 第 11.4 节）：给长明火换一副灯身，相当于选角色。主角模型不变，只换灯笼和光色。
 // 起手法器还没解锁时，用这盏灯就视为已解锁。本命五行的升级选项权重 ×1.2。P0 做这 3 盏。
 [
-    (id: "red", name: "红纸灯", flavor: "最寻常的红纸灯笼，糊了三层纸。长明火在里头烧得最旺。", school: "星火", element: Fire, start_weapon: "lamp", color: "#FF9A4A",
+    (id: "red", name: "红纸灯", flavor: "最寻常的红纸灯笼，糊了三层纸，长明火烧得最旺。", school: "星火", element: Fire, start_weapon: "lamp", color: "#FF9A4A",
      good: "灼烧伤害 +20%", bad: "无", effects: [Add(BurnDamage, 0.2)], initial: true),
     (id: "mirror", name: "铜镜灯", flavor: "老灯匠打的，灯后头嵌一面铜镜，光都往前聚。", school: "剑修", element: Metal, start_weapon: "sword", color: "#F0E6C8",
      good: "暴击率 +10%，暴伤 +20%", bad: "生命上限 -15%",
