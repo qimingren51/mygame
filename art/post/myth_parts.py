@@ -79,11 +79,6 @@ def edge_band(m: np.ndarray, sigma: float) -> tuple[np.ndarray, np.ndarray]:
     return inner, outer
 
 
-def ribbon_poly(pts: np.ndarray, hw: np.ndarray) -> np.ndarray:
-    """中线 + 半宽 → 闭合多边形（左边去、右边回）。"""
-    return W.ribbon(np.asarray(pts, dtype=np.float64), np.asarray(hw, dtype=np.float64))
-
-
 def to_white(a_ss, seed, peak=PEAK, ss=4):
     """叠加帧：亮度场 → 白色、软饱和到 peak、蓝噪声抖动（同 vfx_frames.frame_white，超采样倍数可改）。"""
     a = V.downsample(np.clip(a_ss, 0, None), ss)
@@ -991,6 +986,216 @@ def make_ult_halo() -> list[Image.Image]:
     return [to_color(a, heat, 13810, LAMP_GOLD, ss=ss)]
 
 
+# ============================================================== 九尾登场：月亮
+
+
+MOON_SIZE = 1024
+MOON_R = 360.0  # 月面半径（像素）
+
+
+def make_fox_moon() -> list[Image.Image]:
+    """月亮（1024²，锚点居中，贴在镜头上方）：一轮满月，月面是淡墨晕出来的几块月海（边上略深、洇开），边缘一圈清亮，
+    往里稍暗（临边昏暗），外面一圈柔光和一道淡淡的月晕。白色可染（建议冷白 #DCE6FF；血月染红），叠加。"""
+    size, ss = MOON_SIZE, 2
+    X, Y = V.grid(size, size, ss)
+    c = size / 2
+    r = np.hypot(X - c, Y - c)
+    q = r / MOON_R
+    disc = smoothstep(1.0 + 1.2 / MOON_R, 1.0 - 1.2 / MOON_R, q)
+    n1 = V.noise(np.random.default_rng(14001), X.shape, 34 * ss)
+    n2 = V.noise(np.random.default_rng(14002), X.shape, 10 * ss)
+    n3 = V.noise(np.random.default_rng(14003), X.shape, 3 * ss)
+    # 月海：几块淡墨（阈值以下），边上洇一道略深的水痕
+    sea = smoothstep(0.25, 0.75, n1 + 0.25 * n2 - 0.15)
+    seam = smoothstep(0.12, 0.0, np.abs(n1 + 0.25 * n2 - 0.4)) * 0.5
+    limb = 1.0 - 0.22 * q**3  # 临边昏暗
+    bright = limb * (1.0 - 0.36 * sea - 0.12 * seam) * (0.96 + 0.04 * n3)
+    rim = smoothstep(0.02, 0.0, np.abs(q - 0.985)) * 0.25
+    face = disc * np.clip(bright + rim, 0, 1)
+    glow = np.exp(-np.maximum(q - 1.0, 0) / 0.06) * (1 - disc) * 0.45 + np.exp(-np.maximum(q - 1.0, 0) / 0.22) * (1 - disc) * 0.16
+    halo = np.exp(-(((q - 1.28) / 0.07) ** 2)) * 0.06 * (0.7 + 0.3 * smoothstep(-1, 1, n2))
+    a = np.clip(face + glow + halo, 0, 1)
+    a *= smoothstep(c - 2, c - 24, r)
+    return [to_white(a, 14010, ss=ss)]
+
+
+# ============================================================== 九尾登场：身子剪影
+
+
+FOX_W = 512
+FOX_TAIL_ROOT = (204.0, 440.0)  # 尾根（脊梁末端，代码从这里旋开九条尾巴）
+FOX_EYE = (392.0, 120.0)
+FOX_MARK = (376.0, 104.0)
+FOX_INK = V.col("#0E1318")
+FOX_RIM = V.col(FOX_CYAN)
+
+
+def sd_round_cone(X, Y, a, b, ra, rb):
+    """两头半径不同的圆锥（胶囊）的有向距离（近似，够画剪影）。"""
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    t = np.clip(((X - ax) * dx + (Y - ay) * dy) / L2, 0, 1)
+    r = ra + (rb - ra) * t
+    return np.hypot(X - ax - t * dx, Y - ay - t * dy) - r
+
+
+def sd_ellipse(X, Y, c, rx, ry, rot=0.0):
+    ca, sa = math.cos(rot), math.sin(rot)
+    u = ((X - c[0]) * ca + (Y - c[1]) * sa) / rx
+    v = (-(X - c[0]) * sa + (Y - c[1]) * ca) / ry
+    return (np.hypot(u, v) - 1.0) * min(rx, ry)
+
+
+def smin(a, b, k):
+    h = np.clip(0.5 + 0.5 * (b - a) / k, 0, 1)
+    return b * (1 - h) + a * h - k * h * (1 - h)
+
+
+def fur(d, X, Y, c, th0, th1, n, amp, lean=0.0):
+    """在以 c 为中心、角度 th0..th1 的那一段边上加一簇簇尖毛：沿角度方向一串尖峰，把距离场往外推。"""
+    th = np.arctan2(Y - c[1], X - c[0])
+    span = th1 - th0
+    q = np.mod(th - th0, 2 * math.pi) / span
+    inside = (q >= 0) & (q <= 1)
+    ph = np.mod(q * n + lean * np.clip(-d / 20.0, -1, 1), 1.0)
+    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** 3
+    env = np.sin(np.pi * np.clip(q, 0, 1)) ** 0.6
+    return d - amp * spike * env * inside * smoothstep(30, 0, np.abs(d))
+
+
+def fox_sdf(X, Y):
+    """九尾的身子（没有尾巴），朝 +X 坐着、头抬起来：用几块圆滑的形体捏出来（后胯、背、胸、颈、头、吻、耳、腿），再加胸前毛领、腮毛、后胯的毛。"""
+    haunch = sd_ellipse(X, Y, (236, 394), 66, 74, 0.2)
+    back = sd_round_cone(X, Y, (234, 382), (334, 262), 58, 44)
+    chest = sd_ellipse(X, Y, (352, 262), 40, 56, 0.15)
+    neck = sd_round_cone(X, Y, (342, 250), (374, 158), 38, 27)
+    head = sd_ellipse(X, Y, (380, 132), 36, 29, -0.25)
+    snout = sd_round_cone(X, Y, (398, 128), (450, 136), 18, 4.5)
+    jaw = sd_round_cone(X, Y, (392, 146), (440, 146), 13, 3.5)
+    ear1 = sd_round_cone(X, Y, (372, 116), (366, 50), 17, 1.5)
+    ear2 = sd_round_cone(X, Y, (350, 120), (334, 58), 15, 1.5)
+    leg1 = sd_round_cone(X, Y, (352, 300), (360, 460), 17, 8)
+    leg2 = sd_round_cone(X, Y, (376, 300), (390, 460), 15, 8)
+    paw1 = sd_ellipse(X, Y, (368, 465), 17, 7)
+    paw2 = sd_ellipse(X, Y, (398, 465), 16, 7)
+    hpaw = sd_ellipse(X, Y, (300, 464), 28, 9)
+    root = sd_round_cone(X, Y, (226, 430), (196, 448), 30, 18)
+    d = smin(haunch, back, 18)
+    d = smin(d, chest, 16)
+    d = smin(d, neck, 14)
+    d = smin(d, head, 10)
+    d = smin(d, snout, 8)
+    d = smin(d, jaw, 6)
+    d = smin(d, ear1, 5)
+    d = smin(d, ear2, 5)
+    d = smin(d, root, 10)
+    d = smin(d, hpaw, 8)
+    legs = np.minimum(smin(leg1, paw1, 5), smin(leg2, paw2, 5))
+    d = smin(d, legs, 4)
+    # 毛：胸前毛领（尖往下）、腮后一簇、后胯后面一簇
+    d = fur(d, X, Y, (350, 250), -0.85, 1.3, 6, 17, lean=0.5)
+    d = fur(d, X, Y, (378, 138), 1.6, 2.7, 3, 13)
+    d = fur(d, X, Y, (236, 394), 2.4, 3.4, 4, 7)
+    d = fur(d, X, Y, (330, 200), 3.3, 4.3, 3, 8)  # 后颈的鬃
+    return d
+
+
+def silhouette_layers(m, rim_px, ss, seed, glow_px=6.0, extra_emit=None, tint_zone=None):
+    """剪影 → (本体 RGBA, 发光层 RGBA)：本体焦墨（略带青黑）、边上一道青线；发光层是青边往外的一圈光。
+    tint_zone = (遮罩, 颜色)：这一块的墨往这个颜色过渡（尾尖透青）。"""
+    inner, outer = edge_band(m, rim_px * ss)
+    edge = np.clip(inner * 1.6, 0, 1)
+    ink = FOX_INK
+    if tint_zone is not None:
+        ink = FOX_INK * (1 - tint_zone[0][..., None]) + tint_zone[1] * tint_zone[0][..., None]
+    rgb = ink * (1 - edge[..., None]) + FOX_RIM * edge[..., None]
+    a = np.clip(m * 0.98, 0, 1)
+    body = to_paint(rgb * a[..., None], a, seed, ss=ss)
+    g_in, g_out = edge_band(m, glow_px * ss)
+    lum = 0.85 * edge + 0.5 * np.clip(g_out * 1.4, 0, 1) + 0.2 * np.clip(g_in, 0, 1)
+    heat = 0.5 + 0.5 * edge
+    if extra_emit is not None:
+        lum = F.soft_union(lum, extra_emit[0])
+        heat = np.maximum(heat, extra_emit[1])
+    emit = to_color(lum, heat, seed + 1, FOXFIRE, ss=ss)
+    return body, emit
+
+
+FOXFIRE = [(0.0, "#3FB59A"), (0.5, FOX_CYAN), (0.85, "#D8FFF4"), (1.0, "#FFFFFF")]
+
+
+def make_fox_body() -> tuple[list[Image.Image], list[Image.Image]]:
+    """九尾的身子剪影（512²，锚点在地面线正中）：朝 +X 坐着、头抬起来望月，尖耳长吻，长颈往后弯成一道弧落到后胯，
+    胸前一圈毛领、后颈一道鬃，前腿笔直。本体焦墨（带一点青黑）、一道青边，普通混合；发光层：青边往外一圈光、丹凤眼一道青、额心一点青火。
+    月亮前面的剪影要画在月亮之上（天上的层，同月亮一样在暗层之上）。尾根在 (204, 440)，九条尾巴（fox_tail）从这里旋开成扇，扇在身后。"""
+    size, ss = FOX_W, 4
+    X, Y = grid(size, size)
+    d = fox_sdf(X, Y)
+    m = smoothstep(0.5, -0.5, d)
+    ex, ey = FOX_EYE
+    eye = F.almond_field(X, Y, (ex - 8, ey + 2), (ex + 9, ey - 4), 3.6)[0]  # 丹凤眼往上挑
+    mk = F.dot(X, Y, FOX_MARK[0], FOX_MARK[1], 2.6) + 0.6 * F.almond_field(X, Y, (FOX_MARK[0], FOX_MARK[1] + 3), (FOX_MARK[0] - 2, FOX_MARK[1] - 9), 3.0)[0]
+    extra = (np.clip(eye + mk, 0, 1), np.clip(eye + mk, 0, 1))
+    body, emit = silhouette_layers(m, 1.4, ss, 14110, glow_px=7.0, extra_emit=extra)
+    return [body], [emit]
+
+
+# ============================================================== 九尾登场：一条尾巴
+
+
+TAIL_W, TAIL_H = 128, 512
+TAIL_ROOT = (64.0, 500.0)
+
+
+def make_fox_tail() -> tuple[list[Image.Image], list[Image.Image]]:
+    """九尾的一条尾巴（128×512，锚点在尾根，尾巴朝上）：根细、中段蓬、尖收，S 形，两边一簇簇往尖上歪的尖毛；
+    尖上一截青火（发光层，往上窜的火舌）。本体焦墨 + 青边，普通混合；代码从尾根旋开九条（中间长、两边短一点，前后两层错开）。"""
+    w, h, ss = TAIL_W, TAIL_H, 4
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(14201)
+    sp = V.bezier([TAIL_ROOT, (28, 396), (104, 240), (62, 92)], 90)  # 尖留出 90 像素给青火
+    t = np.linspace(0, 1, len(sp))
+    rad = 5 + 50 * np.sin(np.pi * np.clip(t, 0, 1) ** 1.36) ** 0.8  # 根细、六成处最蓬、尖收成笔尖
+    rad[-12:] = np.maximum(rad[-12:], 0) * np.linspace(1, 0.4, 12)
+    d = np.full(X.shape, 1e9)
+    tt = np.zeros(X.shape)
+    for k in range(len(sp) - 1):
+        dk = sd_round_cone(X, Y, sp[k], sp[k + 1], rad[k], rad[k + 1])
+        closer = dk < d
+        tt = np.where(closer, t[k], tt)
+        d = np.minimum(d, dk)
+    # 两边一簇簇尖毛：沿尾巴的位置排一串尖峰，越往尖越长，尖往尾尖歪
+    ph = np.mod(tt * 11 + np.clip(-d / 18.0, -1, 1) * 0.7, 1.0)
+    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** 2.5
+    d = d - (3 + 13 * tt**1.2) * spike * smoothstep(0.05, 0.25, tt) * smoothstep(30, 0, np.abs(d))
+    m = smoothstep(0.5, -0.5, d)
+    # 尖上的青火：尾尖一截发亮，往上窜三条泪滴形的火舌（中间高、两边矮，往外歪），芯白
+    acc = Acc(X, Y)
+    tip = sp[-1]
+    tdir = (sp[-1] - sp[-8]) / (np.linalg.norm(sp[-1] - sp[-8]) + 1e-9)
+    tip_zone = smoothstep(90.0, 10.0, np.hypot(X - tip[0], Y - tip[1])) * m
+    acc.add((slice(None), slice(None)), 0.32 * tip_zone, 0.8)
+    base = sp[-11]
+    for off, L, wd, lean in ((0.0, 128.0, 21.0, 0.05), (-11.0, 86.0, 14.0, -0.38), (11.0, 92.0, 14.0, 0.34)):
+        nrm = np.array([-tdir[1], tdir[0]])
+        b0 = base + nrm * off
+        ang = math.atan2(tdir[1], tdir[0]) + lean
+        t0 = b0 + L * np.array([math.cos(ang), math.sin(ang)])
+        sl = acc.window(min(b0[0], t0[0]) - wd, min(b0[1], t0[1]) - wd, max(b0[0], t0[0]) + wd, max(b0[1], t0[1]) + wd)
+        cov, dd, along = F.almond_field(X[sl], Y[sl], b0, t0, wd, bulge=0.3)
+        rim = smoothstep(2.0, 0.0, np.abs(dd)) * (dd < 0.8)
+        brk = dry(tex := W.ptex(np.random.default_rng(14202), ns=16, nt=256, along=12.0, across=0.6), np.clip(dd / wd, -1, 1), along * 0.6 + off * 0.01, 0.1 + 0.5 * along**2)
+        acc.add(sl, (0.35 * cov + 0.7 * rim) * brk, 0.7 + 0.3 * (1 - along))
+        core = smoothstep(0.55, 0.0, along) * cov * smoothstep(-wd * 0.18, -wd * 0.4, dd)
+        acc.add(sl, 0.9 * core, 1.0)
+    extra = (np.clip(acc.a, 0, 1), np.clip(acc.heat(), 0, 1))
+    teal = smoothstep(0.72, 0.98, tt) * m  # 尾尖那一截墨里透出青
+    body, emit = silhouette_layers(m, 1.3, ss, 14210, glow_px=6.0, extra_emit=extra, tint_zone=(teal, V.col('#1E5A50')))
+    return [body], [emit]
+
+
 # ============================================================== 规格与写出
 
 # 名字 → (生成函数, 尺寸, 锚点, 混合, 可染, 颜色, 附加 meta)。生成函数返回帧列表；返回 (本体, 发光层) 的写两组。
@@ -1026,6 +1231,18 @@ SPECS: dict = {
                           "从 0.4 倍长到盖满全屏（约 2 倍）；叠加、自带灯金色；佛光期间暗层提亮到八成"}),
     "ult_halo": (make_ult_halo, (HALO_SIZE, HALO_SIZE), (0.5, 0.5), "add", False, "full",
                  {"note": "头光：圆光 + 放射纹 + 一圈小珠 + 火焰纹，锚点居中，放在莲灯后面（也可以放主角头后），跟着慢转；叠加、自带灯金色"}),
+    "fox_moon": (make_fox_moon, (MOON_SIZE, MOON_SIZE), (0.5, 0.5), "add", True, "white",
+                 {"tint_hint": "#DCE6FF", "radius_px": int(MOON_R), "screen_space": "top",
+                  "note": "九尾登场的月亮：满月，淡墨晕的月海、临边昏暗、一圈柔光和淡月晕；锚点居中，贴在镜头上方，代码从 0.6 倍放大到约 1.6 倍压到画面上方。"
+                          "白色可染（建议冷白 #DCE6FF，血月染红），叠加"}),
+    "fox_body": (make_fox_body, (FOX_W, FOX_W), (0.5, 471 / FOX_W), "normal", False, "full",
+                 {"emit": "fox_body_emit", "sockets": {"tail_root": [FOX_TAIL_ROOT[0], FOX_TAIL_ROOT[1]], "eye": list(FOX_EYE)},
+                  "note": "九尾的身子剪影（没有尾巴）：朝 +X 坐着、头抬起来望月；锚点在地面线正中；尾根挂点 tail_root，九条 fox_tail 从这里旋开成扇（扇在身后）。"
+                          "焦墨（带一点青黑）+ 一道青边，普通混合；在月亮前面时要画在月亮之上（同月亮一样在暗层之上）；发光层见 fox_body_emit"}),
+    "fox_tail": (make_fox_tail, (TAIL_W, TAIL_H), (TAIL_ROOT[0] / TAIL_W, TAIL_ROOT[1] / TAIL_H), "normal", False, "full",
+                 {"emit": "fox_tail_emit", "points": "-y",
+                  "note": "九尾的一条尾巴：锚点在尾根，尾巴朝上（−Y），S 形、两边一簇簇尖毛；代码从身子的 tail_root 旋开九条成扇（−78°…+78°，"
+                          "中间长、两边短，前后两层错开），一条条展开。焦墨 + 青边，普通混合；发光层见 fox_tail_emit（青边、尾尖的青火）"}),
 }
 EMIT_SPECS = {
     "sword_cloud": {"name": "sword_cloud_emit", "blend": "add", "tint": False, "color": "full",
@@ -1033,7 +1250,12 @@ EMIT_SPECS = {
 }
 EMIT_SPECS["kun_sea"] = {"name": "kun_sea_emit", "blend": "add", "tint": False, "color": "full",
                          "note": "冰海的发光层：冰缝、水边冰下透的光、冰板缝、浪尖亮线和碎光；叠加、自带冰色（#7FB6E8 → #CDEBFF → 白），画在暗层之上"}
-GROUPS = {"sword": ["sword_blade", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_leap"], "ult": ["ult_lotus", "ult_rays", "ult_halo"]}
+EMIT_SPECS["fox_body"] = {"name": "fox_body_emit", "blend": "add", "tint": False, "color": "full",
+                          "note": "九尾身子的发光层：青边往外一圈光、丹凤眼、额心青火印；叠加、自带狐火青（#3FB59A → #8FE3C8 → 白）"}
+EMIT_SPECS["fox_tail"] = {"name": "fox_tail_emit", "blend": "add", "tint": False, "color": "full",
+                          "note": "九尾尾巴的发光层：青边、尾尖一截青火往上窜；叠加、自带狐火青"}
+GROUPS = {"sword": ["sword_blade", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_leap"], "ult": ["ult_lotus", "ult_rays", "ult_halo"],
+          "fox": ["fox_moon", "fox_body", "fox_tail"]}
 
 
 def meta_for(name, spec, n, i, size_override=None, emit=None):

@@ -663,6 +663,142 @@ def ult_panel(k: int) -> tuple[Z.Shot, str]:
     return shot, "1.3 秒 · 佛光收拢、淡下去，妖物只剩灰，灰和余烬飘得比平时高；接现在的三拍（墨浪、余烬）"
 
 
+# ============================================================== 九尾登场
+
+
+FOX_T = lin("#8FE3C8").astype(np.float32)
+MOON_T = lin("#DCE6FF").astype(np.float32)
+FAN = [32.0 - 15.5 * k for k in range(9)]  # 扇开以后每条尾巴的角度（离竖直，往右为正）；扇从右往左一条条打开
+
+
+def fox_fan(img, cx, cy, sc, opened, alpha=1.0, emit_gain=1.0):
+    """月前的九尾剪影：身子锚点放在画面 (cx, cy)，sc 是画面像素 / 贴图像素。opened[k] 是第 k 条尾巴打开了多少（0 合着、1 到位）。
+    尾巴先画（在身子后面），从合着的位置（最右那条的角度）往左转到自己的角度；中间几条长，两边短一点，前后两层错开明暗。"""
+    body, be = parts("fox_body")[0], parts("fox_body_emit")[0]
+    tail, te = parts("fox_tail")[0], parts("fox_tail_emit")[0]
+    bs = sc * 1.14  # 身子比尾巴大一点
+    rx, ry = cx + (P.FOX_TAIL_ROOT[0] - 256) * bs, cy + (P.FOX_TAIL_ROOT[1] - 471) * bs
+    anc = (P.TAIL_ROOT[0] / P.TAIL_W, P.TAIL_ROOT[1] / P.TAIL_H)
+    order = sorted(range(9), key=lambda k: (k % 2, -abs(k - 4)))  # 后层（奇数）先画
+    for k in order:
+        o = opened[k]
+        if o <= 0:
+            continue
+        ease = 1 - (1 - min(o, 1.0)) ** 2.2
+        ang = FAN[0] + (FAN[k] - FAN[0]) * ease
+        lk = 0.86 * (1.06 - 0.16 * abs(k - 4) / 4) * (0.94 if k % 2 else 1.0)
+        back = 0.75 if k % 2 else 1.0
+        a_ = math.radians(ang)
+        flip = ang < FAN[4]
+        Z.blit(img, Z.pm_of(tail), rx, ry, anc, sc * lk, angle=a_, flip=flip, alpha=alpha * min(1.0, o * 3))
+        Z.blit(img, Z.pm_of(te), rx, ry, anc, sc * lk, angle=a_, flip=flip, mode="add", gain=Z.EMIT * emit_gain * back * alpha * min(1.0, o * 3))
+    Z.blit(img, Z.pm_of(body), cx, cy, (0.5, 471 / 512), bs, alpha=alpha)
+    Z.blit(img, Z.pm_of(be), cx, cy, (0.5, 471 / 512), bs, mode="add", gain=Z.EMIT * emit_gain * alpha)
+
+
+def moon_at(img, x, y, radius_px, alpha=1.0):
+    moon = parts("fox_moon")[0]
+    Z.blit(img, Z.pm_of(moon, tint=MOON_T), x, y, (0.5, 0.5), radius_px / P.MOON_R, mode="add", gain=Z.EMIT * alpha)
+
+
+def moon_light(gain):
+    """月亮压下来时，月光把整片地照冷一点（光照图）。"""
+    def light(lm, cam):
+        Z.glow_ellipse(lm, SW / 4, 0, SW / 2 * 0.9, SH / 2 * 1.1, MOON_T, gain, power=1.0)
+    return light
+
+
+def fox_panel(k: int) -> tuple[Z.Shot, str]:
+    if k == 0:
+        cam = Z.Cam(z=0.97, cy=4.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.62), pool=0.75, bloom=0.3, vignette=0.42)
+        shot.light.append(moon_light(0.12))
+
+        def sky(img, cam):
+            moon_at(img, 960, 262, 250, alpha=0.65)
+            r2 = np.random.default_rng(101)
+            for _ in range(40):  # 月边飘的几缕青光（狐火将起）
+                a = r2.uniform(0, 2 * math.pi)
+                rr = r2.uniform(255, 330)
+                Z.glow(img, 960 + rr * math.cos(a), 262 + rr * math.sin(a), r2.uniform(1.5, 3), FOX_T, 0.6, power=2)
+
+        shot.sky.append(sky)
+        return shot, "0.5 秒 · 天暗下来，一轮满月放大、压到画面上方，月光把地照冷；月边飘起几点青光"
+    if k == 1:
+        cam = Z.Cam(z=0.93, cy=4.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.6), pool=0.72, bloom=0.2, vignette=0.4)
+        shot.light.append(moon_light(0.15))
+        t = 1.3
+        opened = [np.clip((t - (0.6 + 0.12 * j)) / 0.25, 0, 1) for j in range(9)]
+
+        def sky(img, cam):
+            moon_at(img, 960, 262, 315, alpha=0.7)
+            fox_fan(img, 1060, 536, 1.02, opened)
+
+        shot.sky.append(sky)
+        return shot, "1.3 秒 · 拉远看全景：月前浮出九尾的剪影，尾巴从右往左一条条旋开（已开五条），每条尾尖亮起一点青火"
+    if k == 2:
+        cam = Z.Cam(z=0.9, cy=4.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.58), pool=0.7, bloom=0.26, vignette=0.38)
+        shot.light.append(moon_light(0.16))
+
+        def sky(img, cam):
+            moon_at(img, 960, 262, 320, alpha=0.7)
+            fox_fan(img, 1060, 536, 1.02, [1.0] * 9)
+            r2 = np.random.default_rng(102)
+            for _ in range(70):  # 尾尖散出来的青火星
+                a = math.radians(r2.uniform(-100, 40)) - math.pi / 2
+                rr = r2.uniform(300, 520)
+                x, y = 1060 + (204 - 256) * 1.16 + rr * math.cos(a), 536 + (440 - 471) * 1.16 + rr * math.sin(a)
+                Z.glow(img, x, y, r2.uniform(1.5, 3.5), FOX_T, r2.uniform(0.4, 1.0), power=2)
+
+        shot.sky.append(sky)
+        return shot, "1.75 秒 · 九尾全开成扇，月前一道剪影：焦墨身子、青边，尾尖九点青火；《南山经》“有兽如狐而九尾”"
+    # k == 3：剪影落下，化成真身，一圈狐火环亮起
+    cam = Z.Cam(z=0.9, cy=4.0, shake=(-6.0, 5.0))
+    bx, by = 30.0, -92.0
+    actors = Z.default_actors()
+    actors = [a_ for a_ in actors if math.hypot(a_.x - bx, a_.y - by) > 70]
+    boss = Z.Actor("boss/summon_E_02", bx, by, atlas="boss", flip=False)
+    actors.append(boss)
+    shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.66), pool=0.75, bloom=0.42, vignette=0.36)
+    shot.light.append(moon_light(0.08))
+    ring_n, ring_r = 14, 112.0
+
+    def light(lm, cam):
+        x, y = cam.s(bx, by)
+        Z.glow_ellipse(lm, x / 2, y / 2, ring_r * 1.3 * cam.k / 2, ring_r * 1.3 * FLAT * cam.k / 2, FOX_T, 0.35, power=1.2)
+
+    def ground(img, cam):
+        x, y = cam.s(bx, by)
+        sw = M.atlas_frame("vfx", "vfx/kill_ink_5")[0]
+        for j in range(6):  # 落地砸起的一圈墨尘
+            a = 2 * math.pi * j / 6 + 0.4
+            Z.blit(img, Z.pm_of(sw), x + 150 * math.cos(a), y + 150 * FLAT * math.sin(a), (0.5, 0.5), cam.sprite * 1.2, angle=a, alpha=0.35)
+
+    def add(img, cam):
+        x, y = cam.s(bx, by)
+        sw = M.atlas_frame("vfx", "vfx/shockwave_2")[0]
+        Z.blit(img, Z.pm_of(sw, tint=FOX_T), x, y, (0.5, 0.5), cam.sprite * 1.4, mode="add", gain=Z.EMIT * 0.7)
+        ff = [M.atlas_frame("vfx", f"weapons/foxfire_{i}")[0] for i in range(3)]
+        for j in range(ring_n):  # 狐火环：现成的狐火弹排一圈，朝外
+            a = 2 * math.pi * j / ring_n
+            px, py = cam.s(bx + ring_r * math.cos(a), by + ring_r * FLAT * math.sin(a), 14)
+            ang = math.atan2(FLAT * math.sin(a), math.cos(a))
+            Z.blit(img, Z.pm_of(ff[j % 3], tint=FOX_T), px, py, (0.6, 0.5), cam.sprite * 1.8, angle=ang, mode="add", gain=Z.EMIT)
+            Z.glow(img, px, py, 30, FOX_T, 0.3, power=2)
+        Z.glow_ellipse(img, x, y, ring_r * cam.k * 1.05, ring_r * FLAT * cam.k * 1.05, FOX_T, 0.06, power=0.6)
+
+    def sky(img, cam):
+        moon_at(img, 960, 250, 300, alpha=0.12)
+
+    shot.light.append(light)
+    shot.ground.append(ground)
+    shot.add.append(add)
+    shot.sky.append(sky)
+    return shot, "2.3 秒 · 剪影落下化成真身，砸地顿帧 0.12 秒、震屏 0.5，一圈狐火环亮起（现成狐火弹排一圈）；月亮退回去，接登场题字"
+
+
 # ============================================================== 汇总
 
 SHOWS = {
@@ -689,6 +825,14 @@ SHOWS = {
         "title": "燃灯（大招）· 1.3 秒，接现在的三拍 · 分镜",
         "sub": "《大智度论》：燃灯佛生时，身边如灯。元件：myth/ult_lotus_0..7（莲灯开合）、ult_rays（放射佛光，两张反向转）、ult_halo（头光）；"
                "光迹、暗层提亮、化灰（烧边余烬、灰片上飘）是代码的示意",
+    },
+    "fox": {
+        "panels": fox_panel,
+        "n": 4,
+        "hero": 2,
+        "title": "九尾登场（夜主）· 3.0 秒，接现在的登场题字 · 分镜",
+        "sub": "《南山经》：青丘之山，有兽如狐而九尾。元件：myth/fox_moon（月亮，叠加可染冷白）、fox_body + _emit（身子剪影，焦墨描青边）、fox_tail + _emit（一条尾巴，代码旋开九条）；"
+               "尾巴旋开的排法、青火星、落地墨尘、狐火环（现成 weapons/foxfire）是代码的示意",
     },
 }
 
