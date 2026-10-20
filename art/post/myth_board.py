@@ -38,8 +38,9 @@ WARM_WHITE = lin("#FFF4DC").astype(np.float32)
 
 
 def parts(name):
+    """读元件；名字以 _emit 结尾的读发光层（文件名是帧号在前、_emit 在后）。"""
     if name not in _CACHE:
-        _CACHE[name] = P.load(name)
+        _CACHE[name] = P.load(name[:-5], emit=True) if name.endswith("_emit") else P.load(name)
     return _CACHE[name]
 
 
@@ -164,6 +165,17 @@ def spot_light(lm, cam, x, y, r_units, color, gain, power=1.4):
     Z.glow_ellipse(lm, sx / 2, sy / 2, r_units * cam.k / 2, r_units * FLAT * cam.k / 2, color, gain, power=power)
 
 
+GIANTS = [(0.5, 2.0, 0.0, 0.0, 0.55), (0.55, 2.3, -0.022, -9.0, 0.16), (0.46, 1.7, 0.02, 8.0, 0.14)]  # (缩放, 粗细, 角度, 横移, 亮度)：剑尖落在云缝里
+
+
+def giant_column(img, cam, gx, gy, gain=1.0):
+    """剑柱最外一层：几张 sword_giant 叠成一柄顶天的大剑（剑格在 (gx, gy)，剑尖朝上），大小、粗细、角度错开一点。"""
+    gs = parts("sword_giant")[0]
+    for scl, sy, dang, dx, al in GIANTS:
+        Z.blit(img, Z.pm_of(gs, tint=GOLD_T), gx + dx, gy, (250.0 / P.GIANT_W, 0.5), scl, angle=-math.pi / 2 + dang, sy=sy,
+               mode="add", gain=Z.EMIT * al * gain)
+
+
 def sword_panel(k: int) -> tuple[Z.Shot, str]:
     hx, hy = Z.HERO
     if k == 0:
@@ -221,36 +233,34 @@ def sword_panel(k: int) -> tuple[Z.Shot, str]:
         return shot, "1.2 秒 · 120 柄剑影从四周飞来，螺旋汇成剑河绕身两圈（外圈低、内圈高），每柄拖一道光；云压满上空"
     if k == 2:
         cam = Z.Cam(z=1.06, cy=4.0, shake=(5.0, -3.0))
-        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.7), pool=0.5, bloom=0.61, vignette=0.34)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.66), pool=0.36, bloom=0.36, vignette=0.36)
         rng = np.random.default_rng(41)
         col = []
         bx, by = cam.s(hx, hy, 26)
-        for j in range(90):  # 剑柱：三股拧在一起往上冲，越往上越散开一点
+        for j in range(54):  # 小剑影：绕着大剑往上冲，在剑身两边拧成两股
             strand = j % 3
             hh = rng.uniform(30, 340)
             spread = 0.55 + 0.45 * min(hh / 140, 1)
             phase = hh / 34.0 + strand * 2 * math.pi / 3
-            xo = 40 * spread * math.sin(phase) + rng.normal(0, 4)
+            xo = (40 + 8 * spread) * math.sin(phase) + rng.normal(0, 3)
             x, y = cam.s(hx + xo, hy, 26 + hh)
             sc = rng.uniform(1.5, 1.9) * (1.1 - 0.2 * min(hh / 300, 1))
             ang = -math.pi / 2 + 0.22 * math.cos(phase) * spread
             L = rng.uniform(40, 90)
             tp = [(x - L * (1 - q) * math.cos(ang), y - L * (1 - q) * math.sin(ang)) for q in np.linspace(0, 1, 6)]
-            col.append((x, y, ang, int(rng.integers(3)), sc, rng.uniform(0.48, 0.72), tp))
+            col.append((x, y, ang, int(rng.integers(3)), sc * 0.85, rng.uniform(0.35, 0.55), tp))
         funnel = river_swords(cam, t_head=4.2, n=30, turns=1.0, R0=100, R1=28, h0=8, h1=56, seed=7, spread=0.6, size=(1.35, 1.6))
 
         def light(lm, cam):
-            spot_light(lm, cam, hx, hy, 70, GOLD_T, 0.45, power=1.1)
-            spot_light(lm, cam, hx, hy, 200, GOLD_DEEP, 0.18, power=1.6)
+            spot_light(lm, cam, hx, hy, 70, GOLD_T, 0.3, power=1.1)
+            spot_light(lm, cam, hx, hy, 200, GOLD_DEEP, 0.14, power=1.6)
 
         def add(img, cam):
             top = -60
             god_rays(img, SW / 2 + cam.shake[0], 170, 11, 0.7, 1150, GOLD_T, 0.11, 61, width=(40, 120))
-            Z.stroke(img, [(bx, top), (bx, by)], [170, 130], GOLD_DEEP, alpha=[0.04, 0.06], soft=70)
-            Z.stroke(img, [(bx, top), (bx, by)], [44, 34], GOLD_T, alpha=[0.05, 0.1], soft=18)
-            Z.stroke(img, [(bx, top), (bx, by)], [5, 4], WARM_WHITE, alpha=[0.15, 0.25], soft=3)
-            draw_swords(img, cam, funnel, trail_w=1.8, trail_a=0.25, echoes=1)
-            draw_swords(img, cam, col, trail_w=1.4, trail_a=0.24, echoes=2)
+            draw_swords(img, cam, funnel, trail_w=1.8, trail_a=0.22, echoes=1)
+            draw_swords(img, cam, col, trail_w=1.2, trail_a=0.2, echoes=1)
+            giant_column(img, cam, bx, by - 34)
             gx, gy = cam.s(hx, hy)
             sw = M.atlas_frame("vfx", "vfx/shockwave_2")[0]
             Z.blit(img, Z.pm_of(sw, tint=GOLD_T), gx, gy, (0.5, 0.5), cam.sprite * 1.25, mode="add", gain=Z.EMIT * 0.3)
@@ -260,41 +270,81 @@ def sword_panel(k: int) -> tuple[Z.Shot, str]:
         shot.sky.append(cloud_layer(3, cy=140.0, scale=2.1))
         shot.light.append(light)
         shot.add.append(add)
-        return shot, "2.0 秒 · 剑河冲天，三股拧成一道剑柱，把上空的云劈开（上决浮云），缝里漏下金光；震屏 0.35、辉光猛涨"
-    # k == 3
-    cam = Z.Cam(z=1.03, cy=4.0)
-    shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.85), pool=0.8, bloom=0.4, vignette=0.3)
-    rng = np.random.default_rng(51)
-    bx, by = cam.s(hx, hy, 26)
+        return shot, "2.0 秒 · 剑河冲天：三柄大剑影叠成一柄顶天的大剑（剑格在主角头顶、剑尖顶进云缝），小剑影绕着剑身往上冲，把上空的云劈开（上决浮云）；震屏 0.35、辉光猛涨"
+    # k == 3：归宗——剑影收拢，飞回主角手里的符剑，剑身一亮，扣“归宗”二字
+    cam = Z.Cam(z=1.06, cy=4.0)
+    shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.72), pool=0.62, bloom=0.42, vignette=0.36)
+    sx_, sy_ = cam.s(hx + 12, hy, 30)  # 符剑：主角右手边，剑尖朝上
+    sword = M.atlas_frame("vfx", "weapons/sword_evo")[0]
 
     def light(lm, cam):
-        spot_light(lm, cam, hx, hy, 80, GOLD_T, 0.5)
-        for _ in range(26):  # 落下的光点照亮地面一小片
-            x, y = rng.uniform(-330, 330), rng.uniform(-190, 190)
-            spot_light(lm, cam, x, y, rng.uniform(8, 16), GOLD_T, 0.16, power=2.0)
+        Z.glow(lm, sx_ / 2, sy_ / 2, 60 * cam.k / 2, GOLD_T, 0.5, power=1.4)
+
+    def over(img, cam):
+        Z.blit(img, Z.pm_of(sword), sx_, sy_, (0.6, 0.5), cam.sprite * 2.2, angle=-math.pi / 2)
+        guizong(img, 690, 250, 150, layer="ink")
 
     def add(img, cam):
-        Z.stroke(img, [(bx, -40), (bx, by)], [60, 40], GOLD_T, alpha=[0.05, 0.16], soft=24)
-        r2 = np.random.default_rng(52)
-        for j in range(380):  # 剑影化成的光点往下落：剑柱那一带密、上面密，竖着拖一小截
-            near_col = r2.random() < 0.35
-            x = r2.normal(SW / 2, 90 if near_col else 520) if r2.random() < 0.8 else r2.uniform(0, SW)
-            y = r2.uniform(-10, SH) * (0.45 + 0.55 * r2.random())
-            if not (0 < x < SW):
+        r2 = np.random.default_rng(53)
+        inc = []
+        for j in range(72):  # 剑影从四面八方收回来，剑尖朝着符剑，越近越亮、越密
+            ang = r2.uniform(0, 2 * math.pi)
+            R = 30 + 420 * r2.uniform(0, 1) ** 1.6
+            x, y = sx_ + R * math.cos(ang), sy_ - 40 + R * 0.75 * math.sin(ang)
+            hd = math.atan2(sy_ - 40 - y, sx_ - x)
+            L = 40 + 0.35 * R
+            tp = [(x - L * (1 - q) * math.cos(hd), y - L * (1 - q) * math.sin(hd)) for q in np.linspace(0, 1, 6)]
+            if R < 60:
                 continue
-            r = r2.uniform(1.2, 3.2)
-            L = r2.uniform(8, 26) * r / 2
-            a = r2.uniform(0.35, 1.0)
-            Z.stroke(img, [(x, y - L), (x, y)], [0.3, 1.6 * r], GOLD_T, alpha=[0.0, 0.6 * a], gain=Z.EMIT)
-            Z.glow(img, x, y, r * 2.2, WARM_WHITE, 0.9 * a, power=2.0)
-        for j in range(18):  # 还没散完的几柄，半透明、竖着往下掉
-            x, y = r2.normal(SW / 2, 260), r2.uniform(60, 520)
-            sword_at(img, cam, x, y, math.pi / 2 + r2.uniform(-0.3, 0.3), int(r2.integers(3)), 1.1, r2.uniform(0.25, 0.5))
+            inc.append((x, y, hd, int(r2.integers(3)), r2.uniform(1.1, 1.45), (0.8 - 0.45 * R / 450), tp))
+        draw_swords(img, cam, inc, trail_w=1.4, trail_a=0.3)
+        # 剑身一亮：沿剑身一道白光、剑尖一颗星芒
+        L = 104 * cam.sprite * 2.2
+        top = (sx_, sy_ - 0.4 * L)
+        Z.stroke(img, [(sx_, sy_ + 0.6 * L), top], [10, 4], WARM_WHITE, alpha=[0.3, 0.9], soft=4, gain=Z.EMIT)
+        Z.glow(img, sx_, sy_ - 0.1 * L, 60, GOLD_T, 0.2, power=1.8)
+        crit = M.atlas_frame("vfx", "vfx/crit_0")[0]
+        Z.blit(img, Z.pm_of(crit), top[0], top[1] - 6, (0.5, 0.5), 0.42, mode="add", gain=Z.EMIT * 0.7)
+        for _ in range(26):  # 少量拖尾火星
+            a = r2.uniform(0, 2 * math.pi)
+            R = r2.uniform(30, 160)
+            x, y = sx_ + R * math.cos(a), sy_ - 40 + R * 0.8 * math.sin(a)
+            Lk = r2.uniform(8, 22)
+            Z.stroke(img, [(x + Lk * math.cos(a), y + Lk * math.sin(a)), (x, y)], [0.3, 2.0], GOLD_T, alpha=[0.0, 0.8], gain=Z.EMIT)
+        guizong(img, 690, 250, 150, layer="gold")
 
-    shot.sky.append(cloud_layer(5))
+    shot.sky.append(cloud_layer(5, alpha=0.7, emit_gain=0.6))
     shot.light.append(light)
+    shot.over.append(over)
     shot.add.append(add)
-    return shot, "2.45 秒 · 剑柱散了，剑影化成光点纷纷落下，照亮一片片地面；云退到两边散开，演出最后 0.4 秒淡出"
+    return shot, "2.4 秒 · 归宗：剑柱散开，所有剑影收拢、飞回主角手里的符剑，剑身一亮，扣下“归宗”二字（金字，题字层）；只剩几点拖尾火星，然后淡出"
+
+
+_GZ: dict = {}
+
+
+def guizong(img, x, y, size, layer):
+    """“归宗”二字（示意：马善政体，竖排）。ink 是垫在字下面的一层淡墨（普通混合），gold 是金字（叠加）。"""
+    key = (x, y, size)
+    if key not in _GZ:
+        from PIL import ImageDraw, ImageFilter, ImageFont
+        font = ImageFont.truetype(str(V.OUT / "fonts" / "MaShanZheng-Regular.ttf"), size)
+        m = Image.new("L", (int(size * 1.4), int(size * 2.5)), 0)
+        d = ImageDraw.Draw(m)
+        for i, ch in enumerate("归宗"):
+            d.text((size * 0.2, size * 0.1 + i * size * 1.15), ch, fill=255, font=font)
+        a = np.asarray(m, dtype=np.float32) / 255.0
+        back = np.asarray(m.filter(ImageFilter.GaussianBlur(size * 0.12)), dtype=np.float32) / 255.0
+        _GZ[key] = (a, back)
+    a, back = _GZ[key]
+    h, w = a.shape
+    x0, y0 = int(x - w / 2), int(y)
+    reg = img[y0 : y0 + h, x0 : x0 + w]
+    if layer == "ink":
+        k = np.clip(back * 1.6, 0, 0.75)[..., None]
+        reg[:] = reg * (1 - k) + lin("#17140F").astype(np.float32) * k
+    else:
+        reg += (a[..., None] * GOLD_T * 0.9 + np.clip(back - a, 0, 1)[..., None] * GOLD_T * 0.35) * Z.EMIT
 
 
 def S_DIM(k: float) -> str:
@@ -807,8 +857,8 @@ SHOWS = {
         "n": 4,
         "hero": 2,
         "title": "万剑归宗（符剑进化）· 2.6 秒 · 分镜",
-        "sub": "《庄子·说剑》：天子之剑，上决浮云。元件：myth/sword_blade_0..2（剑影 3 种，叠加染金）、sword_cloud_0..5 + _emit（被劈开的云，焦墨 + 裂口金光）；"
-               "拖尾、光点、聚光、剑柱的光是代码画的示意",
+        "sub": "《庄子·说剑》：天子之剑，上决浮云。元件：myth/sword_blade_0..2（剑影 3 种，叠加染金）、sword_giant（大剑影，剑柱最外一层叠四张）、"
+               "sword_cloud_0..5 + _emit（被劈开的云，焦墨 + 裂口金光）；拖尾、聚光、云缝光、收拢的排法、“归宗”题字是代码 / 界面的示意",
     },
     "kun": {
         "panels": kun_panel,

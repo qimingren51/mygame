@@ -4,15 +4,15 @@
 约定同逐帧特效（FEEL 第 12 节、vfx_frames.py）：
   - 2 倍密度（4 像素 / 世界单位），一次性的按 24 帧/秒；叠加帧最亮处 alpha 约 0.8，边上要飞白、干笔断续；
   - 普通混合的墨用焦墨 #17140F；方向朝 +X；地面的已按透视压扁（高 ÷ 宽 ≈ 0.62）。
-  - 帧名 myth/<演出>_<元件>_<帧号>，单张的不带帧号；发光层是同画布、同锚点、同帧号的 <演出>_<元件>_emit_<帧号>，
-    meta 写 layer_of（同 weapons/sky_lantern_emit 的写法）：本体普通混合（暗层之下），发光层叠加（暗层之上）。
+  - 帧名 myth/<演出>_<元件>_<帧号>，单张的不带帧号；发光层是同画布、同锚点、同帧号的 <演出>_<元件>_<帧号>_emit（单张的 <演出>_<元件>_emit，
+    同 actors 图集），meta 写 layer_of：本体普通混合（暗层之下），发光层叠加（暗层之上）。
   - 放新图集 myth（演出少见，单独一页）。
 
 元件（FEEL 13.2）：
-  万剑归宗  sword_blade_0..2（3 种剑影，96×24，叠加，可染金，挑着用）
+  万剑归宗  sword_blade_0..2（3 种剑影，96×24，叠加，可染金，挑着用）、sword_giant（大剑影，1024×160，剑柱最外一层）
             sword_cloud_0..5（被劈开的云，1024×512，焦墨）+ sword_cloud_emit_0..5（裂口金光，叠加）
   北冥潮    kun_sea_0..5（脚下冰海，1024×640 已压扁，墨蓝）+ kun_sea_emit_0..5（冰光，叠加）
-            kun_shadow（鲲影，1536×512，焦墨半透明，头朝 +X）
+            kun_shadow（鲲影，1536×512，焦墨，头朝 +X）+ kun_shadow_emit、kun_fin（露出水面的背鳍）+ kun_fin_emit
             kun_leap_0..5（鲲跃出水的冷光剪影，768×768，叠加，#CDEBFF）
   燃灯      ult_lotus_0..7（莲灯开合，256×320，叠加，锚点底边中点）、ult_rays（放射佛光，2048²，叠加）、ult_halo（头光，512²，叠加）
   九尾登场  fox_moon（月亮，1024²，叠加冷白，可染）、fox_body（身子剪影，512²，焦墨描青边）+ fox_body_emit、
@@ -356,6 +356,70 @@ def make_sword_cloud() -> tuple[list[Image.Image], list[Image.Image]]:
     return cloud, emit
 
 
+# ============================================================== 万剑归宗：大剑影（剑柱最外一层）
+
+
+GIANT_W, GIANT_H = 1024, 160
+
+
+def make_sword_giant() -> list[Image.Image]:
+    """大剑影（1024×160，剑尖朝 +X，锚点在剑格中心）：剑柱最外一层，代码拿 3–5 张叠成一柄顶天的大剑（大小、角度、明暗错开）。
+    剑身直、两刃，中脊一线最亮，脊两边各一道细的血槽线；剑身上一串淡的符文（刻进去的，暗）；如意剑格两头卷起；缠绳剑柄、圆环剑首，
+    剑首拖两缕剑穗（飞白）。剑尖一点烧白。白色可染（建议金 #FFE7A8），叠加。"""
+    w, h, ss = GIANT_W, GIANT_H, 2
+    X, Y = V.grid(h, w, ss)
+    cy = h / 2
+    rng = np.random.default_rng(13901)
+    tex = W.ptex(rng, ns=24, nt=1024, along=40.0, across=0.6)
+    gx = 250.0  # 剑格
+    tip = 1010.0
+    u = np.clip((X - gx) / (tip - gx), 0, 1)
+    hw = 21.0 - 4.0 * u
+    tq = np.clip((u - 0.84) / 0.16, 0, 1)
+    hw = hw * (1 - tq**1.1)
+    inside = (X >= gx) & (X <= tip)
+    d = np.abs(Y - cy) - hw
+    cov = smoothstep(0.6, -0.6, d) * inside
+    edge = smoothstep(1.8, 0.0, np.abs(d)) * inside * (hw > 0.3)
+    ridge = smoothstep(1.4, 0.0, np.abs(Y - cy)) * inside * (u < 0.985)
+    groove = smoothstep(1.0, 0.0, np.abs(np.abs(Y - cy) - hw * 0.45)) * inside * smoothstep(0.02, 0.06, u) * smoothstep(0.8, 0.72, u)
+    body = cov * (0.16 + 0.06 * W.sample_ptex(tex, np.clip((Y - cy) / 20, -1, 1), u * 0.8))
+    # 符文：剑身上一串刻进去的短笔画（发暗）
+    glyph = np.zeros_like(X)
+    for k in range(9):
+        x0 = 300 + k * 34 + rng.uniform(-4, 4)
+        for _ in range(3):
+            a = rng.uniform(-1.2, 1.2)
+            L = rng.uniform(5, 10)
+            xa, ya = x0 + rng.uniform(-6, 6), cy + rng.uniform(-7, 7)
+            dd, _t = F.seg(X, Y, xa, ya, xa + L * math.cos(a), ya + L * math.sin(a))
+            glyph = np.maximum(glyph, smoothstep(1.4, 0.4, dd))
+    glyph *= inside
+    glint = np.exp(-(((X - (tip - 10)) / 10) ** 2 + ((Y - cy) / 4) ** 2))
+    halo = np.exp(-np.maximum(d, 0) ** 2 / 18.0) * inside * (1 - cov)
+    # 如意剑格：中间一块，两头往剑尖那边卷
+    gq = np.hypot((X - (gx - 8)) / 9.0, (Y - cy) / 50.0)
+    guard = smoothstep(1.04, 0.92, gq)
+    curls = np.zeros_like(X)
+    for sgn in (-1, 1):
+        cxk, cyk = gx + 2, cy + sgn * 50
+        rr = np.hypot(X - cxk, Y - cyk)
+        curls = np.maximum(curls, smoothstep(2.2, 0.4, np.abs(rr - 9.0)) * ((X - cxk) * 1.0 > -12))
+        curls = np.maximum(curls, smoothstep(10.5, 8.0, rr) * 0.5)
+    guard_rim = smoothstep(2.0, 0.0, np.abs(gq - 0.98)) * 0.6
+    grip = smoothstep(0.6, -0.6, np.abs(Y - cy) - 8.5) * ((X > 120) & (X < gx - 16))
+    wrap = 0.55 + 0.45 * (np.sin((X - 120) * 0.62 + (Y - cy) * 0.5) > 0)
+    pommel_r = np.hypot(X - 104, Y - cy)
+    pommel = smoothstep(2.4, 0.3, np.abs(pommel_r - 14.0)) + 0.4 * smoothstep(15, 12, pommel_r)
+    tassel = np.zeros_like(X)
+    for k, (dy0, bend) in enumerate(((-3.0, 14.0), (4.0, 22.0))):
+        pts = V.bezier([(90, cy + dy0), (62, cy + dy0 + bend * 0.4), (34, cy + dy0 + bend), (8, cy + dy0 + bend * 0.7)], 60)
+        tassel = np.maximum(tassel, V.brush_stroke(X, Y, pts, np.linspace(3.5, 0.8, 60), np.random.default_rng(13902 + k), dry=0.6, ss=ss)[0])
+    lum = F.soft_union(body * (1 - 0.6 * glyph), 0.7 * edge, 0.95 * ridge * (1 - 0.7 * glyph), 0.45 * groove, 0.95 * glint, 0.12 * halo,
+                       0.7 * guard, 0.85 * curls, guard_rim, 0.4 * grip * wrap, 0.75 * pommel, 0.4 * tassel)
+    return [to_white(lum, 13910, ss=ss)]
+
+
 # ============================================================== 北冥潮：脚下冰海
 
 
@@ -514,10 +578,11 @@ def smooth_profile(xs, hs, n=400):
     return t, out
 
 
-def make_kun_shadow() -> list[Image.Image]:
+def make_kun_shadow() -> tuple[list[Image.Image], list[Image.Image]]:
     """鲲影：俯视的一条大鱼，头朝 +X，在冰海底下游过去。钝圆的头、纺锤形的身子、一对翅膀一样往后掠的大胸鳍（鲲化为鹏），
-    小腹鳍，叉开的大尾。焦墨、普通混合（身子最浓约 0.95——合成在线性光里，0.9 才看着压得住；鳍往梢上变淡），边是水下的虚边；背脊一道深的，
-    身上鳞纹淡淡几排，水面的光纹（焦散）从身上淡出一张网。代码把它放大到 2.5 倍以上，画面装不下。"""
+    小腹鳍，叉开的大尾。焦墨、普通混合（身子最浓约 0.97——合成在线性光里，0.9 才看着压得住），边是水下的虚边；背脊一道深的，
+    身上鳞纹淡淡几排，水面的光纹（焦散）从身上淡出一张网。鳍有骨条：鳍条浓、鳍条之间的膜薄（约 0.4，透得出底下的水）。
+    发光层：影子边上一圈冰光（冰海的光从鲲身边漏上来），把影子从亮水里托出来。代码放大约 2 倍。"""
     w, h, ss = SHADOW_W, SHADOW_H, 2
     cy = h / 2
     X, Y = V.grid(h, w, ss)
@@ -529,18 +594,29 @@ def make_kun_shadow() -> list[Image.Image]:
     body_poly = np.concatenate([top, bot])
     tail = [(345, cy - 30), (300, cy - 62), (232, cy - 128), (150, cy - 196), (118, cy - 190), (170, cy - 120), (214, cy - 52), (236, cy),
             (214, cy + 52), (170, cy + 120), (118, cy + 190), (150, cy + 196), (232, cy + 128), (300, cy + 62), (345, cy + 30)]
-    fins = []
+    fins, fin_rays = [], []
     for sgn in (-1, 1):
-        # 胸鳍像一对往后掠的翅膀：根在身子里（960–1200），前缘鼓出去，梢在 (690, ±242)，后缘一道道扇贝似的缺口（鳍条）
-        lead = V.bezier([(1200, cy + sgn * 110), (1130, cy + sgn * 232), (930, cy + sgn * 252), (690, cy + sgn * 242)], 70)
-        tr = V.bezier([(690, cy + sgn * 242), (790, cy + sgn * 200), (880, cy + sgn * 160), (960, cy + sgn * 112)], 70)
+        # 胸鳍像一对往后掠的翅膀：根在身子里（960–1200），前缘鼓出去，梢在 (690, ±242)；七根鳍条从根散到边上，
+        # 鳍条之间的膜薄（淡），边上一道道扇贝似的缺口落在两根鳍条之间
+        lead = V.bezier([(1200, cy + sgn * 110), (1130, cy + sgn * 222), (930, cy + sgn * 238), (700, cy + sgn * 228)], 70)
+        tr = V.bezier([(700, cy + sgn * 228), (790, cy + sgn * 192), (880, cy + sgn * 156), (960, cy + sgn * 112)], 70)
         tt = np.linspace(0, 1, len(tr))
-        scal = np.abs(np.sin(tt * math.pi * 5)) * 12 * (1 - tt * 0.5)
-        tr = tr + np.stack([np.zeros_like(tt) - scal * 0.4, -sgn * scal], -1)
+        scal = np.abs(np.sin(tt * math.pi * 4)) * 16 * (1 - tt * 0.4)
+        tr = tr + np.stack([-scal * 0.45, -sgn * scal], -1)
         fins.append(np.concatenate([lead, tr]))
+        root = np.array([1165.0, cy + sgn * 112])
+        margin = np.concatenate([lead[28:], tr[:-8]])
+        for q in np.linspace(0.0, 1.0, 7):
+            end = margin[int(q * (len(margin) - 1))]
+            fin_rays.append(np.stack([root + (end - root) * f + np.array([0, sgn * 10 * math.sin(math.pi * f)]) for f in np.linspace(0, 1, 12)]))
         pel_l = V.bezier([(680, cy + sgn * 96), (630, cy + sgn * 158), (570, cy + sgn * 176), (520, cy + sgn * 172)], 30)
         pel_t = V.bezier([(520, cy + sgn * 172), (565, cy + sgn * 144), (605, cy + sgn * 116), (630, cy + sgn * 92)], 30)
         fins.append(np.concatenate([pel_l, pel_t]))
+        proot = np.array([650.0, cy + sgn * 98])
+        for end in (pel_l[18], pel_l[-1], pel_t[10]):
+            fin_rays.append(np.stack([proot + (end - proot) * f for f in np.linspace(0, 1, 8)]))
+    for end in ((150, cy - 196), (190, cy - 140), (226, cy - 70), (226, cy + 70), (190, cy + 140), (150, cy + 196)):  # 尾鳍的鳍条
+        fin_rays.append(np.stack([np.array([336.0, cy]) + (np.array(end) - np.array([336.0, cy])) * f for f in np.linspace(0, 1, 10)]))
     m_body = mask_polys(w, h, [body_poly], ss)
     m_tail = mask_polys(w, h, [tail], ss)
     m_fin = mask_polys(w, h, fins, ss)
@@ -551,27 +627,102 @@ def make_kun_shadow() -> list[Image.Image]:
     # 背脊和身上的浓淡：中线最浓，往两边淡；头更浓
     across = np.abs(Y - cy) / np.maximum(np.interp(X, bx, bh), 1.0)
     spine = smoothstep(0.35, 0.0, across) * smoothstep(380, 600, X) * smoothstep(1460, 1300, X)
-    body_a = mb * (0.86 + 0.08 * spine + 0.04 * smoothstep(1150, 1420, X) - 0.1 * across**4 + 0.03 * n1)
+    body_a = mb * (0.93 + 0.05 * spine + 0.02 * smoothstep(1150, 1420, X) - 0.06 * across**4 + 0.02 * n1)
     # 鳞纹：几排往后开的弧（淡一点的线）
     scale_u = (X - 600) / 46.0
     scale_v = (Y - cy) / 40.0
-    arcs = np.abs(np.sin(np.pi * (scale_u - 0.35 * scale_v**2 * 0 + 0.5 * np.abs(scale_v)))) < 0.12
+    arcs = np.abs(np.sin(np.pi * (scale_u + 0.5 * np.abs(scale_v)))) < 0.12
     body_a -= 0.05 * arcs * mb * smoothstep(600, 760, X) * smoothstep(1250, 1100, X) * smoothstep(0.85, 0.3, across)
-    # 鳍：根浓梢淡，鳍条一道道
+    # 鳍：鳍条浓、膜薄（半透明），根浓梢淡
+    acc_r = Acc(X, Y)
+    ray_m = np.zeros_like(X)
+    for rp in fin_rays:
+        sl = acc_r.window(*(rp.min(0) - 8), *(rp.max(0) + 8))
+        dd, tq = F.polyline_dist(X[sl], Y[sl], rp)
+        ray_m[sl] = np.maximum(ray_m[sl], smoothstep(3.4 - 1.6 * tq, 1.0 - 0.6 * tq, dd))
     fin_r = np.clip((1180 - X) / 480.0, 0, 1)
-    rays = 0.5 + 0.5 * np.cos((np.arctan2(np.abs(Y - cy) - 110, X - 1150)) * 24)
-    fin_a = mf * (0.8 - 0.3 * fin_r + 0.08 * rays * smoothstep(0.1, 0.5, fin_r))
-    tail_a = mt * (0.78 - 0.22 * np.clip((330 - X) / 200, 0, 1) + 0.04 * n1)
+    ray_f = V.fft_blur(ray_m * m_fin, 0.8 * ss)
+    ray_t = V.fft_blur(ray_m * m_tail, 0.8 * ss)
+    fin_a = mf * (0.56 - 0.16 * fin_r) + ray_f * (0.92 - 0.25 * fin_r)
+    tail_a = mt * (0.62 - 0.14 * np.clip((330 - X) / 200, 0, 1) + 0.03 * n1) + ray_t * 0.85
     a = 1 - (1 - np.clip(body_a, 0, 1)) * (1 - np.clip(fin_a, 0, 1)) * (1 - np.clip(tail_a, 0, 1))
     # 水面的焦散光纹（两层噪声的零线织成网）：从影子里减掉一点
     c1 = V.noise(np.random.default_rng(13403), X.shape, 16 * ss)
     c2 = V.noise(np.random.default_rng(13404), X.shape, 11 * ss)
     caustic = np.maximum(smoothstep(0.07, 0.0, np.abs(c1)), smoothstep(0.06, 0.0, np.abs(c2)))
-    a *= 1 - 0.1 * caustic
-    a *= 0.97 + 0.03 * n2
-    a = np.clip(a, 0, 0.95)
+    a *= 1 - 0.08 * caustic
+    a *= 0.98 + 0.02 * n2
+    a = np.clip(a, 0, 0.97)
     a *= smoothstep(0, 10, X) * smoothstep(w, w - 10, X) * smoothstep(0, 10, Y) * smoothstep(h, h - 10, Y)
-    return [to_paint(a[..., None] * JIAO, a, 13410, ss=ss)]
+    # 发光层：影子边上一圈冰光（冰海的光从鲲身边漏上来），鳍膜边上淡一点
+    m_all = np.clip(m_body + m_tail + m_fin, 0, 1)
+    soft = V.fft_blur(m_all, 9.0 * ss)
+    rim = np.clip((soft - m_all) * 3.0, 0, 1) * (1 - m_all) + 0.25 * np.clip((m_all - V.fft_blur(m_all, 3.0 * ss)) * 2.0, 0, 1)
+    rim *= 0.75 + 0.25 * smoothstep(-0.5, 0.8, n1)
+    rim *= smoothstep(0, 24, X) * smoothstep(w, w - 24, X) * smoothstep(0, 24, Y) * smoothstep(h, h - 24, Y)
+    emit = to_color(0.7 * rim, 0.55 + 0.4 * rim, 13411, ICE_LIGHT, ss=ss)
+    return [to_paint(a[..., None] * JIAO, a, 13410, ss=ss)], [emit]
+
+
+# ============================================================== 北冥潮：露出水面的背鳍
+
+
+FIN_W, FIN_H = 256, 256
+FIN_WATER = 200.0  # 水面线（画布 y），锚点在这条线的正中
+
+
+def make_kun_fin() -> tuple[list[Image.Image], list[Image.Image]]:
+    """鲲的背鳍露出水面（256²，往 +X 游，锚点在水面线正中）：高高的一片弯鳍，前缘厚、往后掠，后缘内凹；六根鳍条从根散到边上，
+    鳍条之间的膜薄（半透明）。本体焦墨、普通混合，入水的地方淡进水里；发光层：前缘一道湿亮的冰光、整片一圈细冰边、
+    根上一圈压扁的白浪和往前翻的浪花、几点水珠。八字浪痕由代码沿身后拖（现成 wave_trail / 笔画）。"""
+    w, h, ss = FIN_W, FIN_H, 4
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(13951)
+    lead = V.bezier([(178, FIN_WATER + 4), (176, 124), (146, 62), (92, 36)], 60)
+    trail_ = V.bezier([(92, 36), (120, 104), (100, 160), (80, FIN_WATER + 4)], 60)
+    poly = np.concatenate([lead, trail_])
+    m = mask_polys(w, h, [poly], ss)
+    base_pts = np.linspace(86, 172, 6)
+    margin = np.concatenate([lead[14:], trail_[:44]])
+    acc_r = Acc(X, Y)
+    rays = np.zeros_like(X)
+    for k, bxp in enumerate(base_pts):
+        end = margin[int((1 - k / 5) * (len(margin) - 1))]  # 后面的根连后缘、前面的根连前缘，不交叉
+        st = np.array([bxp, FIN_WATER])
+        pts = np.stack([st + (end - st) * f + np.array([-10 * math.sin(math.pi * f), 0]) for f in np.linspace(0, 1, 14)])
+        sl = acc_r.window(*(pts.min(0) - 5), *(pts.max(0) + 5))
+        dd, tq = F.polyline_dist(X[sl], Y[sl], pts)
+        rays[sl] = np.maximum(rays[sl], smoothstep(2.2 - 1.0 * tq, 0.6 - 0.3 * tq, dd))
+    rays *= m
+    ld, lt = F.polyline_dist(X, Y, lead)
+    lead_thick = smoothstep(4.5, 1.0, ld) * m  # 前缘厚
+    water_fade = smoothstep(FIN_WATER + 2, FIN_WATER - 22, Y)
+    a = np.clip((0.6 * m + 0.38 * rays + 0.3 * lead_thick) * water_fade, 0, 0.97)
+    body = to_paint(a[..., None] * V.col("#121820"), a, 13952, ss=ss)
+    # 发光层
+    acc = Acc(X, Y)
+    inner, outer = edge_band(m, 1.5 * ss)
+    acc.add((slice(None), slice(None)), (0.5 * np.clip(inner * 1.6, 0, 1) + 0.3 * np.clip(outer * 1.4, 0, 1)) * water_fade, 0.8)
+    acc.add((slice(None), slice(None)), 0.75 * smoothstep(2.6, 0.4, ld) * smoothstep(0.1, 0.4, lt) * water_fade, 1.0)  # 前缘湿亮
+    acc.add((slice(None), slice(None)), 0.18 * rays * water_fade, 0.7)
+    # 根上一圈压扁的白浪 + 往前翻的浪花
+    q = np.hypot((X - 132) / 86.0, (Y - FIN_WATER) / 16.0)
+    foam = smoothstep(0.16, 0.0, np.abs(q - 0.85)) * (0.55 + 0.45 * smoothstep(-0.2, 0.6, V.noise(np.random.default_rng(13953), X.shape, 3 * ss)))
+    acc.add((slice(None), slice(None)), 0.7 * foam, 0.85)
+    tex = W.ptex(rng, ns=16, nt=256, along=12.0, across=0.6)
+    for k in range(14):  # 鳍前翻起的浪花：往前上方甩出去的水针
+        ang = -math.pi * rng.uniform(0.08, 0.42)
+        L = rng.uniform(22, 56)
+        x0, y0 = 176 + rng.uniform(-6, 10), FIN_WATER - rng.uniform(0, 8)
+        sl = acc.window(x0 - 4, y0 - L - 4, x0 + L + 4, y0 + 4)
+        cv, uu = F.needle(X[sl], Y[sl], x0, y0, ang, L, rng.uniform(1.6, 3.2), taper=1.3)
+        acc.add(sl, 0.7 * cv * dry(tex, 0.0, uu * 0.5 + k * 0.17, 0.12 + 0.4 * uu), 0.9)
+    for k in range(26):
+        x, y = 190 + rng.normal(0, 22), FIN_WATER - abs(rng.normal(0, 26))
+        sl = acc.window(x - 5, y - 5, x + 5, y + 5)
+        acc.add(sl, 0.85 * F.dot(X[sl], Y[sl], x, y, rng.uniform(1.0, 2.4)), 0.95)
+    emit = F.frame_color(acc.a, acc.heat(), 13954, ICE_LIGHT)
+    return [body], [emit]
 
 
 # ============================================================== 北冥潮：鲲跃出水（侧面，冷光剪影）
@@ -615,8 +766,8 @@ def fish_outline():
         tr = tr + nrm * (np.abs(np.sin(tt * math.pi * n_scal)) * depth * (1 - 0.6 * tt))[:, None]
         return [tuple(p) for p in lead] + [tuple(p) for p in tr]
     # 近侧的胸鳍往下后方张开，宽大像翅膀；远侧的在身子后面，往上后方，小一点
-    wing_near = wing((0.77, -0.05), [(0.7, -0.27), (0.55, -0.41)], (0.33, -0.45), [(0.42, -0.33), (0.52, -0.2)], (0.6, -0.06), 4, 0.02)
-    wing_far = wing((0.75, 0.06), [(0.69, 0.2), (0.58, 0.28)], (0.45, 0.3), [(0.52, 0.22), (0.57, 0.14)], (0.61, 0.08), 3, 0.014)
+    wing_near = wing((0.77, -0.05), [(0.7, -0.27), (0.55, -0.41)], (0.33, -0.45), [(0.42, -0.33), (0.52, -0.2)], (0.6, -0.06), 5, 0.04)
+    wing_far = wing((0.75, 0.06), [(0.69, 0.2), (0.58, 0.28)], (0.45, 0.3), [(0.52, 0.22), (0.57, 0.14)], (0.61, 0.08), 4, 0.03)
     dorsal = [(0.42, 0.11), (0.47, 0.17), (0.55, 0.16), (0.6, 0.125)]
     anal = [(0.24, -0.065), (0.2, -0.11), (0.15, -0.1), (0.15, -0.045)]
     return body, [wing_near, wing_far, dorsal, anal, tail]
@@ -671,8 +822,9 @@ def make_kun_leap() -> list[Image.Image]:
         perp = np.repeat(np.repeat(f["perp"], ss, 0), ss, 1)
         flow = W.sample_ptex(tex, np.clip(perp / 80.0, -1, 1), t_along * 1.4 - 0.12 * i)
         streak = smoothstep(0.55, 0.85, flow) * m_body
-        fill = 0.16 * m_body + 0.1 * m_fin + 0.08 * m_small
-        rim = 0.95 * inner + 0.55 * inner_b
+        fill = 0.16 * m_body + 0.05 * m_fin + 0.06 * m_small  # 鳍膜薄，透
+        inner_f, _ = edge_band(np.clip(m_fin + m_small, 0, 1), 1.2 * ss)
+        rim = 0.95 * inner_b + 0.45 * inner * (1 - m_body) + 0.25 * inner_f
         glow_out = 0.22 * outer
         # 眼、鳃
         eye_p = bend([(0.9, 0.03)], spine, LEAP_L)[0]
@@ -685,16 +837,16 @@ def make_kun_leap() -> list[Image.Image]:
         gill_l[sl] = smoothstep(2.6, 0.6, gd) * 0.7
         # 鳍条：从鳍根往外的几道线
         ray_l = np.zeros_like(X)
-        for fi, (root, tips) in enumerate((((0.72, -0.06), [(0.34 + 0.065 * k, -0.43 + 0.075 * k) for k in range(5)]),
-                                           ((0.71, 0.07), [(0.46 + 0.04 * k, 0.28 - 0.04 * k) for k in range(4)]),
+        for fi, (root, tips) in enumerate((((0.74, -0.06), [(0.33 + 0.058 * k, -0.445 + 0.078 * k) for k in range(7)]),
+                                           ((0.72, 0.07), [(0.45 + 0.035 * k, 0.29 - 0.04 * k) for k in range(6)]),
                                            ((0.1, 0.0), [(-0.06, 0.17), (-0.03, 0.1), (-0.03, -0.1), (-0.06, -0.16)]))):
             for tip in tips:
                 seg_pts = bend([(root[0] + (tip[0] - root[0]) * q, root[1] + (tip[1] - root[1]) * q) for q in np.linspace(0, 1, 16)], spine, LEAP_L)
                 sl = acc.window(*(seg_pts.min(0) - 5), *(seg_pts.max(0) + 5))
                 d, tq = F.polyline_dist(X[sl], Y[sl], seg_pts)
-                ray_l[sl] = np.maximum(ray_l[sl], smoothstep(2.2, 0.5, d) * (1 - 0.6 * tq))
+                ray_l[sl] = np.maximum(ray_l[sl], smoothstep(2.4 - 1.0 * tq, 0.6, d) * (1 - 0.35 * tq))
         ray_l *= np.clip(m_fin + m_small, 0, 1)
-        lum = F.soft_union(fill, rim, glow_out, 0.42 * streak, eye, gill_l * m_body, 0.45 * ray_l)
+        lum = F.soft_union(fill, rim, glow_out, 0.42 * streak * m_body, eye, gill_l * m_body, 0.72 * ray_l)
         heat = np.clip(0.35 + 0.65 * (rim + eye + 0.5 * streak), 0, 1)
         # 水下的部分：看不见（只剩一点透上来的光）
         under = smoothstep(LEAP_WATER - 6, LEAP_WATER + 10, Y)
@@ -784,17 +936,25 @@ def lotus_petal(phi, tilt, r0, L, Wd, el, cup=0.18, n=40):
     return proj(pts3), face, mid, float(np.mean(py))
 
 
-def make_ult_lotus() -> list[Image.Image]:
-    """燃灯的莲灯：三层莲瓣（外八、中八、内六）围着一盏灯焰，从合着的花苞一层层打开。叠加、自带灯金色。
-    0–1 合着的花苞升起（小一点、亮在里头）；2–3 外层打开；4–5 中层打开、灯焰露出来；6–7 内层打开、灯焰最旺，末帧可以留着。
-    每片瓣是半透明的光：瓣边最亮、瓣心淡、一道中脉；前面的瓣压在后面的瓣上更亮（光叠在一起）。锚点在底边中点（莲座底下）。"""
+LOTUS_PAPER = [(0.0, "#FBF5E6"), (0.55, "#F4E4C8"), (1.0, "#EBB8A6")]  # 瓣根 → 瓣尖（纸色到一点藕粉）
+LOTUS_LINE = V.col("#5A4632")
+LOTUS_SEAT = V.col("#B8955C")
+
+
+def make_ult_lotus() -> tuple[list[Image.Image], list[Image.Image]]:
+    """燃灯的莲灯：三层莲瓣（外八、中八、内六）围着一盏灯焰，从合着的花苞一层层打开。
+    本体普通混合：纸色的瓣（瓣根暖白、瓣尖一点藕粉），焦褐的细轮廓、一道淡中脉，后面的瓣被前面的压住，层次靠轮廓分；
+    发光层叠加、自带灯金色：看得见的瓣边描金、瓣根被灯焰照透的一层暖光、灯焰（芯白）、全开时灯焰放的几道短光。
+    0–1 花苞升起（里头透光）；2–3 外层开；4–5 中层开、灯焰露出来；6–7 全开，末帧可以留着。锚点在底边中点（莲座底下）。"""
     w, h, ss = LOTUS_W, LOTUS_H, 4
     X, Y = grid(w, h)
     rng = np.random.default_rng(13601)
     tex = W.ptex(rng, ns=16, nt=512, along=20.0, across=0.6)
-    out = []
+    bodies, emits = [], []
     for i in range(8):
         k = LOTUS_SIZE[i]
+        paint = Paint(X, Y)
+        R = np.zeros_like(X)  # 看得见的瓣边（描金）：和本体一样被前面的瓣盖住
         acc = Acc(X, Y)
         petals = []
         for li, (n, r0, L, Wd, a0) in enumerate(LOTUS_LAYERS):
@@ -803,39 +963,49 @@ def make_ult_lotus() -> list[Image.Image]:
                 phi = a0 + 2 * math.pi * j / n + 0.04 * li
                 poly, face, mid, depth = lotus_petal(phi, tilt, r0 * k, L * k, Wd * k, LOTUS_EL)
                 petals.append((depth, li, poly, face, mid))
-        # 从后往前叠（后面的瓣先画）
+        # 莲座先画（在最下面）：一圈往下翻的萼片
+        bx, by = LOTUS_BASE
+        fl_ = 0.42
+        rr = np.hypot(X - bx, (Y - by) / fl_)
+        th = np.arctan2((Y - by) / fl_, X - bx)
+        scallop = 30 * k * (1 + 0.12 * np.abs(np.sin(th * 6)))
+        seat = smoothstep(scallop + 1.0, scallop - 1.0, rr) * (Y > by - 6 * k)
+        seat_line = smoothstep(1.6, 0.3, np.abs(rr - scallop)) * (Y > by - 6 * k)
+        full = (slice(None), slice(None))
+        paint.over(full, LOTUS_SEAT, seat * 0.95)
+        paint.over(full, LOTUS_LINE, seat_line * 0.8)
+        R = np.maximum(R, seat_line * 0.6)
         for depth, li, poly, face, mid in sorted(petals, key=lambda t: -t[0]):
             lo, hi = poly.min(0) - 3, poly.max(0) + 3
-            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
-            cov, d = F.poly_cover(X[sl], Y[sl], poly)
-            rim = smoothstep(2.0, 0.2, np.abs(d)) * (d < 0.8)
+            sl = paint.window(lo[0], lo[1], hi[0], hi[1])
+            cov, d = F.poly_cover(X[sl], Y[sl], poly, aa=0.5)
             md, mt = F.polyline_dist(X[sl], Y[sl], mid)
-            vein = smoothstep(1.2, 0.2, md) * cov * (1 - 0.7 * mt)
-            fill = cov * (0.2 + 0.12 * (face + 1) / 2) * (0.75 + 0.25 * dry(tex, 0.0, mt * 0.5 + li * 0.3, 0.2))
-            glow_in = cov * 0.22 * (1 - mt) * LOTUS_GLOW[i]  # 根部被灯焰照亮
-            lum = np.clip(fill + 0.7 * rim + 0.35 * vein + glow_in, 0, 1) * (0.75 + 0.25 * (li / 2))
-            acc.add(sl, lum, 0.45 + 0.35 * (li / 2) + 0.2 * (1 - mt) * LOTUS_GLOW[i])
-        # 莲座：一圈往下翻的小萼片（压扁的花边椭圆）
-        bx, by = LOTUS_BASE
-        th = np.arctan2((Y - by) / (FLAT_L := 0.42), X - bx)
-        rr = np.hypot(X - bx, (Y - by) / FLAT_L)
-        scallop = 30 * k * (1 + 0.12 * np.abs(np.sin(th * 6)))
-        seat = smoothstep(scallop + 1.2, scallop - 1.2, rr) * (Y > by - 6 * k)
-        seat_rim = smoothstep(2.0, 0.0, np.abs(rr - scallop)) * (Y > by - 6 * k)
-        acc.add((slice(None), slice(None)), 0.28 * seat + 0.6 * seat_rim, 0.5)
+            col = F.lerp_col(np.clip(mt * 0.9 + 0.1 * (li == 2), 0, 1), LOTUS_PAPER)
+            shade = 1.0 - 0.1 * (1 - (face + 1) / 2) - 0.08 * (1 - mt) * (li < 2)  # 朝里的瓣、瓣根略暗
+            col = col * shade[..., None]
+            vein = smoothstep(1.0, 0.2, md) * cov * (1 - 0.6 * mt)
+            col = col * (1 - 0.18 * vein[..., None])
+            line = smoothstep(1.4, 0.3, np.abs(d)) * (d < 0.7)
+            paint.over(sl, col, cov * 0.97)
+            paint.over(sl, LOTUS_LINE, line * 0.85)
+            rimk = smoothstep(1.2, 0.2, np.abs(d + 2.3)) * (d < -0.9)  # 描金在墨线里侧，墨线还在
+            R[sl] = rimk + R[sl] * (1 - cov)
+            # 瓣根被灯焰照透（只在看得见的地方）
+            glow_in = cov * (1 - mt) ** 1.5 * LOTUS_GLOW[i] * (0.25 + 0.2 * (li / 2))
+            acc.a[sl] = acc.a[sl] * (1 - cov)  # 前面的瓣挡住后面的透光
+            acc.add(sl, glow_in, 0.6)
+        bodies.append(paint.image(13630 + i))
+        acc.add(full, 0.62 * R, 0.7)
         # 灯焰：莲心一朵泪滴形的火，芯白
         fl = LOTUS_FLAME[i]
         if fl > 0:
             fx, fy = bx, by - 34 * k - 22 * fl
             fh, fw = 46 * fl + 8, 13 * fl + 3
             q = np.hypot((X - fx) / fw, np.where(Y < fy, (Y - fy) / fh, (Y - fy) / (fw * 1.1)))
-            flame = smoothstep(1.0, 0.55, q)
-            core = smoothstep(0.55, 0.1, q)
-            halo = np.exp(-((np.hypot(X - fx, Y - fy) / (34 * fl + 10)) ** 2))
-            acc.add((slice(None), slice(None)), 0.7 * flame, 0.85)
-            acc.add((slice(None), slice(None)), core, 1.0)
-            acc.add((slice(None), slice(None)), 0.22 * halo * fl, 0.9)
-            if i >= 6:  # 灯焰往外放几道短光
+            acc.add(full, 0.7 * smoothstep(1.0, 0.55, q), 0.85)
+            acc.add(full, smoothstep(0.55, 0.1, q), 1.0)
+            acc.add(full, 0.18 * np.exp(-((np.hypot(X - fx, Y - fy) / (30 * fl + 8)) ** 2)) * fl, 0.9)
+            if i >= 6:
                 for kk in range(16):
                     ang = -math.pi / 2 + (kk - 7.5) / 7.5 * 1.3
                     L0 = (40 + 18 * ((kk * 5) % 3)) * (1 if i == 6 else 1.15)
@@ -843,12 +1013,12 @@ def make_ult_lotus() -> list[Image.Image]:
                     sl = acc.window(min(x0, x0 + L0 * math.cos(ang)) - 4, min(y0, y0 + L0 * math.sin(ang)) - 4,
                                     max(x0, x0 + L0 * math.cos(ang)) + 4, max(y0, y0 + L0 * math.sin(ang)) + 4)
                     cv, uu = F.needle(X[sl], Y[sl], x0, y0, ang, L0, 1.6, taper=1.0)
-                    acc.add(sl, 0.38 * cv * dry(tex, 0.0, uu * 0.4 + kk * 0.1, 0.1 + 0.5 * uu), 0.9)
-        else:  # 合着的花苞里头亮
+                    acc.add(sl, 0.34 * cv * dry(tex, 0.0, uu * 0.4 + kk * 0.1, 0.1 + 0.5 * uu), 0.9)
+        else:  # 合着的花苞里头透光
             gq = np.hypot((X - bx) / 20, (Y - (by - 40 * k)) / 34)
-            acc.add((slice(None), slice(None)), 0.5 * np.exp(-gq**2) * LOTUS_GLOW[i], 0.9)
-        out.append(F.frame_color(acc.a, acc.heat(), 13610 + i, LAMP_GOLD))
-    return out
+            acc.add(full, 0.4 * np.exp(-gq**2) * LOTUS_GLOW[i], 0.9)
+        emits.append(F.frame_color(acc.a, acc.heat(), 13610 + i, LAMP_GOLD))
+    return bodies, emits
 
 
 # ============================================================== 燃灯：放射佛光
@@ -1024,8 +1194,8 @@ def make_fox_moon() -> list[Image.Image]:
 
 FOX_W = 512
 FOX_TAIL_ROOT = (204.0, 440.0)  # 尾根（脊梁末端，代码从这里旋开九条尾巴）
-FOX_EYE = (392.0, 120.0)
-FOX_MARK = (376.0, 104.0)
+FOX_EYE = (394.0, 128.0)
+FOX_MARK = (378.0, 112.0)
 FOX_INK = V.col("#0E1318")
 FOX_RIM = V.col(FOX_CYAN)
 
@@ -1053,52 +1223,64 @@ def smin(a, b, k):
     return b * (1 - h) + a * h - k * h * (1 - h)
 
 
-def fur(d, X, Y, c, th0, th1, n, amp, lean=0.0):
-    """在以 c 为中心、角度 th0..th1 的那一段边上加一簇簇尖毛：沿角度方向一串尖峰，把距离场往外推。"""
+def fur(d, X, Y, c, th0, th1, n, amp, lean=0.0, seed=0, jitter=0.35, sharp_range=(2.2, 3.6)):
+    """在以 c 为中心、角度 th0..th1 的那一段边上加一簇簇尖毛：沿角度方向一串尖峰，把距离场往外推。
+    每一簇的长短、粗细、间距都随机抖一点（jitter），不排得太齐。"""
+    rng = np.random.default_rng(15000 + seed)
     th = np.arctan2(Y - c[1], X - c[0])
     span = th1 - th0
     q = np.mod(th - th0, 2 * math.pi) / span
     inside = (q >= 0) & (q <= 1)
-    ph = np.mod(q * n + lean * np.clip(-d / 20.0, -1, 1), 1.0)
-    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** 3
+    # 不均匀的间距：把 q 按一条随机抖过的单调曲线重新映射
+    knots = np.cumsum(rng.uniform(1 - jitter, 1 + jitter, n + 1))
+    knots = np.concatenate([[0], knots]) / knots[-1]
+    qq = np.interp(np.clip(q, 0, 1), knots, np.linspace(0, 1, n + 2)) * (n + 1)
+    idx = np.clip(np.floor(qq).astype(int), 0, n + 1)
+    amps = rng.uniform(0.55, 1.3, n + 2)[idx]
+    sharp = rng.uniform(*sharp_range, n + 2)[idx]
+    ph = np.mod(qq + lean * np.clip(-d / 20.0, -1, 1), 1.0)
+    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** sharp
     env = np.sin(np.pi * np.clip(q, 0, 1)) ** 0.6
-    return d - amp * spike * env * inside * smoothstep(30, 0, np.abs(d))
+    return d - amp * amps * spike * env * inside * smoothstep(34, 0, np.abs(d))
 
 
 def fox_sdf(X, Y):
-    """九尾的身子（没有尾巴），朝 +X 坐着、头抬起来：用几块圆滑的形体捏出来（后胯、背、胸、颈、头、吻、耳、腿），再加胸前毛领、腮毛、后胯的毛。"""
-    haunch = sd_ellipse(X, Y, (236, 394), 66, 74, 0.2)
-    back = sd_round_cone(X, Y, (234, 382), (334, 262), 58, 44)
-    chest = sd_ellipse(X, Y, (352, 262), 40, 56, 0.15)
-    neck = sd_round_cone(X, Y, (342, 250), (374, 158), 38, 27)
-    head = sd_ellipse(X, Y, (380, 132), 36, 29, -0.25)
-    snout = sd_round_cone(X, Y, (398, 128), (450, 136), 18, 4.5)
-    jaw = sd_round_cone(X, Y, (392, 146), (440, 146), 13, 3.5)
-    ear1 = sd_round_cone(X, Y, (372, 116), (366, 50), 17, 1.5)
-    ear2 = sd_round_cone(X, Y, (350, 120), (334, 58), 15, 1.5)
-    leg1 = sd_round_cone(X, Y, (352, 300), (360, 460), 17, 8)
-    leg2 = sd_round_cone(X, Y, (376, 300), (390, 460), 15, 8)
-    paw1 = sd_ellipse(X, Y, (368, 465), 17, 7)
-    paw2 = sd_ellipse(X, Y, (398, 465), 16, 7)
-    hpaw = sd_ellipse(X, Y, (300, 464), 28, 9)
-    root = sd_round_cone(X, Y, (226, 430), (196, 448), 30, 18)
-    d = smin(haunch, back, 18)
-    d = smin(d, chest, 16)
-    d = smin(d, neck, 14)
-    d = smin(d, head, 10)
+    """九尾的身子（没有尾巴），朝 +X 坐着、头抬起来望月：比例照 boss 图集的九尾——大耳、口吻短一点、颈粗、胸前一大圈蓬的毛领，
+    身子圆，前腿收在胸下，后胯圆圆地着地。用几块圆滑的形体捏出来，再加毛领、颈毛、腮毛、后胯的毛（长短不齐）。"""
+    haunch = sd_ellipse(X, Y, (238, 392), 84, 80, 0.15)
+    back = sd_round_cone(X, Y, (240, 378), (330, 268), 74, 62)
+    chest = sd_ellipse(X, Y, (346, 292), 64, 88, 0.1)
+    neck = sd_round_cone(X, Y, (336, 252), (364, 170), 54, 40)
+    head = sd_ellipse(X, Y, (376, 138), 42, 35, -0.18)
+    snout = sd_round_cone(X, Y, (404, 138), (444, 150), 21, 5.5)
+    jaw = sd_round_cone(X, Y, (398, 154), (434, 158), 14, 4.5)
+    ear1 = sd_round_cone(X, Y, (378, 120), (378, 30), 25, 2.0)
+    ear2 = sd_round_cone(X, Y, (348, 122), (332, 38), 23, 2.0)
+    leg1 = sd_round_cone(X, Y, (346, 372), (350, 458), 19, 12)
+    leg2 = sd_round_cone(X, Y, (368, 372), (376, 458), 17, 12)
+    paw1 = sd_ellipse(X, Y, (360, 464), 21, 8)
+    paw2 = sd_ellipse(X, Y, (386, 464), 20, 8)
+    hpaw = sd_ellipse(X, Y, (306, 462), 48, 12)
+    tuck = sd_ellipse(X, Y, (316, 452), 30, 14)  # 后爪收在身下，和前爪挨着
+    root = sd_round_cone(X, Y, (226, 430), (196, 448), 36, 22)
+    d = smin(haunch, back, 22)
+    d = smin(d, chest, 20)
+    d = smin(d, neck, 18)
+    d = smin(d, head, 12)
     d = smin(d, snout, 8)
     d = smin(d, jaw, 6)
-    d = smin(d, ear1, 5)
-    d = smin(d, ear2, 5)
-    d = smin(d, root, 10)
-    d = smin(d, hpaw, 8)
-    legs = np.minimum(smin(leg1, paw1, 5), smin(leg2, paw2, 5))
-    d = smin(d, legs, 4)
-    # 毛：胸前毛领（尖往下）、腮后一簇、后胯后面一簇
-    d = fur(d, X, Y, (350, 250), -0.85, 1.3, 6, 17, lean=0.5)
-    d = fur(d, X, Y, (378, 138), 1.6, 2.7, 3, 13)
-    d = fur(d, X, Y, (236, 394), 2.4, 3.4, 4, 7)
-    d = fur(d, X, Y, (330, 200), 3.3, 4.3, 3, 8)  # 后颈的鬃
+    d = smin(d, ear1, 6)
+    d = smin(d, ear2, 6)
+    d = smin(d, root, 12)
+    d = smin(d, hpaw, 10)
+    d = smin(d, tuck, 14)
+    legs = np.minimum(smin(leg1, paw1, 6), smin(leg2, paw2, 6))
+    d = smin(d, legs, 8)
+    # 毛：胸前一大圈毛领（尖往下）、颈后的鬃、腮后、后胯后面
+    d = fur(d, X, Y, (340, 270), -0.9, 1.15, 6, 36, lean=0.7, seed=1, sharp_range=(1.3, 2.0))  # 毛领：几大簇，宽、尖往下卷
+    d = fur(d, X, Y, (350, 214), 3.2, 4.5, 4, 20, lean=0.5, seed=2, sharp_range=(1.4, 2.2))
+    d = fur(d, X, Y, (376, 142), 1.45, 2.75, 3, 20, seed=3, sharp_range=(1.4, 2.2))
+    d = fur(d, X, Y, (238, 392), 2.3, 3.5, 5, 10, seed=4)
     return d
 
 
@@ -1127,8 +1309,8 @@ FOXFIRE = [(0.0, "#3FB59A"), (0.5, FOX_CYAN), (0.85, "#D8FFF4"), (1.0, "#FFFFFF"
 
 
 def make_fox_body() -> tuple[list[Image.Image], list[Image.Image]]:
-    """九尾的身子剪影（512²，锚点在地面线正中）：朝 +X 坐着、头抬起来望月，尖耳长吻，长颈往后弯成一道弧落到后胯，
-    胸前一圈毛领、后颈一道鬃，前腿笔直。本体焦墨（带一点青黑）、一道青边，普通混合；发光层：青边往外一圈光、丹凤眼一道青、额心一点青火。
+    """九尾的身子剪影（512²，锚点在地面线正中）：朝 +X 坐着、头抬起来望月；比例照 boss 图集的九尾：大耳、口吻不长、颈粗，
+    胸前一大圈蓬的毛领、颈后一道鬃，身子圆，前腿收在胸下。本体焦墨（带一点青黑）、一道青边，普通混合；发光层：青边往外一圈光、丹凤眼一道青、额心一点青火。
     月亮前面的剪影要画在月亮之上（天上的层，同月亮一样在暗层之上）。尾根在 (204, 440)，九条尾巴（fox_tail）从这里旋开成扇，扇在身后。"""
     size, ss = FOX_W, 4
     X, Y = grid(size, size)
@@ -1167,9 +1349,18 @@ def make_fox_tail() -> tuple[list[Image.Image], list[Image.Image]]:
         tt = np.where(closer, t[k], tt)
         d = np.minimum(d, dk)
     # 两边一簇簇尖毛：沿尾巴的位置排一串尖峰，越往尖越长，尖往尾尖歪
-    ph = np.mod(tt * 11 + np.clip(-d / 18.0, -1, 1) * 0.7, 1.0)
-    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** 2.5
-    d = d - (3 + 13 * tt**1.2) * spike * smoothstep(0.05, 0.25, tt) * smoothstep(30, 0, np.abs(d))
+    # 尖毛的间距、长短、尖不尖都随机抖（左右两边各一套），不排得太齐
+    side = np.sign((X - np.interp(Y, sp[::-1, 1], sp[::-1, 0])))
+    rr2 = np.random.default_rng(14203)
+    knots = np.concatenate([[0], np.cumsum(rr2.uniform(0.55, 1.5, 13))])
+    knots /= knots[-1]
+    qq = np.interp(tt, knots, np.linspace(0, 1, 14)) * 13 + 0.5 * (side > 0)
+    idx = np.clip(np.floor(qq).astype(int), 0, 13)
+    amps = rr2.uniform(0.5, 1.35, 14)[idx]
+    sharp = rr2.uniform(1.8, 3.4, 14)[idx]
+    ph = np.mod(qq + np.clip(-d / 18.0, -1, 1) * 0.7, 1.0)
+    spike = np.clip(1 - np.abs(ph - 0.5) * 2, 0, 1) ** sharp
+    d = d - (3 + 14 * tt**1.2) * amps * spike * smoothstep(0.05, 0.25, tt) * smoothstep(30, 0, np.abs(d))
     m = smoothstep(0.5, -0.5, d)
     # 尖上的青火：尾尖一截发亮，往上窜三条泪滴形的火舌（中间高、两边矮，往外歪），芯白
     acc = Acc(X, Y)
@@ -1204,6 +1395,10 @@ SPECS: dict = {
                     {"_variants": True, "points": "+x", "tint_hint": "#FFE7A8",
                      "note": "万剑归宗的剑影，3 种挑着用（不是动画）：0 长剑、1 符剑（系符纸）、2 剑气；剑尖朝 +X，锚点居中；"
                              "白色可染（建议金 #FFE7A8，金系 #E9D9A6 也行）。代码排成剑河，每柄后面拖一道 fx/streak"}),
+    "sword_giant": (make_sword_giant, (GIANT_W, GIANT_H), (250.0 / GIANT_W, 0.5), "add", True, "white",
+                    {"points": "+x", "tint_hint": "#FFE7A8",
+                     "note": "大剑影：剑柱最外一层，剑尖朝 +X，锚点在剑格中心；代码拿 3–5 张叠成一柄顶天的大剑（大小差一两成、角度差两三度、明暗错开），"
+                             "剑格在主角胸口、剑尖顶进云缝；里面再跑小剑影。白色可染（建议金 #FFE7A8），叠加"}),
     "sword_cloud": (make_sword_cloud, (CLOUD_W, CLOUD_H), (0.5, 0.5), "normal", False, "jiao",
                     {"emit": "sword_cloud_emit", "screen_space": "top",
                      "note": "被劈开的云：贴在镜头上方（画布中心放在画面上沿往下约 120 像素，下沿的云头垂进画面），按画面宽度放大约 2 倍；"
@@ -1216,14 +1411,18 @@ SPECS: dict = {
                          "普通混合（暗层之下、妖物之下）；发光层见 kun_sea_emit。代码按要盖住的范围放大（分镜里约 2.4–2.7 倍），"
                          "并在光照图里给冰海加一盏大的冷光（#CDEBFF，盖住水面），水才亮得起来、鲲影压得出来"}),
     "kun_shadow": (make_kun_shadow, (SHADOW_W, SHADOW_H), (0.5, 0.5), "normal", False, "jiao",
-                   {"points": "+x", "note": "鲲影：俯视的大鱼，头朝 +X，锚点居中；焦墨（身子最浓约 0.95，鳍梢约 0.5），水下的虚边、背脊、鳞纹、水面焦散的光纹；"
+                   {"points": "+x", "emit": "kun_shadow_emit", "note": "鲲影：俯视的大鱼，头朝 +X，锚点居中；焦墨（身子最浓约 0.95，鳍梢约 0.5），水下的虚边、背脊、鳞纹、水面焦散的光纹；"
                                              "画在冰海之上、妖物之下。代码放大约 2 倍（比画面宽）从画面一侧平移到另一侧；放到 2.5 倍以上整片海都在影子里，反而看不出鱼形，可以轻轻左右摆尾（整张绕头转几度）"}),
+    "kun_fin": (make_kun_fin, (FIN_W, FIN_H), (0.5, FIN_WATER / FIN_H), "normal", False, "full",
+                {"emit": "kun_fin_emit", "points": "+x",
+                 "note": "鲲的背鳍露出水面：往 +X 游，锚点在水面线正中；焦墨、鳍条浓、膜半透明，入水处淡进水里，普通混合（画在冰海和鲲影之上、妖物之下）；"
+                         "发光层见 kun_fin_emit（前缘湿亮、冰边、根上白浪、鳍前浪花）。代码跟着鲲影的背脊走，身后拖八字浪痕"}),
     "kun_leap": (make_kun_leap, (LEAP_SIZE, LEAP_SIZE), (0.5, LEAP_WATER / LEAP_SIZE), "add", False, "full",
                  {"points": "+x", "fps": 12,
                   "note": "鲲跃出水：侧面的冷光剪影，头朝 +X；锚点在水面线正中。0 破水、1 半身、2 跃到最高（鳍张开像翅膀）、3 翻过去、4 扎回、5 水花落下；"
                           "叠加、自带冷光色（#5E9AD8 → #CDEBFF → 白）。12 帧/秒，第 2 帧上顿帧 0.08 秒；代码放大约 1.9 倍"}),
-    "ult_lotus": (make_ult_lotus, (LOTUS_W, LOTUS_H), (0.5, 1.0), "add", False, "full",
-                  {"hold_last": True,
+    "ult_lotus": (make_ult_lotus, (LOTUS_W, LOTUS_H), (0.5, 1.0), "normal", False, "full",
+                  {"hold_last": True, "emit": "ult_lotus_emit",
                    "note": "燃灯的莲灯：三层莲瓣围着灯焰，从花苞一层层打开（0–1 花苞升起、2–3 外层开、4–5 中层开灯焰露出、6–7 全开）；"
                            "锚点在底边中点（莲座底下），代码让它从主角的灯升到头顶上方；叠加、自带灯金色（#D9963F → #FFE7A8 → 白），末帧可以留到演出完"}),
     "ult_rays": (make_ult_rays, (RAYS_SIZE, RAYS_SIZE), (0.5, 0.5), "add", False, "full",
@@ -1250,11 +1449,17 @@ EMIT_SPECS = {
 }
 EMIT_SPECS["kun_sea"] = {"name": "kun_sea_emit", "blend": "add", "tint": False, "color": "full",
                          "note": "冰海的发光层：冰缝、水边冰下透的光、冰板缝、浪尖亮线和碎光；叠加、自带冰色（#7FB6E8 → #CDEBFF → 白），画在暗层之上"}
+EMIT_SPECS["kun_shadow"] = {"name": "kun_shadow_emit", "blend": "add", "tint": False, "color": "full",
+                            "note": "鲲影的发光层：影子边上一圈冰光，叠加、自带冰色；和鲲影同画布、同锚点、同缩放，画在冰海发光层之上"}
+EMIT_SPECS["kun_fin"] = {"name": "kun_fin_emit", "blend": "add", "tint": False, "color": "full",
+                         "note": "背鳍的发光层：前缘湿亮的冰光、冰边、根上一圈白浪、鳍前浪花和水珠；叠加、自带冰色"}
+EMIT_SPECS["ult_lotus"] = {"name": "ult_lotus_emit", "blend": "add", "tint": False, "color": "full",
+                           "note": "莲灯的发光层：看得见的瓣边描金、瓣根被灯焰照透的暖光、灯焰（芯白）、全开时的几道短光；叠加、自带灯金色"}
 EMIT_SPECS["fox_body"] = {"name": "fox_body_emit", "blend": "add", "tint": False, "color": "full",
                           "note": "九尾身子的发光层：青边往外一圈光、丹凤眼、额心青火印；叠加、自带狐火青（#3FB59A → #8FE3C8 → 白）"}
 EMIT_SPECS["fox_tail"] = {"name": "fox_tail_emit", "blend": "add", "tint": False, "color": "full",
                           "note": "九尾尾巴的发光层：青边、尾尖一截青火往上窜；叠加、自带狐火青"}
-GROUPS = {"sword": ["sword_blade", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_leap"], "ult": ["ult_lotus", "ult_rays", "ult_halo"],
+GROUPS = {"sword": ["sword_blade", "sword_giant", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_fin", "kun_leap"], "ult": ["ult_lotus", "ult_rays", "ult_halo"],
           "fox": ["fox_moon", "fox_body", "fox_tail"]}
 
 
@@ -1278,8 +1483,10 @@ def meta_for(name, spec, n, i, size_override=None, emit=None):
     return m
 
 
-def fname(name: str, n: int, i: int) -> str:
-    return f"{name}.png" if n == 1 else f"{name}_{i}.png"
+def fname(name: str, n: int, i: int, emit: bool = False) -> str:
+    """文件名：多帧的帧号在前、_emit 在后（同 actors 图集：sword_cloud_0_emit）；单张的 fox_body_emit。"""
+    tail = "_emit" if emit else ""
+    return f"{name}{tail}.png" if n == 1 else f"{name}_{i}{tail}.png"
 
 
 def build(names: list[str]) -> None:
@@ -1292,11 +1499,12 @@ def build(names: list[str]) -> None:
         res = spec[0]()
         body, emit = (res if isinstance(res, tuple) else (res, None))
         n = len(body)
-        # 先删掉这一组旧的条目
+        # 先删掉这一组旧的条目和文件（包括上一轮 <名>_emit_<帧号> 写法的）
         for k in [k for k in files if k.startswith(name + "_") or k == name + ".png"]:
-            if k.startswith(name + "_emit") and emit is None:
-                continue
             files.pop(k, None)
+        for old in list(OUT.glob(f"{name}_*.png")) + list(OUT.glob(f"{name}.png")):
+            if old.stem == name or old.stem[len(name) + 1:].split("_")[0] in {str(j) for j in range(64)} | {"emit"}:
+                old.unlink()
         for i, img in enumerate(body):
             assert img.size == tuple(spec[1]), (name, img.size, spec[1])
             V.save_png(img, OUT / fname(name, n, i))
@@ -1305,21 +1513,21 @@ def build(names: list[str]) -> None:
             en = EMIT_SPECS[name]
             for i, img in enumerate(emit):
                 assert img.size == tuple(spec[1])
-                V.save_png(img, OUT / fname(en["name"], n, i))
-                files[fname(en["name"], n, i)] = meta_for(name, spec, n, i, emit=en)
+                V.save_png(img, OUT / fname(name, n, i, emit=True))
+                files[fname(name, n, i, emit=True)] = meta_for(name, spec, n, i, emit=en)
         print(f"{name}: {n} 帧{' + 发光层' if emit else ''}  {time.perf_counter() - t0:.1f}s", flush=True)
     meta = {"name": "myth", "generator": GENERATOR, "format": "PNG RGBA，直通（非预乘）alpha", "px_per_unit": PPU, "files": dict(sorted(files.items()))}
     meta_path.write_text(V.dump_json(meta), encoding="utf-8")
 
 
-def load(name: str) -> list[Image.Image]:
-    """读回一组（审图、分镜用）。单张的返回一个元素的列表。"""
-    if (OUT / f"{name}.png").exists():
-        return [Image.open(OUT / f"{name}.png").convert("RGBA")]
+def load(name: str, emit: bool = False) -> list[Image.Image]:
+    """读回一组（审图、分镜用）。单张的返回一个元素的列表；emit=True 读发光层。"""
+    if (OUT / fname(name, 1, 0, emit)).exists():
+        return [Image.open(OUT / fname(name, 1, 0, emit)).convert("RGBA")]
     out = []
     i = 0
-    while (OUT / f"{name}_{i}.png").exists():
-        out.append(Image.open(OUT / f"{name}_{i}.png").convert("RGBA"))
+    while (OUT / fname(name, 2, i, emit)).exists():
+        out.append(Image.open(OUT / fname(name, 2, i, emit)).convert("RGBA"))
         i += 1
     if not out:
         raise FileNotFoundError(name)
