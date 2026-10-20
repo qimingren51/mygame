@@ -25,9 +25,13 @@ pub(crate) fn move_player(
     director: Res<crate::run::Director>,
     input: Res<InputFrame>,
     bamboo: Res<crate::bamboo::Bamboo>,
+    mut outbox: ResMut<SimOutbox>,
     mut q: Query<(&mut Pos, &mut Player)>,
 ) {
     let speed = stats.get(Stat::Speed);
+    // 定海神针：站定、又动了，各发一次事件（画面用）；没挂这枚灯坠时不发
+    let still_after = content.0.player.charms.still_after;
+    let stance = stats.get(Stat::StillDamage) > 0.0;
     let charges = stats.get(Stat::DashCharges).round().max(1.0) as u32;
     let dir = input.dir();
     for (mut pos, mut p) in &mut q {
@@ -52,7 +56,12 @@ pub(crate) fn move_player(
             p.facing = dir.normalize();
         }
         p.moved = before.distance(pos.0);
+        let was_still = p.still_t >= still_after;
         p.still_t = if p.moved > 1e-3 { 0.0 } else { p.still_t + DT };
+        let still = p.still_t >= still_after;
+        if stance && still != was_still {
+            outbox.0.push(SimEvent::Stance { on: still });
+        }
         // 闪避按段充能：冷却走完补一段，没满就接着冷却
         p.dash_ready = p.dash_ready.min(charges);
         if p.dash_ready < charges {

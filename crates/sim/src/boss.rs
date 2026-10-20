@@ -396,6 +396,7 @@ pub(crate) fn boss_attacks(
                 let angle = combat.range_f32(0.0, TAU);
                 let (s, co) = ops::sin_cos(angle);
                 let at = p + Vec2::new(co, s) * il.distance;
+                outbox.0.push(SimEvent::IllusionSpawned { pos: at });
                 st.illusions.push(Illusion {
                     pos: at,
                     prev: at,

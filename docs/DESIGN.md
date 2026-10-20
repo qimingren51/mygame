@@ -246,6 +246,10 @@ Points(2), Favor,                                                 // 夜签“�
 - `SimEvent::Hit` 保留 `pos` 的飘字语义，新增 `impact_pos: Vec2`、`incoming_dir: Vec2`、`weapon: Option<u16>`、`source: combat::Source`、`target: EnemyHandle`。接触点为敌人中心减入射单位方向乘敌人半径。飞剑、纸鹤可把当前速度附在瞬时 `combat::Hit.incoming`；否则取 `from→目标`，重合时取 `主角→目标`，再重合为零方向、接触点为中心。
 - `Source::Weapon(i)` 的 `weapon` 为内容下标；`BonusSword` 按 ID 查找 `sword`，缺失为 `None`；灼烧、反应、燃灯等非法器来源为 `None`。`Source` 保留来源类别，用于给无元素字段的灼烧 / 反应脉冲上色。
 - `SimEvent::Kill` 增加 `target`、`weapon`、`incoming_dir`；`Death.hit: KillingHit` 保存最后一击的来源和方向。范围打击、反应走统一结算，灼烧死亡显式传 `Burn + ZERO`。句柄包含代号，槽位复用不会把旧受击表现套到新妖物上。
+- 神话特效（`FEEL.md` 第 13 节）另加三处：
+  - `Kill.frozen`：死时还冻着，和冰魄珠的魂火翻倍同一个判断；
+  - `SimEvent::IllusionSpawned { pos }`：九尾分出幻身的那一刻；
+  - `SimEvent::Stance { on }`：挂着定海神针时，站定满 `still_after` 发 `on: true`，一动发 `on: false`。
 - 这些数据只写到临时伤害 / 死亡记录与事件里，不参与伤害、击退、控制、随机流或状态哈希。事件仍为 `Copy`，不含堆分配。`Enemies.flash` 的原模拟值保持原样；画面改由事件驱动自己的计时。
 - `content::WeaponIdentity` 按字符串 ID 给 view / audio 提供相同归属，未知 ID 使用通用表现。`view::impact` 保存句柄对应的受击曲线与最后可见姿态；精灵池在变换传播之后、可见性检查之前应用纯渲染仿射矩阵。每帧从原始 `Transform` 重建，暂停时不叠乘形变。死亡残留使用 `fx` 一次性池的低优先级槽位，不修改模拟资源。
 
