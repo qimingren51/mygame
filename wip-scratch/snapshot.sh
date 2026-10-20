@@ -29,7 +29,7 @@ git ls-files -m -o --exclude-standard -z | while IFS= read -r -d '' f; do
 done
 
 # 各工作区：wip-worktrees/<名>/
-for wt in wt wt-moon wt_enemies; do
+for wt in wt wt-moon wt_enemies wt-inspect wt-myth wt-portrait; do
   P=$SP/$wt
   [ -d "$P" ] || continue
   dst=$W/wip-worktrees/$wt
@@ -46,7 +46,7 @@ done
 
 # 进度笔记与 scratchpad 小脚本
 mkdir -p "$W/docs/playtest/r1/notes"
-cp -p "$SP"/notes_line*.md "$W/docs/playtest/r1/notes/" 2>/dev/null || true
+cp -p "$SP"/notes_*.md "$W/docs/playtest/r1/notes/" 2>/dev/null || true
 for d in . l2 b2 b3 tools; do
   for f in "$SP/$d"/*.py "$SP/$d"/*.sh; do
     [ -f "$f" ] || continue
