@@ -178,8 +178,8 @@ fn spawn_panel(commands: &mut Commands, card: &InspectCard, fonts: &Fonts, skin:
                 row_gap: px(14),
                 ..default()
             },
-            // 几乎不透：界面混色在线性空间，0.9 上下时后面的图鉴还看得见，和右边的字叠在一起
-            BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.985)),
+            // 不透明：界面在线性空间混色，哪怕 0.98，后面图鉴的字也还看得见，和右边的字叠在一起
+            BackgroundColor(Color::srgb(0.02, 0.025, 0.03)),
         ))
         .with_children(|root| {
             root.spawn(Node { column_gap: px(36), align_items: AlignItems::Center, ..default() })
