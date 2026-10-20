@@ -3,24 +3,28 @@
 //!
 //! 局内的操作都发 `SimCommand::Dev`，回放照样复现，用过的局不计奖励和成绩；面板开着时对局暂停，合上以后生效。
 //! 局外的全解锁、加灯油只改内存里的存档，之后本次启动不再存档。
+//! 流速（×0 定格到 ×4）只改画面层的虚拟时间（`lantern_view::SimSpeed`），不进回放；定格时按 F2 走一步。
 
 use bevy::picking::events::{PointerClick, PointerOver};
 use bevy::prelude::*;
 
-use lantern_content::Content;
+use lantern_content::{Content, PlanEvent, Rank};
 use lantern_platform::{Actions, Profile, Settings, UiCue};
 use lantern_sim::run::RunPlan;
 use lantern_sim::{AppState, Dev, DevCommand, GameContent, RunState, SimCommand, SimCommands, SimPhase};
+use lantern_view::SimSpeed;
 
 use crate::responsive::FitViewport;
 use crate::skin::Skin;
 use crate::{Fonts, INK, INK_DIM, PAPER, overlay_vignette, text};
 
 /// 对局里的页签；标题和灯驿里只有“局外”
-const RUN_TABS: [&str; 6] = ["身板", "成长", "法器", "心法", "合璧", "局外"];
+const RUN_TABS: [&str; 8] = ["身板", "成长", "法器", "心法", "合璧", "流程", "时间", "局外"];
 const META_TABS: [&str; 1] = ["局外"];
 /// 伤害倍率的几档
 const DAMAGE: [u16; 4] = [1, 10, 100, 1000];
+/// 流速的几档（0 是定格）
+const SPEEDS: [f32; 6] = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0];
 
 #[derive(Resource, Default)]
 pub(crate) struct DevPanel {
@@ -35,9 +39,10 @@ pub(crate) struct DevPanel {
     col: usize,
     clicked: Option<(usize, usize)>,
     hovered: Option<(usize, usize)>,
-    /// 发出去还没生效的无敌、伤害倍率（面板开着时对局暂停，命令要等合上才执行）
+    /// 发出去还没生效的无敌、伤害倍率、刷怪开关（面板开着时对局暂停，命令要等合上才执行）
     god: Option<bool>,
     damage: Option<u16>,
+    spawning: Option<bool>,
     /// 最近一次操作的回显
     note: String,
     dirty: bool,
@@ -50,6 +55,10 @@ impl DevPanel {
     }
 }
 
+/// 下一局的夜签（`omens.ron` 下标）：出发抽夜签时放到第一张，这一局记成开发者局。本次启动有效
+#[derive(Resource, Default)]
+pub(crate) struct DevOmen(pub(crate) Option<usize>);
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Action {
     Sim(DevCommand),
@@ -60,6 +69,12 @@ enum Action {
         oil: u32,
         gold: u32,
     },
+    /// 刷怪开关：按现在的状态取反
+    Spawning,
+    /// 流速
+    Speed(f32),
+    /// 下一局的夜签；None 是不指定
+    Omen(Option<usize>),
 }
 
 struct Button {
@@ -77,10 +92,38 @@ fn tabs(in_run: bool) -> &'static [&'static str] {
     if in_run { &RUN_TABS } else { &META_TABS }
 }
 
+/// 按钮上要显示的当前状态
+#[derive(Clone, Copy)]
+struct Now {
+    god: bool,
+    damage: u16,
+    spawning: bool,
+    speed: f32,
+    omen: Option<usize>,
+}
+
+impl Default for Now {
+    fn default() -> Self {
+        Now { god: false, damage: 1, spawning: true, speed: 1.0, omen: None }
+    }
+}
+
+/// 时间表上的一项叫什么
+fn event_name(e: &PlanEvent) -> &'static str {
+    match e {
+        PlanEvent::Elite(_) => "精英",
+        PlanEvent::Surge { .. } => "妖潮",
+        PlanEvent::MiniBoss { .. } => "小头目",
+        PlanEvent::Encircle { .. } => "合围",
+        PlanEvent::Boss { .. } => "夜主",
+    }
+}
+
 /// 一页的按钮，按行排。
-fn page(tab: &str, c: &Content, god: bool, damage: u16) -> Vec<Vec<Button>> {
+fn page(tab: &str, c: &Content, now: Now) -> Vec<Vec<Button>> {
     use DevCommand as D;
     let sim = Action::Sim;
+    let Now { god, damage, spawning, speed, omen } = now;
     match tab {
         "身板" => vec![
             vec![button(if god { "无敌：开" } else { "无敌：关" }, Action::God, god)],
@@ -132,13 +175,65 @@ fn page(tab: &str, c: &Content, god: bool, damage: u16) -> Vec<Vec<Button>> {
                 .map(|(f, def)| button(&def.name, sim(D::Fuse(f as u16)), false))
                 .collect(),
         ],
-        _ => vec![
-            vec![button("全解锁（本次启动）", Action::UnlockAll, false)],
-            vec![
-                button("灯油 +5000", Action::AddMeta { oil: 5000, gold: 0 }, false),
-                button("铜钱 +2000", Action::AddMeta { oil: 0, gold: 2000 }, false),
-            ],
+        "流程" => {
+            // 时间表上的节点：跳过去，前面的跳过，这一刻的照常发生（9:30 夜主九尾）
+            let jumps = c
+                .run
+                .schedule
+                .iter()
+                .map(|s| {
+                    let at = s.at.0.round() as u16;
+                    let label = format!("跳到 {}:{:02} {}", at / 60, at % 60, event_name(&s.event));
+                    button(label, sim(D::SkipTo(at)), false)
+                })
+                .collect();
+            let spawns: Vec<(String, Action)> = c
+                .enemies
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.rank != Rank::Boss)
+                .map(|(k, e)| (format!("刷 {}", e.name), sim(D::Spawn(k as u16))))
+                .collect();
+            let mut rows = vec![jumps];
+            rows.extend(
+                spawns.chunks(5).map(|r| r.iter().map(|(l, a)| button(l.clone(), *a, false)).collect()),
+            );
+            rows.push(vec![
+                button("清屏", sim(D::Clear), false),
+                button(if spawning { "刷怪：开" } else { "刷怪：停" }, Action::Spawning, !spawning),
+            ]);
+            rows
+        }
+        "时间" => vec![
+            SPEEDS
+                .iter()
+                .map(|&s| {
+                    let label = if s == 0.0 { "定格".to_string() } else { format!("流速 ×{s}") };
+                    button(label, Action::Speed(s), (speed - s).abs() < 1e-3)
+                })
+                .collect(),
         ],
+        _ => {
+            let mut rows = vec![
+                vec![button("全解锁（本次启动）", Action::UnlockAll, false)],
+                vec![
+                    button("灯油 +5000", Action::AddMeta { oil: 5000, gold: 0 }, false),
+                    button("铜钱 +2000", Action::AddMeta { oil: 0, gold: 2000 }, false),
+                ],
+            ];
+            // 下一局的夜签
+            let omens: Vec<Button> =
+                std::iter::once(button("夜签：不指定", Action::Omen(None), omen.is_none()))
+                    .chain(c.omens.iter().enumerate().map(|(k, o)| {
+                        button(format!("夜签：{}", o.name), Action::Omen(Some(k)), omen == Some(k))
+                    }))
+                    .collect();
+            let mut omens = omens.into_iter().peekable();
+            while omens.peek().is_some() {
+                rows.push(omens.by_ref().take(5).collect());
+            }
+            rows
+        }
     }
 }
 
@@ -146,7 +241,13 @@ fn page(tab: &str, c: &Content, god: bool, damage: u16) -> Vec<Vec<Button>> {
 struct Root;
 
 pub(crate) fn register(app: &mut App) {
-    app.init_resource::<DevPanel>().add_systems(
+    // 流速每局从 ×1 开始
+    app.add_systems(OnEnter(AppState::Run), |speed: Option<ResMut<SimSpeed>>| {
+        if let Some(mut s) = speed {
+            s.0 = 1.0;
+        }
+    });
+    app.init_resource::<DevPanel>().init_resource::<DevOmen>().add_systems(
         Update,
         (input, redraw)
             .chain()
@@ -169,8 +270,18 @@ impl RunInfo<'_> {
         panel.god.unwrap_or(self.plan.as_ref().is_some_and(|p| p.god))
     }
 
-    fn damage(&self, panel: &DevPanel) -> u16 {
-        panel.damage.unwrap_or(self.dev.as_ref().map_or(1, |d| d.damage.round() as u16))
+    fn spawning(&self, panel: &DevPanel) -> bool {
+        panel.spawning.unwrap_or(self.dev.as_ref().is_none_or(|d| !d.no_spawn))
+    }
+
+    fn now(&self, panel: &DevPanel, speed: Option<&SimSpeed>, omen: Option<&DevOmen>) -> Now {
+        Now {
+            god: self.god(panel),
+            damage: panel.damage.unwrap_or(self.dev.as_ref().map_or(1, |d| d.damage.round() as u16)),
+            spawning: self.spawning(panel),
+            speed: speed.map_or(1.0, |s| s.0),
+            omen: omen.and_then(|o| o.0),
+        }
     }
 }
 
@@ -187,9 +298,28 @@ fn input(
     (mut sim, mut profile): (ResMut<SimCommands>, ResMut<Profile>),
     mut cues: MessageWriter<UiCue>,
     title: Option<ResMut<crate::title::TitleUi>>,
+    (mut speed, mut fixed, mut omen): (
+        Option<ResMut<SimSpeed>>,
+        Option<ResMut<Time<Fixed>>>,
+        Option<ResMut<DevOmen>>,
+    ),
 ) {
     let (app_state, run_state) = states;
     let in_run = *app_state.get() == AppState::Run;
+    let playing = run_state.as_ref().is_some_and(|s| *s.get() == RunState::Playing);
+    // 定格时按 F2 走一步：给固定步长的时钟塞进一步的时间，下一帧模拟正好跑一步
+    if settings.dev_tools
+        && in_run
+        && playing
+        && !panel.open
+        && keys.just_pressed(KeyCode::F2)
+        && speed.as_ref().is_some_and(|s| s.0 == 0.0)
+        && let Some(f) = fixed.as_mut()
+    {
+        let step = f.timestep();
+        f.accumulate_overstep(step);
+        return;
+    }
     let close = |panel: &mut DevPanel, next_run: &mut NextState<RunState>| {
         panel.open = false;
         if panel.resume && in_run {
@@ -207,7 +337,6 @@ fn input(
             close(&mut panel, &mut next_run);
             cues.write(UiCue::Back);
         } else if in_run {
-            let playing = run_state.as_ref().is_some_and(|s| *s.get() == RunState::Playing);
             if playing {
                 next_run.set(RunState::Paused);
             }
@@ -235,7 +364,7 @@ fn input(
     let names = tabs(in_run);
     panel.tab = panel.tab.min(names.len() - 1);
     let c = &content.0;
-    let rows = page(names[panel.tab], c, run.god(&panel), run.damage(&panel));
+    let rows = page(names[panel.tab], c, run.now(&panel, speed.as_deref(), omen.as_deref()));
     let width = |row: usize| if row == 0 { names.len() } else { rows.get(row - 1).map_or(1, Vec::len) };
     let before = (panel.tab, panel.row, panel.col);
     if let Some(h) = panel.hovered.take()
@@ -271,7 +400,29 @@ fn input(
             panel.tab = panel.col;
         } else if let Some(b) = rows.get(panel.row - 1).and_then(|r| r.get(panel.col)) {
             let label = b.label.clone();
-            panel.note = act(b.action, &label, c, &mut panel, &run, &mut sim, &mut profile);
+            panel.note = match b.action {
+                // 流速只改画面层的虚拟时间，不发命令
+                Action::Speed(s) => {
+                    if let Some(sp) = speed.as_mut() {
+                        sp.0 = s;
+                    }
+                    if s == 0.0 {
+                        "定格：合上面板后，按 F2 走一步".into()
+                    } else {
+                        format!("{label}：合上面板后生效")
+                    }
+                }
+                Action::Omen(k) => {
+                    if let Some(o) = omen.as_mut() {
+                        o.0 = k;
+                    }
+                    match k {
+                        Some(_) => format!("{label}：下次出发抽夜签时放在第一张，那一局不计奖励"),
+                        None => "下一局夜签照常抽".into(),
+                    }
+                }
+                a => act(a, &label, c, &mut panel, &run, &mut sim, &mut profile),
+            };
             // 局外改了存档：灯驿、图鉴跟着重画
             if matches!(b.action, Action::UnlockAll | Action::AddMeta { .. })
                 && let Some(mut t) = title
@@ -325,6 +476,12 @@ fn act(
             profile.dev_add(oil, gold);
             format!("{label}。本次启动不再存档，重开游戏恢复原来的进度")
         }
+        Action::Spawning => {
+            let on = !run.spawning(panel);
+            panel.spawning = Some(on);
+            send(DevCommand::Spawning(on))
+        }
+        Action::Speed(_) | Action::Omen(_) => String::new(),
     }
 }
 
@@ -337,6 +494,7 @@ fn redraw(
     skin: Res<Skin>,
     run: RunInfo,
     roots: Query<Entity, With<Root>>,
+    (speed, omen): (Option<Res<SimSpeed>>, Option<Res<DevOmen>>),
 ) {
     if panel.open && !panel.dirty && !roots.is_empty() {
         return;
@@ -354,7 +512,7 @@ fn redraw(
     let in_run = *app_state.get() == AppState::Run;
     let names = tabs(in_run);
     let tab = panel.tab.min(names.len() - 1);
-    let rows = page(names[tab], &content.0, run.god(&panel), run.damage(&panel));
+    let rows = page(names[tab], &content.0, run.now(&panel, speed.as_deref(), omen.as_deref()));
     let focus = (panel.row, panel.col);
     commands
         .spawn((
@@ -467,19 +625,23 @@ mod tests {
     fn every_tab_has_buttons_and_weapon_rows_follow_the_data() {
         let c = content();
         for name in RUN_TABS {
-            let rows = page(name, &c, false, 1);
+            let rows = page(name, &c, Now::default());
             assert!(!rows.is_empty() && rows.iter().all(|r| !r.is_empty()), "{name}");
         }
-        let weapons = page("法器", &c, false, 1);
+        let weapons = page("法器", &c, Now::default());
         assert_eq!(weapons.len(), c.weapons.len());
         for (row, w) in weapons.iter().zip(&c.weapons) {
             assert_eq!(row.len(), 2 + usize::from(w.evolution.is_some()) + usize::from(w.mutation.is_some()));
         }
-        let passives: usize = page("心法", &c, false, 1).iter().map(Vec::len).sum();
+        let passives: usize = page("心法", &c, Now::default()).iter().map(Vec::len).sum();
         assert_eq!(passives, c.passives.len());
         // 当前的那一档点亮
-        assert!(page("身板", &c, true, 100)[0][0].on);
-        assert!(page("身板", &c, false, 100)[1].iter().any(|b| b.on && b.label == "伤害 ×100"));
+        assert!(page("身板", &c, Now { god: true, damage: 100, ..Now::default() })[0][0].on);
+        assert!(
+            page("身板", &c, Now { damage: 100, ..Now::default() })[1]
+                .iter()
+                .any(|b| b.on && b.label == "伤害 ×100")
+        );
     }
 
     fn app(state: AppState) -> App {
@@ -544,6 +706,43 @@ mod tests {
             app.world().resource::<NextState<RunState>>(),
             NextState::Pending(RunState::Playing)
         ));
+    }
+
+    /// “时间”页选定格；合上回到对局以后，定格时按 F2 给固定步长塞进一步
+    #[test]
+    fn speed_buttons_set_sim_speed_and_f2_steps_when_frozen() {
+        let mut app = app(AppState::Run);
+        app.init_resource::<SimSpeed>().insert_resource(Time::<Fixed>::from_hz(60.0));
+        app.update();
+        press_f1(&mut app);
+        app.update();
+        let set = |app: &mut App, a: Actions| {
+            *app.world_mut().resource_mut::<Actions>() = a;
+            app.update();
+        };
+        set(&mut app, Actions { nav: IVec2::NEG_Y, ..default() });
+        let time_tab = RUN_TABS.iter().position(|&t| t == "时间").unwrap();
+        for _ in 0..time_tab {
+            set(&mut app, Actions { nav: IVec2::X, ..default() });
+        }
+        set(&mut app, Actions { nav: IVec2::Y, ..default() });
+        set(&mut app, Actions { confirm: true, ..default() });
+        assert_eq!(app.world().resource::<SimSpeed>().0, 0.0, "第一个是定格");
+        assert!(app.world().resource::<SimCommands>().0.is_empty(), "流速不发命令、不进回放");
+        set(&mut app, Actions { back: true, ..default() });
+        set(&mut app, Actions::default());
+        assert_eq!(*app.world().resource::<State<RunState>>().get(), RunState::Playing);
+        let before = app.world().resource::<Time<Fixed>>().overstep();
+        press_f1_like(&mut app, KeyCode::F2);
+        let after = app.world().resource::<Time<Fixed>>().overstep();
+        assert_eq!(after - before, app.world().resource::<Time<Fixed>>().timestep());
+    }
+
+    fn press_f1_like(app: &mut App, key: KeyCode) {
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(key);
+        app.update();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(key);
     }
 
     /// 设置里没打开开发者选项时，F1 没反应

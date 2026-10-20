@@ -103,7 +103,7 @@ pub(crate) fn start_run(mut commands: Commands, content: Res<GameContent>, setup
     };
     commands.insert_resource(ids);
     commands.insert_resource(Tick(0));
-    commands.insert_resource(crate::dev::Dev::default());
+    commands.insert_resource(crate::dev::Dev { used: setup.dev, ..Default::default() });
     commands.insert_resource(SimRng(rng));
     commands.insert_resource(plan);
     commands.insert_resource(SimView::new(c));
@@ -317,6 +317,7 @@ pub(crate) fn record_hash(p: HashParams, mut log: ResMut<HashLog>) {
     if p.dev.used {
         h.write_u32(1);
         h.write_f32(p.dev.damage);
+        h.write_u32(u32::from(p.dev.no_spawn));
     }
     // 叙事只在启用（回放带了 StorySeed）时写入；旧路径的黄金哈希不变。
     p.story.hash_into(&p.rng, &mut h);

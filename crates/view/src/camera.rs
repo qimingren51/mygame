@@ -497,6 +497,7 @@ pub(crate) fn update_rig(
     mut time: ResMut<Time<Virtual>>,
     player: Single<(&Pos, &PrevPos, &Player)>,
     mut cam: Single<(&mut Transform, &mut Projection), With<MainCamera>>,
+    speed: Option<Res<crate::SimSpeed>>,
 ) {
     let dt = real.delta_secs().min(0.1);
     let rig = &mut *rig;
@@ -504,7 +505,9 @@ pub(crate) fn update_rig(
     rig.protected_left = (rig.protected_left - dt).max(0.0);
 
     // ---- 时间：旧计时已在收事件前推进，新请求完整保留到下一帧。
-    let scale = if feel.hitstop { rig.time_scale() } else { 1.0 };
+    // 开发者选项的流速是基础倍率，顿帧、慢镜在它上面再乘
+    let base = speed.map_or(1.0, |s| s.0);
+    let scale = (if feel.hitstop { rig.time_scale() } else { 1.0 }) * base;
     if (time.relative_speed() - scale).abs() > 1e-4 {
         time.set_relative_speed(scale);
     }

@@ -256,7 +256,7 @@ pub(crate) struct FlowParams<'w, 's> {
     content: Res<'w, GameContent>,
     setup: Res<'w, RunSetup>,
     plan: ResMut<'w, RunPlan>,
-    tick: Res<'w, Tick>,
+    tick: ResMut<'w, Tick>,
     phase: ResMut<'w, SimPhase>,
     flow: ResMut<'w, Flow>,
     arsenal: ResMut<'w, Arsenal>,
@@ -454,6 +454,20 @@ impl FlowParams<'_, '_> {
         let weapon = |d: u16| Some(usize::from(d)).filter(|&d| d < c.weapons.len());
         match cmd {
             DevCommand::God(on) => self.plan.god = on,
+            DevCommand::SkipTo(secs) => {
+                let to = u64::from(secs) * u64::from(lantern_core::step::TICK_HZ);
+                if to > self.tick.0 {
+                    self.tick.0 = to;
+                    // 跳过的这段时间表不再触发；正好在这一刻的照常发生
+                    for step in &mut self.plan.schedule {
+                        if step.at < f32::from(secs) {
+                            step.done = true;
+                        }
+                    }
+                }
+            }
+            DevCommand::Spawning(on) => self.dev.no_spawn = !on,
+            DevCommand::Spawn(_) | DevCommand::Clear => self.dev.queue.push(cmd),
             DevCommand::Damage(n) => self.dev.damage = f32::from(n.max(1)),
             DevCommand::Levels(n) => {
                 // 补足连升 n 级要的经验，照常走升级和选卡

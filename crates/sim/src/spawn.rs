@@ -161,10 +161,13 @@ pub(crate) fn update_spawns(
     mut outbox: ResMut<SimOutbox>,
     mut survival: ResMut<Survival>,
     bamboo: Res<crate::bamboo::Bamboo>,
+    dev: Res<crate::dev::Dev>,
 ) {
     let content = &content.0;
     let s = &content.run.spawn;
     let p = player.0;
+    // 开发者选项停了刷怪：常规刷怪、成群、伏击都停，时间表照常
+    let quiet = dev.no_spawn;
     let t = tick.secs();
     let m = t / 60.0;
     let rng = rng.0.get(Stream::Spawn);
@@ -191,7 +194,7 @@ pub(crate) fn update_spawns(
         rate *= director.boss_mult;
     }
     // 妖潮期间不受常规上限限制
-    if en.count >= soft_cap(s, m) && director.surge_t <= 0.0 {
+    if (en.count >= soft_cap(s, m) && director.surge_t <= 0.0) || quiet {
         rate = 0.0;
     }
     director.spawn_acc += rate * DT;
@@ -219,7 +222,7 @@ pub(crate) fn update_spawns(
     if director.next_pack == 0.0 {
         director.next_pack = packs.start;
     }
-    if t >= director.next_pack {
+    if t >= director.next_pack && !quiet {
         director.next_pack = t + rng.range_f32(packs.interval.0, packs.interval.1);
         let (bx, by) = ring_pos(rng, &view, p.x, p.y, s.ring_extra + 20.0);
         let n = (packs.size.at(m) * s.scale * stats.get(Stat::SpawnRate)).round() as u32;
@@ -242,7 +245,7 @@ pub(crate) fn update_spawns(
         director.ambush_t = s.ambush.iter().map(|a| a.from).collect();
     }
     for (k, a) in s.ambush.iter().enumerate() {
-        if t < director.ambush_t[k] {
+        if t < director.ambush_t[k] || quiet {
             continue;
         }
         let kind = content.enemy_index(&a.enemy).expect("内容校验保证引用存在") as u16;

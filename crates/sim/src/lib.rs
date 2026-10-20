@@ -114,6 +114,9 @@ pub struct RunSetup {
     /// 存档里已经解锁的法器（`weapons.ron` 的 ID）：`run.ron` 里锁着的，这些照常进卡池（docs/GAMEPLAY.md 第 13.2 节）
     #[serde(default)]
     pub unlocked: std::collections::BTreeSet<String>,
+    /// 开发者选项改过开局（指定了夜签）：这一局一开始就记成开发者局，不计奖励
+    #[serde(default)]
+    pub dev: bool,
 }
 
 fn first_tier() -> u8 {
@@ -137,6 +140,7 @@ impl RunSetup {
             attributes: BTreeMap::new(),
             insight: None,
             unlocked: Default::default(),
+            dev: false,
         }
     }
 
@@ -257,6 +261,7 @@ impl Plugin for SimPlugin {
                         replay::feed_playback,
                         replay::record,
                         flow::handle_commands,
+                        dev::apply,
                         tick::save_prev_pos.run_if(flow::playing),
                         stats::refresh_stats,
                     )

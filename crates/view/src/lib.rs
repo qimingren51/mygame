@@ -71,6 +71,16 @@ pub struct ViewPlugin {
 #[derive(Resource)]
 pub struct AssetRoot(pub PathBuf);
 
+/// 对局流速的基础倍率（开发者选项：×0 定格、×0.25 … ×4）。顿帧、慢镜在它上面再乘，不进模拟、不进回放。
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct SimSpeed(pub f32);
+
+impl Default for SimSpeed {
+    fn default() -> Self {
+        SimSpeed(1.0)
+    }
+}
+
 /// 局内单独使用的贴图，在标题期间保留并预载。
 #[derive(Resource)]
 pub struct SceneAssets {
@@ -82,6 +92,7 @@ impl Plugin for ViewPlugin {
         app.add_plugins((lighting::LightingPlugin, hero_feedback::HeroFeedbackPlugin))
             .insert_resource(ClearColor(NIGHT))
             .insert_resource(AssetRoot(self.asset_root.clone()))
+            .init_resource::<SimSpeed>()
             .init_resource::<actors::Pools>()
             .init_resource::<impact::Impacts>()
             .init_resource::<actors::GlowPool>()

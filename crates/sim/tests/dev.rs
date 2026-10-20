@@ -217,3 +217,69 @@ fn dev_commands_replay_identically() {
     assert_eq!(played.hashes(), sim.hashes());
     assert!(played.world().resource::<Dev>().used);
 }
+
+/// 跳到 9:30：前面的时间表跳过，夜主九尾照常降临；只往后跳
+#[test]
+fn skipping_to_the_boss_summons_jiuwei_and_skips_earlier_events() {
+    let mut sim = SimHarness::new(content(), 9);
+    sim.step(InputFrame::default(), &dev(DevCommand::SkipTo(570)));
+    assert!(sim.tick() >= 570 * 60);
+    let plan = sim.world().resource::<lantern_sim::run::RunPlan>();
+    assert!(plan.schedule.iter().filter(|s| s.at < 570.0).all(|s| s.done), "前面的跳过");
+    let mut arrived = false;
+    for _ in 0..120 {
+        sim.step(InputFrame::default(), &[]);
+        arrived |= sim.take_events().iter().any(|e| matches!(e, SimEvent::BossArrived { .. }));
+    }
+    assert!(arrived && sim.world().resource::<lantern_sim::Director>().boss.is_some());
+    let now = sim.tick();
+    sim.step(InputFrame::default(), &dev(DevCommand::SkipTo(60)));
+    assert_eq!(sim.tick(), now + 1, "不往回跳");
+}
+
+/// 刷指定的妖物在主角右边；清屏留下夜主；夜主不能直接刷
+#[test]
+fn spawn_and_clear_screen() {
+    let c = content();
+    let mut sim = quiet(10);
+    let ghoul = c.enemy_index("ghoul").unwrap() as u16;
+    let boss = c.enemies.iter().position(|e| e.rank == lantern_content::Rank::Boss).unwrap() as u16;
+    sim.step(
+        InputFrame::default(),
+        &[SimCommand::Dev(DevCommand::Spawn(ghoul)), SimCommand::Dev(DevCommand::Spawn(boss))],
+    );
+    let en = sim.enemies();
+    assert_eq!(en.count, 1, "夜主不刷");
+    let i = en.iter_alive().next().unwrap();
+    assert_eq!(en.kind[i], ghoul);
+    assert!(en.x[i] > 150.0, "在主角右边");
+    sim.step(InputFrame::default(), &dev(DevCommand::Clear));
+    assert_eq!(sim.enemies().count, 0);
+    // 夜主在场时清屏只留下它（quiet 会清掉时间表，这里用正常的一局、停了常规刷怪）
+    let mut sim = SimHarness::new(content(), 10);
+    sim.step(InputFrame::default(), &dev(DevCommand::Spawning(false)));
+    sim.step(InputFrame::default(), &dev(DevCommand::SkipTo(570)));
+    for _ in 0..30 {
+        sim.step(InputFrame::default(), &dev(DevCommand::Spawn(ghoul)));
+    }
+    assert!(sim.world().resource::<lantern_sim::Director>().boss.is_some());
+    assert!(sim.enemies().count > 1);
+    sim.step(InputFrame::default(), &dev(DevCommand::Clear));
+    assert_eq!(sim.enemies().count, 1);
+}
+
+/// 停刷：常规刷怪停下，再打开又刷
+#[test]
+fn spawning_can_be_stopped_and_resumed() {
+    let mut sim = SimHarness::new(content(), 11);
+    sim.step(InputFrame::default(), &dev(DevCommand::Spawning(false)));
+    for _ in 0..60 * 20 {
+        sim.step(InputFrame::default(), &[]);
+    }
+    assert_eq!(sim.enemies().count, 0);
+    sim.step(InputFrame::default(), &dev(DevCommand::Spawning(true)));
+    for _ in 0..60 * 5 {
+        sim.step(InputFrame::default(), &[]);
+    }
+    assert!(sim.enemies().count > 0);
+}

@@ -141,7 +141,11 @@ pub(crate) fn input(
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
     mut cues: MessageWriter<UiCue>,
-    (mut reader, dev): (ResMut<crate::journals::Reader>, Option<Res<crate::dev_panel::DevPanel>>),
+    (mut reader, dev, dev_omen): (
+        ResMut<crate::journals::Reader>,
+        Option<Res<crate::dev_panel::DevPanel>>,
+        Option<Res<crate::dev_panel::DevOmen>>,
+    ),
 ) {
     // 手记、开发者面板开着时，按键归它们
     if controls.is_open() || transition.active() || reader.open || dev.is_some_and(|d| d.open) {
@@ -228,6 +232,7 @@ pub(crate) fn input(
                 let mut setup = profile.run_setup(c, seed);
                 setup.god = god.0;
                 setup.omen = picks.get(i).cloned();
+                setup.dev = forced_omen(&settings, dev_omen.as_deref()).is_some();
                 info!("出发，种子 {seed}，夜签 {:?}", setup.omen);
                 depart(c, &profile, setup, &mut mode, &mut ui, &mut commands, &mut next);
             } else if actions.back {
@@ -248,7 +253,17 @@ pub(crate) fn input(
             hub::PrepAction::Go => {
                 save(&profile);
                 let seed = seed.0.unwrap_or_else(random_seed);
-                *mode = TitleMode::Omen { seed, picks: draw_omens(c, seed, 3) };
+                let mut picks = draw_omens(c, seed, 3);
+                // 开发者选项指定了夜签：把它放到第一张（五行按这个种子抽）
+                if let Some(k) = forced_omen(&settings, dev_omen.as_deref())
+                    && let Some(p) =
+                        draw_omens(c, seed, c.omens.len()).into_iter().find(|p| p.id == c.omens[k].id)
+                {
+                    picks.retain(|q| q.id != p.id);
+                    picks.insert(0, p);
+                    picks.truncate(3);
+                }
+                *mode = TitleMode::Omen { seed, picks };
                 open(&mut ui);
             }
             hub::PrepAction::Back => {
@@ -418,6 +433,11 @@ fn save(profile: &Profile) {
     if let Err(e) = profile.save() {
         warn!("保存存档失败：{e}");
     }
+}
+
+/// 开发者选项里指定的下一局夜签（设置里关了开发者选项就不算）
+fn forced_omen(settings: &Settings, omen: Option<&crate::dev_panel::DevOmen>) -> Option<usize> {
+    if settings.dev_tools { omen.and_then(|o| o.0) } else { None }
 }
 
 fn back_to_hub(mode: &mut TitleMode, ui: &mut TitleUi, i: usize) {
@@ -1016,6 +1036,46 @@ mod input_tests {
         app.update();
         assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Settings);
         assert_eq!(app.world().resource::<TitleUi>().selected, keyboard - 1);
+    }
+
+    /// 开发者选项指定了下一局的夜签：抽夜签时放在第一张，出发后这一局记成开发者局
+    #[test]
+    fn forced_omen_comes_first_and_marks_the_run() {
+        for forced in [false, true] {
+            let mut app = app();
+            let c = app.world().resource::<GameContent>().0.clone();
+            let k = c.omens.len() - 1;
+            app.insert_resource(SeedOverride(Some(42)));
+            app.world_mut().resource_mut::<Settings>().dev_tools = true;
+            app.insert_resource(crate::dev_panel::DevOmen(forced.then_some(k)));
+            {
+                let mut profile = app.world_mut().resource_mut::<Profile>();
+                profile.basics = true;
+                profile.saw_scroll(crate::scroll::REGION, false);
+            }
+            *app.world_mut().resource_mut::<TitleMode>() = TitleMode::Prep;
+            let go = hub::prep_rows(&c, app.world().resource::<Profile>()).len() - 1;
+            app.world_mut().resource_mut::<TitleUi>().selected = go;
+            *app.world_mut().resource_mut::<Actions>() = Actions { confirm: true, ..default() };
+            app.update();
+            // 换面板要先拉墨幕；这里直接跳过
+            app.world_mut().resource_scope(|world, mut t: Mut<crate::transition::InkTransition>| {
+                let mut mode = world.resource_mut::<TitleMode>();
+                let mut m = mode.clone();
+                let mut selected = 0;
+                t.skip(&mut m, &mut selected);
+                *mode = m;
+                world.resource_mut::<TitleUi>().selected = 0;
+            });
+            let TitleMode::Omen { picks, .. } = app.world().resource::<TitleMode>().clone() else {
+                panic!("该到抽夜签了：{:?}", app.world().resource::<TitleMode>())
+            };
+            assert_eq!(picks.len(), 3);
+            assert_eq!(picks[0].id == c.omens[k].id, forced || draw_omens(&c, 42, 3)[0].id == c.omens[k].id);
+            app.update();
+            let setup = app.world().resource::<RunSetup>();
+            assert_eq!(setup.dev, forced);
+        }
     }
 
     #[test]
