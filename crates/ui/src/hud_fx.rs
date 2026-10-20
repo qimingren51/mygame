@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use bevy::ui::Val2;
 
-use lantern_sim::{AppState, Health, Player, Progress, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Health, Player, Progress, SimEvent, SimOutbox, SimPhase};
 
 use crate::PAPER;
 use crate::hud::{HpFill, Kills, LevelLabel, UltLabel, UltTick, XpFill};
@@ -49,8 +49,9 @@ struct HudFx {
     shake: f32,
     coin: f32,
     level: f32,
-    /// 升级后过了几秒（盖章的动作按它算）
+    /// 升级后过了几秒（盖章的动作按它算）；升级了、还在选卡时先记着，回到战斗再盖
     level_t: f32,
+    level_pending: bool,
     /// 经验条的亮度和上一帧的经验
     xp_glow: f32,
     xp_last: Option<(u32, f32)>,
@@ -192,6 +193,7 @@ fn curtain(
 
 fn animate(
     time: Res<Time<Real>>,
+    phase: Option<Res<SimPhase>>,
     outbox: Res<SimOutbox>,
     player: Query<&Health, With<Player>>,
     mut fx: ResMut<HudFx>,
@@ -215,10 +217,7 @@ fn animate(
                 fx.shake = 1.0;
             }
             SimEvent::CoinPicked { .. } => fx.coin = 1.0,
-            SimEvent::LevelUp { .. } => {
-                fx.level = 1.0;
-                fx.level_t = 0.0;
-            }
+            SimEvent::LevelUp { .. } => fx.level_pending = true,
             _ => {}
         }
     }
@@ -277,7 +276,13 @@ fn animate(
     for mut tf in &mut ult_label {
         tf.scale = Vec2::splat(1.0 + 0.06 * breath);
     }
-    // 升级：等级印盖章似的砸下来，字泛金后慢慢退回纸色
+    // 升级：等级印盖章似的砸下来，字泛金后慢慢退回纸色。升级会弹出选卡、整个信息栏压暗，
+    // 所以等卡片收起、回到战斗那一刻再盖（连升几级只盖一次）
+    if fx.level_pending && phase.as_deref().is_none_or(|p| *p == SimPhase::Play) {
+        fx.level_pending = false;
+        fx.level = 1.0;
+        fx.level_t = 0.0;
+    }
     fx.level = (fx.level - dt * 2.0).max(0.0);
     fx.level_t += dt;
     for mut tf in &mut seal {
@@ -305,6 +310,33 @@ mod tests {
         assert!(stamp(0.14) < 0.95);
         assert!((stamp(0.32) - 1.0).abs() < 1e-3);
         assert_eq!(stamp(5.0), 1.0);
+    }
+
+    /// 升级弹出选卡时信息栏压暗：等回到战斗再盖章
+    #[test]
+    fn level_seal_waits_for_the_choice_to_close() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<HudFx>()
+            .insert_resource(SimPhase::LevelUp)
+            .add_systems(Update, animate);
+        let seal = app.world_mut().spawn((LevelSeal, UiTransform::default())).id();
+        let step = |app: &mut App| {
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(Duration::from_millis(16));
+            app.update();
+        };
+        app.world_mut().resource_mut::<HudFx>().level_t = 10.0;
+        app.world_mut().resource_mut::<SimOutbox>().0.push(SimEvent::LevelUp { level: 2 });
+        step(&mut app);
+        app.world_mut().resource_mut::<SimOutbox>().0.clear();
+        for _ in 0..10 {
+            step(&mut app);
+        }
+        assert_eq!(app.world().get::<UiTransform>(seal).unwrap().scale.x, 1.0, "选卡时不盖");
+        *app.world_mut().resource_mut::<SimPhase>() = SimPhase::Play;
+        step(&mut app);
+        assert!(app.world().get::<UiTransform>(seal).unwrap().scale.x > 1.5, "回到战斗砸下来");
     }
 
     /// 燃灯每点亮一格，那一格跳一下；蓄满后整圈呼吸；燃灯那一下整圈一闪
