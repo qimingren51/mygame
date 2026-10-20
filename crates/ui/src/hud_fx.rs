@@ -1,15 +1,17 @@
-//! 信息栏的动效（docs/FEEL.md 第 5 节）：掉血的白色残影慢半拍缩回、挨打时血条一抖，
-//! 拾到铜钱时那一行字跳一下（“角落的计数跳动”），升级时等级字放大泛金，燃灯蓄满时燃灯条一呼一吸地发亮，
-//! 燃灯未满时尝试燃灯，计量条一抖并短暂提示。
+//! 信息栏的动效（docs/FEEL.md 第 5 节）：掉血的白色残影慢半拍缩回、挨打时血条一抖一亮，
+//! 生命低于三成时血条跟着心跳泛红；拾到铜钱时那一行字跳一下（“角落的计数跳动”）；
+//! 吃到魂火时经验条亮一下；升级时等级印像盖章一样砸下来、字泛金；
+//! 燃灯刻度每点亮一格就跳一下，蓄满时整圈一呼一吸地发亮，燃灯那一下整圈一闪再熄掉；
+//! 燃灯未满时尝试燃灯，头像章一抖并短暂提示。
 //! 开局时画面从黑里淡出来（灯笼同时点亮，见画面层的 `hero_glow`）。用现实时间。
 
 use bevy::prelude::*;
 use bevy::ui::Val2;
 
-use lantern_sim::{AppState, Health, Player, Progress, SimEvent, SimOutbox};
+use lantern_sim::{AppState, Health, Player, Progress, SimEvent, SimOutbox, SimPhase};
 
 use crate::PAPER;
-use crate::hud::{Kills, LevelLabel, UltFill, UltLabel};
+use crate::hud::{HpFill, Kills, LevelLabel, UltLabel, UltTick, XpFill};
 
 const GOLD: Color = Color::srgb(1.0, 0.85, 0.54);
 const ULT_HINT_SECS: f32 = 1.2;
@@ -31,6 +33,10 @@ pub(crate) struct HpBar;
 #[derive(Component)]
 pub(crate) struct HpTrail;
 
+/// 等级印（升级时盖章似的砸下来）。
+#[derive(Component)]
+pub(crate) struct LevelSeal;
+
 /// 开局的黑幕。
 #[derive(Component)]
 struct Curtain(f32);
@@ -43,12 +49,27 @@ struct HudFx {
     shake: f32,
     coin: f32,
     level: f32,
+    /// 升级后过了几秒（盖章的动作按它算）；升级了、还在选卡时先记着，回到战斗再盖
+    level_t: f32,
+    level_pending: bool,
+    /// 经验条的亮度和上一帧的经验
+    xp_glow: f32,
+    xp_last: Option<(u32, f32)>,
+    /// 心跳的相位（和画面暗角同一个节奏）
+    heart: f32,
+    /// 燃灯刻度：上一帧点亮了几格、每格跳的余量、燃灯那一下的闪
+    lit: usize,
+    pops: [f32; TICKS],
+    cast: f32,
 }
+
+/// 燃灯刻度的个数（和 hud.rs 的头像章一致）
+const TICKS: usize = 12;
 
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<HudFx>()
         .add_systems(OnEnter(AppState::Run), (reset, spawn_curtain))
-        .add_systems(Update, (animate, ult_feedback, curtain).run_if(in_state(AppState::Run)));
+        .add_systems(Update, (animate, ticks, ult_feedback, curtain).run_if(in_state(AppState::Run)));
 }
 
 fn ult_feedback(
@@ -81,7 +102,61 @@ fn ult_feedback(
 }
 
 fn reset(mut fx: ResMut<HudFx>) {
-    *fx = HudFx { trail: 1.0, ..default() };
+    *fx = HudFx { trail: 1.0, level_t: 10.0, ..default() };
+}
+
+/// 盖章：从 2 倍砸到 0.9 倍（0.14 秒），再弹回原大（到 0.32 秒）。
+fn stamp(t: f32) -> f32 {
+    if t < 0.14 {
+        let u = t / 0.14;
+        2.0 - 1.1 * u * u
+    } else if t < 0.32 {
+        let u = (t - 0.14) / 0.18;
+        0.9 + 0.1 * (1.0 - (1.0 - u) * (1.0 - u))
+    } else {
+        1.0
+    }
+}
+
+/// 心跳“咚、咚”两下（同画面层 atmos.rs 的暗角）。
+fn beat(h: f32) -> f32 {
+    (-((h - 0.05) * 18.0).powi(2)).exp() + (-((h - 0.28) * 18.0).powi(2)).exp() * 0.7
+}
+
+/// 燃灯刻度：每点亮一格那一格跳一下、泛金；蓄满后整圈一呼一吸；燃灯那一下整圈一闪再熄。
+fn ticks(
+    time: Res<Time<Real>>,
+    outbox: Res<SimOutbox>,
+    progress: Option<Res<Progress>>,
+    mut fx: ResMut<HudFx>,
+    mut q: Query<(&UltTick, &mut ImageNode, &mut UiTransform)>,
+) {
+    let dt = time.delta_secs().min(0.1);
+    let ult = progress.map_or(0.0, |p| p.ult);
+    let lit = if ult >= 1.0 { TICKS } else { ((ult * TICKS as f32) as usize).min(TICKS) };
+    if outbox.0.iter().any(|e| matches!(e, SimEvent::Ult)) {
+        fx.cast = 1.0;
+    }
+    // 一帧点亮了好几格时（开局读档、拾到大魂火）依次错开一点跳
+    if lit > fx.lit {
+        for k in fx.lit..lit {
+            fx.pops[k] = 1.0 + (k - fx.lit) as f32 * 0.12;
+        }
+    }
+    fx.lit = lit;
+    fx.cast = (fx.cast - dt * 2.5).max(0.0);
+    for p in &mut fx.pops {
+        *p = (*p - dt * 4.0).max(0.0);
+    }
+    let breath = if ult >= 1.0 { 0.5 + 0.5 * (time.elapsed_secs() * 4.0).sin() } else { 0.0 };
+    for (tick, mut img, mut tf) in &mut q {
+        let pop = fx.pops.get(tick.0).copied().unwrap_or(0.0).min(1.0);
+        let k = pop * pop;
+        tf.scale = Vec2::splat(1.0 + 0.55 * k + 0.25 * fx.cast);
+        let glow = breath.max(k).max(fx.cast);
+        let hot = if fx.cast > 0.0 { Color::srgb(2.2, 2.0, 1.6) } else { Color::srgb(1.6, 1.35, 0.8) };
+        img.color = Color::WHITE.mix(&hot, glow);
+    }
 }
 
 fn spawn_curtain(mut commands: Commands) {
@@ -118,18 +193,20 @@ fn curtain(
 
 fn animate(
     time: Res<Time<Real>>,
+    phase: Option<Res<SimPhase>>,
     outbox: Res<SimOutbox>,
     player: Query<&Health, With<Player>>,
     mut fx: ResMut<HudFx>,
     mut trail: Query<&mut Node, With<HpTrail>>,
     mut bar: Query<&mut UiTransform, (With<HpBar>, Without<Kills>, Without<LevelLabel>)>,
     mut kills: Query<&mut UiTransform, (With<Kills>, Without<HpBar>, Without<LevelLabel>)>,
-    mut level: Query<(&mut UiTransform, &mut TextColor), (With<LevelLabel>, Without<HpBar>, Without<Kills>)>,
+    mut level: Query<&mut TextColor, With<LevelLabel>>,
     progress: Option<Res<lantern_sim::Progress>>,
-    mut ult: Query<&mut ImageNode, With<UltFill>>,
+    mut seal: Query<&mut UiTransform, (With<LevelSeal>, Without<HpBar>, Without<Kills>, Without<LevelLabel>)>,
+    mut fills: ParamSet<(Query<&mut ImageNode, With<XpFill>>, Query<&mut ImageNode, With<HpFill>>)>,
     mut ult_label: Query<
         &mut UiTransform,
-        (With<UltLabel>, Without<HpBar>, Without<Kills>, Without<LevelLabel>),
+        (With<UltLabel>, Without<HpBar>, Without<Kills>, Without<LevelLabel>, Without<LevelSeal>),
     >,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -140,14 +217,16 @@ fn animate(
                 fx.shake = 1.0;
             }
             SimEvent::CoinPicked { .. } => fx.coin = 1.0,
-            SimEvent::LevelUp { .. } => fx.level = 1.0,
+            SimEvent::LevelUp { .. } => fx.level_pending = true,
             _ => {}
         }
     }
     // 残影：回血时立刻跟上，掉血时停一下再缩；只画当前血量到残影之间的那一截
     let mut hp = fx.trail;
+    let mut low = 0.0;
     if let Ok(h) = player.single() {
         hp = (h.hp / h.max.max(1.0)).clamp(0.0, 1.0);
+        low = ((0.3 - hp) / 0.2).clamp(0.0, 1.0);
         if hp >= fx.trail {
             fx.trail = hp;
         } else if fx.hold > 0.0 {
@@ -169,27 +248,138 @@ fn animate(
     for mut tf in &mut kills {
         tf.scale = Vec2::splat(1.0 + 0.06 * fx.coin);
     }
-    // 燃灯蓄满：燃灯条一呼一吸地发亮，字跟着轻轻起伏
+    // 血条：挨打那一下白一闪；生命低于三成时跟着心跳泛红（越低越急、越红）
+    fx.heart = (fx.heart + dt * (1.1 + low * 0.6)).fract();
+    let red = low * (0.25 + 0.75 * beat(fx.heart));
+    for mut img in &mut fills.p1() {
+        img.color = Color::WHITE
+            .mix(&Color::srgb(1.9, 0.5, 0.42), red * 0.85)
+            .mix(&Color::srgb(2.4, 2.2, 2.0), s_hit(fx.shake));
+    }
+    // 经验条：吃到魂火亮一下，一下子吃得多亮得多；升级那一刻经验归零，不算
+    if let Some(p) = progress.as_deref() {
+        if let Some((lv, xp)) = fx.xp_last
+            && lv == p.level
+            && p.xp > xp
+        {
+            fx.xp_glow = (fx.xp_glow + 0.25 + (p.xp - xp) * 0.02).min(1.0);
+        }
+        fx.xp_last = Some((p.level, p.xp));
+    }
+    fx.xp_glow = (fx.xp_glow - dt * 2.5).max(0.0);
+    for mut img in &mut fills.p0() {
+        img.color = Color::WHITE.mix(&Color::srgb(1.7, 1.55, 1.1), fx.xp_glow * 0.7);
+    }
+    // 燃灯蓄满：按键字跟着刻度一起轻轻起伏（刻度的呼吸在 `ticks`）
     let ready = progress.is_some_and(|p| p.ult >= 1.0);
     let breath = if ready { 0.5 + 0.5 * (time.elapsed_secs() * 4.0).sin() } else { 0.0 };
-    for mut img in &mut ult {
-        img.color = Color::WHITE.mix(&Color::srgb(1.6, 1.35, 0.8), breath);
-    }
     for mut tf in &mut ult_label {
         tf.scale = Vec2::splat(1.0 + 0.06 * breath);
     }
-    fx.level = (fx.level - dt * 2.0).max(0.0);
-    for (mut tf, mut color) in &mut level {
-        let k = fx.level * fx.level;
-        tf.scale = Vec2::splat(1.0 + 0.35 * k);
-        color.0 = PAPER.mix(&GOLD, k);
+    // 升级：等级印盖章似的砸下来，字泛金后慢慢退回纸色。升级会弹出选卡、整个信息栏压暗，
+    // 所以等卡片收起、回到战斗那一刻再盖（连升几级只盖一次）
+    if fx.level_pending && phase.as_deref().is_none_or(|p| *p == SimPhase::Play) {
+        fx.level_pending = false;
+        fx.level = 1.0;
+        fx.level_t = 0.0;
     }
+    fx.level = (fx.level - dt * 2.0).max(0.0);
+    fx.level_t += dt;
+    for mut tf in &mut seal {
+        tf.scale = Vec2::splat(stamp(fx.level_t));
+    }
+    for mut color in &mut level {
+        color.0 = PAPER.mix(&GOLD, fx.level * fx.level);
+    }
+}
+
+/// 挨打时血条白一闪的量：抖动的前一小段（抖动从 1 往下掉，掉到 0.7 以下就不闪了）。
+fn s_hit(shake: f32) -> f32 {
+    ((shake - 0.7) / 0.3).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// 等级印：先放大砸下去、压过头一点，再回到原大
+    #[test]
+    fn level_seal_stamps_down_and_settles() {
+        assert!((stamp(0.0) - 2.0).abs() < 1e-6);
+        assert!(stamp(0.14) < 0.95);
+        assert!((stamp(0.32) - 1.0).abs() < 1e-3);
+        assert_eq!(stamp(5.0), 1.0);
+    }
+
+    /// 升级弹出选卡时信息栏压暗：等回到战斗再盖章
+    #[test]
+    fn level_seal_waits_for_the_choice_to_close() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<HudFx>()
+            .insert_resource(SimPhase::LevelUp)
+            .add_systems(Update, animate);
+        let seal = app.world_mut().spawn((LevelSeal, UiTransform::default())).id();
+        let step = |app: &mut App| {
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(Duration::from_millis(16));
+            app.update();
+        };
+        app.world_mut().resource_mut::<HudFx>().level_t = 10.0;
+        app.world_mut().resource_mut::<SimOutbox>().0.push(SimEvent::LevelUp { level: 2 });
+        step(&mut app);
+        app.world_mut().resource_mut::<SimOutbox>().0.clear();
+        for _ in 0..10 {
+            step(&mut app);
+        }
+        assert_eq!(app.world().get::<UiTransform>(seal).unwrap().scale.x, 1.0, "选卡时不盖");
+        *app.world_mut().resource_mut::<SimPhase>() = SimPhase::Play;
+        step(&mut app);
+        assert!(app.world().get::<UiTransform>(seal).unwrap().scale.x > 1.5, "回到战斗砸下来");
+    }
+
+    /// 燃灯每点亮一格，那一格跳一下；蓄满后整圈呼吸；燃灯那一下整圈一闪
+    #[test]
+    fn ult_ticks_pop_as_they_light_and_flash_on_cast() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<Progress>()
+            .init_resource::<HudFx>()
+            .add_systems(Update, ticks);
+        let ids: Vec<Entity> = (0..TICKS)
+            .map(|k| app.world_mut().spawn((UltTick(k), ImageNode::default(), UiTransform::default())).id())
+            .collect();
+        let step = |app: &mut App| {
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(Duration::from_millis(16));
+            app.update();
+        };
+        let scale = |app: &App, k: usize| app.world().get::<UiTransform>(ids[k]).unwrap().scale.x;
+        step(&mut app);
+        assert!((0..TICKS).all(|k| scale(&app, k) == 1.0));
+        // 蓄到两格多：第 0、1 格跳，第 2 格不动
+        app.world_mut().resource_mut::<Progress>().ult = 2.5 / TICKS as f32;
+        step(&mut app);
+        assert!(scale(&app, 0) > 1.3 && scale(&app, 1) > 1.3);
+        assert_eq!(scale(&app, 2), 1.0);
+        for _ in 0..30 {
+            step(&mut app);
+        }
+        assert_eq!(scale(&app, 0), 1.0, "跳完回到原大");
+        // 燃灯：整圈一闪
+        app.world_mut().resource_mut::<Progress>().ult = 0.0;
+        app.world_mut().resource_mut::<SimOutbox>().0.push(SimEvent::Ult);
+        step(&mut app);
+        app.world_mut().resource_mut::<SimOutbox>().0.clear();
+        assert!((0..TICKS).all(|k| scale(&app, k) > 1.1));
+        assert_ne!(app.world().get::<ImageNode>(ids[5]).unwrap().color, Color::WHITE);
+        for _ in 0..40 {
+            step(&mut app);
+        }
+        assert!((0..TICKS).all(|k| scale(&app, k) == 1.0));
+        assert_eq!(app.world().get::<ImageNode>(ids[5]).unwrap().color, Color::WHITE);
+    }
 
     #[test]
     fn empty_ult_bar_shakes_and_hint_fades_or_clears_when_ready() {
