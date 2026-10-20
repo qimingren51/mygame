@@ -464,6 +464,40 @@ art/.venv/bin/python art/post/check_atlas.py
   四足兽用 `register_band`（赤面狐 [0.70, 0.92]）取躯干做 x 配准，迈步的膝盖不算漂移。
 - 打包：换素材用 `atlas_swap.py`（见上面“打包桌面版图集”）。actors 一页放得下时是 `actors.json`（第三批起），放不下自动分成 `actors_0`、`actors_1`……（游戏和冒烟测试都按 `index.json` 找页）。
 
+## 检视模型（inspect/）
+
+物品、法器、法宝的 360° 检视用实时三维：这里建模、用 Cycles 烘贴图、导出 glb，游戏（Bevy）里用三维镜头显示，任意角度拖动、缩放。
+规格（坐标、命名、描边、贴图、透明、动画、体积）写在 `docs/DESIGN.md` 第 15 节“检视模型”，这里只记怎么做。现在只有两件样张：`sword`（符剑）、`wind_wheel`（风火轮，**WIP**：最新一版 2.55 MB 超了 2 MB，还没压到预算内，glb 暂不提交；审图还没出正式版）。
+
+```bash
+art/.venv/bin/python art/inspect/export.py sword wind_wheel       # 正式 → assets/models/inspect/<id>.glb（符剑约 17 分钟，风火轮约 5 分钟）
+art/.venv/bin/python art/inspect/export.py sword --draft          # 试做：512 烘、少采样 → out/_inspect_tmp/draft/sword.glb（约半分钟）
+art/.venv/bin/python art/inspect/review.py sword --draft --sample # 试渲小图（正面、四分之三、四处特写）→ out/_inspect_tmp/sample_sword.png
+art/.venv/bin/python art/inspect/review.py sword wind_wheel       # 审图 → out/review@2x/inspect_<id>_sheet.png、_turn.gif、_detail.gif、_idle.gif（--only sheet,turn,detail,idle）
+art/.venv/bin/python art/post/check_models.py --expect sword,wind_wheel   # 自检，缺件也报
+art/.venv/bin/python art/post/test_check_models.py                # 自检脚本的自检（19 项，不需要 Blender）
+```
+
+| 文件 | 作用 |
+|---|---|
+| `inspect/models.py` | 每件一个函数（`@model("<id>")`），建零件、登记节点，返回说明：贴图集、节点（挂点、父子、位置）、实例、形变键、idle 动画；`REVIEW` 里是审图特写的镜头 |
+| `inspect/kit.py` | 公共件：`PMat`（只有一个 Principled 的材质，带 AO 凹处、Bevel 棱边、圆角法线、链式凹凸、低频“笔触”）、周期坐标（轮子 8 个扇区无缝）、`slab_strip`（有厚度的纸条和绸带：毛边、撕口、折痕）、`join_objects`、UV 工具 |
+| `inspect/export.py` | 烘焙和导出（流程见文件头） |
+| `inspect/review.py` | 把 glb 重新导入 Blender 渲审图，顺便验证导出没坏 |
+| `post/check_models.py` | 自检（也带 glb 读写，export.py 改写 glb 用它） |
+
+造型和材质尽量复用卡面插画：`render/card_art.py` 的建模工具（`make_obj`、`lathe_uv`、`tube_uv`、`ribbon_uv`、`catmull`、`Mat`），`render/card_props.py` 的剑和符纸的思路。
+材质为了能烘焙，全部写成单个 Principled（`PMat`），烘焙时把底色、粗糙度、金属度、自发光、透明度各自接到自发光上烘。
+
+- **新增一件**：在 `models.py` 写 `@model("<id>")` 的函数（照 `build_sword` / `build_wind_wheel`），在 `REVIEW` 加两处特写，跑 `export.py <id> --draft` 和 `review.py <id> --draft --sample` 看方向，满意再出正式版。
+- **UV**：零件按节点合并、三角化后一起展（Smart UV）。Blender 的 UV 操作（smart_project、pack_islands）会按材质里图像贴图的宽高比把岛压扁，所以展 UV 时材质槽临时换成没贴图的（`kit.plain_materials`），`correct_aspect` 也关掉；每个岛按三维面积统一纹素密度，再乘零件的 `density`；太长的岛（剑身那种）切成几段再排。六棱的管子（缠绳、丝、结）用 `kit.tube_bake_uv`，不走 Smart UV（不然一面一个岛，顶点翻几倍，glb 就大了）。
+- **重复的件**：风火轮先做一个 45° 的单元（一根辐条、两片莲瓣、一颗莲子……），展好 UV 再复制 8 份，贴图上只画一个扇区；材质里的噪声都用 `kit.periodic_coords(8)` 给的周期坐标，扇区之间看不出接缝。两只轮子是同一个网格的两个实例，火也是。
+- **体积**：主要卡在顶点数和 PNG。每件 ≤ 2 MB：符剑 2K 烘、底色和法线写 1K（2K 的 PNG 底色一张就 1.7 MB），粗糙度金属度 512；PNG 先轻微去噪、按 7 位取整再压，粗糙度 64 级、金属度 16 级。材质里别加太细的颜色噪声（细节放法线里）。
+- **审图**：模型转、镜头和三点光不动，渲成透明底再铺宣纸。拼图 4×3：正、背、侧、俯、仰、四分之三和四处特写（`models.REVIEW`），最后一格写面数、贴图、体积、自检结果；转台 36 帧；`_detail.gif` 绕第一处特写左右摆；`_idle.gif` 播一遍 idle。描边外壳在 Cycles 里用 Backfacing 模拟引擎的背面剔除。渲染包在 `bstyle.render_lock()` 里。
+- **覆盖率**：烘焙图的 alpha 不可靠（有时整张都是 1），哪些像素烘到了按 BakeUV 三角形自己画（`export.uv_coverage`）；Cycles 另外往外扩 3 像素，再由 numpy 扩到 8 像素、空白填平均色。
+- **踩过的坑**：合并零件后会多一个空材质槽，Cycles 会因此整个物体不烘（`join_objects` 里删掉）；分几次展的 UV 岛要放在不同的“停车位”（`kit._SLOT`），否则排的时候被 `merge_overlap` 当成重叠的并在一起。
+- 烘焙的中间结果在 `out/_inspect_tmp/final/<id>/`（PNG 和 `report.json`），审图的 EXR 用完即删。
+
 ## 正式管线
 
 ```bash
@@ -553,4 +587,4 @@ LANTERN_ART_DENSITY=2 art/.venv/bin/python art/render/lamp_icons.py   # → out/
 - `out/` 是渲染产物
 - `.blender/` 用来放官方 Blender 压缩包（如果以后要用）
 
-需要提交的只有 `render/`、`post/`、`style/`、`requirements.txt`、`README.md` 和 `.gitignore`。
+需要提交的只有 `render/`、`post/`、`style/`、`models/`、`inspect/`、`requirements.txt`、`README.md` 和 `.gitignore`（检视模型的产物在仓库的 `assets/models/inspect/`）。

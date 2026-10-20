@@ -718,6 +718,28 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
     - 条 `bar_track`、`bar_fill_{hp,xp,boss,shield,unlock}`（填充按百分比设宽度，任何宽度都正常）、`pip`、`pip_on`（心灯进度点）；
     - 提示 `toast`、`toast_big`、`chip`、`chip_dark`；
     - 其他 `divider`、`scroll_body` + `scroll_end`（宝箱卷轴，另一端镜像）、`arrow_marker`（屏外奇遇指示，尖角朝 +X，代码旋转）、`focus_ring`（键盘 / 手柄焦点）、`menu_hl`（标题菜单选中项的底）。
+- **检视模型**（物品、法器、法宝的 360° 检视，实时三维；美术管线 `art/inspect/`，见 `art/README.md`“检视模型”）：
+  - **文件**：`assets/models/inspect/<id>.glb`（glTF 2.0 二进制，贴图是内嵌的 PNG；不用 Draco、meshopt、KTX2）。id：法器本体用 `weapons.ron` 的 id，进化加 `_evo`，异化加 `_mut`；合璧用 `fusions.ron` 的 id；灯坠用 `charms.ron` 的 id；灯笼是 `lantern_red`、`lantern_mirror`、`lantern_frost`。现在只有两件样张：`sword`（符剑，已导出）、`wind_wheel`（风火轮，WIP：体积还超，glb 暂不提交）。
+  - **坐标**：+Y 朝上，正面朝 +Z（默认镜头放在 +Z 看原点）。原点在几何中心（主体包围盒的中心），离原点最远的主体顶点正好是 1（glTF 单位），描边外壳略超出（≤ 1.06）。符剑横放，剑尖朝 +X，贴符的一面朝 +Z；风火轮两只轮子交叠，前轮在左下。
+  - **节点**：
+    - 根节点名 = id，单位变换；`extras.inspect` 写 `up`（"+Y"）、`front`（"+Z"）、`radius`（1）、`center_m` 和 `radius_m`（建模时的米制中心和半径）、`tris`、`outline_tris`、`outline_width`、`emissive_strength`、`idle_seconds`。
+    - 子节点、网格、材质的名字都以 id 开头。符剑：`sword_body`（剑身、剑格、柄、剑首）、`sword_talisman`（符纸，有形变）、`sword_tassel`（剑穗，原点在挂点，绕它摆）。风火轮：`wind_wheel_a`、`wind_wheel_b`（两只轮子共用一个网格 `wind_wheel_a`）、它们下面各挂一个火 `wind_wheel_a_flame` / `wind_wheel_b_flame`（也共用网格），`wind_wheel_ribbon`（红绸）。
+    - 材质：符剑一套 `sword_body`；风火轮 `wind_wheel_body`（轮子和红绸共用）、`wind_wheel_flame_core`（里层火，不透明）、`wind_wheel_flame`（外层火，BLEND）。
+  - **描边**：反向外壳。每个要描边的节点下面挂一个子节点 `<节点名>_outline`，网格名 `<网格名>_outline`，材质 `<id>_outline`（导出成 KHR_materials_unlit 的纯黑，单面）。外壳是主体顶点沿法线外推 `outline_width`（0.003，按零件乘 0.4–1 的倍数）再翻面，法线朝里；所以**照常背面剔除、不受光、纯黑**画出来就是墨线，不用别的处理。外壳是按 0.3 左右减过面的（只管轮廓），火和剑穗的丝不描边。有形变的节点（符纸、红绸）外壳带同样的形变键，跟着动。线宽是物体空间里的固定值，镜头拉近时线会变粗；要屏幕上等宽时可以在顶点着色器里沿（朝里的）法线反方向再推一点。
+  - **面数**：主体 ≤ 5 万三角形（实例按实际画的次数算），描边另算。现在：符剑 主体 16918、描边 6569；风火轮 主体 45284（一只轮子的网格 约 1.5 万，画两次）、描边 11784。
+  - **贴图**（Cycles 烘的，≤ 2048²、2 的幂，全部 sRGB 以外的都是线性）：
+    - `baseColor`：sRGB，材质颜色 × AO，手绘的笔触在材质里；外层火的 alpha 在 A 通道。
+    - `normal`：切线空间，OpenGL 约定（+Y 上），MikkTSpace。**glb 里不带切线**，Bevy 读取时会用 mikktspace 自己算（和 Blender 烘焙用的同一套算法；网格已经三角化，两边三角形一样）。
+    - `metallicRoughness`：G = 粗糙度，B = 金属度（R 恒为 1，不当 AO 用）。没有单独的 occlusion 贴图（AO 已经烘进底色）。
+    - `emissive`：sRGB，按最亮处归一；`emissiveFactor` = 1，亮度写在 `KHR_materials_emissive_strength`。
+    - 尺寸：符剑 2K 烘、底色和法线 1K、粗糙度金属度和自发光 512（2 MB 放不下 2K 的 PNG，底色 2K 一张就 1.7 MB）；风火轮底色和法线 1K（8 个扇区共用一份，纹素密度是整圈摊开的 8 倍）、粗糙度金属度 512、火 256。
+  - **透明**：只有外层火是 `alphaMode: BLEND`（尖和窄边渐隐），按普通的透明混合画（不写深度，按物体排序）；里层火是不透明的自发光，挡得住后面的东西。别的材质都是 OPAQUE、单面。
+  - **自发光强度**：glb 里的 `emissive_strength` 是在 Cycles 里调的（符纸朱砂符文约 1.6，风火轮的火约 3.7），按 Bevy 的 HDR + bloom，建议先原样用，再按画面乘一个系数：火在 bloom 下要亮但不冲白（建议火的有效亮度 2–4），符文只是微微透光（1–2，暗处看得出、亮处看不出）。
+  - **布光**（审图就是这样打的，引擎里照着来最接近）：主光在左上前方（从镜头看，偏左 40°、偏上 35°），暖白；补光在右下前方，冷色，约主光的 1/4；轮廓光在右后上方，和主光差不多亮，勾出剑身和轮圈的边；另有一点很暗的环境光（上暖下暗的渐变）。金属件（剑身、铜鎏金）没有环境贴图会发黑，建议给检视镜头加 `EnvironmentMapLight`（或者 `GeneratedEnvironmentMapLight` 用一张简单的渐变天空立方体图）。
+  - **动画**：一条 `idle`，循环，首尾同一帧，按每帧采样、线性插值。符剑 4 秒（剑穗绕挂点摆一个 8 字，符纸两个形变键组合成往后走的波）；风火轮 8 秒（两只轮子各转一圈，火跟着轮子转，一个形变键让每条火舌各自伸缩；红绸两个形变键摆尾巴）。形变键的权重会是负数（-1..1）。用 `AnimationPlayer` 循环播放即可。
+  - **体积**：每件 ≤ 2 MB，39 件合计 ≤ 60 MB。现在：符剑 1.93 MB，风火轮 2.55（**WIP：超了 2 MB，还没压，assets 里先不放**） MB。
+  - **自检**：`art/.venv/bin/python art/post/check_models.py [--expect id,...]`：体积、扩展、命名、根节点、包围球、面数、描边（名字、材质、法线朝里）、贴图尺寸、自发光、动画首尾，传入期望的 id 时报缺件。
+  - Bevy 这边要打开 glTF 支持（现在工作区的 `bevy` 特性里没有 `bevy_gltf`、3D 渲染相关的特性）。
 
 ## 16. 性能预算
 
