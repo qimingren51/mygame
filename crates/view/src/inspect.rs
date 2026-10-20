@@ -75,6 +75,8 @@ pub struct Inspect {
     dragging: bool,
     /// 模型出来以后过了几秒：入场时墨晕化开、物件转进来
     intro: f32,
+    /// 手转过的总角度（弧度），音效按它一格响一下
+    turned: f32,
 }
 
 impl Inspect {
@@ -103,10 +105,25 @@ impl Inspect {
         self.status
     }
 
+    /// 入场开始了没有（模型出来、等过编着色器那一下）；入场的声音跟它走
+    pub fn entered(&self) -> bool {
+        self.status == InspectStatus::Ready && self.intro >= 0.0
+    }
+
+    /// 手转过的总角度（弧度）：拖动、按键、松手后的惯性都算，自己慢慢转的不算。打开时归零
+    pub fn turned(&self) -> f32 {
+        self.turned
+    }
+
+    /// 缩放到第几格：滚轮一格 1.12 倍，原大是 0
+    pub fn zoom_step(&self) -> i32 {
+        (self.zoom.max(ZOOM.0).ln() / 1.12f32.ln()).round() as i32
+    }
+
     /// 鼠标或手指拖了 `delta` 像素（这一帧，`dt` 秒）：跟手转，松手后按最后的速度带惯性
     pub fn drag(&mut self, delta: Vec2, dt: f32) {
         let turn = delta * DRAG_RATE;
-        self.rotate(turn);
+        self.rotate(turn, true);
         if dt > 0.0 {
             self.spin = self.spin.lerp(turn / dt, 0.5);
         }
@@ -124,7 +141,7 @@ impl Inspect {
         if rate == Vec2::ZERO {
             return;
         }
-        self.rotate(rate * 2.2 * dt);
+        self.rotate(rate * 2.2 * dt, true);
         self.spin = Vec2::ZERO;
         self.idle = 0.0;
     }
@@ -135,9 +152,14 @@ impl Inspect {
         self.idle = 0.0;
     }
 
-    fn rotate(&mut self, turn: Vec2) {
+    /// `by_hand`：手转的（含惯性）记进 `turned`
+    fn rotate(&mut self, turn: Vec2, by_hand: bool) {
+        let pitch = (self.pitch + turn.y).clamp(-PITCH_MAX, PITCH_MAX);
+        if by_hand {
+            self.turned += turn.x.abs() + (pitch - self.pitch).abs();
+        }
         self.yaw = (self.yaw + turn.x).rem_euclid(TAU);
-        self.pitch = (self.pitch + turn.y).clamp(-PITCH_MAX, PITCH_MAX);
+        self.pitch = pitch;
     }
 
     /// 一帧：惯性衰减，不碰久了自己慢慢转
@@ -146,11 +168,11 @@ impl Inspect {
             return;
         }
         self.idle += dt;
-        self.rotate(self.spin * dt);
+        self.rotate(self.spin * dt, true);
         self.spin *= (-DAMPING * dt).exp();
         if self.idle > IDLE_AFTER {
             let ease = ((self.idle - IDLE_AFTER) / 1.5).min(1.0);
-            self.rotate(Vec2::new(IDLE_SPIN * ease * dt, 0.0));
+            self.rotate(Vec2::new(IDLE_SPIN * ease * dt, 0.0), false);
             // 自己转时慢慢回正俯仰
             self.pitch *= (-0.8 * ease * dt).exp();
         }
@@ -552,6 +574,30 @@ mod tests {
         assert_eq!(v.zoom, ZOOM.1);
         v.zoom(-100.0);
         assert_eq!(v.zoom, ZOOM.0);
+    }
+
+    /// 音效按手转的角度一格一响：拖动和松手后的惯性算，自己慢慢转不算；缩放按滚轮的格数
+    #[test]
+    fn turned_counts_hand_and_inertia_but_not_idle_spin() {
+        let mut v = Inspect { zoom: 1.0, ..default() };
+        v.drag(Vec2::new(100.0, 0.0), 1.0 / 60.0);
+        let by_drag = v.turned();
+        assert!((by_drag - 0.8).abs() < 1e-4, "{by_drag}");
+        v.release();
+        for _ in 0..(60 * 2) {
+            v.advance(1.0 / 60.0);
+        }
+        let with_spin = v.turned();
+        assert!(with_spin > by_drag + 0.5, "松手后惯性也算：{with_spin}");
+        for _ in 0..(60 * 6) {
+            v.advance(1.0 / 60.0);
+        }
+        assert!(v.turned() - with_spin < 0.01, "自己转的不算：{}", v.turned());
+        assert_eq!(v.zoom_step(), 0);
+        v.zoom(2.0);
+        assert_eq!(v.zoom_step(), 2);
+        v.zoom(-100.0);
+        assert_eq!(v.zoom_step(), -3);
     }
 
     /// 底色反算以后再走一遍 AcesFitted，回到宣纸色

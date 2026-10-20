@@ -19,6 +19,16 @@ pub enum UiCue {
     Confirm,
     /// 菜单返回
     Back,
+    /// 物件检视打开（或换了一件）
+    InspectOpen,
+    /// 检视里的物件转进来，墨晕化开
+    InspectEnter,
+    /// 检视里手转过一格（拖动、按键、惯性）
+    InspectTurn,
+    /// 检视缩放到第几格（最远是 0，越大越近）
+    InspectZoom(u8),
+    /// 检视合上
+    InspectClose,
 }
 
 impl UiCue {

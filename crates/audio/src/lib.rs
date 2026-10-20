@@ -399,6 +399,17 @@ fn play_ui_cues(mut cues: MessageReader<UiCue>, mut audio: NonSendMut<Audio>) {
             }
             UiCue::LampLit => a.sfx.lamp_lit.clone(),
             UiCue::DawnSpread => a.sfx.dawn_spread.clone(),
+            UiCue::InspectOpen => a.sfx.inspect_open.clone(),
+            UiCue::InspectEnter => a.sfx.inspect_enter.clone(),
+            UiCue::InspectClose => a.sfx.inspect_close.clone(),
+            // 转、缩放一帧可能好几格，拉开一点间隔，不叠成一片
+            UiCue::InspectTurn if a.can("inspect_turn", 0.05) => a.sfx.inspect_turn.clone(),
+            // 缩放按格数走角调：原大（第 3 格）是基准音，拉近往上
+            UiCue::InspectZoom(k) if a.can("inspect_zoom", 0.035) => {
+                let rate = jiao(i32::from(k) + 7) / jiao(10);
+                a.sfx.inspect_zoom.playback_rate(f64::from(rate))
+            }
+            UiCue::InspectTurn | UiCue::InspectZoom(_) => continue,
         };
         // 演出声同一帧来几个就响几个（心灯点亮和晨光铺开可能同时）
         a.interface(sound);

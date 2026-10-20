@@ -103,6 +103,16 @@ pub struct Sfx {
     pub lamp_lit: StaticSoundData,
     /// 灯驿远山晨光铺开：一串往上走的拨弦，末尾几声鸟叫
     pub dawn_spread: StaticSoundData,
+    /// 物件检视打开：纸页翻开的几下沙沙
+    pub inspect_open: StaticSoundData,
+    /// 物件转进来、墨晕化开：低处呼地涌起，一声深的磬，上面一点高的余音
+    pub inspect_enter: StaticSoundData,
+    /// 手转过一格：一颗玉珠轻轻一磕（惯性慢下来时越响越疏，像转经筒）
+    pub inspect_turn: StaticSoundData,
+    /// 缩放一格：很轻的一声拨弦，按格数升降调，滚一串就是一段刮奏。基准音 jiao(10)
+    pub inspect_zoom: StaticSoundData,
+    /// 检视合上：纸页合拢，木盒盖上似的一下闷响
+    pub inspect_close: StaticSoundData,
 }
 
 /// `Sfx::reactions` 的顺序，和 `elements.ron` 的反应顺序一致（测试核对）；也当节流的键
@@ -448,6 +458,11 @@ impl Sfx {
             &self.scroll_line,
             &self.lamp_lit,
             &self.dawn_spread,
+            &self.inspect_open,
+            &self.inspect_enter,
+            &self.inspect_turn,
+            &self.inspect_zoom,
+            &self.inspect_close,
             &self.ui_move,
             &self.ui_confirm,
             &self.ui_back,
@@ -926,6 +941,48 @@ impl Sfx {
                 for (t, f) in [(2.4, 3600.0), (2.75, 4100.0), (3.3, 3800.0)] {
                     chirp(b, t, f, 0.035);
                 }
+            }),
+            inspect_open: render(0.6, |b| {
+                for k in 0..6 {
+                    let t = k as f32 * 0.06 + (k * 53 % 5) as f32 * 0.006;
+                    let f = 1900.0 + (k * 211 % 7) as f32 * 260.0;
+                    b.noise(
+                        t,
+                        0.06,
+                        0.14 * (1.0 - k as f32 / 8.0),
+                        NoiseOpts { freq: f, q: 1.6, ..Default::default() },
+                    );
+                }
+                b.pluck(jiao(12), 0.02, 0.045, 0.35);
+            }),
+            inspect_enter: render(3.2, |b| {
+                b.noise(
+                    0.0,
+                    0.75,
+                    0.09,
+                    NoiseOpts {
+                        kind: FilterKind::Low,
+                        freq: 140.0,
+                        slide: Some(900.0),
+                        attack: 0.3,
+                        ..Default::default()
+                    },
+                );
+                b.bell(jiao(5), 0.06, 0.075, 2.8);
+                b.sine(jiao(0), 0.06, 1.6, 0.04);
+                b.bell(jiao(17), 0.14, 0.018, 1.6);
+            }),
+            inspect_turn: render(0.1, |b| {
+                b.sine(2600.0, 0.0, 0.025, 0.035);
+                b.noise(0.0, 0.012, 0.035, NoiseOpts { freq: 4200.0, q: 5.0, ..Default::default() });
+            }),
+            inspect_zoom: render(0.4, |b| b.pluck(jiao(10), 0.0, 0.035, 0.3)),
+            inspect_close: render(0.5, |b| {
+                for k in 0..3 {
+                    let f = 2600.0 - k as f32 * 450.0;
+                    b.noise(k as f32 * 0.05, 0.05, 0.11, NoiseOpts { freq: f, q: 1.6, ..Default::default() });
+                }
+                b.wood(0.15, 0.07, 300.0);
             }),
             burn: render(2.2, |b| {
                 b.noise(
