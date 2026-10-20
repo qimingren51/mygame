@@ -257,15 +257,15 @@ def sword_panel(k: int) -> tuple[Z.Shot, str]:
 
         def add(img, cam):
             top = -60
-            god_rays(img, SW / 2 + cam.shake[0], 170, 11, 0.7, 1150, GOLD_T, 0.11, 61, width=(40, 120))
+            god_rays(img, SW / 2 + cam.shake[0], 110, 11, 0.7, 1200, GOLD_T, 0.09, 61, width=(40, 120))
             draw_swords(img, cam, funnel, trail_w=1.8, trail_a=0.22, echoes=1)
             draw_swords(img, cam, col, trail_w=1.2, trail_a=0.2, echoes=1)
-            giant_column(img, cam, bx, by - 34)
+            giant_column(img, cam, bx, by - 58)
             gx, gy = cam.s(hx, hy)
             sw = M.atlas_frame("vfx", "vfx/shockwave_2")[0]
             Z.blit(img, Z.pm_of(sw, tint=GOLD_T), gx, gy, (0.5, 0.5), cam.sprite * 1.25, mode="add", gain=Z.EMIT * 0.3)
             Z.glow_ellipse(img, gx, gy, 80, 80 * FLAT, GOLD_T, 0.08, power=1.8)
-            Z.glow(img, SW / 2 + cam.shake[0], 250, 120, GOLD_T, 0.12, power=2.2)  # 剑柱顶开云的地方亮一团
+            Z.glow(img, SW / 2 + cam.shake[0], 120, 110, GOLD_T, 0.08, power=2.2)  # 剑尖顶开云的地方亮一团
 
         shot.sky.append(cloud_layer(3, cy=140.0, scale=2.1))
         shot.light.append(light)
@@ -429,53 +429,60 @@ def kun_panel(k: int) -> tuple[Z.Shot, str]:
         head_x = 1560.0  # 画面像素：头已经过了主角，身子和尾巴还拖在画面左边外头，一对大鳍正从主角脚下过
         cy_s = 585.0
 
-        def fin_pos(cam):
+        shadow_e = parts("kun_shadow_emit")[0]
+        fin, fin_e = parts("kun_fin")[0], parts("kun_fin_emit")[0]
+        fin_sc = 1.6
+
+        def shadow_pos(cam):
             L = shadow.width * cam.sprite * sc
-            return head_x - 0.48 * L + (900 - 768) * cam.sprite * sc, cy_s - 4
+            return head_x - 0.48 * L, cy_s
+
+        def fin_pos(cam):
+            x, y = shadow_pos(cam)
+            return x + (900 - 768) * cam.sprite * sc, y - 4
 
         def ground(img, cam):
             g(img, cam)
-            L = shadow.width * cam.sprite * sc
-            Z.blit(img, Z.pm_of(shadow), head_x - 0.48 * L, cy_s, (0.5, 0.5), cam.sprite * sc, angle=-0.05, alpha=1.0)
-            # 背鳍露出水面（代码画的示意：一片焦墨的鳍，后缘弯）
-            fx, fy = fin_pos(cam)
-            back = [(fx - 70 + 40 * q, fy - 64 * (1 - q) ** 0.7 * (1 - 0.15 * q)) for q in np.linspace(0, 1, 12)]
-            poly = [(fx + 26, fy + 2), (fx - 30, fy - 70), (fx - 74, fy - 66)] + back[1:] + [(fx - 30, fy + 3)]
-            from PIL import ImageDraw as _D
-            m = Image.new("L", (SW * 2, SH * 2), 0)
-            _D.Draw(m).polygon([(x * 2, y * 2) for x, y in poly], fill=255)
-            fa = np.asarray(m.resize((SW, SH), Image.LANCZOS), dtype=np.float32)[..., None] / 255.0 * 0.95
-            img[:] = img * (1 - fa) + lin("#141A22").astype(np.float32) * fa
+            Z.blit(img, Z.pm_of(shadow), *shadow_pos(cam), (0.5, 0.5), cam.sprite * sc, angle=-0.05)
+            # 背鳍露出水面（kun_fin），跟着背脊
+            Z.blit(img, Z.pm_of(fin), *fin_pos(cam), (0.5, P.FIN_WATER / P.FIN_H), cam.sprite * fin_sc)
 
         shot.ground.append(ground)
-        shot.light.append(sea_light(cam, 2.7 * 0.95, 0.55))
+        shot.light.append(sea_light(cam, 2.7 * 0.95, 0.95))
 
         def add(img, cam):
             a(img, cam)
+            Z.blit(img, Z.pm_of(shadow_e), *shadow_pos(cam), (0.5, 0.5), cam.sprite * sc, angle=-0.05, mode="add", gain=Z.EMIT * 0.65)
             fx, fy = fin_pos(cam)
-            # 鳍前一道翻起的浪（现成 wave_front，转成朝 +X），鳍根一圈白沫
+            Z.glow_ellipse(img, fx - 20, fy - 50, 120, 90, ICE_T, 0.1, power=1.4)  # 鳍后面一团冷光，托出焦墨的鳍
+            Z.blit(img, Z.pm_of(fin_e), fx, fy, (0.5, P.FIN_WATER / P.FIN_H), cam.sprite * fin_sc, mode="add", gain=Z.EMIT * 1.5)
+            # 鳍前一道翻起的浪（现成 wave_front，转成朝 +X）
             wf = M.atlas_frame("vfx", "weapons/wave_front_2")[0]
-            Z.blit(img, Z.pm_of(wf, tint=ICE_T), fx + 30, fy, (0.5, 0.6953125), cam.sprite * 0.42, angle=-math.pi / 2, sx=0.9, mode="add", gain=Z.EMIT * 0.95)
-            Z.glow_ellipse(img, fx - 10, fy + 2, 60, 14, ICE_T, 0.35, power=1.5)
-            # 身后两道八字形的浪痕：一段段断开的白沫，越往后越散、越淡
+            Z.blit(img, Z.pm_of(wf, tint=ICE_T), fx + 70, fy, (0.5, 0.6953125), cam.sprite * 0.6, angle=-math.pi / 2, sx=0.9, mode="add", gain=Z.EMIT)
+            # 身后两道八字形的浪痕：浪头一节节往外翻（wave_front 转成朝外），后面拖一道粗的白沫带，越往后越宽、越散、越淡
             r2 = np.random.default_rng(71)
             for sgn in (-1, 1):
-                for j in range(60):
-                    q = j / 60
-                    x0 = fx - 20 - 900 * q
-                    y0 = fy + sgn * (10 + 190 * q ** 0.85) + r2.normal(0, 4 + 10 * q)
-                    if r2.random() < 0.25 + 0.4 * q:
+                pts = [(fx - 10 - 1000 * q, fy + sgn * (14 + 230 * q ** 0.85)) for q in np.linspace(0, 1, 40)]
+                for j in range(1, len(pts)):
+                    q = j / len(pts)
+                    if r2.random() < 0.12 + 0.3 * q:
                         continue
-                    Ld = r2.uniform(10, 30) * (1 - 0.4 * q)
-                    ang = math.atan2(sgn * 190 * 0.85 * max(q, 0.02) ** -0.15 / 900, -1) + r2.normal(0, 0.12)
-                    pts = [(x0, y0), (x0 + Ld * math.cos(ang), y0 + Ld * math.sin(ang))]
-                    Z.stroke(img, pts, [r2.uniform(1.5, 4.0) * (1 - 0.5 * q), 0.8], ICE_T, alpha=[0.75 * (1 - q) ** 1.3, 0.1], gain=Z.EMIT)
-            for _ in range(60):  # 浪花溅起的水珠
-                x, y = fx + 20 + r2.normal(0, 40), fy + r2.normal(0, 22)
+                    (x0, y0), (x1, y1) = pts[j - 1], pts[j]
+                    jit = r2.normal(0, 3 + 8 * q, 2)
+                    Z.stroke(img, [(x0 + jit[0], y0 + jit[1]), (x1 + jit[0], y1 + jit[1])], [r2.uniform(14, 24) * (1 - 0.35 * q)] * 2, ICE_T,
+                             alpha=0.4 * (1 - q) ** 1.1, gain=Z.EMIT, soft=6.0)
+                    Z.stroke(img, [(x0 + jit[0], y0 + jit[1] - sgn * 4), (x1 + jit[0], y1 + jit[1] - sgn * 4)], [r2.uniform(3, 6) * (1 - 0.4 * q)] * 2, ICE_T,
+                             alpha=0.75 * (1 - q) ** 1.2, gain=Z.EMIT, soft=1.5)  # 浪唇一道亮
+                    if j % 5 == 2 and q < 0.75:  # 浪头往外翻
+                        ang = math.atan2(y1 - y0, x1 - x0) + sgn * math.pi / 2
+                        Z.blit(img, Z.pm_of(wf, tint=ICE_T), x1, y1, (0.5, 0.6953125), cam.sprite * (0.55 - 0.25 * q), angle=ang - math.pi / 2,
+                               mode="add", gain=Z.EMIT * (0.8 - 0.6 * q))
+            for _ in range(70):  # 浪花溅起的水珠
+                x, y = fx + 50 + r2.normal(0, 40), fy + r2.normal(0, 26)
                 Z.glow(img, x, y, r2.uniform(1.8, 3.8), ICE_T, r2.uniform(0.4, 1.0), power=2.0)
 
         shot.add.append(add)
-        return shot, "1.0 秒 · 冰海铺满，鲲影从左往右掠过脚下，大得画面装不下；背鳍划开水面，拖出两道八字形的浪痕"
+        return shot, "1.0 秒 · 冰海铺满、冷光照亮水面，一片焦墨的鲲影从脚下掠过（边上一圈冰光），大得画面装不下；背鳍露出水面，划出两道八字浪"
     if k == 2:
         cam = Z.Cam(z=1.06, cy=4.0, shake=(-4.0, 3.0))
         actors = Z.default_actors()
@@ -594,11 +601,39 @@ def ash_flakes(img, cam, actors, p, rise, n=26, seed=5, mode="over"):
                     Z.glow(img, px, py, r2.uniform(1.5, 3.2), EMBER_T, 0.9 * (1 - q) * p, power=1.8)
 
 
-def lotus_at(img, cam, fi, h, scale, gain=1.0):
-    lot = parts("ult_lotus")[fi]
+LAMP_LIT = lin("#FFF1D6").astype(np.float32) * 0.92
+
+
+def lotus_at(img, cam, fi, h, scale, gain=1.0, dark=0.0):
+    """莲灯：在主角头顶的天上，画在暗层之上（自己的灯焰照亮，本体按暖光 LAMP_LIT 着色）。
+    dark > 0 时先在莲灯后面垫一圈暗晕（普通混合的淡墨），佛光再亮也压不白莲瓣；然后本体（普通混合）、发光层（叠加）。"""
+    body, em = parts("ult_lotus")[fi], parts("ult_lotus_emit")[fi]
     x, y = cam.s(Z.HERO[0], Z.HERO[1], h)
-    Z.blit(img, Z.pm_of(lot), x, y, (0.5, 1.0), cam.sprite * scale, mode="add", gain=Z.EMIT * gain)
+    if dark > 0:
+        fx, fy = flame_pos(cam, fi, h, scale)
+        r = 150 * cam.sprite * scale
+        x0, x1 = int(max(fx - 1.6 * r, 0)), int(min(fx + 1.6 * r, SW))
+        y0, y1 = int(max(fy - 1.6 * r, 0)), int(min(fy + 1.6 * r, SH))
+        X, Y = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
+        k = (dark * np.exp(-((np.hypot(X - fx, (Y - fy) * 1.15) / r) ** 2)))[..., None].astype(np.float32)
+        reg = img[y0:y1, x0:x1]
+        reg[:] = reg * (1 - k) + lin("#2A2118").astype(np.float32) * k * 0.6
+    pm = Z.pm_of(body).copy()
+    pm[..., :3] *= LAMP_LIT
+    Z.blit(img, pm, x, y, (0.5, 1.0), cam.sprite * scale)
+    Z.blit(img, Z.pm_of(em), x, y, (0.5, 1.0), cam.sprite * scale, mode="add", gain=Z.EMIT * gain)
     return x, y
+
+
+def rays_masked(img, cam, center, scale, angle, gain, r_hole, floor=0.15):
+    """佛光：先画进一张临时层，在莲灯附近按半径压低（r_hole 以内只剩 floor），再叠到画面上。"""
+    rays = parts("ult_rays")[0]
+    tmp = np.zeros_like(img)
+    Z.blit(tmp, Z.pm_of(rays), center[0], center[1], (0.5, 0.5), cam.sprite * scale, angle=angle, mode="add", gain=Z.EMIT * gain)
+    Y, X = np.mgrid[0:SH, 0:SW].astype(np.float32)
+    r = np.hypot(X + 0.5 - center[0], Y + 0.5 - center[1])
+    m = floor + (1 - floor) * V.smoothstep(r_hole * 0.55, r_hole * 1.4, r)
+    img += tmp * m[..., None]
 
 
 def flame_pos(cam, fi, h, scale):
@@ -647,9 +682,8 @@ def ult_panel(k: int) -> tuple[Z.Shot, str]:
             fx, fy = flame_pos(cam, 5, H_LAMP, SC)
             halo = parts("ult_halo")[0]
             Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 0.9, angle=0.2, mode="add", gain=Z.EMIT * 0.6)
-            rays = parts("ult_rays")[0]
-            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 0.6, angle=0.1, mode="add", gain=Z.EMIT * 0.3)
-            lotus_at(img, cam, 5, H_LAMP, SC, gain=0.8)
+            rays_masked(img, cam, (fx, fy), 0.6, 0.1, 0.32, 70, floor=0.3)
+            lotus_at(img, cam, 5, H_LAMP, SC, gain=0.85, dark=0.25)
 
         shot.light.append(light)
         shot.add.append(add)
@@ -671,18 +705,17 @@ def ult_panel(k: int) -> tuple[Z.Shot, str]:
 
         def add(img, cam):
             fx, fy = flame_pos(cam, 7, H_LAMP, SC)
-            rays = parts("ult_rays")[0]
-            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.0, angle=0.16, mode="add", gain=Z.EMIT * 0.34)
-            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.6, angle=-0.21, mode="add", gain=Z.EMIT * 0.14)
+            rays_masked(img, cam, (fx, fy), 2.0, 0.16, 0.36, 150, floor=0.12)
+            rays_masked(img, cam, (fx, fy), 2.6, -0.21, 0.16, 150, floor=0.12)
             halo = parts("ult_halo")[0]
-            Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.32, mode="add", gain=Z.EMIT * 0.4)
-            lotus_at(img, cam, 7, H_LAMP, SC, gain=0.5)
+            Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.32, mode="add", gain=Z.EMIT * 0.45)
+            lotus_at(img, cam, 7, H_LAMP, SC, gain=0.7, dark=0.55)
             ash_flakes(img, cam, actors, 1.0, 70, mode="add")
 
         shot.light.append(light)
         shot.over.append(over)
         shot.add.append(add)
-        return shot, "0.95 秒 · 莲灯全开，千条佛光照透全场（暗层往八成提，辉光拉满）；被照到的妖物从里往外烧成灰，余烬和灰片往上飘"
+        return shot, "0.95 秒 · 莲灯全开，千条佛光照透全场（暗层往八成提，辉光拉满）；莲灯后面垫一圈暗晕、近处佛光压低，瓣的轮廓和描金看得清；妖物烧成灰往上飘"
     cam = Z.Cam(z=1.08, cy=-6.0)
     actors = [a_ for a_ in Z.default_actors() if not near(a_)]
     ghosts = [a_ for a_ in Z.default_actors() if near(a_)]
@@ -700,11 +733,10 @@ def ult_panel(k: int) -> tuple[Z.Shot, str]:
 
     def add(img, cam):
         fx, fy = flame_pos(cam, 7, H_LAMP, SC)
-        rays = parts("ult_rays")[0]
-        Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.4, angle=0.3, mode="add", gain=Z.EMIT * 0.14)
+        rays_masked(img, cam, (fx, fy), 2.4, 0.3, 0.14, 140, floor=0.2)
         halo = parts("ult_halo")[0]
         Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.45, mode="add", gain=Z.EMIT * 0.35)
-        lotus_at(img, cam, 7, H_LAMP, SC, gain=0.8)
+        lotus_at(img, cam, 7, H_LAMP, SC, gain=0.8, dark=0.3)
         ash_flakes(img, cam, ghosts, 0.85, 150, n=34, seed=6, mode="add")
 
     shot.light.append(light)
@@ -806,47 +838,55 @@ def fox_panel(k: int) -> tuple[Z.Shot, str]:
         return shot, "1.75 秒 · 九尾全开成扇，月前一道剪影：焦墨身子、青边，尾尖九点青火；《南山经》“有兽如狐而九尾”"
     # k == 3：剪影落下，化成真身，一圈狐火环亮起
     cam = Z.Cam(z=0.9, cy=4.0, shake=(-6.0, 5.0))
-    bx, by = 30.0, -92.0
+    bx, by = 60.0, -88.0
     actors = Z.default_actors()
-    actors = [a_ for a_ in actors if math.hypot(a_.x - bx, a_.y - by) > 70]
-    boss = Z.Actor("boss/summon_E_02", bx, by, atlas="boss", flip=False)
+    actors = [a_ for a_ in actors if math.hypot(a_.x - bx, a_.y - by) > 110]
+    boss = Z.Actor("boss/summon_E_02", bx, by, atlas="boss", flip=False)  # 游戏里的真身，照常受光，不另加光
     actors.append(boss)
-    shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.66), pool=0.75, bloom=0.42, vignette=0.36)
-    shot.light.append(moon_light(0.08))
-    ring_n, ring_r = 14, 112.0
-
-    def light(lm, cam):
-        x, y = cam.s(bx, by)
-        Z.glow_ellipse(lm, x / 2, y / 2, ring_r * 1.3 * cam.k / 2, ring_r * 1.3 * FLAT * cam.k / 2, FOX_T, 0.35, power=1.2)
+    shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.8), pool=0.8, bloom=0.3, vignette=0.36)
+    ring_n, ring_r = 16, 168.0  # 狐火环：比第一轮放大 1.5 倍
 
     def ground(img, cam):
+        # 落地砸起的一圈墨尘冲击波：压扁的墨环（边上毛、断续），环上几团墨溅，往外拖几道尘
         x, y = cam.s(bx, by)
-        sw = M.atlas_frame("vfx", "vfx/kill_ink_5")[0]
-        for j in range(6):  # 落地砸起的一圈墨尘
-            a = 2 * math.pi * j / 6 + 0.4
-            Z.blit(img, Z.pm_of(sw), x + 150 * math.cos(a), y + 150 * FLAT * math.sin(a), (0.5, 0.5), cam.sprite * 1.2, angle=a, alpha=0.35)
+        R = 210 * cam.k
+        x0, x1 = int(max(x - 1.5 * R, 0)), int(min(x + 1.5 * R, SW))
+        y0, y1 = int(max(y - 1.5 * R * FLAT, 0)), int(min(y + 1.5 * R * FLAT, SH))
+        X, Y = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
+        re = np.hypot((X - x) / R, (Y - y) / (R * FLAT))
+        th = np.arctan2((Y - y) / FLAT, X - x)
+        wob = V.angular_noise(np.random.default_rng(211), th, harmonics=(5, 7, 11, 17, 23), amp=0.5)
+        band = np.exp(-(((re - 1.0 - 0.04 * wob) / (0.07 + 0.03 * wob)) ** 2)) * np.clip(0.55 + 0.6 * wob, 0, 1)
+        inner = np.exp(-(((re - 0.82) / 0.16) ** 2)) * 0.25
+        k = np.clip(0.75 * band + inner, 0, 0.85)[..., None].astype(np.float32)
+        reg = img[y0:y1, x0:x1]
+        reg[:] = reg * (1 - k) + lin("#17140F").astype(np.float32) * k
+        r2 = np.random.default_rng(212)
+        splat = [M.atlas_frame("vfx", f"vfx/kill_ink_{i}")[0] for i in (4, 5)] + [M.atlas_frame("vfx", f"vfx/ink_{i}")[0] for i in range(3)]
+        for j in range(18):
+            a = 2 * math.pi * j / 18 + r2.uniform(-0.12, 0.12)
+            rr = R * r2.uniform(0.92, 1.12)
+            px, py = x + rr * math.cos(a), y + rr * FLAT * math.sin(a)
+            Z.blit(img, Z.pm_of(splat[j % len(splat)]), px, py, (0.5, 0.5), cam.sprite * r2.uniform(0.8, 1.4), angle=a, sy=0.7, alpha=0.7)
+            L = r2.uniform(30, 70)
+            Z.stroke(img, [(px, py), (px + L * math.cos(a), py + L * FLAT * math.sin(a))], [r2.uniform(4, 8), 0.5], lin("#17140F").astype(np.float32),
+                     mode="over", alpha=[0.5, 0.0])
 
     def add(img, cam):
         x, y = cam.s(bx, by)
         sw = M.atlas_frame("vfx", "vfx/shockwave_2")[0]
-        Z.blit(img, Z.pm_of(sw, tint=FOX_T), x, y, (0.5, 0.5), cam.sprite * 1.4, mode="add", gain=Z.EMIT * 0.7)
+        Z.blit(img, Z.pm_of(sw, tint=FOX_T), x, y, (0.5, 0.5), cam.sprite * 1.6, mode="add", gain=Z.EMIT * 0.45)
         ff = [M.atlas_frame("vfx", f"weapons/foxfire_{i}")[0] for i in range(3)]
         for j in range(ring_n):  # 狐火环：现成的狐火弹排一圈，朝外
             a = 2 * math.pi * j / ring_n
-            px, py = cam.s(bx + ring_r * math.cos(a), by + ring_r * FLAT * math.sin(a), 14)
+            px, py = cam.s(bx + ring_r * math.cos(a), by + ring_r * FLAT * math.sin(a), 16)
             ang = math.atan2(FLAT * math.sin(a), math.cos(a))
-            Z.blit(img, Z.pm_of(ff[j % 3], tint=FOX_T), px, py, (0.6, 0.5), cam.sprite * 1.8, angle=ang, mode="add", gain=Z.EMIT)
-            Z.glow(img, px, py, 30, FOX_T, 0.3, power=2)
-        Z.glow_ellipse(img, x, y, ring_r * cam.k * 1.05, ring_r * FLAT * cam.k * 1.05, FOX_T, 0.06, power=0.6)
+            Z.blit(img, Z.pm_of(ff[j % 3], tint=FOX_T), px, py, (0.6, 0.5), cam.sprite * 2.7, angle=ang, mode="add", gain=Z.EMIT)
+            Z.glow(img, px, py, 45, FOX_T, 0.28, power=2)
 
-    def sky(img, cam):
-        moon_at(img, 960, 250, 300, alpha=0.12)
-
-    shot.light.append(light)
     shot.ground.append(ground)
     shot.add.append(add)
-    shot.sky.append(sky)
-    return shot, "2.3 秒 · 剪影落下化成真身，砸地顿帧 0.12 秒、震屏 0.5，一圈狐火环亮起（现成狐火弹排一圈）；月亮退回去，接登场题字"
+    return shot, "2.3 秒 · 剪影落下化成真身（游戏里的九尾，照常受光），砸地顿帧 0.12 秒、震屏 0.5，砸起一圈墨尘冲击波，一圈狐火环亮起（现成狐火弹排一圈，放大 1.5 倍）；接登场题字"
 
 
 # ============================================================== 汇总
@@ -857,7 +897,7 @@ SHOWS = {
         "n": 4,
         "hero": 2,
         "title": "万剑归宗（符剑进化）· 2.6 秒 · 分镜",
-        "sub": "《庄子·说剑》：天子之剑，上决浮云。元件：myth/sword_blade_0..2（剑影 3 种，叠加染金）、sword_giant（大剑影，剑柱最外一层叠四张）、"
+        "sub": "《庄子·说剑》：天子之剑，上决浮云。元件：myth/sword_blade_0..2（剑影 3 种，叠加染金）、sword_giant（大剑影，剑柱最外一层叠三张）、"
                "sword_cloud_0..5 + _emit（被劈开的云，焦墨 + 裂口金光）；拖尾、聚光、云缝光、收拢的排法、“归宗”题字是代码 / 界面的示意",
     },
     "kun": {
@@ -865,24 +905,24 @@ SHOWS = {
         "n": 4,
         "hero": 2,
         "title": "北冥潮（沧浪进化）· 2.4 秒 · 分镜",
-        "sub": "《逍遥游》：北冥有鱼，其名为鲲；鹏之徙于南冥，水击三千里。元件：myth/kun_sea_0..5 + _emit（脚下冰海）、kun_shadow（鲲影）、kun_leap_0..5（跃出水的冷光剪影）；"
-               "浪头、冰碴用现成的 wave_front、ice_shatter，浪痕、水珠、冻住是代码的示意",
+        "sub": "《逍遥游》：北冥有鱼，其名为鲲；鹏之徙于南冥，水击三千里。元件：myth/kun_sea_0..5 + _emit（脚下冰海）、kun_shadow + _emit（鲲影，边上一圈冰光）、"
+               "kun_fin + _emit（露出水面的背鳍）、kun_leap_0..5（跃出水的冷光剪影，鳍有骨条）；浪头、冰碴用现成的 wave_front、ice_shatter，八字浪、水珠、冻住是代码的示意",
     },
     "ult": {
         "panels": ult_panel,
         "n": 4,
         "hero": 2,
         "title": "燃灯（大招）· 1.3 秒，接现在的三拍 · 分镜",
-        "sub": "《大智度论》：燃灯佛生时，身边如灯。元件：myth/ult_lotus_0..7（莲灯开合）、ult_rays（放射佛光，两张反向转）、ult_halo（头光）；"
-               "光迹、暗层提亮、化灰（烧边余烬、灰片上飘）是代码的示意",
+        "sub": "《大智度论》：燃灯佛生时，身边如灯。元件：myth/ult_lotus_0..7 + _emit（莲灯开合：纸色瓣、焦褐轮廓 + 描金和灯焰）、ult_rays（放射佛光，两张反向转）、"
+               "ult_halo（头光）；光迹、暗层提亮、莲灯后的暗晕和近处压低佛光、化灰是代码的示意",
     },
     "fox": {
         "panels": fox_panel,
         "n": 4,
         "hero": 2,
         "title": "九尾登场（夜主）· 3.0 秒，接现在的登场题字 · 分镜",
-        "sub": "《南山经》：青丘之山，有兽如狐而九尾。元件：myth/fox_moon（月亮，叠加可染冷白）、fox_body + _emit（身子剪影，焦墨描青边）、fox_tail + _emit（一条尾巴，代码旋开九条）；"
-               "尾巴旋开的排法、青火星、落地墨尘、狐火环（现成 weapons/foxfire）是代码的示意",
+        "sub": "《南山经》：青丘之山，有兽如狐而九尾。元件：myth/fox_moon（月亮，叠加可染冷白）、fox_body + _emit（坐姿剪影，比例照 boss 图集的九尾，焦墨描青边）、"
+               "fox_tail + _emit（一条尾巴，代码旋开九条）；尾巴旋开的排法、青火星、墨尘冲击波、狐火环（现成 weapons/foxfire）是代码的示意",
     },
 }
 
