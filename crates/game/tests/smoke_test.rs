@@ -14,7 +14,7 @@ impl TestDir {
         fs::create_dir_all(path.join("安装 目录")).unwrap();
         fs::create_dir_all(path.join("工作 目录")).unwrap();
         let dir = Self(path);
-        fs::copy(env!("CARGO_BIN_EXE_lantern"), dir.exe()).unwrap();
+        copy_retrying(Path::new(env!("CARGO_BIN_EXE_lantern")), &dir.exe());
         copy_dir(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
             &dir.0.join("安装 目录/assets"),
@@ -69,6 +69,22 @@ impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// 复制刚编出来的 exe：Windows 上杀毒、索引程序会短暂占着新文件（错误 32，共享冲突），稍等重试。
+fn copy_retrying(from: &Path, to: &Path) {
+    let mut wait = Duration::from_millis(100);
+    for _ in 0..8 {
+        match fs::copy(from, to) {
+            Ok(_) => return,
+            Err(e) => {
+                eprintln!("复制 {} 失败，{wait:?} 后重试：{e}", from.display());
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(Duration::from_secs(2));
+            }
+        }
+    }
+    fs::copy(from, to).unwrap();
 }
 
 fn copy_dir(from: &Path, to: &Path) {
