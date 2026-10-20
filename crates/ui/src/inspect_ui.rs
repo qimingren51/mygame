@@ -305,16 +305,24 @@ mod tests {
         assert_eq!(unique.len(), ids.len(), "有重名");
     }
 
-    /// models/inspect 里的每个 glb 都对得上一件东西，名字写错了这里会提醒
+    /// models/inspect 里的每个 glb 都对得上一件东西，名字写错了这里会提醒；
+    /// 体积按用户定的上限：单件不超过 6 MB，39 件合计不超过 60 MB
     #[test]
-    fn every_inspect_model_is_named_after_an_item() {
+    fn every_inspect_model_is_named_after_an_item_and_within_size() {
+        const EACH: u64 = 6 * 1024 * 1024;
+        const TOTAL: u64 = 60 * 1024 * 1024;
         let ids: BTreeSet<String> = inspect_ids(&content()).into_iter().collect();
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models/inspect");
         let Ok(files) = std::fs::read_dir(&dir) else { return };
+        let mut total = 0;
         for f in files.flatten() {
             let name = f.file_name().to_string_lossy().into_owned();
             let id = name.strip_suffix(".glb").unwrap_or_else(|| panic!("{name} 不是 .glb"));
             assert!(ids.contains(id), "{name} 对不上任何法器、灯坠或灯笼");
+            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+            assert!(size <= EACH, "{name} 有 {:.1} MB，单件不超过 6 MB", size as f64 / 1048576.0);
+            total += size;
         }
+        assert!(total <= TOTAL, "检视模型合计 {:.1} MB，不超过 60 MB", total as f64 / 1048576.0);
     }
 }

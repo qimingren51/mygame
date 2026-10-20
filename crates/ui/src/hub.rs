@@ -718,7 +718,7 @@ fn codex_row_height(row: &[CodexEntry], profile: &Profile) -> f32 {
     let tallest = row
         .iter()
         .map(|e| {
-            if profile.codex.contains(&e.key) {
+            if e.known(profile) {
                 lines(&e.short) + if e.flavor.is_empty() { 0.0 } else { lines(&e.flavor) }
             } else {
                 lines(e.hint.as_deref().unwrap_or("还没拿到过"))
