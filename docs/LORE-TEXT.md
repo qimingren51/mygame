@@ -1,7 +1,7 @@
 # 提灯夜行 · 文本稿
 
 > 状态：v0.8（2026-10-20）。由世界观与命名会话维护。
-> 已进游戏的部分：第 1 节在 `assets/data/hub.ron`，第 2 节在 `assets/data/journals.ron`，第 3 节的灯坠、灯、奇遇、法器（连同进化）、心法，第 5 节的异化、合璧描述，在 `charms.ron`、`lamps.ron`、`events.ron`、`weapons.ron`、`passives.ron`、`fusions.ron` 的 `flavor` 字段（只接了数据里已有的几件，其余的等加进数据时再接）。改这几节时两边一起改。字体子集已含 GB2312 一级字库的常用字，用到生僻字时才要运行 `python3 crates/ui/fonts.py`（CI 会报缺字）。
+> 已进游戏的部分：第 1 节在 `assets/data/hub.ron`，第 2 节在 `assets/data/journals.ron`，第 3 节的灯坠、灯、奇遇、法器（连同进化）、心法，第 5 节的异化、合璧描述，在 `charms.ron`、`lamps.ron`、`events.ron`、`weapons.ron`、`passives.ron`、`fusions.ron` 的 `flavor` 字段（只接了数据里已有的几件，其余的等加进数据时再接）。改这几节时两边一起改。字体子集已含 GB2312 一级字库的常用字，用到生僻字时才要运行 `python3 crates/ui/fonts.py`（CI 会报缺字）。改了 `assets/data` 里的文字，推送前跑 `cargo test -p lantern_content -p lantern_platform -p lantern_ui` 和 `python3 crates/ui/fonts.py --check`：`lantern_ui` 里有排版测试，文字变长可能把图鉴、卡面顶出窗口。
 > 游戏里要显示的文字：灯驿人物台词、守灯人手记、一句话描述、百妖谱。设定和名字以 `docs/LORE.md` 为准，这里只放成稿。
 > 夜主台词见 `LORE.md` 第 7 节，开场卷轴见第 6 节，结局见第 8 节，成就名和局内提示见 9.12、9.13 节。
 > 基调（`GAMEPLAY.md` 2.5）：志怪、留白、苦中带暖。不血腥，不说教，不堆文字。
