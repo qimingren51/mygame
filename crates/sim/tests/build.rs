@@ -433,6 +433,8 @@ fn the_early_weapon_up_cap_limits_a_lone_weapon() {
         let offers = lantern_sim::build::offers(c, sim.arsenal(), sim.build(), secs);
         offers.iter().find_map(|(o, w)| matches!(o, Offer::WeaponUp(0)).then_some(*w)).unwrap()
     };
+    // 先关掉封顶量一次，再打开比
+    c.run.choices.budget.as_mut().unwrap().weapon_up_each = 0.0;
     let (open, late) = (up(&c, 0.0), up(&c, 200.0));
     let b = c.run.choices.budget.as_mut().unwrap();
     b.weapon_up_each = 7.0;
@@ -440,4 +442,20 @@ fn the_early_weapon_up_cap_limits_a_lone_weapon() {
     // 起手只有一件法器：开局只分到 7，五行倍率不变，所以正好是原来的 7 / 总量
     assert!((up(&c, 0.0) / open - 7.0 / total).abs() < 1e-4);
     assert!((up(&c, 200.0) - late).abs() < 1e-4, "3:00 以后不封顶");
+}
+
+/// 按等级分（`by_level`）：“法器升级”里每件的份额乘它现在的等级。
+#[test]
+fn by_level_favors_the_leading_weapon() {
+    let mut c = content();
+    c.run.choices.budget.as_mut().unwrap().by_level = true;
+    let mut setup = RunSetup::new(1, RunMode::Normal);
+    setup.god = true;
+    let mut sim = SimHarness::with_setup(c.clone(), setup);
+    sim.quiet();
+    // 金、水各一件，都还没到一阶，也不是灯的本命五行：两张升级卡只差份额
+    sim.set_build(&[("sword", 4, false), ("bell", 1, false)], &[]);
+    let offers = lantern_sim::build::offers(&c, sim.arsenal(), sim.build(), 0.0);
+    let up = |k: usize| offers.iter().find_map(|(o, w)| (*o == Offer::WeaponUp(k)).then_some(*w)).unwrap();
+    assert!((up(0) / up(1) - 4.0).abs() < 1e-4, "4 级的是 1 级的 4 倍：{} / {}", up(0), up(1));
 }
