@@ -25,6 +25,7 @@ pub(crate) enum Item {
     Keyboard,
     Gamepad,
     DebugTools,
+    DevTools,
 }
 
 pub(crate) const ITEMS: [Item; 12] = [
@@ -42,7 +43,7 @@ pub(crate) const ITEMS: [Item; 12] = [
     Item::Gamepad,
 ];
 
-pub(crate) const ADVANCED_ITEMS: [Item; 1] = [Item::DebugTools];
+pub(crate) const ADVANCED_ITEMS: [Item; 2] = [Item::DebugTools, Item::DevTools];
 
 /// 显示设置值的文字。
 #[derive(Component)]
@@ -62,6 +63,7 @@ fn label(item: Item) -> &'static str {
         Item::Keyboard => "键盘按键",
         Item::Gamepad => "手柄按键",
         Item::DebugTools => "性能调试",
+        Item::DevTools => "开发者选项",
         Item::Numbers => "伤害数字",
     }
 }
@@ -80,6 +82,7 @@ fn value(item: Item, s: &Settings) -> String {
         Item::Bloom => on_off(s.bloom),
         Item::Fx => if s.lite_fx { "精简" } else { "完整" }.into(),
         Item::DebugTools => on_off(s.debug_tools),
+        Item::DevTools => on_off(s.dev_tools),
         Item::Numbers => match s.damage_numbers {
             DamageNumbers::All => "全部",
             DamageNumbers::Crit => "只看暴击",
@@ -158,6 +161,10 @@ pub(crate) fn adjust(
         }
         Item::DebugTools if actions.nav.x != 0 || actions.confirm => {
             settings.debug_tools = !settings.debug_tools;
+            true
+        }
+        Item::DevTools if actions.nav.x != 0 || actions.confirm => {
+            settings.dev_tools = !settings.dev_tools;
             true
         }
         Item::Fullscreen if actions.nav.x != 0 || actions.confirm => {

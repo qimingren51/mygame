@@ -43,6 +43,8 @@ pub struct Settings {
     pub bindings: crate::bindings::Bindings,
     /// 允许用 F3 查看种子号和性能面板；面板仍由玩家主动打开。
     pub debug_tools: bool,
+    /// 开发者选项：对局里按 F1、暂停菜单里点“开发者”打开面板（docs/PLAYTEST.md 第 13 项）。默认关
+    pub dev_tools: bool,
     /// 伤害数字：全部、只看暴击、关
     pub damage_numbers: DamageNumbers,
     #[serde(skip)]
@@ -67,6 +69,7 @@ impl Default for Settings {
             lite_fx: false,
             bindings: Default::default(),
             debug_tools: false,
+            dev_tools: false,
             damage_numbers: DamageNumbers::All,
             path: None,
             save_error: None,
@@ -229,6 +232,7 @@ mod tests {
         assert_eq!(s, Settings { path: Some(dir.join("settings.ron")), ..Settings::default() });
         s.fullscreen = true;
         s.debug_tools = true;
+        s.dev_tools = true;
         s.music_volume = 0.2;
         s.sfx_volume = 0.4;
         s.ui_volume = 0.6;
@@ -247,6 +251,7 @@ mod tests {
         let s = Settings::load(&dir);
         assert!(s.fullscreen && s.vsync);
         assert!(!s.debug_tools);
+        assert!(!s.dev_tools, "开发者选项默认关");
         assert_eq!(s.ui_volume, Settings::default().ui_volume);
         assert_eq!(s.ambience_volume, Settings::default().ambience_volume);
         let _ = std::fs::remove_dir_all(&dir);

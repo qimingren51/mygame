@@ -141,6 +141,9 @@ pub struct Profile {
     path: Option<PathBuf>,
     #[serde(skip)]
     save_error: Option<String>,
+    /// 开发者选项改过局外（全解锁、加灯油）：本次启动不再存档，免得把真实进度搞乱
+    #[serde(skip)]
+    dev_session: bool,
 }
 
 impl Default for Profile {
@@ -179,6 +182,7 @@ impl Default for Profile {
             tips: BTreeSet::new(),
             path: None,
             save_error: None,
+            dev_session: false,
         }
     }
 }
@@ -285,6 +289,9 @@ impl Profile {
     pub fn save(&self) -> io::Result<()> {
         if let Some(error) = &self.save_error {
             return Err(io::Error::other(error.clone()));
+        }
+        if self.dev_session {
+            return Ok(());
         }
         let Some(path) = &self.path else { return Ok(()) };
         let text =
@@ -435,6 +442,42 @@ impl Profile {
     }
 
     // ---- 解锁 ----
+
+    /// 开发者选项改过局外，本次启动不存档。
+    pub fn dev_session(&self) -> bool {
+        self.dev_session
+    }
+
+    /// 开发者选项：本次启动全解锁（灯、灯坠、法器、各更、反应、图鉴、手记）。只改内存，之后本次启动不存档。
+    pub fn dev_unlock_all(&mut self, content: &Content) {
+        self.dev_session = true;
+        self.basics = true;
+        self.lamps.extend(content.lamps.iter().map(|l| l.id.clone()));
+        self.charms.extend(content.charms.iter().map(|c| c.id.clone()));
+        self.unlocked.extend(content.run.choices.locked.iter().cloned());
+        self.tier = self.tier.max(content.difficulty.len() as u8);
+        let all = content.elements.reactions.len().min(32);
+        self.reactions |= if all >= 32 { u32::MAX } else { (1u32 << all) - 1 };
+        for w in &content.weapons {
+            self.codex.insert(format!("w:{}", w.id));
+            if w.evolution.is_some() {
+                self.codex.insert(format!("w:{}_evo", w.id));
+            }
+            if w.mutation.is_some() {
+                self.codex.insert(format!("w:{}_mut", w.id));
+            }
+        }
+        self.codex.extend(content.fusions.iter().map(|f| format!("f:{}", f.id)));
+        self.codex.extend(content.passives.iter().map(|p| format!("p:{}", p.id)));
+        self.journals.extend(content.journals.iter().map(|j| j.page));
+    }
+
+    /// 开发者选项：加灯油、铜钱。只改内存，之后本次启动不存档。
+    pub fn dev_add(&mut self, oil: u32, gold: u32) {
+        self.dev_session = true;
+        self.oil = self.oil.saturating_add(oil);
+        self.gold = self.gold.saturating_add(gold);
+    }
 
     pub fn lamp_unlocked(&self, content: &Content, id: &str) -> bool {
         content.lamps.iter().any(|l| l.id == id && l.initial) || self.lamps.contains(id)
@@ -799,7 +842,32 @@ mod tests {
             feats: Feats::default(),
             endless: false,
             bosses: u32::from(won),
+            dev: false,
         }
+    }
+
+    /// 开发者全解锁、加灯油：内存里都有了，但本次启动不再写存档
+    #[test]
+    fn dev_unlock_all_stays_in_memory() {
+        let c = content();
+        let dir = temp("dev-unlock");
+        let mut p = Profile::load(&dir);
+        p.oil = 7;
+        p.save().unwrap();
+        let before = std::fs::read_to_string(dir.join("save.ron")).unwrap();
+        p.dev_unlock_all(&c);
+        p.dev_add(5000, 2000);
+        assert!(p.dev_session());
+        assert!(c.charms.iter().all(|ch| p.charm_unlocked(&c, &ch.id)));
+        assert!(c.lamps.iter().all(|l| p.lamp_unlocked(&c, &l.id)));
+        assert!(c.run.choices.locked.iter().all(|w| p.unlocked.contains(w)));
+        assert!(c.fusions.iter().all(|f| p.codex.contains(&format!("f:{}", f.id))));
+        assert_eq!(p.tier as usize, c.difficulty.len());
+        assert_eq!(p.oil, 5007);
+        p.save().unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("save.ron")).unwrap(), before, "不写盘");
+        assert_eq!(Profile::load(&dir).oil, 7);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp(name: &str) -> PathBuf {

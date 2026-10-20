@@ -14,6 +14,7 @@ mod choice;
 mod controls;
 mod cover;
 mod describe;
+mod dev_panel;
 mod hub;
 mod hub_fx;
 mod hub_scene;
@@ -132,6 +133,7 @@ impl Plugin for UiPlugin {
         hub_scene::register(app);
         results::register(app);
         journals::register(app);
+        dev_panel::register(app);
         story::register(app);
         pause::register(app);
         stats_panel::register(app);

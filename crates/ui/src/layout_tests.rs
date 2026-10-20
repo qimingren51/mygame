@@ -313,6 +313,7 @@ fn results_list_new_weapons_and_fit() {
                     feats: Default::default(),
                     endless: false,
                     bosses: 0,
+                    dev: false,
                 };
                 let recorded = lantern_platform::profile::Recorded {
                     unlocked: c.run.choices.locked.clone(),

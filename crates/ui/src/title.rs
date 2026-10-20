@@ -141,9 +141,10 @@ pub(crate) fn input(
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
     mut cues: MessageWriter<UiCue>,
-    mut reader: ResMut<crate::journals::Reader>,
+    (mut reader, dev): (ResMut<crate::journals::Reader>, Option<Res<crate::dev_panel::DevPanel>>),
 ) {
-    if controls.is_open() || transition.active() || reader.open {
+    // 手记、开发者面板开着时，按键归它们
+    if controls.is_open() || transition.active() || reader.open || dev.is_some_and(|d| d.open) {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -890,6 +891,12 @@ fn settings_panel(commands: &mut Commands, fonts: &Fonts, skin: &Skin, settings:
             if advanced {
                 panel.spawn(text(&fonts.body, 16.0, INK_DIM, "开启性能调试后，按 F3 查看种子与性能数据。"));
                 panel.spawn(text(&fonts.body, 16.0, INK_DIM, "开发模式始终支持 F3。"));
+                panel.spawn(text(
+                    &fonts.body,
+                    16.0,
+                    INK_DIM,
+                    "开启开发者选项后，对局里按 F1 或在暂停菜单里点“开发者”。用过的局不计奖励。",
+                ));
             }
         });
         p.spawn(crate::prompts::hint(

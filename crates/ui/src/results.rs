@@ -70,8 +70,11 @@ fn record(
     *ui = ResultsUi::default();
     let c = &content.0;
     let Some(r) = flow.result.clone() else { return };
-    let counts =
-        playback.is_none() && !matches!(setup.mode, lantern_sim::RunMode::Bench { .. }) && !setup.god;
+    // 回放、跑分、无敌、用过开发者选项的局都不计奖励和成绩
+    let counts = playback.is_none()
+        && !matches!(setup.mode, lantern_sim::RunMode::Bench { .. })
+        && !setup.god
+        && !r.dev;
     let recorded = if counts {
         let rec = RunRecord { result: &r, tier: setup.tier, attributes: !setup.attributes.is_empty() };
         let before = profile.clone();
@@ -421,6 +424,9 @@ pub(crate) fn results_body(
                     }
                 },
             );
+            if r.dev {
+                p.spawn(text(&fonts.body, 16.0, INK_DIM, "开发者局：用过开发者选项，不计灯油、铜钱和成绩"));
+            }
             if counts {
                 let [time, kills, win, lamps, bonus] = r.oil_parts;
                 let mut detail = format!("存活 +{time} · 击杀 {} → +{kills}", r.kills);

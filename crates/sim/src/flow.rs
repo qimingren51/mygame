@@ -17,10 +17,11 @@ use crate::boss::Foes;
 use crate::build::{Awaken, Build, Offer, apply_offer, offers, pick_weighted, roll_choices};
 use crate::charms::{Survival, charm_candidates, charm_slots, roll_charms};
 use crate::combat::{Area, Source, Strike, StrikeFx, Strikes, heal};
+use crate::dev::DevCommand;
 use crate::encounters::Encounters;
 use crate::run::{Progress, RunMode, RunPlan};
 use crate::stats::{Effects, Stats, StatsDirty, apply_collected, collect};
-use crate::weapons::Arsenal;
+use crate::weapons::{Arsenal, Form, WeaponSlot};
 use crate::{
     GameContent, Health, Player, Pos, RunSetup, SimCommand, SimCommands, SimEvent, SimOutbox, SimRng, Tick,
 };
@@ -169,6 +170,8 @@ pub struct RunResult {
     pub endless: bool,
     /// 打倒的夜主
     pub bosses: u32,
+    /// 用过开发者选项：不计奖励和成绩
+    pub dev: bool,
 }
 
 /// 一局里做到的事（成就、图鉴用）。
@@ -193,7 +196,6 @@ pub struct Feats {
 /// 图鉴的键：法器 `w:<id>`，进化 `w:<id>_evo`，异化 `w:<id>_mut`，合璧 `f:<合璧 id>`，心法 `p:<id>`。
 /// 按局末的法器栏和心法算：合璧的两件材料都进化过，一并记上。
 pub fn codex_keys(c: &Content, arsenal: &Arsenal, build: &Build) -> std::collections::BTreeSet<String> {
-    use crate::weapons::Form;
     let mut keys = std::collections::BTreeSet::new();
     for w in &arsenal.0 {
         let id = &c.weapons[w.def].id;
@@ -272,6 +274,7 @@ pub(crate) struct FlowParams<'w, 's> {
     director: Res<'w, crate::run::Director>,
     discoveries: Res<'w, crate::reactions::Discoveries>,
     story: ResMut<'w, crate::story::Story>,
+    dev: ResMut<'w, crate::dev::Dev>,
     player: Query<'w, 's, &'static mut Health, With<Player>>,
 }
 
@@ -443,6 +446,119 @@ impl FlowParams<'_, '_> {
         *self.phase = SimPhase::Chest;
     }
 
+    /// 开发者操作（`dev.rs`）。用过就记成开发者局；下标越界的丢掉。
+    fn dev(&mut self, cmd: DevCommand) {
+        let content = self.content.0.clone();
+        let c = &*content;
+        self.dev.used = true;
+        let weapon = |d: u16| Some(usize::from(d)).filter(|&d| d < c.weapons.len());
+        match cmd {
+            DevCommand::God(on) => self.plan.god = on,
+            DevCommand::Damage(n) => self.dev.damage = f32::from(n.max(1)),
+            DevCommand::Levels(n) => {
+                // 补足连升 n 级要的经验，照常走升级和选卡
+                let level = self.progress.level;
+                self.progress.xp +=
+                    (0..u32::from(n)).map(|k| c.run.xp_need.at((level + k) as f32)).sum::<f32>();
+            }
+            DevCommand::FillUlt => self.progress.ult = 1.0,
+            DevCommand::Gold(n) => self.progress.gold += n as f32,
+            DevCommand::Weapon(d) => {
+                let Some(d) = weapon(d) else { return };
+                match self.dev_slot(d) {
+                    Some(k) => self.apply(Offer::WeaponUp(k)),
+                    None => self.apply(Offer::NewWeapon(d)),
+                }
+            }
+            DevCommand::MaxWeapon(d) => {
+                if let Some(d) = weapon(d) {
+                    self.dev_maxed(d);
+                }
+            }
+            DevCommand::Passive(d) => {
+                let d = usize::from(d);
+                if d >= c.passives.len() {
+                    return;
+                }
+                match self.build.passives.iter().position(|p| p.def == d) {
+                    Some(k) => self.apply(Offer::PassiveUp(k)),
+                    None => self.apply(Offer::NewPassive(d)),
+                }
+            }
+            DevCommand::Evolve(d) => {
+                let Some(d) = weapon(d) else { return };
+                if c.weapons[d].evolution.is_some()
+                    && let Some(k) = self.dev_maxed(d)
+                    && self.arsenal.0[k].form == Form::Base
+                {
+                    self.apply(Offer::Evolve(k));
+                    self.after_choice();
+                }
+            }
+            DevCommand::Mutate(d) => {
+                let Some(d) = weapon(d) else { return };
+                if c.weapons[d].mutation.is_some()
+                    && let Some(k) = self.dev_maxed(d)
+                    && self.arsenal.0[k].form == Form::Base
+                {
+                    // 不看克制的条件，直接异化
+                    self.arsenal.0[k].form = Form::Mutated;
+                    self.build.evolutions += 1;
+                    self.flow.pending_evos.push_back(k);
+                    self.awaken();
+                    self.after_choice();
+                }
+            }
+            DevCommand::Fuse(f) => {
+                let f = usize::from(f);
+                let Some(def) = c.fusions.get(f) else { return };
+                let mats: Vec<usize> = def.weapons.iter().filter_map(|id| c.weapon_index(id)).collect();
+                let [first, second] = mats[..] else { return };
+                // 两件材料都要在手、都进化过（不看共鸣和相生的条件）
+                for m in [first, second] {
+                    let Some(k) = self.dev_maxed(m) else { return };
+                    if self.arsenal.0[k].form == Form::Base && c.weapons[m].evolution.is_some() {
+                        self.arsenal.0[k].form = Form::Evolved;
+                        self.build.evolutions += 1;
+                    }
+                }
+                let (Some(a), Some(b)) = (self.dev_slot(first), self.dev_slot(second)) else { return };
+                if self.arsenal.0[a].form != Form::Evolved || self.arsenal.0[b].form != Form::Evolved {
+                    return;
+                }
+                // 和升级卡上的合璧一样：主材料满级、换成合璧形态，另一件让出格子
+                let mut w = WeaponSlot::new(first);
+                w.level = c.weapons[first].levels.len() as u32;
+                w.form = Form::Fused(f);
+                let k = a.min(b);
+                self.arsenal.0.remove(a.max(b));
+                self.arsenal.0[k] = w;
+                self.flow.pending_evos.push_back(k);
+                self.awaken();
+                self.after_choice();
+            }
+        }
+    }
+
+    /// 法器 d 在法器栏里的位置（合璧了的不算）。
+    fn dev_slot(&self, d: usize) -> Option<usize> {
+        self.arsenal.0.iter().position(|w| w.def == d && !matches!(w.form, Form::Fused(_)))
+    }
+
+    /// 让法器 d 在手、满级：没有就先拿（法器栏满了拿不到），还没进化的直接升满。
+    fn dev_maxed(&mut self, d: usize) -> Option<usize> {
+        if self.dev_slot(d).is_none() {
+            self.apply(Offer::NewWeapon(d));
+        }
+        let k = self.dev_slot(d)?;
+        let w = &mut self.arsenal.0[k];
+        if !w.transformed() {
+            w.level = self.content.0.weapons[d].levels.len() as u32;
+            self.awaken();
+        }
+        Some(k)
+    }
+
     /// 一个选择结束：先演出待进化，再处理剩余升级，再开排队的宝箱、点灯奖励，最后回到 Play。
     fn after_choice(&mut self) {
         self.flow.choice = None;
@@ -612,6 +728,7 @@ impl FlowParams<'_, '_> {
             },
             endless: endless.is_some(),
             bosses: endless.map_or(u32::from(won), |e| e.downs),
+            dev: self.dev.used,
         });
         self.flow.choice = None;
         *self.phase = SimPhase::Over;
@@ -870,6 +987,7 @@ pub(crate) fn handle_commands(
                     _ => fp.after_choice(),
                 }
             }
+            (SimPhase::Play, SimCommand::Dev(d)) => fp.dev(d),
             _ => {}
         }
     }

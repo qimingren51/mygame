@@ -53,6 +53,8 @@ pub enum SimCommand {
     Ack,
     /// 跑分模式下改变场上保持的妖物数量（分段跑分用）；普通模式下忽略
     BenchTarget(u32),
+    /// 开发者选项（`dev.rs`）
+    Dev(crate::dev::DevCommand),
 }
 
 /// 伤害数字的种类。
