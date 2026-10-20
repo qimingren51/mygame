@@ -300,12 +300,52 @@ fn ice_soul_doubles_xp_from_frozen_kills() {
             .0
             .push(lantern_sim::combat::Hit::new(h, 1.0, Source::Ult));
     }
+    let _ = sim.take_events();
     idle(&mut sim, 1);
     let gems = sim.world().resource::<lantern_sim::Gems>();
     let mut values: Vec<f32> = gems.value[..gems.n].to_vec();
     values.sort_by(f32::total_cmp);
     assert_eq!(values.len(), 2);
     assert!((values[1] / values[0] - 2.0).abs() < 1e-4, "{values:?}");
+    // 击杀事件带着“冻死的”，画面据此让魂火被珠子吸走
+    let mut frozen: Vec<bool> = sim
+        .take_events()
+        .iter()
+        .filter_map(|e| match e {
+            SimEvent::Kill { frozen, .. } => Some(*frozen),
+            _ => None,
+        })
+        .collect();
+    frozen.sort();
+    assert_eq!(frozen, [false, true]);
+}
+
+/// 定海神针：站定、又动了，各发一次 Stance；没挂这枚灯坠时不发
+#[test]
+fn pillar_reports_stance_on_and_off() {
+    let stances = |charms: Vec<String>| {
+        let mut s = setup(4);
+        s.charms = charms;
+        s.god = true;
+        let mut sim = quiet(s);
+        let mut seen = Vec::new();
+        for k in 0..200 {
+            let input = if k < 120 { InputFrame::default() } else { InputFrame::quantize(Vec2::X) };
+            sim.step(input, &[]);
+            for e in sim.take_events() {
+                if let SimEvent::Stance { on } = e {
+                    seen.push((k, on));
+                }
+            }
+        }
+        seen
+    };
+    let seen = stances(vec!["pillar".into()]);
+    assert_eq!(seen.iter().map(|&(_, on)| on).collect::<Vec<_>>(), [true, false], "{seen:?}");
+    let after = content().player.charms.still_after;
+    assert!((seen[0].0 as f32 + 1.0) * lantern_core::step::DT >= after - 1e-4);
+    assert_eq!(seen[1].0, 120, "一动就收");
+    assert!(stances(Vec::new()).is_empty());
 }
 
 #[test]

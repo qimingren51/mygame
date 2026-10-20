@@ -289,13 +289,19 @@ fn illusions_inside_the_reveal_circle_dispel() {
     sim.set_build(&[], &[("dengxin", 5)]);
     sim.progress_mut().level = 200;
     sim.world_mut().resource_mut::<lantern_sim::stats::StatsDirty>().0 = true;
-    let mut gone = false;
+    let (mut spawned, mut gone) = (0, false);
     for _ in 0..90 {
         sim.step(InputFrame::default(), &[]);
-        if sim.take_events().iter().any(|e| matches!(e, SimEvent::IllusionDispelled { .. })) {
-            gone = true;
+        for e in sim.take_events() {
+            match e {
+                SimEvent::IllusionSpawned { .. } => spawned += 1,
+                SimEvent::IllusionDispelled { .. } => gone = true,
+                _ => {}
+            }
         }
     }
+    // 分幻身那一刻也有事件（画面让九尾“一分为几”）
+    assert!(spawned > 0);
     assert!(gone);
 }
 

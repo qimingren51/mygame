@@ -711,6 +711,24 @@ fn codex_cell(
     });
 }
 
+/// 图鉴里一行格子大概多高：图标和名字一行，下面的短句、背景故事按字数折行（13～14 号字，一行约 22 字）。
+/// 按最高的那一格算；文字改长了画布跟着变高，不会顶出窗口。
+fn codex_row_height(row: &[CodexEntry], profile: &Profile) -> f32 {
+    let lines = |s: &str| s.chars().count().div_ceil(22).max(1) as f32;
+    let tallest = row
+        .iter()
+        .map(|e| {
+            if profile.codex.contains(&e.key) {
+                lines(&e.short) + if e.flavor.is_empty() { 0.0 } else { lines(&e.flavor) }
+            } else {
+                lines(e.hint.as_deref().unwrap_or("还没拿到过"))
+            }
+        })
+        .fold(1.0, f32::max);
+    // 上下留白加图标那行约 50，每行字 19
+    50.0 + tallest * 19.0
+}
+
 /// 说书人的图鉴：页签加一页内容。五行谱页另有累计统计和手记入口。
 pub(crate) fn codex_panel(
     commands: &mut Commands,
@@ -743,8 +761,8 @@ pub(crate) fn codex_panel(
             format!("拿到过 {seen} / {all}")
         }
     };
-    // 每行格子约 84 高（图标名字、短句、一两行背景故事）；行多时画布变高、整页等比缩小
-    let height = 300.0 + rows.len() as f32 * 84.0;
+    // 行多、字长时画布变高，整页等比缩小
+    let height = 300.0 + rows.iter().map(|row| codex_row_height(row, profile)).sum::<f32>();
     let root = frame(
         commands,
         fonts,

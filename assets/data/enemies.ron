@@ -61,7 +61,7 @@
                      phase2: "灯下有影子的，才是我。",
                      phase3: "孩子们，闭上眼。",
                      defeat: "去吧，提灯人。天亮了，记得狐也怕黑。",
-                     retreat: "光透不下来的……孩子们，再等等。",
+                     retreat: "这么深，光下不来。孩子们，再等等。",
                      again: "越往下，怕黑的孩子越多。",
                  ))))),
     (id: "toad", name: "金蟾", rank: Critter, movement: Flee,
