@@ -2,20 +2,20 @@
 // 出发前挂一枚；局内 5:00 小头目必给一次三选一，精英宝箱 30% 附带一次，货郎 80 铜钱一次。
 // 风火轮、定海神针、长命锁、冰魄珠一开始就有，其余靠成就解锁（achievements.ron）。P0 做这 8 枚。
 [
-    (id: "wind_wheel", name: "风火轮", flavor: "哪吒脚下那对的小样。踩上去，脚下生火。", good: "闪避更远，留下火痕", bad: "闪避冷却 +0.4 秒",
+    (id: "wind_wheel", name: "风火轮", flavor: "仿哪吒那对风火轮打的，只有巴掌大。踩着闪一步，地上留一道火。", good: "闪避更远，留下火痕", bad: "闪避冷却 +0.4 秒",
      effects: [Mul(DashDistance, 0.4), Add(TrailDamage, 1.5), Add(DashCooldown, 0.4)], initial: true),
-    (id: "pillar", name: "定海神针", flavor: "站定了，一根针也压得住海。", good: "站定：攻防各 +25%", bad: "移动时伤害 -10%",
+    (id: "pillar", name: "定海神针", flavor: "大禹量海那根铁的小样，一拃长，沉得坠手。", good: "站定：攻防各 +25%", bad: "移动时伤害 -10%",
      effects: [Add(StillDamage, 0.25), Add(StillReduction, 0.25), Add(MovingDamage, -0.10)], initial: true),
-    (id: "night_pearl", name: "照夜珠", flavor: "灯阵第一次合拢那夜，五盏灯的光凝成了它。", good: "照见圈 +30%，易伤 +8%", bad: "圈外妖物移速 +25%",
+    (id: "night_pearl", name: "照夜珠", flavor: "头一回点齐五盏石灯笼那夜，灯光收拢，地上多了这颗珠子。", good: "照见圈 +30%，易伤 +8%", bad: "圈外妖物移速 +25%",
      effects: [Mul(Reveal, 0.3), Add(RevealVuln, 0.08), Add(DarkSpeed, 0.25)]),
-    (id: "elixir", name: "九转金丹", flavor: "倒下一回，它替你站起来一回。只一回。", good: "倒下复活一次", bad: "占一格，用完即碎",
+    (id: "elixir", name: "九转金丹", flavor: "老君炉里炼的，只此一颗。倒下时含着，能再站起来一回。", good: "倒下复活一次", bad: "占一格，用完即碎",
      effects: [Rule(Revive)]),
-    (id: "five_coins", name: "五帝钱", flavor: "五个皇帝的钱，五系都在才管用。", good: "每系一阶，伤害 +5%", bad: "每缺一系，伤害 -8%",
+    (id: "five_coins", name: "五帝钱", flavor: "五个皇帝年间的铜钱，红线串着，民间拿来镇宅。缺一枚就不灵。", good: "每系一阶，伤害 +5%", bad: "每缺一系，伤害 -8%",
      effects: [ByTiers(stat: Damage, on: 0.05, off: -0.08, all: 0.10)]),
-    (id: "longevity", name: "长命锁", flavor: "灯童挂上去的。回来要还他。", good: "生命上限 +60", bad: "伤害 -10%",
+    (id: "longevity", name: "长命锁", flavor: "灯童从脖子上摘下来的，说好了回来要还。", good: "生命上限 +60", bad: "伤害 -10%",
      effects: [Add(MaxHp, 60.0), Add(Damage, -0.10)], initial: true),
-    (id: "ice_soul", name: "冰魄珠", flavor: "冰魄散了凝成的珠子。冻住的魂，加倍归灯。", good: "冻死的妖，魂火 ×2", bad: "冰冻时长 -20%",
+    (id: "ice_soul", name: "冰魄珠", flavor: "北冥的冰魄碎了，剩下这颗，攥久了手会麻。", good: "冻死的妖，魂火 ×2", bad: "冰冻时长 -20%",
      effects: [Add(FrozenXp, 1.0), Mul(FreezeTime, -0.2)], initial: true),
-    (id: "broken_sword", name: "断剑", flavor: "剑断了，剩下的那截更狠。", good: "法器伤害 +35%", bad: "法器栏只剩 4 格",
+    (id: "broken_sword", name: "断剑", flavor: "半截剑，断口没有磨平，也配不上鞘。", good: "法器伤害 +35%", bad: "法器栏只剩 4 格",
      effects: [Add(Damage, 0.35), Add(WeaponSlots, -2.0)], max_weapons: Some(4)),
 ]

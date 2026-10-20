@@ -5,7 +5,7 @@
     (
         id: "lamp", name: "灯火", icon: "灯", element: Fire,
         desc: "火焰环绕周身，烧灼靠近的妖物。", short: "火环绕身，烧近身妖",
-        flavor: "长明火自己的火。它绕着你转，夜挨不近你。",
+        flavor: "长明火的火苗绕着人转，挨近的妖先被烫着。",
         // 转速 3.2 + 0.12·等级（弧度/秒）；同一只妖物 0.45 秒内只吃一次；火焰判定半径 10
         behavior: Orbit(spin: (3.2, 0.12, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 10.0),
         levels: [
@@ -21,7 +21,7 @@
         evolution: Some((
             name: "不夜城", passive: "changming",
             desc: "十盏灯笼环城而行，内圈多一层火海。", short: "十盏灯环身，内圈火海",
-            flavor: "东莱有不夜县，夜里出过太阳。十盏灯一围，这里也是。",
+            flavor: "东莱有座不夜城，相传古时夜里出过太阳。十盏灯围成一圈，圈里亮得跟白天一样。",
             // 外圈伤害是满级的 2 倍；内环火海半径 50，每 0.5 秒造成外圈伤害的 20%（docs/BALANCE.md 第 6.1 节）
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.45, knockback: 50.0, size: 12.0,
                             inner: Some((radius: 50.0, every: 0.5, ratio: 0.2))),
@@ -29,7 +29,7 @@
         )),
         mutation: Some((
             name: "冰火两重天", desc: "五盏冰焰冻结、五盏火焰灼烧。绕行让同一只妖先后触两焰，引爆蒸腾；舍弃内环火海与合璧。", short: "半冰半火，引爆蒸腾",
-            flavor: "十盏灯，一半的焰是冷的。冷热一撞，就是一团白汽。",
+            flavor: "十盏灯里五盏烧的是冷焰，冷热碰在一块，腾起白汽。",
             // 冰焰冻结 0.6 秒，火焰点 1 层灼烧；固定十盏，不吃数量加成
             behavior: Orbit(spin: (2.4, 0.0, 0.0), hit_cooldown: 0.38, knockback: 35.0, size: 12.0,
                             ice_fire: Some((freeze: 0.6, ignite: 1.0))),
@@ -56,14 +56,14 @@
         evolution: Some((
             name: "万剑归宗", passive: "jianyi",
             desc: "飞剑连发，无限穿透。", short: "三剑连发，无限穿透",
-            flavor: "万剑同出一宗。一剑过去，后面的都跟上。",
+            flavor: "头一把剑飞出去，后面的排着队跟上，一把接一把。",
             behavior: Volley(range: 460.0, speed: 380.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
                              knockback: 30.0, spread: 0.14, retry: 0.2),
             level: (cooldown: 0.42, count: 3, damage: 84.5, pierce: 999),
         )),
         mutation: Some((
             name: "赤霄", desc: "赤剑命中熔金易伤，击杀分作两剑，分剑不再分裂。舍弃无限穿透与合璧，追逐残血妖群。", short: "熔金易伤，击杀分剑",
-            flavor: "汉高祖斩白蛇的剑叫赤霄。符剑在火里烧红了，也就成了它。",
+            flavor: "符剑在火里烧得通红，有人说像汉高祖斩白蛇的那把赤霄。",
             // 熔金：易伤 30%、4 秒；击杀时朝 460 内最近的两只各分一剑，伤害为这一击的 60%
             behavior: Volley(range: 460.0, speed: 400.0, life: 1.5, turn: 8.0, hit_radius: 9.0,
                 knockback: 25.0, spread: 0.14, retry: 0.2,
@@ -110,7 +110,7 @@
     (
         id: "crane", name: "纸鹤", icon: "鹤", element: Wood,
         desc: "纸鹤自动扑向妖物，撞击后折返。", short: "纸鹤自动扑击",
-        flavor: "纸扎的鹤，本是送亡魂上路的。现在它替你去找妖。",
+        flavor: "纸扎铺的白鹤，本是出殡时送魂上路的，守灯人拿来找妖。",
         // 平时绕身（半径 34）；随机扑向 340 内最近 3 只之一，撞到即伤害，休息 0.35 秒；速度 250 + 6·等级
         behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.35,
                          knockback: 50.0, speed: (250.0, 6.0, 0.0), steer: 7.0, reach: 6.0),
@@ -128,14 +128,14 @@
         evolution: Some((
             name: "千鹤引", passive: "zhezhi",
             desc: "十只纸鹤随身，扑击更快更狠。", short: "十只纸鹤，更快更狠",
-            flavor: "鹤多了，就成了一条引魂的路。",
+            flavor: "十只纸鹤排成一行飞，像给魂指的路。",
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 340.0, pick: 3, rest: 0.2,
                              knockback: 50.0, speed: (330.0, 0.0, 0.0), steer: 7.0, reach: 6.0),
             level: (count: 10, damage: 49.5),
         )),
         mutation: Some((
             name: "铁鹤", desc: "鹤群收为五只铁鹤，单次伤害三倍，扑击射出穿透铁羽；斩杀两成血以下小妖。数量加成失效，不能合璧。", short: "五只铁鹤，伤害 ×3",
-            flavor: "纸鹤让金气浸透，成了铁的。少了，可每一只都要命。",
+            flavor: "纸鹤让金气浸透，翅膀成了铁片，只剩五只，啄一下能穿透。",
             // 铁羽：穿透 5、速度 480、存活 0.6 秒，伤害为扑击的 30%（全额会远超进化的伤害预算）
             behavior: Seeker(orbit_radius: 34.0, orbit_spin: 2.0, range: 360.0, pick: 3, rest: 0.5,
                 knockback: 25.0, speed: (350.0, 0.0, 0.0), steer: 7.0, reach: 8.0,
@@ -146,7 +146,7 @@
     (
         id: "seal", name: "山印", icon: "印", element: Earth,
         desc: "石印从天而降，范围伤害并击晕。", short: "石印落地，击晕一片",
-        flavor: "盖下去的是一座山。印下的妖，一时站不起来。",
+        flavor: "印面刻着篆书的“山”字，盖下去，妖半天爬不起来。",
         // 从 300 内最近 12 只里随机选落点（不足时在主角周围随机），预警 0.45 秒、依次间隔 0.12 秒；
         // 落地击退 90、击晕 0.5 秒
         behavior: Drop(range: 300.0, candidates: 12, delay: 0.45, stagger: 0.12, knockback: 90.0,
@@ -175,7 +175,7 @@
         )),
         mutation: Some((
             name: "竹印", desc: "巨竹破土挑飞妖物，留存四秒阻挡追兵。舍弃地裂持续伤害与合璧，借竹墙绕出活路。", short: "巨竹挑飞，竹墙挡路",
-            flavor: "石印没落下来，地下冲出一根竹子。青丘的竹，顶得起山。",
+            flavor: "石印还没落地，下面先冲出一根粗竹，把印顶了回去。",
             // 竹墙：不造成伤害，普通妖物穿过时移速 ×0.12（和地图竹丛取更慢的一个），夜主、精英不受阻
             behavior: Drop(range: 300.0, candidates: 12, delay: 0.3, stagger: 0.12, knockback: 90.0,
                 stun: 1.2, scatter: (150.0, 100.0), amount_div: 2,
@@ -188,7 +188,7 @@
     (
         id: "coin_sword", name: "铜钱剑", icon: "钱", element: Metal,
         desc: "朝最近的妖物挥出扇形剑气，自带暴击。", short: "扇形剑气，自带暴击",
-        flavor: "七枚铜钱排成北斗。挥一下，斩一片。",
+        flavor: "七枚铜钱拿红绳串成北斗的样子，当剑使。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "七枚铜钱成了剑",
         // 120° 扇形；方向朝 radius + 40 以内最近的妖物，没有就朝面向；扇形里从近到远最多打 count 只；暴击率 +15%
@@ -206,7 +206,7 @@
         evolution: Some((
             name: "天罡", passive: "ruimu",
             desc: "周身剑气旋风，暴击时再斩一次。", short: "剑气绕身，暴击再斩",
-            flavor: "斗柄绕着北极转，剑气绕着你转。",
+            flavor: "剑气绕着人转一整圈，像斗柄绕着北极。",
             // 一整圈；暴击的那一下对同一只再斩一次（× 1.0，再斩不再触发）
             behavior: Sweep(arc: 6.2832, aim: 40.0, knockback: 25.0, crit_bonus: 0.15, echo: 1.0),
             level: (cooldown: 0.80, count: 10, radius: 200.0, damage: 100.0),
@@ -215,7 +215,7 @@
     (
         id: "sky_lantern", name: "孔明灯", icon: "孔", element: Fire,
         desc: "放飞孔明灯，飘向妖物最密的地方，落地爆燃，留下火海。", short: "灯飘向妖群，落地爆燃",
-        flavor: "狐村的孩子还你的。它往妖最多的地方飘，再落下来。",
+        flavor: "狐村孩子放来的那盏，专往妖多的地方飘，飘够了往下落。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "狐村放来一盏灯",
         // 落点：360 以内最近的 24 只里，挑 100 以内同伴最多的那只；几盏至少隔开 120。灯每秒飘 60，3 秒后落地。
@@ -235,7 +235,7 @@
         evolution: Some((
             name: "万灯升", passive: "luxin",
             desc: "满天孔明灯同时坠落。", short: "八盏齐落，满地火海",
-            flavor: "薪尽火传。一盏传十盏，十盏传满天。",
+            flavor: "满天的孔明灯一齐落下来，落处一片火。",
             // 每 5 秒 8 盏，落点在 480 以内分散挑，2 秒落地
             behavior: SkyLantern(range: 480.0, pick: 48, cluster: 100.0, spread: 120.0, speed: 120.0, fuse: 2.0, retarget: 0.5,
                 zone: (kind: Fire, radius_scale: 0.8, life: 3.0, tick: 0.5, damage_scale: 0.12, slow: 0.0, slow_time: 0.0)),
@@ -245,7 +245,7 @@
     (
         id: "wave", name: "沧浪", icon: "浪", element: Water,
         desc: "朝面向推出一道浪（站着不动时朝最近的妖物），打伤、减速并推开碰到的妖物。", short: "推浪开路，减速妖物",
-        flavor: "沧浪之水，推得动船，也推得开妖。",
+        flavor: "《渔父》里那条沧浪水，起了浪，连妖带泥一起推走。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "冻河化作了浪",
         // 浪速 320，走 260 后散掉；最多推 140（精英一半，夜主不推）；减速 40%，1.5 秒；
@@ -273,7 +273,7 @@
     (
         id: "vine", name: "青藤", icon: "藤", element: Wood,
         desc: "和附近最近的几只妖物各连一根青藤，持续造成伤害，回复伤害的 4%。", short: "藤连妖物，吸血续命",
-        flavor: "藤缠上去，就把它的力气吸给你。",
+        flavor: "藤缠住妖，顺着藤往回送力气。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "纸鹤落地生了根",
         // 目标离开连线距离 + 40 或死了就断，0.3 秒后接新目标；每秒最多回复 0.5 + 0.125 × 等级
@@ -300,7 +300,7 @@
     (
         id: "tower", name: "镇妖塔", icon: "塔", element: Earth,
         desc: "在妖物最密的地方落下宝塔，砸晕一片，再把周围的妖物吸到塔下。", short: "落塔吸妖，聚成一团",
-        flavor: "土伯拿它压门缝。塔一落，周围的妖都被吸到塔底。",
+        flavor: "土伯压门缝用的七层小塔，借了一座出来。落了地，妖都往塔底下钻。",
         // 解锁提示的正文（docs/LORE-TEXT.md 第 6.9 节）
         unlock: "土伯借你一座塔",
         // 落点：300 以内最近的 24 只里，挑 100 以内同伴最多的那只（几座至少隔开 120）；预警 0.5 秒，落地击晕 0.5 秒。
