@@ -8,7 +8,7 @@
 use std::f32::consts::TAU;
 
 use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
-use bevy::asset::LoadState;
+use bevy::asset::{LoadState, RenderAssetUsages};
 use bevy::camera::Hdr;
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
@@ -16,7 +16,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::gltf::{Gltf, GltfAssetLabel, GltfMaterialName};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 use crate::AssetRoot;
@@ -73,6 +73,8 @@ pub struct Inspect {
     /// 多久没碰了（秒）；拖动时为 0
     idle: f32,
     dragging: bool,
+    /// 模型出来以后过了几秒：入场时墨晕化开、物件转进来
+    intro: f32,
 }
 
 impl Inspect {
@@ -154,9 +156,10 @@ impl Inspect {
         }
     }
 
-    /// 物件的朝向：先绕竖轴转，再朝镜头俯仰
+    /// 物件的朝向：先绕竖轴转，再朝镜头俯仰；入场时多带一段没转完的角度
     fn rotation(&self) -> Quat {
-        Quat::from_rotation_x(self.pitch) * Quat::from_rotation_y(self.yaw)
+        let late = INTRO_TURN * (1.0 - ease_out(self.intro / INTRO_SECS));
+        Quat::from_rotation_x(self.pitch) * Quat::from_rotation_y(self.yaw - late)
     }
 }
 
@@ -171,6 +174,26 @@ struct Pivot;
 #[derive(Component)]
 struct InspectCamera;
 
+/// 物件背后的墨（一张烤好的底图：宣纸、一团淡墨晕、一道干笔横扫的笔触）
+#[derive(Component)]
+struct Backdrop;
+
+/// 入场：墨从中间往外晕开，物件从侧面转进来并稍稍放大到原大，用时（秒）和多转的角度（弧度）
+const INTRO_SECS: f32 = 0.8;
+const INTRO_TURN: f32 = 1.1;
+/// 模型出来以后先停一下再入场：头一帧要编着色器，卡一下的那几帧不算进入场
+const INTRO_DELAY: f32 = 0.25;
+/// 底图离原点多远（在物件后面）、多大。底图边上就是宣纸色，和底色一样，放大缩小都看不出边
+const BACKDROP_Z: f32 = -2.0;
+const BACKDROP_SIZE: f32 = 4.2;
+/// 笔触斜一点
+const STROKE_TILT: f32 = 0.1;
+
+fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
 /// 模型的整个 glTF（取 idle 动画用）
 #[derive(Component)]
 struct ModelGltf(Handle<Gltf>);
@@ -184,6 +207,8 @@ fn sync(
     mut commands: Commands,
     mut inspect: ResMut<Inspect>,
     mut images: ResMut<Assets<Image>>,
+    (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
+    mut backdrop: Local<Option<Handle<Image>>>,
     assets: Res<AssetServer>,
     parts: Query<Entity, With<InspectPart>>,
 ) {
@@ -201,8 +226,14 @@ fn sync(
         inspect.status = InspectStatus::Closed;
         return;
     };
-    *inspect =
-        Inspect { id: Some(id.clone()), shown: Some(id.clone()), zoom: 1.0, pitch: -0.18, ..default() };
+    *inspect = Inspect {
+        id: Some(id.clone()),
+        shown: Some(id.clone()),
+        zoom: 1.0,
+        pitch: -0.18,
+        intro: -INTRO_DELAY,
+        ..default()
+    };
     let image = images.add(Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba8UnormSrgb, None));
     inspect.image = Some(image.clone());
     inspect.status = InspectStatus::Loading;
@@ -219,15 +250,17 @@ fn sync(
         Bloom { intensity: 0.22, ..Bloom::NATURAL },
         Tonemapping::AcesFitted,
         Projection::Perspective(PerspectiveProjection { fov: FOV, ..default() }),
-        AmbientLight { color: Color::srgb(1.0, 0.96, 0.9), brightness: 900.0, ..default() },
+        // 环境光压低、偏冷，物件才有明暗
+        AmbientLight { color: Color::srgb(0.9, 0.93, 1.0), brightness: 320.0, ..default() },
         Transform::from_xyz(0.0, 0.0, DISTANCE).looking_at(Vec3::ZERO, Vec3::Y),
         layer.clone(),
     ));
-    // 三盏灯跟镜头不动，物件转：主光在左上前方，暖色补光在右侧，背后一道边缘光勾出轮廓
+    // 三盏灯跟镜头不动，物件转：左上前方一盏暖的主光（像灯笼），右侧一盏冷的补光（像月光），
+    // 背后偏上一道亮的边缘光，金属的刃口、器物的轮廓转到侧面时会亮起一线（docs/FEEL.md 第 14 节）
     for (illuminance, color, from) in [
-        (9000.0, Color::srgb(1.0, 0.97, 0.92), Vec3::new(-2.0, 3.0, 4.0)),
-        (2800.0, Color::srgb(1.0, 0.86, 0.7), Vec3::new(3.5, 0.5, 2.0)),
-        (14000.0, Color::srgb(0.85, 0.92, 1.0), Vec3::new(0.5, 2.0, -4.0)),
+        (11000.0, Color::srgb(1.0, 0.9, 0.74), Vec3::new(-2.5, 2.5, 3.5)),
+        (2400.0, Color::srgb(0.74, 0.84, 1.0), Vec3::new(3.5, 0.3, 1.5)),
+        (22000.0, Color::srgb(1.0, 0.96, 0.88), Vec3::new(0.8, 2.2, -3.5)),
     ] {
         commands.spawn((
             InspectPart,
@@ -236,6 +269,22 @@ fn sync(
             layer.clone(),
         ));
     }
+    // 物件背后烤好的一张底图：宣纸上一团淡墨晕、一道干笔横扫的笔触。三维画面在色调映射之前混色，
+    // 纸色那时比白还亮，半透明的墨怎么叠都是褐色；所以每个像素直接存“映射前该是多少”，不混色。
+    // 第一次打开时画，之后一直用
+    let backdrop = backdrop.get_or_insert_with(|| images.add(ink_backdrop())).clone();
+    commands.spawn((
+        InspectPart,
+        Backdrop,
+        Mesh3d(meshes.add(Rectangle::new(BACKDROP_SIZE, BACKDROP_SIZE))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color_texture: Some(backdrop),
+            unlit: true,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.0, BACKDROP_Z).with_scale(Vec3::splat(0.3)),
+        layer.clone(),
+    ));
     let path = model_path(&id);
     commands
         .spawn((InspectPart, Pivot, Transform::default(), Visibility::default(), layer.clone()))
@@ -252,6 +301,98 @@ fn sync(
 
 /// 宣纸底色
 const PAPER: Color = Color::srgb(0.86, 0.82, 0.74);
+
+/// 值噪声（0–1），画墨晕的毛边用。
+fn noise(x: f32, y: f32) -> f32 {
+    let hash = |i: i32, j: i32| {
+        let mut h = (i as u32).wrapping_mul(0x8da6_b343) ^ (j as u32).wrapping_mul(0xd816_3841);
+        h ^= h >> 13;
+        h = h.wrapping_mul(0x5bd1_e995);
+        h ^= h >> 15;
+        (h & 0xffff) as f32 / 65535.0
+    };
+    let (xi, yi) = (x.floor() as i32, y.floor() as i32);
+    let (fx, fy) = (x - xi as f32, y - yi as f32);
+    let s = |t: f32| t * t * (3.0 - 2.0 * t);
+    let (u, v) = (s(fx), s(fy));
+    let (a, b, c, d) = (hash(xi, yi), hash(xi + 1, yi), hash(xi, yi + 1), hash(xi + 1, yi + 1));
+    a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
+}
+
+fn fbm(x: f32, y: f32) -> f32 {
+    (noise(x, y) * 0.55 + noise(x * 2.1, y * 2.1) * 0.3 + noise(x * 4.3, y * 4.3) * 0.15).clamp(0.0, 1.0)
+}
+
+fn smooth(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// 干笔横扫的笔触有多浓（0–1）：u 沿着笔走（0 起笔，1 收笔），v 横着（-1..1）。
+/// 起笔圆、笔肚饱满、收笔尖，越往后越干、拉出飞白的细丝。
+fn stroke(u: f32, v: f32) -> f32 {
+    if !(0.0..=1.0).contains(&u) {
+        return 0.0;
+    }
+    // 起笔是钝圆的一团（笔一按下去就铺开），笔肚饱满，收笔尖
+    let start = (1.0 - (1.0 - (u / 0.06).min(1.0)).powi(2)).sqrt();
+    let half = 0.7 * (0.55 + 0.45 * smooth(0.0, 0.12, u)) * start * (1.0 - 0.9 * smooth(0.6, 1.0, u)) + 0.02;
+    let wobble = (fbm(u * 2.4, 1.3) - 0.5) * 0.3;
+    let rough = (fbm(u * 18.0, v * 2.0 + 5.0) - 0.5) * 0.3;
+    let d = ((v - wobble).abs() + rough * half) / half;
+    let body = 1.0 - smooth(0.88, 1.0, d);
+    let dry = smooth(0.3, 1.0, u);
+    let hair = fbm(u * 1.5 + 9.0, v * 46.0);
+    let white = 1.0 - dry * (1.0 - smooth(0.42 - 0.12 * dry, 0.56, hair));
+    (body * white * (0.8 + 0.2 * fbm(u * 24.0, v * 12.0))).clamp(0.0, 1.0)
+}
+
+/// 检视的底图：宣纸色上一团淡墨晕、一道略斜的干笔横扫。存的是色调映射之前的值（半精度浮点），
+/// 画出来正好是想要的纸色和墨色。
+fn ink_backdrop() -> Image {
+    const N: u32 = 640;
+    const INK: Color = Color::srgb(0.09, 0.08, 0.06);
+    let (sin, cos) = STROKE_TILT.sin_cos();
+    let mut px = Vec::with_capacity((N * N * 8) as usize);
+    for y in 0..N {
+        for x in 0..N {
+            // 贴图的 y 往下，画面的 y 往上
+            let p =
+                Vec2::new((x as f32 + 0.5) / N as f32 * 2.0 - 1.0, 1.0 - (y as f32 + 0.5) / N as f32 * 2.0);
+            // 淡墨晕：中间浓、往外化开，边上毛
+            let d = p.length() * (0.75 + 0.5 * fbm(p.x * 2.6 + 7.1, p.y * 2.6 - 2.3)) / 0.62;
+            let halo = (1.0 - smooth(0.3, 0.95, d)) * (0.7 + 0.3 * fbm(p.x * 9.0 + 1.7, p.y * 9.0 + 3.1));
+            // 笔触：转正以后沿 x 走，占中间一段
+            let q = Vec2::new(p.x * cos + p.y * sin, -p.x * sin + p.y * cos);
+            let brush = stroke((q.x + 0.66) / 1.32, (q.y + 0.02) / 0.3);
+            let ink = 1.0 - (1.0 - 0.2 * halo) * (1.0 - 0.94 * brush);
+            let c = before_aces(PAPER.mix(&INK, ink)).to_linear();
+            for v in [c.red, c.green, c.blue, 1.0] {
+                px.extend_from_slice(&f16_bits(v).to_le_bytes());
+            }
+        }
+    }
+    Image::new(
+        Extent3d { width: N, height: N, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        px,
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
+/// 正数 f32 转半精度浮点的位（底图的值都在 0 到几十之间，太小的当 0）。
+fn f16_bits(x: f32) -> u16 {
+    let b = x.max(0.0).to_bits();
+    let exp = ((b >> 23) & 0xff) as i32 - 127 + 15;
+    if exp <= 0 {
+        0
+    } else if exp >= 31 {
+        0x7c00
+    } else {
+        ((exp as u16) << 10) | ((b & 0x7f_ffff) >> 13) as u16
+    }
+}
 
 /// Bevy 的 AcesFitted 用的两个矩阵（tonemapping.wesl 里是行向量乘，这里转置成列向量乘）
 fn aces_matrices() -> (Mat3, Mat3) {
@@ -346,16 +487,30 @@ fn watch_load(
 fn advance(
     time: Res<Time<Real>>,
     mut inspect: ResMut<Inspect>,
-    mut pivots: Query<&mut Transform, (With<Pivot>, Without<InspectCamera>)>,
-    mut cameras: Query<&mut Transform, (With<InspectCamera>, Without<Pivot>)>,
+    mut pivots: Query<&mut Transform, (With<Pivot>, Without<InspectCamera>, Without<Backdrop>)>,
+    mut cameras: Query<&mut Transform, (With<InspectCamera>, Without<Pivot>, Without<Backdrop>)>,
+    mut washes: Query<&mut Transform, (With<Backdrop>, Without<Pivot>, Without<InspectCamera>)>,
 ) {
     if !inspect.is_open() {
         return;
     }
     let dt = time.delta_secs().min(0.1);
     inspect.advance(dt);
+    // 入场从模型出来那一刻算：墨晕化开，物件转进来、放大到原大
+    let fresh = inspect.intro < INTRO_SECS;
+    if inspect.status == InspectStatus::Ready {
+        inspect.intro += dt;
+    }
+    let k = ease_out(inspect.intro / INTRO_SECS);
     for mut tf in &mut pivots {
         tf.rotation = inspect.rotation();
+        tf.scale = Vec3::splat(0.9 + 0.1 * k);
+    }
+    if fresh {
+        // 墨从中间往外晕开：底图边上是纸色，放大时只看得见墨在长
+        for mut tf in &mut washes {
+            tf.scale = Vec3::splat(0.3 + 0.7 * k);
+        }
     }
     for mut tf in &mut cameras {
         tf.translation = Vec3::Z * DISTANCE / inspect.zoom;
@@ -410,6 +565,38 @@ mod tests {
         let want = Vec3::from_array(PAPER.to_linear().to_f32_array_no_alpha());
         assert!((y - want).abs().max_element() < 1e-3, "{y} vs {want}");
         assert!(x.max_element() > want.max_element(), "映射前要更亮");
+    }
+
+    /// 底图存的半精度浮点：常见的值换得对，负数和太小的当 0
+    #[test]
+    fn half_floats_for_the_backdrop() {
+        assert_eq!(f16_bits(1.0), 0x3c00);
+        assert_eq!(f16_bits(2.0), 0x4000);
+        assert_eq!(f16_bits(0.5), 0x3800);
+        assert_eq!(f16_bits(-1.0), 0);
+        assert_eq!(f16_bits(1e-9), 0);
+    }
+
+    /// 笔触：起笔是钝的一团（不是尖），笔肚浓，收笔前干、有飞白的空隙，笔外没有墨
+    #[test]
+    fn brush_stroke_starts_blunt_and_dries_out() {
+        assert!(stroke(0.02, 0.0) > 0.5, "起笔钝圆");
+        assert!(stroke(0.3, 0.0) > 0.7, "笔肚浓");
+        let tail: Vec<f32> = (0..200).map(|i| stroke(0.85, -0.2 + i as f32 * 0.002)).collect();
+        assert!(tail.iter().any(|&a| a < 0.2) && tail.iter().any(|&a| a > 0.5), "收笔有飞白");
+        assert_eq!(stroke(-0.1, 0.0), 0.0);
+        assert_eq!(stroke(0.3, 0.99), 0.0, "笔外没有墨");
+    }
+
+    /// 入场：模型出来先停一下，再转进来；停的时候是起始姿势
+    #[test]
+    fn intro_waits_then_turns_in() {
+        let mut v = Inspect { zoom: 1.0, intro: -INTRO_DELAY, ..default() };
+        let start = v.rotation();
+        v.intro = 0.0;
+        assert!(v.rotation().angle_between(start) < 1e-5, "停的时候不动");
+        v.intro = INTRO_SECS;
+        assert!(v.rotation().angle_between(Quat::IDENTITY) < 1e-5, "入场完正对");
     }
 
     #[test]
