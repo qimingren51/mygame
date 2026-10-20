@@ -454,20 +454,43 @@ def to8(img: np.ndarray) -> Image.Image:
 # ============================================================== 分镜条
 
 
+def wrap(d: ImageDraw.ImageDraw, text: str, font, width: int) -> list[str]:
+    """按像素宽度折行（中文逐字折，标点不放行首）。"""
+    lines, cur = [], ""
+    for ch in text:
+        if d.textlength(cur + ch, font=font) > width and cur:
+            if ch in "，。；、：）》":
+                cur += ch
+                continue
+            lines.append(cur)
+            cur = ch
+        else:
+            cur += ch
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def board(panels: list[tuple[Image.Image, str]], title: str, sub: str, path: Path, cols: int = 2) -> None:
-    """2×2（或横排）分镜条：每格 960×540（从 1080p 缩下来），格下一行小字。"""
-    pw, ph, cap, pad, head = 960, 540, 40, 12, 86
+    """2×2（或横排）分镜条：每格 960×540（从 1080p 缩下来），格下一两行小字。"""
+    pw, ph, cap, pad = 960, 540, 58, 12
+    out_w = cols * pw + (cols + 1) * pad
+    tmp = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    sub_lines = wrap(tmp, sub, M.font(17), out_w - 2 * pad - 8)
+    head = 54 + 24 * len(sub_lines) + 8
     rows = math.ceil(len(panels) / cols)
-    W = cols * pw + (cols + 1) * pad
     H = head + rows * (ph + cap + pad) + pad
-    out = Image.new("RGB", (W, H), (22, 22, 26))
+    out = Image.new("RGB", (out_w, H), (22, 22, 26))
     d = ImageDraw.Draw(out)
     d.text((pad + 4, 14), title, fill=(244, 240, 228), font=M.font(28))
-    d.text((pad + 4, 52), sub, fill=(190, 186, 172), font=M.font(17))
+    for k, line in enumerate(sub_lines):
+        d.text((pad + 4, 54 + 24 * k), line, fill=(190, 186, 172), font=M.font(17))
+    f = M.font(18)
     for i, (im, text) in enumerate(panels):
         r, c = divmod(i, cols)
         x0 = pad + c * (pw + pad)
         y0 = head + r * (ph + cap + pad)
         out.paste(im.resize((pw, ph), Image.LANCZOS), (x0, y0))
-        d.text((x0 + 6, y0 + ph + 8), text, fill=(232, 228, 216), font=M.font(19))
+        for k, line in enumerate(wrap(d, text, f, pw - 12)[:2]):
+            d.text((x0 + 6, y0 + ph + 7 + 24 * k), line, fill=(232, 228, 216), font=f)
     V.save_png(out, path)

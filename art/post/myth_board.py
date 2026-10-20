@@ -303,6 +303,200 @@ def S_DIM(k: float) -> str:
     return "#" + "".join(f"{round(v * 255):02X}" for v in c)
 
 
+# ============================================================== 北冥潮
+
+
+ICE_T = lin("#CDEBFF").astype(np.float32)
+WATER_T = lin("#6FB8FF").astype(np.float32)
+
+
+def sea_layer(fi, scale, alpha=1.0, emit_gain=1.0, at=None):
+    """脚下冰海：本体贴地（ground 钩子，妖物之下、暗层之下），发光层叠加。scale 是相对 1080p 一比一的倍数。"""
+    body, em = parts("kun_sea")[fi], parts("kun_sea_emit")[fi]
+
+    def ground(img, cam):
+        x, y = cam.s(*(at or Z.HERO))
+        Z.blit(img, Z.pm_of(body), x, y, (0.5, 0.5), cam.sprite * scale, alpha=alpha)
+
+    def add(img, cam):
+        x, y = cam.s(*(at or Z.HERO))
+        Z.blit(img, Z.pm_of(em), x, y, (0.5, 0.5), cam.sprite * scale, mode="add", gain=Z.EMIT * alpha * emit_gain)
+
+    return ground, add
+
+
+def sea_light(cam, scale, gain, at=None):
+    """冰海往上照的冷光（光照图）。"""
+    def light(lm, cam_):
+        x, y = cam_.s(*(at or Z.HERO))
+        r = P.SEA_RX * cam_.sprite * scale * 0.85
+        Z.glow_ellipse(lm, x / 2, y / 2, r / 2, r * FLAT / 2, ICE_T, gain, power=0.9)
+    return light
+
+
+def frozen(k=0.65):
+    """冻住的妖物：颜色往冰蓝白拉，边上一圈冷光（改贴图的钩子）。"""
+    ice = lin("#BFE0F5").astype(np.float32)
+
+    def hook(pm, epm):
+        a = pm[..., 3:4]
+        rgb = pm[..., :3] * (1 - k) + ice * a * k * 0.55
+        out = np.concatenate([rgb, a], -1)
+        return out, (epm * 0.3 if epm is not None else None)
+    return hook
+
+
+def kun_panel(k: int) -> tuple[Z.Shot, str]:
+    hx, hy = Z.HERO
+    if k == 0:
+        cam = Z.Cam(z=1.0, cy=4.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.82), pool=0.75, bloom=0.3, vignette=0.36)
+        g, a = sea_layer(2, 2.4)
+        shot.ground.append(g)
+        shot.light.append(sea_light(cam, 2.4 * 0.55, 0.45))
+
+        def add(img, cam):
+            a(img, cam)
+            # 浪往外推：水边一圈浪头（现成 weapons/wave_front，转成朝外）
+            wf = M.atlas_frame("vfx", "weapons/wave_front_1")[0]
+            wb = M.atlas_frame("vfx", "weapons/wave_front_body_1")[0]
+            R = P.SEA_RX * 0.52 * 2.4 / Z.K * 1.0
+            for j in range(14):
+                th = 2 * math.pi * j / 14 + 0.2
+                x, y = ring_pos(cam, hx, hy, R * 1.02, th, 0)
+                ang = math.atan2(FLAT * math.sin(th), math.cos(th)) - math.pi / 2
+                Z.blit(img, Z.pm_of(wf, tint=WATER_T), x, y, (0.5, 0.6953125), cam.sprite * 0.75, angle=ang, sy=0.8, mode="add", gain=Z.EMIT * 0.8)
+
+        shot.add.append(add)
+        return shot, "0.3 秒 · 脚下冰面结霜、放射着裂开，正中翻开一片冰海，一圈圈浪往外推，水边碎冰板往外挤，冰缝里透冷光"
+    if k == 1:
+        cam = Z.Cam(z=1.04, cy=4.0)
+        actors = Z.default_actors()
+        shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.78), pool=0.7, bloom=0.3, vignette=0.4)
+        g, a = sea_layer(4, 2.7)
+        shadow = parts("kun_shadow")[0]
+        sc = 2.05
+        head_x = 1560.0  # 画面像素：头已经过了主角，身子和尾巴还拖在画面左边外头，一对大鳍正从主角脚下过
+        cy_s = 585.0
+
+        def fin_pos(cam):
+            L = shadow.width * cam.sprite * sc
+            return head_x - 0.48 * L + (900 - 768) * cam.sprite * sc, cy_s - 4
+
+        def ground(img, cam):
+            g(img, cam)
+            L = shadow.width * cam.sprite * sc
+            Z.blit(img, Z.pm_of(shadow), head_x - 0.48 * L, cy_s, (0.5, 0.5), cam.sprite * sc, angle=-0.05, alpha=1.0)
+            # 背鳍露出水面（代码画的示意：一片焦墨的鳍，后缘弯）
+            fx, fy = fin_pos(cam)
+            back = [(fx - 70 + 40 * q, fy - 64 * (1 - q) ** 0.7 * (1 - 0.15 * q)) for q in np.linspace(0, 1, 12)]
+            poly = [(fx + 26, fy + 2), (fx - 30, fy - 70), (fx - 74, fy - 66)] + back[1:] + [(fx - 30, fy + 3)]
+            from PIL import ImageDraw as _D
+            m = Image.new("L", (SW * 2, SH * 2), 0)
+            _D.Draw(m).polygon([(x * 2, y * 2) for x, y in poly], fill=255)
+            fa = np.asarray(m.resize((SW, SH), Image.LANCZOS), dtype=np.float32)[..., None] / 255.0 * 0.95
+            img[:] = img * (1 - fa) + lin("#141A22").astype(np.float32) * fa
+
+        shot.ground.append(ground)
+        shot.light.append(sea_light(cam, 2.7 * 0.95, 0.55))
+
+        def add(img, cam):
+            a(img, cam)
+            fx, fy = fin_pos(cam)
+            # 鳍前一道翻起的浪（现成 wave_front，转成朝 +X），鳍根一圈白沫
+            wf = M.atlas_frame("vfx", "weapons/wave_front_2")[0]
+            Z.blit(img, Z.pm_of(wf, tint=ICE_T), fx + 30, fy, (0.5, 0.6953125), cam.sprite * 0.42, angle=-math.pi / 2, sx=0.9, mode="add", gain=Z.EMIT * 0.95)
+            Z.glow_ellipse(img, fx - 10, fy + 2, 60, 14, ICE_T, 0.35, power=1.5)
+            # 身后两道八字形的浪痕：一段段断开的白沫，越往后越散、越淡
+            r2 = np.random.default_rng(71)
+            for sgn in (-1, 1):
+                for j in range(60):
+                    q = j / 60
+                    x0 = fx - 20 - 900 * q
+                    y0 = fy + sgn * (10 + 190 * q ** 0.85) + r2.normal(0, 4 + 10 * q)
+                    if r2.random() < 0.25 + 0.4 * q:
+                        continue
+                    Ld = r2.uniform(10, 30) * (1 - 0.4 * q)
+                    ang = math.atan2(sgn * 190 * 0.85 * max(q, 0.02) ** -0.15 / 900, -1) + r2.normal(0, 0.12)
+                    pts = [(x0, y0), (x0 + Ld * math.cos(ang), y0 + Ld * math.sin(ang))]
+                    Z.stroke(img, pts, [r2.uniform(1.5, 4.0) * (1 - 0.5 * q), 0.8], ICE_T, alpha=[0.75 * (1 - q) ** 1.3, 0.1], gain=Z.EMIT)
+            for _ in range(60):  # 浪花溅起的水珠
+                x, y = fx + 20 + r2.normal(0, 40), fy + r2.normal(0, 22)
+                Z.glow(img, x, y, r2.uniform(1.8, 3.8), ICE_T, r2.uniform(0.4, 1.0), power=2.0)
+
+        shot.add.append(add)
+        return shot, "1.0 秒 · 冰海铺满，鲲影从左往右掠过脚下，大得画面装不下；背鳍划开水面，拖出两道八字形的浪痕"
+    if k == 2:
+        cam = Z.Cam(z=1.06, cy=4.0, shake=(-4.0, 3.0))
+        actors = Z.default_actors()
+        for a_ in actors:
+            if not a_.key.startswith("hero/") and math.hypot(a_.x - hx, a_.y - hy) < 260:
+                a_.hook = frozen(0.55)
+        shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.75), pool=0.65, bloom=0.5, vignette=0.34, desat=0.08)
+        g, a = sea_layer(5, 2.7)
+        leap = parts("kun_leap")[2]
+        lx, ly, lsc = 905.0, 905.0, 2.4  # 比画面还高一截：顶上出画
+
+        def light(lm, cam):
+            Z.glow_ellipse(lm, (lx + 30) / 2, 380 / 2, 640 / 2, 460 / 2, ICE_T, 0.45, power=1.2)
+            sea_light(cam, 2.7 * 0.95, 0.5)(lm, cam)
+
+        def add(img, cam):
+            a(img, cam)
+            Z.blit(img, Z.pm_of(leap), lx, ly, (0.5, P.LEAP_WATER / P.LEAP_SIZE), cam.sprite * lsc, mode="add", gain=Z.EMIT)
+            # 尾巴离水的地方：水面一圈冷光（水花在 kun_leap 帧里）
+            Z.glow_ellipse(img, lx + (230 - 384) * cam.sprite * lsc, ly, 120, 40, ICE_T, 0.25, power=1.5)
+
+        shot.ground.append(g)
+        shot.light.append(light)
+        shot.add.append(add)
+        return shot, "1.75 秒 · 鲲跃出水，冷光剪影拱过主角头顶，鳍张开像翅膀（鲲化为鹏），身上往下淌水；顿帧 0.08 秒、震屏 0.3，近处的妖物冻住"
+    cam = Z.Cam(z=1.03, cy=4.0)
+    actors = Z.default_actors()
+    for a_ in actors:
+        if not a_.key.startswith("hero/") and math.hypot(a_.x - hx, a_.y - hy) < 300:
+            a_.hook = frozen(0.6)
+    shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.85), pool=0.8, bloom=0.4, vignette=0.32)
+    g, a = sea_layer(5, 2.7, alpha=0.5, emit_gain=0.7)
+    body0, em0 = parts("kun_sea")[0], parts("kun_sea_emit")[0]
+
+    def ground(img, cam):
+        g(img, cam)
+        x, y = cam.s(hx, hy)
+        Z.blit(img, Z.pm_of(body0), x, y, (0.5, 0.5), cam.sprite * 2.7, alpha=0.8)  # 冰面碎开的裂纹（借第 0 帧）
+
+    def add(img, cam):
+        a(img, cam)
+        x, y = cam.s(hx, hy)
+        Z.blit(img, Z.pm_of(em0), x, y, (0.5, 0.5), cam.sprite * 2.7, mode="add", gain=Z.EMIT * 0.8)
+        r2 = np.random.default_rng(91)
+        sw = M.atlas_frame("vfx", "vfx/shockwave_3")[0]
+        Z.blit(img, Z.pm_of(sw, tint=ICE_T), x, y, (0.5, 0.5), cam.sprite * 3.0, mode="add", gain=Z.EMIT * 0.7)  # 碎开的那一圈白霜往外荡
+        for _ in range(70):  # 冰海碎成冰碴：崩起来的大块冰片（三角，亮边、淡面）
+            R = math.sqrt(r2.uniform(0.02, 1.0)) * 360
+            th = r2.uniform(0, 2 * math.pi)
+            px, py = ring_pos(cam, hx, hy, R, th, r2.uniform(4, 40))
+            sz = r2.uniform(7, 22)
+            a0 = r2.uniform(0, 6.28)
+            tri = [(px + sz * math.cos(a0 + q) * r2.uniform(0.5, 1.2), py + sz * math.sin(a0 + q) * r2.uniform(0.5, 1.2)) for q in (0.0, 2.3, 4.0)]
+            Z.stroke(img, [tri[0], tri[1], tri[2], tri[0]], 1.6, ICE_T, alpha=0.75, gain=Z.EMIT)
+            cxs, cys = sum(t[0] for t in tri) / 3, sum(t[1] for t in tri) / 3
+            Z.glow(img, cxs, cys, sz * 0.8, ICE_T, 0.25, power=1.2)
+        for _ in range(240):  # 飞起来的冰碴：尖的小碎片，往外、往上崩
+            R = math.sqrt(r2.uniform(0, 1)) * 380
+            th = r2.uniform(0, 2 * math.pi)
+            px, py = ring_pos(cam, hx, hy, R, th, r2.uniform(6, 70))
+            ang = math.atan2(FLAT * math.sin(th), math.cos(th)) - r2.uniform(0.2, 0.9)
+            L = r2.uniform(5, 16)
+            Z.stroke(img, [(px - L * math.cos(ang), py - L * math.sin(ang)), (px, py)], [0.4, r2.uniform(2.0, 4.2)], ICE_T, alpha=[0.15, r2.uniform(0.6, 1.0)], gain=Z.EMIT)
+            Z.glow(img, px, py, 3.0, ICE_T, 0.5, power=2.0)
+
+    shot.ground.append(ground)
+    shot.light.append(sea_light(cam, 2.7 * 0.6, 0.18))
+    shot.add.append(add)
+    return shot, "2.2 秒 · 鲲扎回水里，冰海一下子碎成满地冰碴炸开（现成 vfx/ice_shatter），近处的妖物冻在原地；然后淡出"
+
+
 # ============================================================== 汇总
 
 SHOWS = {
@@ -313,6 +507,14 @@ SHOWS = {
         "title": "万剑归宗（符剑进化）· 2.6 秒 · 分镜",
         "sub": "《庄子·说剑》：天子之剑，上决浮云。元件：myth/sword_blade_0..2（剑影 3 种，叠加染金）、sword_cloud_0..5 + _emit（被劈开的云，焦墨 + 裂口金光）；"
                "拖尾、光点、聚光、剑柱的光是代码画的示意",
+    },
+    "kun": {
+        "panels": kun_panel,
+        "n": 4,
+        "hero": 2,
+        "title": "北冥潮（沧浪进化）· 2.4 秒 · 分镜",
+        "sub": "《逍遥游》：北冥有鱼，其名为鲲；鹏之徙于南冥，水击三千里。元件：myth/kun_sea_0..5 + _emit（脚下冰海）、kun_shadow（鲲影）、kun_leap_0..5（跃出水的冷光剪影）；"
+               "浪头、冰碴用现成的 wave_front、ice_shatter，浪痕、水珠、冻住是代码的示意",
     },
 }
 
