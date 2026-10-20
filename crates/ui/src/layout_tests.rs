@@ -439,6 +439,30 @@ fn single<C: Component>(world: &mut World) -> Entity {
     world.query_filtered::<Entity, With<C>>().single(world).unwrap()
 }
 
+/// 妖物的接触半径和美术在图集里量的一致（docs/PLAYTEST.md“接触半径”一节）：重画以后图集一变，这里就提醒同步 enemies.ron。
+/// 美术量到 0.1，数据取整，差半个单位以内算对上。
+#[test]
+fn enemy_contact_radius_matches_the_atlas() {
+    let mut app = setup();
+    let world = app.world_mut();
+    let c = world.resource::<lantern_sim::GameContent>().0.clone();
+    let db = world.resource::<AtlasDb>();
+    let mut checked = 0;
+    for e in &c.enemies {
+        let Some(measured) = db.assets.get(&e.sprite).and_then(|a| a.contact_radius) else { continue };
+        let ours = e.contact_radius.unwrap_or(e.radius);
+        let want = measured.min(e.radius);
+        assert!(
+            (ours - want).abs() <= 0.5,
+            "{}：enemies.ron 的接触半径 {ours}，图集量的是 {measured}（碰撞半径 {}），请同步",
+            e.id,
+            e.radius
+        );
+        checked += 1;
+    }
+    assert!(checked >= 11, "只核对了 {checked} 只妖物");
+}
+
 /// stat_labels.ron 写的图标在图集里都有（组 `ui/stat_group_*`、属性 `ui/stat_*`），法器组也是。
 #[test]
 fn stat_icons_named_in_the_data_are_in_the_atlas() {

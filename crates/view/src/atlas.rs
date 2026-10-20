@@ -83,6 +83,9 @@ pub struct AssetMeta {
     pub light_color: Option<String>,
     #[serde(default)]
     pub light_radius_units: Option<f32>,
+    /// 美术按画出来的身体量的接触半径（世界单位，已和碰撞半径取小），enemies.ron 的 contact_radius 照它填
+    #[serde(default)]
+    pub contact_radius: Option<f32>,
 }
 
 impl AssetMeta {
