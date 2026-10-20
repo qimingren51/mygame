@@ -361,6 +361,9 @@ pub struct BudgetDef {
     /// weapon_up（0 表示不封顶）。开局只有一两件法器时，不让这一类的总权重全压在它们身上
     #[serde(default)]
     pub weapon_up_each: f32,
+    /// “法器升级”里每件法器的份额乘它现在的等级：升得越高的越常出，随手选卡的人也会把升级攒到领头那件上
+    #[serde(default)]
+    pub by_level: bool,
 }
 
 /// 保底：前 early_levels 次升级至少出现 early_new_weapons 件不同的新法器；

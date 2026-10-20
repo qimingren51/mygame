@@ -944,6 +944,7 @@ mod tests {
             incoming_dir: Vec2::ZERO,
             target: lantern_sim::enemies::EnemyHandle::from_raw(0),
             weapon: None,
+            frozen: false,
         };
         for events in [[crit(1000.0), kill], [kill, crit(1000.0)]] {
             let (mut app, _) = feedback_app(false);

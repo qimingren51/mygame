@@ -291,7 +291,7 @@ const SLOT_S: f32 = 44.0;
 
 /// 燃灯刻度：第 k 个在燃灯到 (k+1)/12 时点亮，蓄满时整圈换成满格。
 #[derive(Component)]
-pub(crate) struct UltTick(usize);
+pub(crate) struct UltTick(pub(crate) usize);
 
 fn portrait(p: &mut ChildSpawnerCommands, db: Option<&AtlasDb>, fonts: &Fonts, skin: &Skin) {
     p.spawn((
@@ -326,6 +326,8 @@ fn portrait(p: &mut ChildSpawnerCommands, db: Option<&AtlasDb>, fonts: &Fonts, s
             ));
         }
         seal.spawn((
+            crate::hud_fx::LevelSeal,
+            UiTransform::default(),
             Node {
                 width: px(30),
                 height: px(30),

@@ -461,7 +461,8 @@ mod tests {
     fn choice_budget_is_validated() {
         let c = Content::load(&repo_data_dir()).unwrap();
         let b = c.run.choices.budget.as_ref().expect("run.ron 写了 choices.budget");
-        assert_eq!(b.weapon_up_each, 0.0, "封顶开关默认关");
+        // 数据里写的是开局封顶 7（docs/BALANCE.md 6.4 定稿），这里只查校验
+        assert!(b.weapon_up_each >= 0.0);
         let rejects = |edit: fn(&mut BudgetDef), field: &str| {
             let mut bad = c.clone();
             edit(bad.run.choices.budget.as_mut().unwrap());

@@ -7,7 +7,7 @@
         Mul(OilGain, 0.25), Mul(GoldGain, 0.25),
     ]),
     (name: "三更", desc: "夜主多一招，回血 -25%", effects: [
-        Mul(EnemyHp, 1.2), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 1.8), Add(Affixes, 1.0), Mul(BossHp, 0.4),
+        Mul(EnemyHp, 1.2), Mul(SpawnRate, 0.2), Mul(EnemyDamage, 2.1), Add(Affixes, 1.0), Mul(BossHp, 0.4),
         Mul(Healing, -0.25), Rule(BossExtra),
         Mul(OilGain, 0.5), Mul(GoldGain, 0.5),
     ]),

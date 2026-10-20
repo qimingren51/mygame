@@ -736,8 +736,9 @@ pub(crate) fn kill(
     });
     let target = en.handle(i);
     let weapon = hit.source.weapon(spread.content);
+    let frozen = en.frozen[i] > 0.0;
     en.kill(i);
-    outbox.0.push(SimEvent::Kill { pos, kind, rank, target, weapon, incoming_dir: hit.incoming_dir });
+    outbox.0.push(SimEvent::Kill { pos, kind, rank, target, weapon, incoming_dir: hit.incoming_dir, frozen });
 }
 
 /// 追加飞剑的额度：每秒补充 `bonus_sword_rate` 把，最多攒这么多（金·极境的上限）。

@@ -270,6 +270,7 @@ mod tests {
                 incoming_dir: Vec2::ZERO,
                 target: lantern_sim::enemies::EnemyHandle::from_raw(0),
                 weapon: None,
+                frozen: false,
             });
             let original = events.clone();
             let mut f = Feedback::default();

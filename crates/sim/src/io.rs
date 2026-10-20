@@ -101,6 +101,10 @@ pub enum SimEvent {
     Dash {
         pos: Vec2,
     },
+    /// 定海神针：站定（on）、站定以后又动了（off）。只在挂着定海神针时发
+    Stance {
+        on: bool,
+    },
     /// 命中妖物；pos 是伤害数字的位置，element 是这一击的五行（画面按它上色）
     Hit {
         pos: Vec2,
@@ -124,6 +128,8 @@ pub enum SimEvent {
         incoming_dir: Vec2,
         kind: u16,
         rank: Rank,
+        /// 死时还冻着（冰魄珠的魂火翻倍按这个算）
+        frozen: bool,
     },
     GemPicked {
         value: f32,
@@ -199,6 +205,10 @@ pub enum SimEvent {
         phase: u8,
     },
     BossEnraged,
+    /// 九尾分出一个幻身
+    IllusionSpawned {
+        pos: Vec2,
+    },
     /// 幻身在照见圈里散了
     IllusionDispelled {
         pos: Vec2,
