@@ -239,6 +239,21 @@ art/.venv/bin/python art/post/title_screen.py --sample   # 只出候选 out/scre
 ```
 
 - 胸像用真实的主角模型、同样的墨线和后期，装进界面图标的圆框；`meta.json` 的 `name` 写 `ui`，所以打包后帧名是 `ui/portrait_hero`。
+
+**头像第二版样张（render/portrait_v2.py，待用户选定，还没进图集）**：试玩反馈“头像像玩偶”，改成工笔淡彩加水墨的胸像，三个方向
+cold（冷峻）、gentle（温和）、hat（带斗笠）。三维出底（隐式曲面的头颈和五官、嵌在眼眶里的眼球、次表面皮肤，灯光 / 月光 / 补光三个光组），
+二维后期（按部件重新染色、胭脂和冷灰的淡彩、毛笔眉、眼线和虹膜高光、唇色、鬓发飞白、交领、斗笠竹篾、帽檐下的影、宣纸纹）。
+
+```bash
+art/.venv/bin/python art/render/portrait_v2.py cold --draft   # 384² 试渲，看构图
+art/.venv/bin/python art/render/portrait_v2.py cold --dev     # 1024²、40 采样，调后期用
+art/.venv/bin/python art/render/portrait_v2.py                # 三个方向正式渲染（160 采样，每个约 3–4 分钟）+ 审图
+art/.venv/bin/python art/render/portrait_v2.py --post         # 只重做后期和审图（读 out/_tmp_portrait_v2/ 的缓存）
+```
+
+审图：`out/review@2x/portrait_samples.png`（三张 512² 母版 + 旧头像，下排是放进窗口的 2 倍、1 倍、半尺寸）、
+`portrait_samples_hud.png`（1080p 状态栏：胸像 92 放进 `assets/atlas/skin/hud_portrait` 头像章，加燃灯刻度和等级印）。
+样张在 `out/_tmp_portrait_v2/samples/`。选定以后再出 256² 的正式图、写 meta、换进 `ui` 图集。
 - 标题画是夜色水墨长卷，只用 Pillow + numpy，不用 Blender（`render/title_hero.py` 已不再使用）：
   - 远山三层，层间隔着雾，有阴阳，近山用披麻皴；
   - 月、松；

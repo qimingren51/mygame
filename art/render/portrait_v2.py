@@ -53,10 +53,10 @@ VARIANTS = {
     "cold": dict(name="冷峻", yaw=28.0, pitch=2.0, roll=-2.0, body=12.0, gaze=(10.0, 1.0), lid_up=0.86, lid_lo=1.08,
                  brow=dict(inner=-0.0012, outer=0.0008, arch=0.0006), mouth=-0.0006, hat=False,
                  cam_elev=2.5, lantern_px=(0.16, 0.86), lantern_dy=-0.16, moon=(0.85, 0.20, 0.50)),
-    "gentle": dict(name="温和", yaw=-26.0, pitch=7.0, roll=3.0, body=-10.0, gaze=(-6.0, 17.0), lid_up=0.92, lid_lo=1.0,
+    "gentle": dict(name="温和", yaw=-26.0, pitch=6.0, roll=3.0, body=-10.0, gaze=(-6.0, 18.0), lid_up=0.92, lid_lo=1.0,
                    lid_drop=0.0024, frame=(-0.022, 0.0, -0.018),
                    brow=dict(inner=0.0010, outer=-0.0004, arch=0.0012), mouth=0.0007, hat=False,
-                   cam_elev=0.0, lantern_px=(0.17, 0.84), lantern_dy=-0.20, moon=(0.80, 0.35, 0.55)),
+                   cam_elev=1.5, lantern_px=(0.17, 0.84), lantern_dy=-0.20, moon=(0.80, 0.35, 0.55)),
     "hat": dict(name="带斗笠", yaw=20.0, pitch=2.0, roll=-1.0, body=8.0, gaze=(6.0, 4.0), lid_up=0.84, lid_lo=1.0,
                 brow=dict(inner=-0.0008, outer=0.0006, arch=0.0006), mouth=-0.0003, hat=True,
                 cam_elev=7.0, frame=(0.0, 0.0, 0.010), lantern_px=(0.18, 0.88), lantern_dy=-0.16, moon=(0.70, 0.30, 0.75)),
@@ -163,7 +163,7 @@ EYE_R = 0.0134
 LID_T = 0.0026  # 眼睑厚
 EYE_IN = (-0.0128, -0.0012)
 EYE_OUT = (0.0140, 0.0028)
-LID_UP_H, LID_LO_H = 0.0068, 0.0040  # 上、下眼睑离两角连线的最大距离
+LID_UP_H, LID_LO_H = 0.0061, 0.0037  # 上、下眼睑离两角连线的最大距离
 
 
 def _bump(t, peak, power):
@@ -246,7 +246,9 @@ def sd_skin(p, var):
     # 眉弓（很淡）、颧、下巴、下巴底下连到颈
     for sx in (-1, 1):
         d = smin(d, sd_ell(q, (0.030 * sx, -0.083, 0.0225), (0.020, 0.010, 0.0075)), 0.010)
-        d = smin(d, sd_ell(q, (0.048 * sx, -0.063, -0.008), (0.016, 0.012, 0.011)), 0.020)
+        d = smin(d, sd_ell(q, (0.048 * sx, -0.063, -0.008), (0.017, 0.0135, 0.011)), 0.020)
+        d = smax(d, -sd_ell(q, (0.046 * sx, -0.074, -0.034), (0.013, 0.008, 0.011)), 0.018)  # 颧下微凹
+        d = smin(d, sd_cone(q, (0.052 * sx, -0.006, -0.066), (0.017 * sx, -0.073, -0.096), 0.004, 0.004), 0.016)  # 下颌线
     d = smin(d, sd_ell(q, (0.0, -0.080, -0.096), (0.013, 0.008, 0.009)), 0.010)
     d = smin(d, sd_cone(q, (0.0, -0.058, -0.103), (0.0, -0.024, -0.116), 0.009, 0.016), 0.020)
     # 眼窝：先挖，再把眼睑壳并回来，最后按杏仁形切开
@@ -538,9 +540,9 @@ def sidelock_spines(var):
     """两缕鬓发：从鬓角发际线出来，在耳前垂到下颌，S 形；再两缕短额发斜扫到眉梢。"""
     out = []
     for sx in (-1, 1):
-        out.append((np.array([(0.057 * sx, -0.054, 0.046), (0.066 * sx, -0.060, 0.016), (0.070 * sx, -0.058, -0.022),
-                              (0.067 * sx, -0.060, -0.060), (0.063 * sx, -0.066, -0.096), (0.059 * sx, -0.068, -0.122)]),
-                    0.0056, "side"))
+        out.append((np.array([(0.057 * sx, -0.054, 0.046), (0.067 * sx, -0.062, 0.018), (0.073 * sx, -0.066, -0.016),
+                              (0.071 * sx, -0.070, -0.050), (0.064 * sx, -0.077, -0.082), (0.062 * sx, -0.080, -0.104),
+                              (0.069 * sx, -0.078, -0.124)]), 0.0050, "side"))
     return out
 
 
@@ -768,7 +770,7 @@ def build_materials():
     bsdf = m.principled(Base_Color=lin("#B8352A"), Roughness=0.55, Sheen_Weight=0.5, Sheen_Roughness=0.4)
     M["ribbon"] = m.surface(bsdf.outputs[0])
     m = C.Mat("Silver")
-    bsdf = m.principled(Base_Color=(0.20, 0.21, 0.23), Metallic=0.5, Roughness=0.55)
+    bsdf = m.principled(Base_Color=(0.11, 0.11, 0.12), Metallic=0.3, Roughness=0.78)
     M["crown"] = m.surface(bsdf.outputs[0])
     m = C.Mat("Jade")
     bsdf = m.principled(Base_Color=lin("#5E8E72"), Roughness=0.12, Subsurface_Weight=0.5, Subsurface_Radius=(0.3, 0.8, 0.5),
@@ -869,10 +871,6 @@ def build_scene(var, draft: bool) -> dict:
     for i, (sp, r0) in enumerate(ponytail_spines(var)):
         V, F = tube_mesh(sp, r0, r0 * 0.18, flat=0.7, n=64)
         new_mesh(f"Pony{i}", V, F, M["hair"], INDEX["ponytail"], HM)
-    for i, (sp, r0, kind) in enumerate(sidelock_spines(var)):
-        V, F = tube_mesh(sp, r0, r0 * 0.15, flat=0.45, n=40, side=(0, 1.0, 0) if kind == "side" else (0, 0, 1.0))
-        ob = new_mesh(f"Lock{i}", V, F, M["lock"], INDEX["lock"], HM)
-        ob.visible_shadow = False
     for i, sp in enumerate(ribbon_spines(var)):
         V, F = strip_mesh(sp, 0.013, n=56, twist=2.2 if i == 0 else -1.8, up=(1.0, 0.0, 0.0))
         new_mesh(f"Ribbon{i}", V, F, M["ribbon"], INDEX["ribbon"], HM)
@@ -1258,7 +1256,7 @@ def brow_points(var, sx, n=24):
     b = var["brow"]
     t = np.linspace(0, 1, n)
     x = (0.0105 + 0.050 * t) * sx
-    z = 0.0150 + b["inner"] * (1 - t) + 0.0050 * t + b["outer"] * t + b["arch"] * np.sin(np.pi * t ** 0.8) \
+    z = 0.0138 + b["inner"] * (1 - t) + 0.0050 * t + b["outer"] * t + b["arch"] * np.sin(np.pi * t ** 0.8) \
         + 0.0030 * np.sin(np.pi * t)
     P = surface_front(lambda p: sd_skin(p, var), np.stack([x, z], -1))
     return P + np.array([0.0, -0.0006, 0.0])
@@ -1301,7 +1299,7 @@ def edge_map(idx, z, alpha, ignore=()):
         for p, q in ignore:
             diff &= ~(((a_i == p) & (b_i == q)) | ((a_i == q) & (b_i == p)))
         rel = np.abs(a_z - b_z) / np.minimum(a_z, b_z)
-        thr = np.where(a_i == INDEX["skin"], 0.022, 0.010)  # 脸上只留真正的剪影（鼻、下颌、耳），别的交给五官的笔
+        thr = np.where(a_i == INDEX["skin"], 0.030, 0.010)  # 脸上只留真正的剪影（鼻、下颌、耳），别的交给五官的笔
         dep = (rel > thr) & (a_i == b_i) & (a_i > 0)
         e = (diff | dep).astype(np.float64)
         E = np.maximum(E, e)
@@ -1450,10 +1448,6 @@ def post_variant(vid, mode=""):
         for S3 in tube_strands(sp, r0, r0 * 0.2, 6, seed=40 + i):
             xy, dep = pj.px(S3)
             lines_hair += visible_runs(xy, pj.visible(xy, dep, 0.012))
-    for i, (sp, r0, kind) in enumerate(sidelock_spines(var)):
-        for S3 in tube_strands(sp, r0, r0 * 0.2, 5, seed=60 + i, spread=0.8):
-            xy, dep = pj.px(S3)
-            lines_hair += visible_runs(xy, pj.visible(xy, dep, 0.008))
     strands = np.zeros((R, R))
     for run in lines_hair:
         cov, sl = Bz.stroke(run, np.array([0.35, 0.7, 0.55, 0.2]) * k * 1.3, dry=0.5, dry_start=0.4, jitter=0.2, soft=0.6)
@@ -1488,6 +1482,7 @@ def post_variant(vid, mode=""):
     P.over(INK_JIAO, mid_l * (0.6 + 0.4 * dryk) * 0.9)
     P.over(INK_JIAO, thk_l * (0.55 + 0.45 * dryk) * 0.95)
     # ---- 7. 五官
+    paint_skin_wash(P, pj, var, idx, k, rng)
     paint_eyes(P, pj, var, idx, k, lit_lan)
     paint_brows(P, pj, var, idx, k, rng)
     paint_nose_mouth(P, pj, var, idx, k)
@@ -1562,7 +1557,7 @@ def paint_surfaces(Dc, lab, G, k, alpha, disp, lin_s):
     # 皮肤
     m = lab["skin"].astype(np.float64)
     if m.sum() > 0:
-        val = lit(m, 2.4)
+        val = lit(m, 3.6)
         base = srgb(masked_blur(A, m, 1.4 * k))
         v = lum(val)
         col = base * (0.24 + 0.76 * val)
@@ -1586,8 +1581,15 @@ def paint_surfaces(Dc, lab, G, k, alpha, disp, lin_s):
     if m.sum() > 0:
         sm = masked_blur(disp, m, 2.0 * k)
         L = lum(sm)
-        col = hexc("#1B1A20") + (sm / np.maximum(L, 1e-4)[..., None]) * (0.30 * (1 - np.exp(-2.2 * np.clip(L - 0.05, 0, None))))[..., None]
+        col = hexc("#1B1A20") + (sm / np.maximum(L, 1e-4)[..., None]) * (0.15 * (1 - np.exp(-3.0 * np.clip(L - 0.05, 0, None))))[..., None]
         out = put(m, np.clip(col, 0, 1))
+    # 银冠：哑光旧银（灰，不反光）
+    m = lab["crown"].astype(np.float64)
+    if m.sum() > 0:
+        L = lum(masked_blur(disp, m, 1.0 * k))
+        col = ramp(np.clip(1 - np.exp(-2.5 * L), 0, 1), [(0.0, "#16161A"), (0.4, "#3A3B40"), (0.75, "#6E6F72"),
+                                                         (1.0, "#A6A49E")])
+        out = put(m, col, 0.6)
     # 斗笠：竹篾的赭色，按明暗从焦赭到暖黄
     m = lab["hat"].astype(np.float64)
     if m.sum() > 0:
@@ -1659,7 +1661,7 @@ def paint_eyes(P, pj, var, idx, k, lit):
             continue
         fk = 0.55 + 0.45 * min(1.0, f / 0.8)
         # 虹膜
-        ring, cen = iris_ring(var, sx, 0.54)
+        ring, cen = iris_ring(var, sx, 0.50)
         xy, dep = pj.px(ring)
         cxy, _ = pj.px(cen[None, :])
         im = poly_mask(R, R, xy) * eye_m
@@ -1718,38 +1720,71 @@ def paint_eyes(P, pj, var, idx, k, lit):
 
 
 def paint_brows(P, pj, var, idx, k, rng):
-    """眉：先一笔淡墨铺底（眉头宽、眉尾收尖），再用细笔顺着眉的走向一根根丝出来。"""
+    """眉：一笔毛笔眉。眉头起笔按下去（圆一点、略重），往外拖出去渐渐提笔，眉尾收尖、带飞白；
+    眉头再补几根往上斜的短丝。"""
     R = P.h
     Bz = Brush(R, R, seed=41)
     face_ok = np.clip(blur((idx == INDEX["skin"]).astype(np.float64), 1.0 * k) * 1.4, 0, 1)
     for sx in (-1, 1):
-        B3 = brow_points(var, sx)
+        B3 = brow_points(var, sx, n=32)
         xy, dep = pj.px(B3)
         vis = pj.visible(xy, dep, 0.006)
         nrm = np.array([0.0, -1.0, 0.25])
-        f = float(pj.facing(B3[12:13], nrm[None, :] / np.linalg.norm(nrm))[0])
-        fk = 0.5 + 0.5 * min(1.0, max(0.0, f) / 0.8)
-        hw = np.interp(np.linspace(0, 1, len(xy)), [0, 0.15, 0.55, 1.0], [2.4, 3.4, 2.2, 0.4]) * k * fk
-        for run in visible_runs(np.column_stack([xy, hw]), vis):
-            cov, sl = Bz.stroke(run[:, :2], run[:, 2], jitter=0.15, dry=0.55, dry_start=0.35)
+        f = float(pj.facing(B3[16:17], nrm[None, :] / np.linalg.norm(nrm))[0])
+        if f < 0.05:
+            continue
+        fk = 0.65 + 0.35 * min(1.0, f / 0.8)
+        # 起笔：从眉头下方一点斜着落笔
+        head = xy[0] + (xy[0] - xy[2]) * 0.6 + np.array([0.0, 1.2 * k])
+        path = np.vstack([head, xy])
+        pv = np.concatenate([[vis[0]], vis])
+        hw = np.interp(np.linspace(0, 1, len(path)), [0, 0.05, 0.18, 0.5, 0.8, 1.0],
+                       [2.2, 4.6, 4.4, 3.4, 1.9, 0.3]) * k * fk
+        for run in visible_runs(np.column_stack([path, hw]), pv):
+            cov, sl = Bz.stroke(run[:, :2], run[:, 2], jitter=0.12, dry=0.65, dry_start=0.45, soft=0.6)
             if cov is not None:
-                P.over(hexc("#2A2321"), cov * face_ok[sl] * 0.72, sl)
-            # 丝：沿眉走、略斜的短笔
-            pts = resample_line(run[:, :2], 1.0)
-            if len(pts) < 4:
-                continue
-            tan = np.gradient(pts, axis=0)
-            tan /= np.linalg.norm(tan, axis=1, keepdims=True) + 1e-9
-            nrm2 = np.stack([-tan[:, 1], tan[:, 0]], -1)
-            for j in range(0, len(pts) - 2, 2):
-                u = j / max(1, len(pts) - 1)
-                wv = np.interp(u, [0, 0.15, 0.55, 1.0], [2.4, 3.4, 2.2, 0.4]) * k * fk
-                o = pts[j] + nrm2[j] * rng.uniform(-0.8, 0.8) * wv
-                L_ = (3.0 + 4.0 * (1 - u)) * k
-                d = tan[j] * L_ - nrm2[j] * L_ * 0.35 * (1 if u < 0.2 else 0.15)
-                cov, sl = Bz.stroke(np.stack([o, o + d * 0.5, o + d]), np.array([0.45, 0.4, 0.1]) * k, soft=0.5)
-                if cov is not None:
-                    P.over(hexc("#0E0C0C"), cov * face_ok[sl] * 0.8, sl)
+                P.over(hexc("#1A1514"), cov * face_ok[sl] * 0.88, sl)
+        # 眉头的丝
+        tan = xy[3] - xy[0]
+        tan = tan / (np.linalg.norm(tan) + 1e-9)
+        up = np.array([tan[1], -tan[0]]) if tan[1] * 0 + 1 else tan
+        if up[1] > 0:
+            up = -up
+        for j in range(6):
+            o = xy[min(len(xy) - 1, j)] + up * rng.uniform(-1.5, 1.5) * k * fk
+            d = (tan * 0.8 + up * 0.6) * rng.uniform(3.5, 5.5) * k * fk
+            cov, sl = Bz.stroke(np.stack([o, o + d * 0.5, o + d]), np.array([0.5, 0.45, 0.1]) * k, soft=0.5)
+            if cov is not None:
+                P.over(hexc("#120E0D"), cov * face_ok[sl] * 0.7, sl)
+
+
+def paint_skin_wash(P, pj, var, idx, k, rng):
+    """皮肤上的淡彩：两颊、眼尾、鼻头、下巴、耳朵罩一层胭脂（暖），鬓角、下颌底下一层花青灰（冷）。
+    每一团都是边缘不规则的水晕，只染在皮肤上。"""
+    R = P.h
+    skin = np.clip(blur((idx == INDEX["skin"]).astype(np.float64), 1.2 * k) * 1.3, 0, 1) * (idx == INDEX["skin"])
+    yy, xx = np.mgrid[0:R, 0:R].astype(np.float64) + 0.5
+    nz = V2D().noise(rng, (R, R), 9.0 * k)
+    blobs = []
+    for sx in (-1, 1):
+        blobs += [((0.044 * sx, -0.078, -0.026), 0.028, "#E08A78", 0.13),
+                  ((0.044 * sx, -0.080, 0.006), 0.011, "#C87060", 0.10),
+                  ((0.073 * sx, 0.006, -0.006), 0.022, "#D07060", 0.20),
+                  ((0.064 * sx, -0.048, 0.030), 0.024, "#8A96B8", 0.07),
+                  ((0.040 * sx, -0.040, -0.090), 0.028, "#8490B0", 0.06)]
+    blobs += [((0.0, -0.104, -0.031), 0.009, "#D88070", 0.10), ((0.0, -0.084, -0.093), 0.013, "#D88070", 0.07)]
+    for c3, r3, col, a in blobs:
+        c3 = warp_pts(np.asarray(c3, np.float64)[None, :])
+        xy, dep = pj.px(c3)
+        e, _ = pj.px(c3 + np.array([[r3, 0, 0]]))
+        rp = max(2.0, float(np.hypot(*(e[0] - xy[0]))))
+        d = np.hypot(xx - xy[0, 0], yy - xy[0, 1]) / rp
+        w = ss(1.0, 0.25, d * (1 + 0.18 * nz)) * a
+        tint = hexc(col) / max(1e-3, float(lum(hexc(col)[None, None, :])[0, 0])) * 0.92
+        P.c = P.c * (1 - (w * skin)[..., None]) + np.clip(P.c * tint, 0, 1) * (w * skin)[..., None]
+    # 绢纹：很细的横竖纤维，让皮肤不是一块光滑的塑料
+    fib = V2D().noise(rng, (R, R), (4.0 * k, 0.5 * k)) * 0.6 + V2D().noise(rng, (R, R), (0.5 * k, 4.0 * k)) * 0.4
+    P.c = P.c * (1 + 0.010 * fib * skin)[..., None]
 
 
 def paint_nose_mouth(P, pj, var, idx, k):
@@ -1765,7 +1800,8 @@ def paint_nose_mouth(P, pj, var, idx, k):
         xy, dep = pj.px(ala)
         nrm = np.array([0.7 * sx, -0.7, 0.0])
         f = float(pj.facing(ala[1:2], nrm[None, :])[0])
-        if f > 0.35:
+        near = (sx < 0) == (var["yaw"] > 0)  # 脸转向右，主角右边（-X）朝镜头
+        if f > 0.35 and near:
             for run in visible_runs(xy, pj.visible(xy, dep, 0.005), 2):
                 cov, sl = Bz.stroke(run, np.array([0.4, 1.1, 1.0, 0.3]) * k, jitter=0.05)
                 if cov is not None:
@@ -1777,22 +1813,38 @@ def paint_nose_mouth(P, pj, var, idx, k):
             d = np.hypot((xx - xy[0, 0]) / 1.0, (yy - xy[0, 1]) / 0.6) / (2.2 * k)
             P.over(hexc("#4A2622"), ss(1.0, 0.4, d) * face_ok * 0.65)
     mc = var.get("mouth", 0.0)
+    # 上下唇的淡朱：上唇有唇峰，下唇饱一点
+    xs = np.linspace(-0.0175, 0.0175, 29)
+    u = xs / 0.0175
+    z_line = -0.0584 + 0.4 * mc + (mc * 0.6) * u ** 2
+    z_up = z_line + 0.0052 * (1 - u ** 2) ** 0.7 - 0.0009 * np.exp(-(xs / 0.0035) ** 2)
+    z_lo = z_line - 0.0060 * (1 - (xs / 0.0155) ** 2).clip(0) ** 0.8
+    for zz, col, a_ in ((z_up, "#A0524A", 0.28), (z_lo, "#B0645A", 0.20)):
+        A3 = surface_front(fn, np.stack([xs, warp_z(z_line)], -1))
+        B3 = surface_front(fn, np.stack([xs, warp_z(zz)], -1))
+        axy, _ = pj.px(A3)
+        bxy, bdep = pj.px(B3)
+        if pj.visible(bxy, bdep, 0.006).mean() < 0.3:
+            continue
+        m = poly_mask(R, R, np.vstack([axy, bxy[::-1]]))
+        m = blur(m, 0.8 * k) * face_ok
+        P.c = P.c * (1 - (m * a_)[..., None]) + (P.c * hexc(col) * 1.2) * (m * a_)[..., None]
     xs = np.linspace(-0.0205, 0.0205, 25)
     zs = warp_z(-0.0584 + 0.4 * mc + (mc * 0.6) * (xs / 0.0205) ** 2)
     M3 = surface_front(fn, np.stack([xs, zs], -1)) + np.array([0.0, 0.0008, 0.0])
     xy, dep = pj.px(M3)
-    hw = np.interp(np.linspace(0, 1, len(xy)), [0, 0.15, 0.5, 0.85, 1], [0.4, 1.2, 1.9, 1.2, 0.4]) * k
+    hw = np.interp(np.linspace(0, 1, len(xy)), [0, 0.12, 0.5, 0.88, 1], [0.5, 1.5, 2.3, 1.5, 0.5]) * k
     for run in visible_runs(np.column_stack([xy, hw]), pj.visible(xy, dep, 0.006)):
         cov, sl = Bz.stroke(run[:, :2], run[:, 2], jitter=0.06)
         if cov is not None:
-            P.over(lip_ink, cov * face_ok[sl] * 0.85, sl)
+            P.over(hexc("#43181A"), cov * face_ok[sl] * 0.92, sl)
     xs = np.linspace(-0.010, 0.010, 12)
     L3 = surface_front(fn, np.stack([xs, warp_z(np.full_like(xs, -0.0700))], -1)) + np.array([0.0, 0.0008, 0.0])
     xy, dep = pj.px(L3)
     for run in visible_runs(xy, pj.visible(xy, dep, 0.006)):
-        cov, sl = Bz.stroke(run, np.array([0.3, 0.9, 0.3]) * k, jitter=0.1)
+        cov, sl = Bz.stroke(run, np.array([0.4, 1.1, 0.4]) * k, jitter=0.1)
         if cov is not None:
-            P.over(INK_SKIN, cov * face_ok[sl] * 0.35, sl)
+            P.over(INK_SKIN, cov * face_ok[sl] * 0.45, sl)
 
 
 def paint_collar(P, pj, var, idx, k):
@@ -1848,19 +1900,31 @@ def paint_hat(P, pj, var, idx, k):
 
 
 def paint_locks(P, pj, var, k):
-    """鬓发、额发、马尾：沿三维的管子画墨笔，几笔错开，末梢飞白散开。"""
+    """鬓发：每缕四五笔，从鬓角发际线起笔，顺着弧度垂到下颌，末梢提笔散开、飞白；被脸挡住的地方不画。
+    马尾：沿三维的管子画几笔浓墨，尾端飞白。"""
     R = P.h
     Bz = Brush(R, R, seed=61)
     ink = hexc("#100F14")
+    rng = np.random.default_rng(62)
     for i, (sp, r0, kind) in enumerate(sidelock_spines(var)):
-        for j, S3 in enumerate(tube_strands(sp, r0, r0 * 0.25, 4, seed=80 + i, spread=0.6)):
-            xy, dep = pj.px(S3)
-            for run in visible_runs(xy, pj.visible(xy, dep, 0.008)):
-                w0 = (1.6 if kind == "side" else 1.0) * k
-                cov, sl = Bz.stroke(run, np.array([w0 * 0.8, w0, w0 * 0.7, 0.2 * k]), dry=0.6, dry_start=0.45,
-                                    jitter=0.2)
+        C = smooth_curve(sp, 48)
+        T = np.gradient(C, axis=0)
+        T /= np.linalg.norm(T, axis=1, keepdims=True) + 1e-12
+        side = np.cross(T, [0.0, -1.0, 0.0])
+        side /= np.linalg.norm(side, axis=1, keepdims=True) + 1e-12
+        for j in range(4):
+            off = (j - 1.5) / 1.5 * r0 * 0.42
+            t = np.linspace(0, 1, len(C))[:, None]
+            fan = off * (1 + 1.8 * t ** 2) + rng.normal(0, 0.0012) * t ** 2
+            Q = C + side * fan + np.array([0.0, -0.002, 0.0])
+            Q = Q[: int(len(Q) * rng.uniform(0.72, 1.0))]
+            xy, dep = pj.px(Q)
+            for run in visible_runs(xy, pj.visible(xy, dep, 0.002)):
+                w0 = rng.uniform(2.2, 3.0) * k
+                cov, sl = Bz.stroke(run, np.array([0.5, 1.0, 1.0, 0.75, 0.2]) * w0, dry=0.6, dry_start=0.5,
+                                    jitter=0.25, soft=0.6)
                 if cov is not None:
-                    P.over(ink, cov * 0.9, sl)
+                    P.over(ink, cov * 0.92, sl)
     for i, (sp, r0) in enumerate(ponytail_spines(var)):
         for j, S3 in enumerate(tube_strands(sp, r0, r0 * 0.3, 3, seed=90 + i, spread=0.9)):
             xy, dep = pj.px(S3)
@@ -1868,7 +1932,6 @@ def paint_locks(P, pj, var, k):
                 cov, sl = Bz.stroke(run, np.array([2.0, 2.6, 1.8, 0.3]) * k, dry=0.7, dry_start=0.35, jitter=0.25)
                 if cov is not None:
                     P.over(ink, cov * 0.85, sl)
-
 
 
 # ====================================================================== 审图
