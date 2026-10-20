@@ -212,8 +212,8 @@ fn sync(
         InspectPart,
         InspectCamera,
         Camera3d::default(),
-        // 在游戏画面和界面之前画好；底色是宣纸，辉光才晕得开
-        Camera { order: -2, clear_color: ClearColorConfig::Custom(PAPER), ..default() },
+        // 在游戏画面和界面之前画好；底色是宣纸（先反算色调映射，画出来才是宣纸色，不发灰）
+        Camera { order: -2, clear_color: ClearColorConfig::Custom(before_aces(PAPER)), ..default() },
         RenderTarget::from(image),
         Hdr,
         Bloom { intensity: 0.22, ..Bloom::NATURAL },
@@ -252,6 +252,38 @@ fn sync(
 
 /// 宣纸底色
 const PAPER: Color = Color::srgb(0.86, 0.82, 0.74);
+
+/// Bevy 的 AcesFitted 用的两个矩阵（tonemapping.wesl 里是行向量乘，这里转置成列向量乘）
+fn aces_matrices() -> (Mat3, Mat3) {
+    let rgb_to_rrt = Mat3::from_cols(
+        Vec3::new(0.59719, 0.35458, 0.04823),
+        Vec3::new(0.07600, 0.90834, 0.01566),
+        Vec3::new(0.02840, 0.13383, 0.83777),
+    )
+    .transpose();
+    let odt_to_rgb = Mat3::from_cols(
+        Vec3::new(1.60475, -0.53108, -0.07367),
+        Vec3::new(-0.10208, 1.10813, -0.00605),
+        Vec3::new(-0.00327, -0.07276, 1.07602),
+    )
+    .transpose();
+    (rgb_to_rrt, odt_to_rgb)
+}
+
+/// 色调映射之前该是什么颜色，映射出来才正好是 `c`（AcesFitted 反过来算）。
+fn before_aces(c: Color) -> Color {
+    let (rgb_to_rrt, odt_to_rgb) = aces_matrices();
+    let y = odt_to_rgb.inverse() * Vec3::from_array(c.to_linear().to_f32_array_no_alpha());
+    // RRTAndODTFit：y = (x² + 0.0245786x − 0.000090537) / (0.983729x² + 0.432951x + 0.238081)，解 x 取正根
+    let fit = |y: f32| {
+        let a = 1.0 - 0.983729 * y;
+        let b = 0.0245786 - 0.432951 * y;
+        let k = -(0.000090537 + 0.238081 * y);
+        (-b + (b * b - 4.0 * a * k).sqrt()) / (2.0 * a)
+    };
+    let x = rgb_to_rrt.inverse() * Vec3::new(fit(y.x), fit(y.y), fit(y.z));
+    Color::linear_rgb(x.x, x.y, x.z)
+}
 
 /// 模型生成好了：整棵挪到检视层，描边换成纯黑，带 idle 动画的播起来。
 #[allow(clippy::too_many_arguments)]
@@ -365,6 +397,19 @@ mod tests {
         assert_eq!(v.zoom, ZOOM.1);
         v.zoom(-100.0);
         assert_eq!(v.zoom, ZOOM.0);
+    }
+
+    /// 底色反算以后再走一遍 AcesFitted，回到宣纸色
+    #[test]
+    fn backdrop_comes_out_of_tonemapping_as_paper() {
+        let (rgb_to_rrt, odt_to_rgb) = aces_matrices();
+        let fit = |v: f32| (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.432951) + 0.238081);
+        let x = Vec3::from_array(before_aces(PAPER).to_linear().to_f32_array_no_alpha());
+        let m = rgb_to_rrt * x;
+        let y = (odt_to_rgb * Vec3::new(fit(m.x), fit(m.y), fit(m.z))).clamp(Vec3::ZERO, Vec3::ONE);
+        let want = Vec3::from_array(PAPER.to_linear().to_f32_array_no_alpha());
+        assert!((y - want).abs().max_element() < 1e-3, "{y} vs {want}");
+        assert!(x.max_element() > want.max_element(), "映射前要更亮");
     }
 
     #[test]

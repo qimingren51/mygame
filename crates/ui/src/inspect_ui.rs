@@ -59,7 +59,8 @@ struct View;
 pub(crate) fn register(app: &mut App) {
     app.init_resource::<InspectCard>()
         .add_systems(Startup, scan_models)
-        .add_systems(Update, (input, redraw, show_view).chain());
+        // 排在标题界面的输入之后：合上检视的那一下返回键，不再让图鉴也跟着合上
+        .add_systems(Update, (input, redraw, show_view).chain().after(crate::title::input));
 }
 
 /// 全部可检视物件的 id：法器本体、进化、异化，合璧，灯坠，灯笼（DESIGN 第 15 节“检视模型”）。
@@ -85,7 +86,7 @@ fn scan_models(mut commands: Commands, root: Res<AssetRoot>, content: Res<lanter
 }
 
 /// 键盘、手柄、滚轮、双指：转和缩放；返回键合上。拖动在画面上的观察者里处理。
-fn input(
+pub(crate) fn input(
     time: Res<Time<Real>>,
     actions: Res<Actions>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -177,7 +178,8 @@ fn spawn_panel(commands: &mut Commands, card: &InspectCard, fonts: &Fonts, skin:
                 row_gap: px(14),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.94)),
+            // 几乎不透：界面混色在线性空间，0.9 上下时后面的图鉴还看得见，和右边的字叠在一起
+            BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.985)),
         ))
         .with_children(|root| {
             root.spawn(Node { column_gap: px(36), align_items: AlignItems::Center, ..default() })

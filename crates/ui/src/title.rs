@@ -1015,6 +1015,26 @@ mod input_tests {
         assert_eq!(app.world().resource::<TitleUi>().selected, keyboard - 1);
     }
 
+    /// 图鉴里开着检视按返回键：只合上检视，图鉴还开着（检视的输入排在这之后）
+    #[test]
+    fn back_closes_the_inspect_viewer_but_not_the_codex() {
+        use lantern_view::inspect::Inspect;
+        let mut app = app();
+        app.init_resource::<Inspect>()
+            .init_resource::<Time<Real>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy::input::touch::Touches>()
+            .add_systems(Update, crate::inspect_ui::input.after(input));
+        *app.world_mut().resource_mut::<TitleMode>() = TitleMode::Codex;
+        app.world_mut().resource_mut::<Inspect>().open("sword");
+        *app.world_mut().resource_mut::<Actions>() = Actions { back: true, ..default() };
+        app.update();
+        assert!(!app.world().resource::<Inspect>().is_open());
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Codex);
+        app.update();
+        assert_eq!(*app.world().resource::<TitleMode>(), TitleMode::Hub, "再按一下才回灯驿");
+    }
+
     #[test]
     fn hub_grid_moves_into_shop_and_back() {
         let mut app = app();
