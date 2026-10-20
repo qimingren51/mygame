@@ -698,11 +698,13 @@ def make_kun_fin() -> tuple[list[Image.Image], list[Image.Image]]:
     lead_thick = smoothstep(4.5, 1.0, ld) * m  # 前缘厚
     water_fade = smoothstep(FIN_WATER + 2, FIN_WATER - 22, Y)
     a = np.clip((0.6 * m + 0.38 * rays + 0.3 * lead_thick) * water_fade, 0, 0.97)
-    body = to_paint(a[..., None] * V.col("#121820"), a, 13952, ss=ss)
+    body = to_paint(a[..., None] * V.col("#2E3D4F"), a, 13952, ss=ss)  # 比鲲影亮一档，压在影子上也看得出
     # 发光层
     acc = Acc(X, Y)
     inner, outer = edge_band(m, 1.5 * ss)
-    acc.add((slice(None), slice(None)), (0.5 * np.clip(inner * 1.6, 0, 1) + 0.3 * np.clip(outer * 1.4, 0, 1)) * water_fade, 0.8)
+    acc.add((slice(None), slice(None)), (0.7 * np.clip(inner * 1.6, 0, 1) + 0.4 * np.clip(outer * 1.4, 0, 1)) * water_fade, 0.85)
+    wl = smoothstep(5.0, 0.0, np.abs(Y - FIN_WATER + 3)) * np.clip(V.fft_blur(m, 3 * ss) * 2.2, 0, 1)  # 鳍根贴着水面一条浪花白边
+    acc.add((slice(None), slice(None)), 0.85 * wl, 1.0)
     acc.add((slice(None), slice(None)), 0.75 * smoothstep(2.6, 0.4, ld) * smoothstep(0.1, 0.4, lt) * water_fade, 1.0)  # 前缘湿亮
     acc.add((slice(None), slice(None)), 0.18 * rays * water_fade, 0.7)
     # 根上一圈压扁的白浪 + 往前翻的浪花
@@ -1252,10 +1254,10 @@ def fox_sdf(X, Y):
     chest = sd_ellipse(X, Y, (346, 292), 64, 88, 0.1)
     neck = sd_round_cone(X, Y, (336, 252), (364, 170), 54, 40)
     head = sd_ellipse(X, Y, (376, 138), 42, 35, -0.18)
-    snout = sd_round_cone(X, Y, (404, 138), (444, 150), 21, 5.5)
-    jaw = sd_round_cone(X, Y, (398, 154), (434, 158), 14, 4.5)
-    ear1 = sd_round_cone(X, Y, (378, 120), (378, 30), 25, 2.0)
-    ear2 = sd_round_cone(X, Y, (348, 122), (332, 38), 23, 2.0)
+    snout = sd_round_cone(X, Y, (402, 138), (432, 148), 22, 7.0)  # 口吻短、吻尖圆一点
+    jaw = sd_round_cone(X, Y, (396, 154), (424, 156), 15, 5.5)
+    ear1 = sd_round_cone(X, Y, (378, 122), (378, 46), 27, 8.0)  # 耳朵大、耳尖圆
+    ear2 = sd_round_cone(X, Y, (348, 124), (334, 54), 25, 7.5)
     leg1 = sd_round_cone(X, Y, (346, 372), (350, 458), 19, 12)
     leg2 = sd_round_cone(X, Y, (368, 372), (376, 458), 17, 12)
     paw1 = sd_ellipse(X, Y, (360, 464), 21, 8)
@@ -1400,7 +1402,7 @@ SPECS: dict = {
                      "note": "大剑影：剑柱最外一层，剑尖朝 +X，锚点在剑格中心；代码拿 3–5 张叠成一柄顶天的大剑（大小差一两成、角度差两三度、明暗错开），"
                              "剑格在主角胸口、剑尖顶进云缝；里面再跑小剑影。白色可染（建议金 #FFE7A8），叠加"}),
     "sword_cloud": (make_sword_cloud, (CLOUD_W, CLOUD_H), (0.5, 0.5), "normal", False, "jiao",
-                    {"emit": "sword_cloud_emit", "screen_space": "top",
+                    {"emit": "sword_cloud_emit", "screen_space": "top", "fps": 12,
                      "note": "被劈开的云：贴在镜头上方（画布中心放在画面上沿往下约 120 像素，下沿的云头垂进画面），按画面宽度放大约 2 倍；"
                              "0 整着、1 金线劈开、2–3 推开漏金光、4–5 退开散掉（12 帧/秒，0.5 秒）。焦墨、普通混合；它在天上，建议画在暗层之上（不受地上灯光照亮），"
                              "剑河之上；发光层见 sword_cloud_emit"}),
@@ -1435,8 +1437,8 @@ SPECS: dict = {
                   "note": "九尾登场的月亮：满月，淡墨晕的月海、临边昏暗、一圈柔光和淡月晕；锚点居中，贴在镜头上方，代码从 0.6 倍放大到约 1.6 倍压到画面上方。"
                           "白色可染（建议冷白 #DCE6FF，血月染红），叠加"}),
     "fox_body": (make_fox_body, (FOX_W, FOX_W), (0.5, 471 / FOX_W), "normal", False, "full",
-                 {"emit": "fox_body_emit", "sockets": {"tail_root": [FOX_TAIL_ROOT[0], FOX_TAIL_ROOT[1]], "eye": list(FOX_EYE)},
-                  "note": "九尾的身子剪影（没有尾巴）：朝 +X 坐着、头抬起来望月；锚点在地面线正中；尾根挂点 tail_root，九条 fox_tail 从这里旋开成扇（扇在身后）。"
+                 {"emit": "fox_body_emit", "tail_root_x": FOX_TAIL_ROOT[0], "tail_root_y": FOX_TAIL_ROOT[1],
+                  "note": "九尾的身子剪影（没有尾巴）：朝 +X 坐着、头抬起来望月；锚点在地面线正中；尾根在画布像素 (tail_root_x, tail_root_y)，九条 fox_tail 从这里旋开成扇（扇在身后）。"
                           "焦墨（带一点青黑）+ 一道青边，普通混合；在月亮前面时要画在月亮之上（同月亮一样在暗层之上）；发光层见 fox_body_emit"}),
     "fox_tail": (make_fox_tail, (TAIL_W, TAIL_H), (TAIL_ROOT[0] / TAIL_W, TAIL_ROOT[1] / TAIL_H), "normal", False, "full",
                  {"emit": "fox_tail_emit", "points": "-y",

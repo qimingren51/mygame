@@ -611,11 +611,11 @@ def lotus_at(img, cam, fi, h, scale, gain=1.0, dark=0.0):
     x, y = cam.s(Z.HERO[0], Z.HERO[1], h)
     if dark > 0:
         fx, fy = flame_pos(cam, fi, h, scale)
-        r = 150 * cam.sprite * scale
-        x0, x1 = int(max(fx - 1.6 * r, 0)), int(min(fx + 1.6 * r, SW))
-        y0, y1 = int(max(fy - 1.6 * r, 0)), int(min(fy + 1.6 * r, SH))
+        r = 240 * cam.sprite * scale  # 比头光大一圈、边很软，头光的圆线落在渐变里，不压在暗晕边上
+        x0, x1 = int(max(fx - 2.2 * r, 0)), int(min(fx + 2.2 * r, SW))
+        y0, y1 = int(max(fy - 2.2 * r, 0)), int(min(fy + 2.2 * r, SH))
         X, Y = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
-        k = (dark * np.exp(-((np.hypot(X - fx, (Y - fy) * 1.15) / r) ** 2)))[..., None].astype(np.float32)
+        k = (dark * np.exp(-((np.hypot(X - fx, (Y - fy) * 1.1) / r) ** 1.3)))[..., None].astype(np.float32)
         reg = img[y0:y1, x0:x1]
         reg[:] = reg * (1 - k) + lin("#2A2118").astype(np.float32) * k * 0.6
     pm = Z.pm_of(body).copy()
@@ -709,7 +709,7 @@ def ult_panel(k: int) -> tuple[Z.Shot, str]:
             rays_masked(img, cam, (fx, fy), 2.6, -0.21, 0.16, 150, floor=0.12)
             halo = parts("ult_halo")[0]
             Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.32, mode="add", gain=Z.EMIT * 0.45)
-            lotus_at(img, cam, 7, H_LAMP, SC, gain=0.7, dark=0.55)
+            lotus_at(img, cam, 7, H_LAMP, SC, gain=0.7, dark=0.5)
             ash_flakes(img, cam, actors, 1.0, 70, mode="add")
 
         shot.light.append(light)
@@ -837,7 +837,7 @@ def fox_panel(k: int) -> tuple[Z.Shot, str]:
         shot.sky.append(sky)
         return shot, "1.75 秒 · 九尾全开成扇，月前一道剪影：焦墨身子、青边，尾尖九点青火；《南山经》“有兽如狐而九尾”"
     # k == 3：剪影落下，化成真身，一圈狐火环亮起
-    cam = Z.Cam(z=0.9, cy=4.0, shake=(-6.0, 5.0))
+    cam = Z.Cam(z=0.9, cy=-56.0, shake=(-6.0, 5.0))  # 镜头往上让一点：真身的尾巴不贴画面上沿
     bx, by = 60.0, -88.0
     actors = Z.default_actors()
     actors = [a_ for a_ in actors if math.hypot(a_.x - bx, a_.y - by) > 110]

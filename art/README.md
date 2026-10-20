@@ -156,6 +156,7 @@ art/.venv/bin/python art/post/pack_atlas.py --name lanterns --out assets/atlas $
 art/.venv/bin/python art/post/pack_atlas.py --name boss --out assets/atlas $A/boss
 art/.venv/bin/python art/post/pack_atlas.py --name vfx --out assets/atlas $A/vfx $A/weapons $A/vfx_leaves $A/vfx_frames $A/weapons_ea
 art/.venv/bin/python art/post/pack_atlas.py --name ground --out assets/atlas $A/ground
+art/.venv/bin/python art/post/pack_atlas.py --name myth --out assets/atlas $A/myth
 art/.venv/bin/python art/post/pack_atlas.py --name ui --no-trim --out assets/atlas $A/ui $A/portrait $A/lamp_icons $A/ui_wash
 mkdir -p assets/atlas/screens && cp art/out/screens/{title,logo,scroll_qingqiu,scroll_qingqiu_dawn,scroll_roller}.png art/out/screens/scroll_roller.json assets/atlas/screens/
 art/.venv/bin/python art/post/check_atlas.py         # 按游戏读取器的规则检查 assets/atlas
@@ -375,6 +376,28 @@ art/.venv/bin/python art/post/test_weapon_textures_ea.py   # 自检 25 项（清
 - 循环的组在附加 meta 里写 `fps`、`loop: true`；接在别的组后面播的写 `follows`；某组的发光层写 `layer_of`。
   只画某几件：`weapon_textures_ea.py wave vine`。
 - 审图的 1080p 合成可以把帧拉伸、转向（`vfx_frames_review.ingame` 的摆法第 6 项：`size_units`、`to` + `h_units`、`face`）。
+
+## 神话特效（post/myth_parts.py、post/myth_board.py）
+
+```bash
+art/.venv/bin/python art/post/myth_parts.py                  # 全部元件 → out/assets@2x/myth/（+ meta.json，约 12 MB），约 10 分钟
+art/.venv/bin/python art/post/myth_parts.py sword kun         # 只画这几个演出（sword、kun、ult、fox），或者给组名：sword_cloud kun_fin
+art/.venv/bin/python art/post/test_myth_parts.py [--regen]    # 自检：清单、尺寸、锚点、发光层命名和配对、四边透明、叠加最亮 0.8、可染为白、图集一致
+art/.venv/bin/python art/post/myth_board.py sword kun ult fox # 分镜 → out/review@2x/myth_<演出>_board.png（2×2，每格 960×540）、myth_<演出>_hero.png（1080p 原大）
+art/.venv/bin/python art/post/myth_board.py sword:2           # 只出一格试构图 → out/myth_try/sword_2.png
+art/.venv/bin/python art/post/pack_atlas.py --name myth --out assets/atlas art/out/assets@2x/myth   # 打成 myth_0、myth_1 两页
+```
+
+docs/FEEL.md 第 13 节的四个样张（万剑归宗、北冥潮、燃灯、九尾登场），只出 2 倍，Pillow + numpy，不用 Blender，固定种子。
+帧名、尺寸、锚点、混合见 `docs/DESIGN.md` 第 15 节“神话特效”。
+
+- 帧名 `myth/<演出>_<元件>_<帧号>`；发光层帧号在前、`_emit` 在后（`sword_cloud_0_emit`、`fox_body_emit`），meta 写 `layer_of`。
+  `myth_parts.build` 重画一组时先删掉这一组的旧文件和旧条目。
+- `myth_scene.py`：分镜的 1080p 合成，和 `vfx_frames_review.ingame` 同一套摆法（月夜底色、宣纸、灯笼光照池、普通混合在暗层之下、叠加 × 1.5），
+  另有镜头缩放和震屏、旋转贴图、拖尾笔画、光照图钩子、近似 Bevy 的辉光（阈值 1.0、软膝 0.25）和暗角。
+- 合成在线性光里：墨要 alpha 0.9 以上才压得住，叠加层很淡的尾巴在暗底上也看得见；天上的东西（云、月、月前剪影、头顶的莲灯）画在暗层之上。
+- 剪影（九尾身子、尾巴）用距离场捏：几块圆滑形体 `smin` 合起来，再加长短、间距随机的尖毛；比折线轮廓圆润。
+- 打包前后逐字节比对 `assets/atlas` 里原有的文件（只该多出 `myth_*` 和 `index.json` 的一行）；`check_atlas.py` 要通过。
 
 ## 灯驿长卷（post/hub_scroll.py）
 

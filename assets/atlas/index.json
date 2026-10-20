@@ -5,6 +5,7 @@
   "cards",
   "ground",
   "lanterns",
+  "myth",
   "ui",
   "vfx"
  ],
@@ -33,6 +34,10 @@
   ],
   "cards": [
    "cards.json"
+  ],
+  "myth": [
+   "myth_0.json",
+   "myth_1.json"
   ]
  }
 }

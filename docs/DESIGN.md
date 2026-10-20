@@ -546,6 +546,7 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `lanterns` | 灯笼叠层 `lantern_<灯>/<动画>_<方向>_<帧号>` 及 `_emit`，目前有 `red`、`mirror`、`frost` 三盏 |
   | `boss` | 夜主九尾 `boss/move_E_00..07`、`sweep_E_00..05`、`summon_E_00..03`（640² 帧，含 `_flash`、`_emit`）。单独一张，改模型时不影响 actors |
   | `vfx` | `vfx/…` 光源渐变、辉光、妖眼、影子、火星、魂火、灯火火焰、墨点、灯芯、地上的铜钱 `coin` + `coin_emit`；`weapons/…` 法器、法术特效、拾取物、夜主弹幕 `foxfire_0..2`、扇形预警 `sector` + `sector_fill`、冲锋预警 `charge_line` + `charge_line_head`、竹魅的竹刺 `bamboo_spike` + `bamboo_spike_trail`、五件新法器的持续部分 `sky_lantern`（飘着的孔明灯，普通混合）、`wave_front`（直线浪的浪头，横着画、叠加可染）、`vine`（藤，锚点在右端、沿 X 拉伸、叠加可染）、`tower`（立着的塔，普通混合）——没有时分别借 `lantern_red/idle_S_00`、`fx/wave`、`weapons/sword_trail`、`weapons/seal` 占位；青丘迷雾 `vfx/mist_0..1`（平铺用，见下面“迷雾”）；竹丛打碎时的竹叶粒子 `vfx/bamboo_leaf_0..3`（32×12，白色可染、普通混合，锚点居中，叶尖朝 +X；第 3 片是撕破的半片）；逐帧特效 `vfx/hit_*`、`crit_*`、`slash_*`、`kill_ink_*`、`shockwave_*`、`fire_burst*`、`ice_shatter_*`、`feather_*`、`evolve*` 和十种五行反应 `react_*`（见下面“逐帧特效”）；抢先体验新法器的 `weapons/coin_*`、`wave_*`、`vine*`、`sky_lantern*`、`lantern_mark`、`fire_sea`、`tower*`（见下面“抢先体验的新法器”） |
+  | `myth` | 神话特效（docs/FEEL.md 第 13 节）：`myth/<演出>_<元件>_<帧号>` 及发光层 `_emit`，四个演出（万剑归宗、北冥潮、燃灯、九尾登场）的元件，见下面“神话特效”。演出少见，单独两页 `myth_0`、`myth_1` |
   | `ground` | 地面装饰：`wash_0..2` 晕染、`grass_0..3`、`reed_0..2` 芦苇、`bamboo_0..1`、`leaves_0..1`、`pebbles_0..1`、`puddle_0`，奇遇用的 `spring` 灵泉、`rift` 裂隙 + `rift_glow`（叠加辉光）；五行反应留下的区域 `zone_lava` + `zone_lava_glow`、`zone_mud`、`zone_herb` + `zone_herb_glow`；青丘地面 `qq_bamboo_leaves_0..2` 落竹叶、`qq_shoots_0..1` 竹笋、`qq_moss_0..1` 苔点、`qq_wash_0..1` 青绿晕染、`qq_fox_tracks` 狐爪印（meta 里有 `region: "qingqiu"`） |
   | `ui` | 界面图标、朱砂印章、主角头像（帧名见下面“界面图集”）。屏幕空间用，**不裁边**；`pxPerUnit` 照写 4，对它没有意义 |
   | `paper.png` | 宣纸，单独的平铺贴图 |
@@ -683,6 +684,27 @@ Bevy 0.20 的 `AssetPlugin.file_path` 必须是 `String`；资源目录无法无
   | `weapons/tower_vortex_0..3` | 4 | 768×480 | 中心 | 叠加 | 白，可染，建议土色 #C9925A | 吸妖的范围：地上淡淡的旋涡（峰值 alpha 0.5），六道螺旋往里转，外沿断续的细线，已压扁；`radius_px: 360`，按吸的范围（2.2R）缩放（1080p 下 140 单位一比一；玲珑塔的 500 是放大）；12 帧/秒循环。占位代码转一个压扁的圆环会把椭圆也转歪，换成这组帧就不用转了 |
   - 命中复用逐帧特效：沧浪的水花用 `vfx/hit_water`，青藤的小刺用 `vfx/hit_wood`；孔明灯爆燃用 `vfx/fire_burst`（加 `fire_burst_smoke`）；镇妖塔每跳的塔底金光和玲珑塔炸开的金色冲击波用 `vfx/shockwave` 染金（#FFE2A8，按半径 R、140 缩放；140 在 1080p 下要放大约 1.6 倍）。
   - 孔明灯和塔是 `art/render/weapons_ea_render.py`（模型在 `art/models/ea_weapons.py`）用 Blender 渲的源图，再由 `weapon_textures_ea.py` 改名、做落下 / 收走的 2D 变化、压发光层的亮度。
+- **神话特效**（docs/FEEL.md 第 13 节，`art/post/myth_parts.py`，自检 `art/post/test_myth_parts.py`，分镜 `art/post/myth_board.py`）：帧名 `myth/<演出>_<元件>_<帧号>`，单张的不带帧号；
+  发光层是同画布、同锚点、同帧号的叠加层，帧号在前、`_emit` 在后（同 actors）：`myth/sword_cloud_0_emit`、`myth/fox_body_emit`，meta 写 `layer_of`（指回本体组名）。
+  本体普通混合、发光层叠加；动画帧的 meta（`anim`、`frame`、`frames`、`fps`、`loop`、`hold_last`）同上面的“逐帧特效”。都是 2 倍密度（4 像素 / 世界单位），
+  叠加帧最亮 alpha 0.8。大图少帧：位移、旋转、缩放、排阵都交给代码（排法见 FEEL 13.2、13.4 和分镜）。
+
+  | 帧 | 帧数 | 原画布 | 锚点 | 混合 | 颜色 | 说明 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `myth/sword_blade_0..2` | 3 种 | 96×24 | 中心 | 叠加 | 白，可染，建议 #FFE7A8 | 万剑归宗的剑影，挑着用（`variant`、`variants`，不是动画）：0 长剑、1 符剑（系符纸）、2 剑气；尖朝 +X（`points: "+x"`）；分镜里放大 1.1–1.7 倍 |
+  | `myth/sword_giant` | 1 | 1024×160 | 剑格 `(0.2441, 0.5)` | 叠加 | 白，可染，建议 #FFE7A8 | 大剑影：剑柱最外一层，代码叠三张成一柄顶天的大剑（大小差一两成、横向拉宽 1.7–2.3 倍、角度差一两度），剑格在主角头顶、剑尖顶进云缝；尖朝 +X |
+  | `myth/sword_cloud_0..5` + `_emit` | 6 | 1024×512 | 中心 | 普通（焦墨）+ 叠加（自带金色） | 不染 | 被劈开的云：贴在镜头上方（`screen_space: "top"`，画布中心在画面上沿往下约 120 像素，按画面宽放大约 2 倍），画在暗层之上；0 整着、1 金线劈开、2–3 推开漏光、4–5 退开散掉；12 帧/秒 |
+  | `myth/kun_sea_0..5` + `_emit` | 6 | 1024×640 | 中心（主角脚下） | 普通（自带颜色）+ 叠加（自带冰色） | 不染 | 脚下冰海，已压扁（`flat: 0.62`），`radius_px: 500`；8 帧/秒、`hold_last`，3–5 帧可以循环到鲲游完；光照图里要给它加一盏大的冷光 |
+  | `myth/kun_shadow` + `_emit` | 1 | 1536×512 | 中心 | 普通（焦墨）+ 叠加（自带冰色） | 不染 | 鲲影（俯视，头朝 +X）：放大约 2 倍从一侧平移到另一侧；本体画在冰海之上、妖物之下，发光层（影子边上一圈冰光）画在冰海发光层之上 |
+  | `myth/kun_fin` + `_emit` | 1 | 256² | 水面线 `(0.5, 0.7813)` | 普通 + 叠加（自带冰色） | 自带颜色 | 露出水面的背鳍（往 +X 游）：跟着鲲影的背脊走，分镜里放大 1.6 倍；身后的八字浪由代码拖 |
+  | `myth/kun_leap_0..5` | 6 | 768² | 水面线 `(0.5, 0.9115)` | 叠加 | 自带冷光色，不染 | 鲲跃出水（侧面，头朝 +X）：0 破水、2 最高、5 水花落下；12 帧/秒，第 2 帧上顿帧；分镜里放大约 2.4 倍 |
+  | `myth/ult_lotus_0..7` + `_emit` | 8 | 256×320 | 底边中点 `(0.5, 1.0)` | 普通（自带颜色）+ 叠加（自带金色） | 不染 | 燃灯的莲灯开合：本体是纸色瓣、焦褐轮廓，发光层是描金、瓣根透光、灯焰；`hold_last`。在主角头顶，画在暗层之上（自己的灯照亮），佛光铺满时后面垫一圈软的暗晕 |
+  | `myth/ult_rays` | 1 | 2048² | 中心 | 叠加 | 自带金色，不染 | 放射佛光：两张叠着反向慢转（增益约 0.34、0.14），从 0.4 倍长到约 2 倍；莲灯附近按半径压低 |
+  | `myth/ult_halo` | 1 | 512² | 中心 | 叠加 | 自带金色，不染 | 头光：圆光、放射纹、一圈小珠、外圈一圈莲瓣；放在莲灯后面跟着慢转 |
+  | `myth/fox_moon` | 1 | 1024² | 中心 | 叠加 | 白，可染，建议 #DCE6FF；血月染红 | 九尾登场的满月：`radius_px: 360`（月面半径），贴在镜头上方（`screen_space: "top"`），增益约 0.7 |
+  | `myth/fox_body` + `_emit` | 1 | 512² | 地面线 `(0.5, 0.9199)` | 普通 + 叠加（狐火青） | 自带颜色 | 九尾坐姿剪影（朝 +X）：尾根在画布像素 (`tail_root_x`, `tail_root_y`) = (204, 440)；画在月亮之上 |
+  | `myth/fox_tail` + `_emit` | 1 | 128×512 | 尾根 `(0.5, 0.9766)` | 普通 + 叠加（狐火青） | 自带颜色 | 一条尾巴，朝 −Y（`points: "-y"`）：代码从 fox_body 的尾根旋开九条（从右往左一条条打开，中间长两边短，前后两层明暗错开） |
+
 - **界面图集 `ui`**：用 `pack_atlas.py --no-trim` 打包，每帧的 `frame` 矩形就是整张原图（`spriteSourceSize` 恒为 `(0, 0, 原图宽, 原图高)`），界面代码直接按矩形取图。全部普通混合、不染色，按 1080p 逻辑像素的 2 倍绘制（128² 的图标在 1080p 下显示 64 像素最清楚）。帧名里的 id 和网页版数据一致：
 
   | 类别 | 帧 | 尺寸 |
