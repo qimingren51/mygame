@@ -74,7 +74,7 @@ fn focus(skin: &Skin, i: usize) -> impl Bundle {
     )
 }
 
-fn spawn(
+pub(crate) fn spawn(
     mut commands: Commands,
     fonts: Res<Fonts>,
     skin: Res<Skin>,
@@ -88,6 +88,11 @@ fn spawn(
             PauseRoot,
             DespawnOnExit(RunState::Paused),
             GlobalZIndex(30),
+            // 菜单比默认画布高（开发者那一行再高一截），窗口矮时整页等比缩小，背景照样铺满
+            crate::responsive::FitViewport::Fixed(Vec2::new(
+                1280.0,
+                if lay.dev.is_some() { 800.0 } else { 760.0 },
+            )),
             Node {
                 position_type: PositionType::Absolute,
                 width: percent(100),

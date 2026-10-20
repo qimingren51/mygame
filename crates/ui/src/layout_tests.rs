@@ -247,6 +247,19 @@ fn codex_pages_with_everything_unlocked_fit_after_resize() {
     }
 }
 
+/// 暂停菜单：打开开发者选项时多一行“开发者”，窗口里照样放得下
+#[test]
+fn pause_menu_fits_with_and_without_the_developer_row() {
+    for dev in [false, true] {
+        let mut app = setup();
+        let mut settings = lantern_platform::Settings::default();
+        settings.dev_tools = dev;
+        app.insert_resource(settings).init_resource::<crate::pause::PauseUi>();
+        app.world_mut().run_system_once(crate::pause::spawn).unwrap();
+        assert_fits_after_resize(&mut app);
+    }
+}
+
 /// 锁着的法器照样列在图鉴里，空位上写怎么解锁；它的进化心法写“<新法器>解锁后可得”；拿到过才写名字。
 #[test]
 fn codex_shows_how_to_unlock_locked_weapons() {
