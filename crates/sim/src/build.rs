@@ -303,14 +303,16 @@ pub fn offers(content: &Content, arsenal: &Arsenal, build: &Build, secs: f32) ->
         }
     }
     // 按类别给总权重（docs/BALANCE.md 第 6.4 节）：每一类的总权重固定，按份额分给这一类能出的卡。
-    // 手上法器（还没进化）的进化心法、进化心法已在手的法器升级，份额乘配对倍率。内容再多，升级卡也不会被稀释。
+    // 手上法器（还没进化）的进化心法、进化心法已在手的法器升级，份额乘配对倍率；by_level 时法器升级再乘等级。
+    // 内容再多，升级卡也不会被稀释。
     if let Some(b) = &ch.budget {
         let held_keys: Vec<usize> =
             arsenal.0.iter().filter(|w| !w.transformed()).filter_map(|w| content.weapon_key(w.def)).collect();
         let class = |o: &Offer| match *o {
             Offer::WeaponUp(k) => {
                 let keyed = content.weapon_key(arsenal.0[k].def).is_some_and(|p| build.passive_level(p) > 0);
-                Some((0, if keyed { b.keyed_up } else { 1.0 }))
+                let lv = if b.by_level { arsenal.0[k].level as f32 } else { 1.0 };
+                Some((0, if keyed { b.keyed_up } else { 1.0 } * lv))
             }
             Offer::NewWeapon(_) => Some((1, 1.0)),
             Offer::PassiveUp(_) => Some((2, 1.0)),
