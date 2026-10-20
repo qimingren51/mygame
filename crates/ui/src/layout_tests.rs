@@ -239,7 +239,16 @@ fn codex_pages_with_everything_unlocked_fit_after_resize() {
                     }));
                     profile.codex.extend(c.fusions.iter().map(|f| format!("f:{}", f.id)));
                     profile.codex.extend(c.passives.iter().map(|p| format!("p:{}", p.id)));
-                    crate::hub::codex_panel(&mut commands, c, &fonts, &skin, &db, &profile, page);
+                    crate::hub::codex_panel(
+                        &mut commands,
+                        c,
+                        &fonts,
+                        &skin,
+                        &db,
+                        &profile,
+                        &Default::default(),
+                        page,
+                    );
                 },
             )
             .unwrap();
@@ -262,7 +271,16 @@ fn codex_shows_how_to_unlock_locked_weapons() {
                       fonts: Res<Fonts>,
                       skin: Res<skin::Skin>,
                       db: Res<AtlasDb>| {
-                    crate::hub::codex_panel(&mut commands, &c.0, &fonts, &skin, &db, &p, page);
+                    crate::hub::codex_panel(
+                        &mut commands,
+                        &c.0,
+                        &fonts,
+                        &skin,
+                        &db,
+                        &p,
+                        &Default::default(),
+                        page,
+                    );
                 },
             )
             .unwrap();

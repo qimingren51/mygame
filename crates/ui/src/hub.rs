@@ -13,7 +13,7 @@ use crate::choice::spawn_icon;
 use crate::describe::{element_color, hex};
 use crate::skin::Skin;
 use crate::title::{TitleUi, clickable, dim_layer, focus, panel};
-use crate::{Fonts, INK, INK_DIM, PAPER, on_paper, text};
+use crate::{CINNABAR, Fonts, INK, INK_DIM, PAPER, on_paper, text};
 
 const GOLD: &str = "#E8C27A";
 const OIL: &str = "#FFD98A";
@@ -451,11 +451,12 @@ fn mmss(secs: f64) -> String {
 }
 
 /// 图鉴的页：五行谱（反应和累计统计）、法器（本体、进化、异化、合璧）、心法。
-pub(crate) const CODEX_PAGES: [&str; 3] = ["五行谱", "法器", "心法"];
+pub(crate) const CODEX_PAGES: [&str; 4] = ["五行谱", "法器", "心法", "灯与灯坠"];
 /// 页签的点击序号从这里起，和“点一下返回”分开
 pub(crate) const CODEX_TAB: usize = 100;
 
 /// 图鉴里的一格：拿到过的写名字、短句和背景故事，没拿到过的只留个空位。
+#[derive(Clone)]
 struct CodexEntry {
     key: String,
     /// 没拿到过时写的那一行；None 写“还没拿到过”（锁着的写怎么解锁，docs/LORE-TEXT.md 第 6.9 节）
@@ -466,6 +467,42 @@ struct CodexEntry {
     name: String,
     short: String,
     flavor: String,
+}
+
+impl CodexEntry {
+    /// 检视模型的 id，和卡面插画一套命名：法器（含进化、异化）、合璧、灯坠的键去掉前缀就是，灯笼是 `lantern_<灯>`
+    fn model(&self) -> Option<String> {
+        let (kind, id) = self.key.split_once(':')?;
+        match kind {
+            "w" | "f" | "c" => Some(id.to_string()),
+            "l" => Some(format!("lantern_{id}")),
+            _ => None,
+        }
+    }
+
+    /// 见过没有：法器、心法看存档记的图鉴；灯和灯坠有了就算
+    fn known(&self, profile: &Profile) -> bool {
+        match self.key.split_once(':') {
+            Some(("l", id)) => profile.lamps.contains(id),
+            Some(("c", id)) => profile.charms.contains(id),
+            _ => profile.codex.contains(&self.key),
+        }
+    }
+
+    /// 检视面板上写的字
+    fn inspect_card(&self, kind: &str) -> crate::inspect_ui::InspectCard {
+        crate::inspect_ui::InspectCard {
+            name: self.name.clone(),
+            kind: kind.into(),
+            short: self.short.clone(),
+            flavor: self.flavor.clone(),
+            color: self.color,
+            art: match self.key.split_once(':') {
+                Some(("l" | "c", _)) => self.icon.clone(),
+                _ => format!("ui/card_{}", self.model().unwrap_or_default()),
+            },
+        }
+    }
 }
 
 /// 法器页：每件法器一行（本体、进化、异化），最后一行合璧；异化与合璧关着时不列。
@@ -571,7 +608,62 @@ fn passive_entries(c: &Content, profile: &Profile) -> Vec<Vec<CodexEntry>> {
     rows
 }
 
-fn codex_cell(p: &mut ChildSpawnerCommands, fonts: &Fonts, db: &AtlasDb, e: &CodexEntry, known: bool) {
+/// 灯与灯坠页：三盏灯一行，八枚灯坠三个一行；有了就算见过（存档的 lamps、charms）。
+fn lamp_entries(c: &Content) -> Vec<Vec<CodexEntry>> {
+    let first = |name: &str| name.chars().next().map(String::from).unwrap_or_default();
+    let mut rows = vec![
+        c.lamps
+            .iter()
+            .map(|l| CodexEntry {
+                key: format!("l:{}", l.id),
+                hint: Some("灯驿里换得".into()),
+                icon: format!("ui/icon_lamp_{}", l.id),
+                glyph: first(&l.name),
+                color: crate::describe::hex(&l.color),
+                name: l.name.clone(),
+                short: l.good.clone(),
+                flavor: l.flavor.clone(),
+            })
+            .collect::<Vec<_>>(),
+    ];
+    let charms: Vec<CodexEntry> = c
+        .charms
+        .iter()
+        .map(|ch| CodexEntry {
+            key: format!("c:{}", ch.id),
+            hint: None,
+            icon: format!("ui/icon_charm_{}", ch.id),
+            glyph: first(&ch.name),
+            color: CINNABAR,
+            name: ch.name.clone(),
+            short: ch.good.clone(),
+            flavor: ch.flavor.clone(),
+        })
+        .collect();
+    rows.extend(charms.chunks(3).map(|r| r.to_vec()));
+    rows
+}
+
+fn codex_cell(
+    p: &mut ChildSpawnerCommands,
+    fonts: &Fonts,
+    db: &AtlasDb,
+    e: &CodexEntry,
+    known: bool,
+    models: &crate::inspect_ui::InspectModels,
+) {
+    let inspect = e.model().filter(|id| known && models.has(id)).map(|id| {
+        let kind = match e.key.as_bytes() {
+            [b'f', ..] => "合璧",
+            [b'c', ..] => "灯坠",
+            [b'l', ..] => "灯",
+            _ if id.ends_with("_evo") => "法器 · 进化",
+            _ if id.ends_with("_mut") => "法器 · 异化",
+            _ => "法器",
+        };
+        let card = e.inspect_card(kind);
+        (id, card)
+    });
     p.spawn(Node {
         width: px(336),
         flex_direction: FlexDirection::Column,
@@ -586,6 +678,26 @@ fn codex_cell(p: &mut ChildSpawnerCommands, fonts: &Fonts, db: &AtlasDb, e: &Cod
                 spawn_icon(head, db, fonts, Some(&e.icon), &e.glyph, color, 36.0);
                 let name = if known { e.name.as_str() } else { "？？？" };
                 head.spawn(text(&fonts.title, 22.0, if known { on_paper(e.color) } else { INK_DIM }, name));
+                // 有三维模型的：名字后面一个“检视”，点开能拖着转
+                if let Some((id, card)) = inspect.clone() {
+                    head.spawn((
+                        Node {
+                            padding: UiRect::axes(px(8), px(1)),
+                            margin: UiRect::left(px(4)),
+                            border: UiRect::all(px(1)),
+                            ..default()
+                        },
+                        BorderColor::all(CINNABAR.with_alpha(0.7)),
+                        text(&fonts.body, 14.0, CINNABAR, "检视"),
+                    ))
+                    .observe(
+                        move |_: On<bevy::picking::events::PointerClick>,
+                              mut inspect: ResMut<lantern_view::inspect::Inspect>,
+                              mut shown: ResMut<crate::inspect_ui::InspectCard>| {
+                            crate::inspect_ui::open(&mut inspect, &mut shown, &id, card.clone());
+                        },
+                    );
+                }
             },
         );
         if known {
@@ -607,17 +719,19 @@ pub(crate) fn codex_panel(
     skin: &Skin,
     db: &AtlasDb,
     profile: &Profile,
+    models: &crate::inspect_ui::InspectModels,
     page: usize,
 ) {
     let page = page.min(CODEX_PAGES.len() - 1);
     let rows = match page {
         1 => weapon_entries(c, profile),
         2 => passive_entries(c, profile),
+        3 => lamp_entries(c),
         _ => Vec::new(),
     };
     let count = |rows: &[Vec<CodexEntry>]| {
         let all: Vec<&CodexEntry> = rows.iter().flatten().collect();
-        (all.iter().filter(|e| profile.codex.contains(&e.key)).count(), all.len())
+        (all.iter().filter(|e| e.known(profile)).count(), all.len())
     };
     let sub = match page {
         0 => {
@@ -658,7 +772,7 @@ pub(crate) fn codex_panel(
             for row in &rows {
                 panel.spawn(Node { width: percent(100), ..default() }).with_children(|r| {
                     for e in row {
-                        codex_cell(r, fonts, db, e, profile.codex.contains(&e.key));
+                        codex_cell(r, fonts, db, e, e.known(profile), models);
                     }
                 });
             }

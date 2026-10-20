@@ -29,6 +29,10 @@ bevy = { version = "=0.20.0", default-features = false, features = [
     "bevy_picking",
     "ui_picking",
     "libm",
+    # 物件检视（docs/PLAYTEST.md 第 11 项）：glTF 模型、三维光照、模型自带的 idle 动画
+    "bevy_gltf",
+    "bevy_pbr",
+    "gltf_animation",
 ] }
 bevy_app = { version = "=0.20.0", default-features = false, features = ["std"] }
 bevy_ecs = { version = "=0.20.0", default-features = false, features = ["std", "multi_threaded"] }

@@ -141,9 +141,10 @@ pub(crate) fn input(
     mut exit: MessageWriter<AppExit>,
     mut transition: ResMut<crate::transition::InkTransition>,
     mut cues: MessageWriter<UiCue>,
-    mut reader: ResMut<crate::journals::Reader>,
+    (mut reader, inspect): (ResMut<crate::journals::Reader>, Option<Res<lantern_view::inspect::Inspect>>),
 ) {
-    if controls.is_open() || transition.active() || reader.open {
+    // 手记、检视开着时，按键归它们
+    if controls.is_open() || transition.active() || reader.open || inspect.is_some_and(|i| i.is_open()) {
         ui.clicked = None;
         ui.hovered = None;
         return;
@@ -509,6 +510,7 @@ fn redraw(
     scene: Option<Res<crate::hub_scene::HubScene>>,
     mut ui: ResMut<TitleUi>,
     panels: Query<Entity, With<TitlePanel>>,
+    models: Res<crate::inspect_ui::InspectModels>,
 ) {
     if !ui.dirty {
         return;
@@ -548,7 +550,9 @@ fn redraw(
         },
         TitleMode::Shop => hub::shop_panel(&mut commands, c, &fonts, &skin, &profile),
         TitleMode::Achievements => hub::achievements_panel(&mut commands, c, &fonts, &skin, &profile),
-        TitleMode::Codex => hub::codex_panel(&mut commands, c, &fonts, &skin, &db, &profile, ui.selected),
+        TitleMode::Codex => {
+            hub::codex_panel(&mut commands, c, &fonts, &skin, &db, &profile, &models, ui.selected)
+        }
         TitleMode::Settings | TitleMode::AdvancedSettings => {
             settings_panel(&mut commands, &fonts, &skin, &settings, *mode == TitleMode::AdvancedSettings)
         }

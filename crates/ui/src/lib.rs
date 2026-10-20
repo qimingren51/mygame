@@ -19,6 +19,7 @@ mod hub_fx;
 mod hub_scene;
 mod hud;
 mod hud_fx;
+mod inspect_ui;
 mod journals;
 mod markers;
 mod moments;
@@ -132,6 +133,7 @@ impl Plugin for UiPlugin {
         hub_scene::register(app);
         results::register(app);
         journals::register(app);
+        inspect_ui::register(app);
         story::register(app);
         pause::register(app);
         stats_panel::register(app);

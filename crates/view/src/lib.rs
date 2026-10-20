@@ -21,6 +21,7 @@ mod fx;
 mod ground;
 mod hero_feedback;
 mod impact;
+pub mod inspect;
 pub mod lighting;
 mod mist;
 /// 统一色板（和美术 style.py 的 RUNTIME_COLORS 对齐，docs/STYLE_GUIDE.md）；质感会话接入后逐步替换各处写死的颜色
@@ -79,6 +80,7 @@ pub struct SceneAssets {
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
+        inspect::register(app);
         app.add_plugins((lighting::LightingPlugin, hero_feedback::HeroFeedbackPlugin))
             .insert_resource(ClearColor(NIGHT))
             .insert_resource(AssetRoot(self.asset_root.clone()))
