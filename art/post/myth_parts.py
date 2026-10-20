@@ -746,6 +746,251 @@ def make_kun_leap() -> list[Image.Image]:
     return out
 
 
+# ============================================================== 燃灯：莲灯开合
+
+
+LOTUS_W, LOTUS_H = 256, 320
+LOTUS_BASE = (128.0, 272.0)  # 莲座中心（画布像素）；锚点是底边中点
+LOTUS_EL = math.radians(24)  # 稍微从上往下看（同游戏的 3/4 视角）
+# 每层：(瓣数, 根半径, 瓣长, 瓣宽, 起始方位角)；每帧三层的张开角（离竖直多少度）
+LOTUS_LAYERS = [(8, 16.0, 102.0, 40.0, 0.0), (8, 12.0, 86.0, 34.0, math.pi / 8), (6, 8.0, 68.0, 28.0, 0.0)]
+LOTUS_TILT = [(10, 7, 4), (12, 8, 5), (36, 10, 6), (60, 28, 7), (72, 52, 20), (78, 63, 36), (81, 67, 47), (83, 69, 52)]
+LOTUS_SIZE = [0.72, 0.86, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # 升起时先小一点
+LOTUS_FLAME = [0.0, 0.0, 0.25, 0.45, 0.65, 0.85, 1.0, 1.05]
+LOTUS_GLOW = [0.55, 0.65, 0.75, 0.85, 0.92, 1.0, 1.0, 1.0]
+LAMP_GOLD = [(0.0, "#D9963F"), (0.4, "#F2C46A"), (0.75, "#FFE7A8"), (1.0, "#FFFBF0")]
+
+
+def lotus_petal(phi, tilt, r0, L, Wd, el, cup=0.18, n=40):
+    """一片花瓣的轮廓（画布坐标，相对莲座中心）：在方位角 phi、离竖直 tilt 的平面里，杏仁形，瓣尖往里收一点（cup）。
+    返回 (多边形, 瓣面朝向观察者的程度 −1..1, 中脉折线, 深度)。"""
+    u = np.linspace(0, 1, n)
+    half = 0.5 * Wd * np.sin(np.pi * u**0.8) ** 0.9 * (1 - 0.15 * u)
+    # 瓣在自己的平面里：沿 d（根 → 尖）走，瓣尖往里卷（tilt 越大卷得越明显）
+    t_eff = tilt - cup * u**2 * (0.4 + tilt)
+    dx = np.sin(t_eff) * math.cos(phi)
+    dy = np.sin(t_eff) * math.sin(phi)
+    dz = np.cos(t_eff)
+    step = L / (n - 1)
+    px = r0 * math.cos(phi) + np.cumsum(dx) * step
+    py = r0 * math.sin(phi) + np.cumsum(dy) * step
+    pz = np.cumsum(dz) * step
+    tx, ty = -math.sin(phi), math.cos(phi)  # 瓣宽的方向（切向）
+    left = np.stack([px + half * tx, py + half * ty, pz], -1)
+    right = np.stack([px - half * tx, py - half * ty, pz], -1)
+    pts3 = np.concatenate([left, right[::-1]])
+
+    def proj(p):
+        x, y, z = p[..., 0], p[..., 1], p[..., 2]
+        return np.stack([LOTUS_BASE[0] + x, LOTUS_BASE[1] - (z * math.cos(el) + y * math.sin(el))], -1)
+
+    face = -math.sin(phi)  # y 往后为正；朝前（y < 0）的瓣面朝观察者
+    mid = proj(np.stack([px, py, pz], -1))
+    return proj(pts3), face, mid, float(np.mean(py))
+
+
+def make_ult_lotus() -> list[Image.Image]:
+    """燃灯的莲灯：三层莲瓣（外八、中八、内六）围着一盏灯焰，从合着的花苞一层层打开。叠加、自带灯金色。
+    0–1 合着的花苞升起（小一点、亮在里头）；2–3 外层打开；4–5 中层打开、灯焰露出来；6–7 内层打开、灯焰最旺，末帧可以留着。
+    每片瓣是半透明的光：瓣边最亮、瓣心淡、一道中脉；前面的瓣压在后面的瓣上更亮（光叠在一起）。锚点在底边中点（莲座底下）。"""
+    w, h, ss = LOTUS_W, LOTUS_H, 4
+    X, Y = grid(w, h)
+    rng = np.random.default_rng(13601)
+    tex = W.ptex(rng, ns=16, nt=512, along=20.0, across=0.6)
+    out = []
+    for i in range(8):
+        k = LOTUS_SIZE[i]
+        acc = Acc(X, Y)
+        petals = []
+        for li, (n, r0, L, Wd, a0) in enumerate(LOTUS_LAYERS):
+            tilt = math.radians(LOTUS_TILT[i][li])
+            for j in range(n):
+                phi = a0 + 2 * math.pi * j / n + 0.04 * li
+                poly, face, mid, depth = lotus_petal(phi, tilt, r0 * k, L * k, Wd * k, LOTUS_EL)
+                petals.append((depth, li, poly, face, mid))
+        # 从后往前叠（后面的瓣先画）
+        for depth, li, poly, face, mid in sorted(petals, key=lambda t: -t[0]):
+            lo, hi = poly.min(0) - 3, poly.max(0) + 3
+            sl = acc.window(lo[0], lo[1], hi[0], hi[1])
+            cov, d = F.poly_cover(X[sl], Y[sl], poly)
+            rim = smoothstep(2.0, 0.2, np.abs(d)) * (d < 0.8)
+            md, mt = F.polyline_dist(X[sl], Y[sl], mid)
+            vein = smoothstep(1.2, 0.2, md) * cov * (1 - 0.7 * mt)
+            fill = cov * (0.2 + 0.12 * (face + 1) / 2) * (0.75 + 0.25 * dry(tex, 0.0, mt * 0.5 + li * 0.3, 0.2))
+            glow_in = cov * 0.22 * (1 - mt) * LOTUS_GLOW[i]  # 根部被灯焰照亮
+            lum = np.clip(fill + 0.7 * rim + 0.35 * vein + glow_in, 0, 1) * (0.75 + 0.25 * (li / 2))
+            acc.add(sl, lum, 0.45 + 0.35 * (li / 2) + 0.2 * (1 - mt) * LOTUS_GLOW[i])
+        # 莲座：一圈往下翻的小萼片（压扁的花边椭圆）
+        bx, by = LOTUS_BASE
+        th = np.arctan2((Y - by) / (FLAT_L := 0.42), X - bx)
+        rr = np.hypot(X - bx, (Y - by) / FLAT_L)
+        scallop = 30 * k * (1 + 0.12 * np.abs(np.sin(th * 6)))
+        seat = smoothstep(scallop + 1.2, scallop - 1.2, rr) * (Y > by - 6 * k)
+        seat_rim = smoothstep(2.0, 0.0, np.abs(rr - scallop)) * (Y > by - 6 * k)
+        acc.add((slice(None), slice(None)), 0.28 * seat + 0.6 * seat_rim, 0.5)
+        # 灯焰：莲心一朵泪滴形的火，芯白
+        fl = LOTUS_FLAME[i]
+        if fl > 0:
+            fx, fy = bx, by - 34 * k - 22 * fl
+            fh, fw = 46 * fl + 8, 13 * fl + 3
+            q = np.hypot((X - fx) / fw, np.where(Y < fy, (Y - fy) / fh, (Y - fy) / (fw * 1.1)))
+            flame = smoothstep(1.0, 0.55, q)
+            core = smoothstep(0.55, 0.1, q)
+            halo = np.exp(-((np.hypot(X - fx, Y - fy) / (34 * fl + 10)) ** 2))
+            acc.add((slice(None), slice(None)), 0.7 * flame, 0.85)
+            acc.add((slice(None), slice(None)), core, 1.0)
+            acc.add((slice(None), slice(None)), 0.22 * halo * fl, 0.9)
+            if i >= 6:  # 灯焰往外放几道短光
+                for kk in range(16):
+                    ang = -math.pi / 2 + (kk - 7.5) / 7.5 * 1.3
+                    L0 = (40 + 18 * ((kk * 5) % 3)) * (1 if i == 6 else 1.15)
+                    x0, y0 = fx + 16 * math.cos(ang), fy + 16 * math.sin(ang)
+                    sl = acc.window(min(x0, x0 + L0 * math.cos(ang)) - 4, min(y0, y0 + L0 * math.sin(ang)) - 4,
+                                    max(x0, x0 + L0 * math.cos(ang)) + 4, max(y0, y0 + L0 * math.sin(ang)) + 4)
+                    cv, uu = F.needle(X[sl], Y[sl], x0, y0, ang, L0, 1.6, taper=1.0)
+                    acc.add(sl, 0.38 * cv * dry(tex, 0.0, uu * 0.4 + kk * 0.1, 0.1 + 0.5 * uu), 0.9)
+        else:  # 合着的花苞里头亮
+            gq = np.hypot((X - bx) / 20, (Y - (by - 40 * k)) / 34)
+            acc.add((slice(None), slice(None)), 0.5 * np.exp(-gq**2) * LOTUS_GLOW[i], 0.9)
+        out.append(F.frame_color(acc.a, acc.heat(), 13610 + i, LAMP_GOLD))
+    return out
+
+
+# ============================================================== 燃灯：放射佛光
+
+
+RAYS_SIZE = 2048
+
+
+def angular_profile(rng, n_rays, width_deg, n=32768, jitter=1.0, amp=(0.5, 1.0)):
+    """一圈放射光的角向分布：n_rays 道光，每道一个高斯，宽度在 width_deg 附近抖。返回长 n 的数组（周期）。"""
+    th = np.linspace(0, 2 * math.pi, n, endpoint=False)
+    prof = np.zeros(n)
+    centers = (np.arange(n_rays) + rng.uniform(-0.45, 0.45, n_rays) * jitter) * 2 * math.pi / n_rays
+    for c, wdeg, a in zip(centers, width_deg * rng.uniform(0.5, 1.6, n_rays), rng.uniform(*amp, n_rays)):
+        d = np.angle(np.exp(1j * (th - c)))
+        prof = np.maximum(prof, a * np.exp(-((d / math.radians(wdeg)) ** 2)))
+    return prof
+
+
+def make_ult_rays() -> list[Image.Image]:
+    """放射佛光（2048²，锚点居中，代码转、缩放）：千道细光从中心射出去，长短、粗细、明暗都不一样，几道宽的柔光束打底，
+    细光上带一点飞白，越往外越淡；中心只有一小点白热和一道细光轮（灯焰在莲灯里，不要在这里画一大团白）。透：光是一丝丝的，光和光之间是空的。叠加、自带灯金色。
+    两张叠着反向慢转、一张放大一点，看着就是“千条”。"""
+    size = RAYS_SIZE
+    c = size / 2
+    rng = np.random.default_rng(13701)
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32) + 0.5
+    dx, dy = xx - c, yy - c
+    r = np.hypot(dx, dy) / c  # 0..1（边上）
+    th = np.mod(np.arctan2(dy, dx), 2 * math.pi)
+    n = 32768
+    idx = (th / (2 * math.pi) * n).astype(np.int32) % n
+
+    def sample(prof):
+        return prof[idx]
+
+    lum = np.zeros((size, size), np.float32)
+    heat = np.zeros((size, size), np.float32)
+
+    def add(f, h):
+        nonlocal lum, heat
+        f = np.clip(f, 0, 1).astype(np.float32)
+        lum = 1 - (1 - lum) * (1 - f)
+        heat += f * h
+
+    wsum = np.zeros((size, size), np.float32)
+    # 宽的柔光束（24 道），长
+    p = angular_profile(rng, 24, 3.2, n, amp=(0.4, 0.8))
+    f = sample(p) * smoothstep(0.98, 0.25, r) * smoothstep(0.0, 0.06, r)
+    add(0.45 * f, 0.6)
+    wsum += 0.45 * f
+    # 中等的光（120 道），分三档长短
+    for k, (L, nr) in enumerate(((0.95, 40), (0.75, 40), (0.55, 40))):
+        p = angular_profile(rng, nr, 0.55, n, amp=(0.5, 1.0))
+        f = sample(p) * smoothstep(L, L * 0.45, r) * smoothstep(0.02, 0.07, r)
+        add(0.6 * f, 0.75)
+        wsum += 0.6 * f
+    # 细光（约 900 道），分六档长短，带飞白
+    tex = W.ptex(rng, ns=64, nt=2048, along=60.0, across=0.5)
+    for k in range(6):
+        L = 0.98 - 0.11 * k
+        p = angular_profile(rng, 150, 0.12, n, amp=(0.35, 1.0))
+        fly = W.sample_ptex(tex, np.clip((th / (2 * math.pi)) * 2 - 1, -1, 1), r * 1.6 + k * 0.17)
+        f = sample(p) * smoothstep(L, L * 0.35, r) * smoothstep(0.03, 0.08, r) * smoothstep(0.25 + 0.3 * r, 0.6 + 0.3 * r, fly)
+        add(0.75 * f, 0.85)
+        wsum += 0.75 * f
+    # 中心：白热的一团 + 一圈光轮
+    core = np.exp(-((r / 0.018) ** 2))  # 中心只留一小点白热（灯焰本身在莲灯里）
+    add(core, 1.0)
+    wsum += core
+    soft = np.exp(-((r / 0.035) ** 2)) * 0.25
+    add(soft, 0.95)
+    wsum += soft
+    ring = np.exp(-(((r - 0.1) / 0.004) ** 2)) * 0.3
+    add(ring, 1.0)
+    wsum += ring
+    h = heat / np.maximum(wsum, 1e-6)
+    h = np.clip(h * (1 - 0.35 * r), 0, 1)
+    a = PEAK * np.tanh(1.25 * np.clip(lum, 0, 1)) / math.tanh(1.25)
+    a *= smoothstep(1.0, 0.9, r)
+    a8 = V.dither_alpha(a, np.random.default_rng(13702))
+    a8[a < 0.004] = 0
+    rgb = F.lerp_col(h, LAMP_GOLD)
+    return [V.to_rgba8(rgb, None, a8)]
+
+
+# ============================================================== 燃灯：头光
+
+
+HALO_SIZE = 512
+
+
+def make_ult_halo() -> list[Image.Image]:
+    """头光（512²，锚点居中，放在莲灯 / 主角头后）：佛像背后的圆光，全是细的光线，中间是空的、透的。
+    里面一层淡淡的圆光；三道细圆线，两线之间一圈细的放射光、一圈小珠；最外一圈火焰纹（二十四朵 S 形往一边卷的火舌，只描边、
+    里面极淡）。叠加、自带灯金色。"""
+    size, ss = HALO_SIZE, 2
+    X, Y = V.grid(size, size, ss)
+    c = size / 2
+    dx, dy = X - c, Y - c
+    r = np.hypot(dx, dy)
+    th = np.arctan2(dy, dx)
+    rng = np.random.default_rng(13801)
+    tex = W.ptex(rng, ns=24, nt=1024, along=24.0, across=0.6)
+    parts = []
+    parts.append((0.035 * np.exp(-((r / 100.0) ** 2)) + 0.05 * np.exp(-(((r - 102) / 18.0) ** 2)), 0.8))  # 淡淡的圆光，边上略亮
+    for R0, a0 in ((108.0, 0.7), (150.0, 0.55), (178.0, 0.75)):
+        parts.append((a0 * smoothstep(1.3, 0.0, np.abs(r - R0)), 1.0))
+    rays = W.sample_ptex(tex, np.clip(np.sin(th * 3), -1, 1) * 0, th / (2 * math.pi) * 6 + r / 4000.0)
+    fine = 0.5 + 0.5 * np.cos(th * 180 + 0.6 * np.sin(th * 7))
+    band = smoothstep(110.0, 116.0, r) * smoothstep(148.0, 142.0, r)
+    parts.append((0.22 * band * smoothstep(0.7, 0.98, fine) * (0.6 + 0.4 * rays), 0.9))  # 细放射光
+    dots = 0.5 + 0.5 * np.cos(th * 48)
+    parts.append((0.65 * smoothstep(0.93, 1.0, dots) * smoothstep(2.6, 0.6, np.abs(r - 164.0)), 1.0))  # 一圈小珠
+    # 火焰纹：根在外圆线上，S 形往一边卷，只描边
+    n = 24
+    seg = (th / (2 * math.pi) * n) % 1.0
+    local = (seg - 0.5) * 2
+    odd = np.floor(th / (2 * math.pi) * n) % 2  # 一长一短
+    rr = (r - 180.0) / (64.0 - 18.0 * odd)
+    rc = np.clip(rr, 0, 1)
+    sway = 0.2 * np.sin(rc * math.pi) + 0.38 * rc**2.2  # 轻轻的 S 形，尖往一边甩
+    width = 0.92 * (1 - rc) ** 1.1 * (0.5 + 0.5 * np.sin(np.clip(rc * 2.6, 0, math.pi / 2)))
+    q = local - sway
+    inside = (rr > 0) & (rr < 1)
+    tongue = smoothstep(width + 0.06, width - 0.06, np.abs(q)) * inside
+    edge = smoothstep(0.1, 0.0, np.abs(np.abs(q) - width)) * inside * (width > 0.02)
+    mid_line = smoothstep(0.06, 0.0, np.abs(q)) * inside * smoothstep(0.85, 0.2, rc)
+    brk = dry(tex, np.clip(local, -1, 1), rc * 0.5 + np.floor(th / (2 * math.pi) * n) * 0.07, 0.1 * smoothstep(0.5, 1.0, rc))
+    parts.append((0.025 * tongue, 0.6))
+    parts.append((0.75 * edge * brk * (1 - 0.45 * rc), 0.75))
+    parts.append((0.3 * mid_line, 0.7))
+    a, heat = F.union_heat(parts)
+    a *= smoothstep(c - 2, c - 10, r)
+    return [to_color(a, heat, 13810, LAMP_GOLD, ss=ss)]
+
+
 # ============================================================== 规格与写出
 
 # 名字 → (生成函数, 尺寸, 锚点, 混合, 可染, 颜色, 附加 meta)。生成函数返回帧列表；返回 (本体, 发光层) 的写两组。
@@ -772,6 +1017,15 @@ SPECS: dict = {
                  {"points": "+x", "fps": 12,
                   "note": "鲲跃出水：侧面的冷光剪影，头朝 +X；锚点在水面线正中。0 破水、1 半身、2 跃到最高（鳍张开像翅膀）、3 翻过去、4 扎回、5 水花落下；"
                           "叠加、自带冷光色（#5E9AD8 → #CDEBFF → 白）。12 帧/秒，第 2 帧上顿帧 0.08 秒；代码放大约 1.9 倍"}),
+    "ult_lotus": (make_ult_lotus, (LOTUS_W, LOTUS_H), (0.5, 1.0), "add", False, "full",
+                  {"hold_last": True,
+                   "note": "燃灯的莲灯：三层莲瓣围着灯焰，从花苞一层层打开（0–1 花苞升起、2–3 外层开、4–5 中层开灯焰露出、6–7 全开）；"
+                           "锚点在底边中点（莲座底下），代码让它从主角的灯升到头顶上方；叠加、自带灯金色（#D9963F → #FFE7A8 → 白），末帧可以留到演出完"}),
+    "ult_rays": (make_ult_rays, (RAYS_SIZE, RAYS_SIZE), (0.5, 0.5), "add", False, "full",
+                 {"note": "放射佛光：千道细光、几十道柔光束，中心白热；锚点居中（放在莲灯的灯焰上）。代码两张叠着反向慢转（一张放大 1.15 倍），"
+                          "从 0.4 倍长到盖满全屏（约 2 倍）；叠加、自带灯金色；佛光期间暗层提亮到八成"}),
+    "ult_halo": (make_ult_halo, (HALO_SIZE, HALO_SIZE), (0.5, 0.5), "add", False, "full",
+                 {"note": "头光：圆光 + 放射纹 + 一圈小珠 + 火焰纹，锚点居中，放在莲灯后面（也可以放主角头后），跟着慢转；叠加、自带灯金色"}),
 }
 EMIT_SPECS = {
     "sword_cloud": {"name": "sword_cloud_emit", "blend": "add", "tint": False, "color": "full",
@@ -779,7 +1033,7 @@ EMIT_SPECS = {
 }
 EMIT_SPECS["kun_sea"] = {"name": "kun_sea_emit", "blend": "add", "tint": False, "color": "full",
                          "note": "冰海的发光层：冰缝、水边冰下透的光、冰板缝、浪尖亮线和碎光；叠加、自带冰色（#7FB6E8 → #CDEBFF → 白），画在暗层之上"}
-GROUPS = {"sword": ["sword_blade", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_leap"]}
+GROUPS = {"sword": ["sword_blade", "sword_cloud"], "kun": ["kun_sea", "kun_shadow", "kun_leap"], "ult": ["ult_lotus", "ult_rays", "ult_halo"]}
 
 
 def meta_for(name, spec, n, i, size_override=None, emit=None):

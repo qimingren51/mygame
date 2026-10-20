@@ -497,6 +497,172 @@ def kun_panel(k: int) -> tuple[Z.Shot, str]:
     return shot, "2.2 秒 · 鲲扎回水里，冰海一下子碎成满地冰碴炸开（现成 vfx/ice_shatter），近处的妖物冻在原地；然后淡出"
 
 
+# ============================================================== 燃灯
+
+
+LAMP_T = lin("#FFE7A8").astype(np.float32)
+EMBER_T = lin("#FFB347").astype(np.float32)
+ASH = lin("#3A3631").astype(np.float32)
+
+
+def ashen(p, seed=0):
+    """被佛光照到的妖物化灰（改贴图的钩子）：按噪声从里往外烧掉，烧到的边一圈余烬（叠加层），剩下的发灰。p 0..1。"""
+    def hook(pm, epm):
+        h, w = pm.shape[:2]
+        n = V.rank01(V.fft_blur(np.random.default_rng(900 + seed).standard_normal((h, w)), 3.0) + 0.6 * V.fft_blur(np.random.default_rng(901 + seed).standard_normal((h, w)), 14.0))
+        a = pm[..., 3]
+        keep = V.smoothstep(p, p + 0.08, n).astype(np.float32)
+        q = np.float32(min(1.0, p * 1.6) * 0.85)
+        rgb = pm[..., :3] * (1 - q) + ASH * a[..., None] * q
+        out = np.concatenate([rgb * keep[..., None], (a * keep)[..., None]], -1).astype(np.float32)
+        e = (a * np.exp(-(((n - p) / 0.035) ** 2)) * (p > 0.01)).astype(np.float32)
+        em = np.concatenate([EMBER_T * e[..., None], e[..., None]], -1)
+        if epm is not None:
+            em = em + epm * keep[..., None]
+        return out, em
+    return hook
+
+
+def ash_flakes(img, cam, actors, p, rise, n=26, seed=5, mode="over"):
+    """化灰的妖物身上飘起来的灰片（普通混合）和余烬（叠加）：越往上越散、越淡。"""
+    r2 = np.random.default_rng(seed)
+    for a_ in actors:
+        if a_.key.startswith("hero/"):
+            continue
+        for _ in range(n):
+            q = r2.uniform(0, 1)
+            x = a_.x + r2.normal(0, 9) + 18 * q * r2.normal(0, 1)
+            hgt = r2.uniform(4, 40) + rise * q
+            px, py = cam.s(x, a_.y, hgt)
+            if mode == "over":
+                sz = r2.uniform(1.5, 4.5) * (1 - 0.4 * q)
+                col = ASH * 0.6
+                al = 0.85 * (1 - q) ** 0.8 * p
+                Z.stroke(img, [(px - sz, py - sz * 0.4), (px + sz, py + sz * 0.3)], sz * 0.9, col, mode="over", alpha=al)
+            else:
+                if r2.random() < 0.4:
+                    Z.glow(img, px, py, r2.uniform(1.5, 3.2), EMBER_T, 0.9 * (1 - q) * p, power=1.8)
+
+
+def lotus_at(img, cam, fi, h, scale, gain=1.0):
+    lot = parts("ult_lotus")[fi]
+    x, y = cam.s(Z.HERO[0], Z.HERO[1], h)
+    Z.blit(img, Z.pm_of(lot), x, y, (0.5, 1.0), cam.sprite * scale, mode="add", gain=Z.EMIT * gain)
+    return x, y
+
+
+def flame_pos(cam, fi, h, scale):
+    """莲灯灯焰在画面上的位置（佛光、头光的中心）。"""
+    x, y = cam.s(Z.HERO[0], Z.HERO[1], h)
+    k = P.LOTUS_SIZE[fi]
+    fl = P.LOTUS_FLAME[fi]
+    fy = P.LOTUS_BASE[1] - 34 * k - 22 * fl
+    return x, y - (P.LOTUS_H - fy) * cam.sprite * scale
+
+
+def ult_panel(k: int) -> tuple[Z.Shot, str]:
+    hx, hy = Z.HERO
+    H_LAMP, SC = 62.0, 1.45
+    near = lambda a_: (not a_.key.startswith("hero/"))  # noqa: E731
+    if k == 0:
+        cam = Z.Cam(z=1.08, cy=-6.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.6), pool=0.6, bloom=0.4, vignette=0.5, desat=0.18)
+
+        def light(lm, cam):
+            x, y = cam.s(hx, hy, H_LAMP - 20)
+            Z.glow(lm, x / 2, y / 2, 70 * cam.k / 2, LAMP_T, 0.35, power=1.5)
+
+        def add(img, cam):
+            sx, sy = M.asset_meta("hero")["sockets"]["lantern"]["idle"]["S"][0]
+            lx, ly = cam.s(hx + sx / Z.PPU, hy + sy / Z.PPU)
+            x, y = lotus_at(img, cam, 1, H_LAMP - 14, SC)
+            fx, fy = flame_pos(cam, 1, H_LAMP - 14, SC)
+            # 从灯里升起来：一道细的光迹，弯一下
+            pts = [(lx + (x - lx) * q + 18 * math.sin(q * math.pi) , ly + (fy + 30 - ly) * q) for q in np.linspace(0, 1, 20)]
+            Z.stroke(img, pts, np.linspace(1.0, 5.0, 20), LAMP_T, alpha=np.linspace(0.05, 0.6, 20), gain=Z.EMIT)
+            Z.glow(img, fx, fy + 20, 60, LAMP_T, 0.12, power=2.0)
+
+        shot.light.append(light)
+        shot.add.append(add)
+        return shot, "0.3 秒 · 顿帧、推近，四下压暗：一盏合着的莲灯从主角的灯里升起，飘到头顶上方，灯苞里透着光"
+    if k == 1:
+        cam = Z.Cam(z=1.12, cy=-10.0)
+        shot = Z.Shot(cam=cam, actors=Z.default_actors(), ambient=S_DIM(0.62), pool=0.65, bloom=0.3, vignette=0.46, desat=0.1)
+
+        def light(lm, cam):
+            fx, fy = flame_pos(cam, 5, H_LAMP, SC)
+            Z.glow(lm, fx / 2, fy / 2, 160 * cam.k / 2, LAMP_T, 0.35, power=1.4)
+
+        def add(img, cam):
+            fx, fy = flame_pos(cam, 5, H_LAMP, SC)
+            halo = parts("ult_halo")[0]
+            Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 0.9, angle=0.2, mode="add", gain=Z.EMIT * 0.6)
+            rays = parts("ult_rays")[0]
+            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 0.6, angle=0.1, mode="add", gain=Z.EMIT * 0.3)
+            lotus_at(img, cam, 5, H_LAMP, SC, gain=0.8)
+
+        shot.light.append(light)
+        shot.add.append(add)
+        return shot, "0.6 秒 · 灯罩一层层打开（外层、中层），灯焰露出来；身后亮起头光，第一圈佛光从灯焰里放出来"
+    if k == 2:
+        cam = Z.Cam(z=1.12, cy=-10.0, shake=(3.0, -2.0))
+        actors = Z.default_actors()
+        for j, a_ in enumerate(actors):
+            if near(a_):
+                a_.hook = ashen(0.45 + 0.1 * ((j * 7) % 3), j)
+        shot = Z.Shot(cam=cam, actors=actors, ambient=S_DIM(0.7), pool=0.8, lift_dark=0.66, bloom=0.36, vignette=0.26)
+
+        def light(lm, cam):
+            fx, fy = flame_pos(cam, 7, H_LAMP, SC)
+            Z.glow(lm, fx / 2, fy / 2, 420 * cam.k / 2, LAMP_T, 0.05, power=1.2)
+
+        def over(img, cam):
+            ash_flakes(img, cam, actors, 1.0, 70, mode="over")
+
+        def add(img, cam):
+            fx, fy = flame_pos(cam, 7, H_LAMP, SC)
+            rays = parts("ult_rays")[0]
+            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.0, angle=0.16, mode="add", gain=Z.EMIT * 0.34)
+            Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.6, angle=-0.21, mode="add", gain=Z.EMIT * 0.14)
+            halo = parts("ult_halo")[0]
+            Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.32, mode="add", gain=Z.EMIT * 0.4)
+            lotus_at(img, cam, 7, H_LAMP, SC, gain=0.5)
+            ash_flakes(img, cam, actors, 1.0, 70, mode="add")
+
+        shot.light.append(light)
+        shot.over.append(over)
+        shot.add.append(add)
+        return shot, "0.95 秒 · 莲灯全开，千条佛光照透全场（暗层往八成提，辉光拉满）；被照到的妖物从里往外烧成灰，余烬和灰片往上飘"
+    cam = Z.Cam(z=1.08, cy=-6.0)
+    actors = [a_ for a_ in Z.default_actors() if not near(a_)]
+    ghosts = [a_ for a_ in Z.default_actors() if near(a_)]
+    for j, a_ in enumerate(ghosts):
+        a_.hook = ashen(0.93, j)
+        a_.shadow = False
+    shot = Z.Shot(cam=cam, actors=actors + ghosts, ambient=S_DIM(0.8), pool=0.5, lift_dark=0.5, bloom=0.32, vignette=0.28)
+
+    def light(lm, cam):
+        fx, fy = flame_pos(cam, 7, H_LAMP, SC)
+        Z.glow(lm, fx / 2, fy / 2, 300 * cam.k / 2, LAMP_T, 0.1, power=1.3)
+
+    def over(img, cam):
+        ash_flakes(img, cam, ghosts, 0.85, 150, n=34, seed=6, mode="over")
+
+    def add(img, cam):
+        fx, fy = flame_pos(cam, 7, H_LAMP, SC)
+        rays = parts("ult_rays")[0]
+        Z.blit(img, Z.pm_of(rays), fx, fy, (0.5, 0.5), cam.sprite * 2.4, angle=0.3, mode="add", gain=Z.EMIT * 0.14)
+        halo = parts("ult_halo")[0]
+        Z.blit(img, Z.pm_of(halo), fx, fy, (0.5, 0.5), cam.sprite * 1.25, angle=0.45, mode="add", gain=Z.EMIT * 0.35)
+        lotus_at(img, cam, 7, H_LAMP, SC, gain=0.8)
+        ash_flakes(img, cam, ghosts, 0.85, 150, n=34, seed=6, mode="add")
+
+    shot.light.append(light)
+    shot.over.append(over)
+    shot.add.append(add)
+    return shot, "1.3 秒 · 佛光收拢、淡下去，妖物只剩灰，灰和余烬飘得比平时高；接现在的三拍（墨浪、余烬）"
+
+
 # ============================================================== 汇总
 
 SHOWS = {
@@ -515,6 +681,14 @@ SHOWS = {
         "title": "北冥潮（沧浪进化）· 2.4 秒 · 分镜",
         "sub": "《逍遥游》：北冥有鱼，其名为鲲；鹏之徙于南冥，水击三千里。元件：myth/kun_sea_0..5 + _emit（脚下冰海）、kun_shadow（鲲影）、kun_leap_0..5（跃出水的冷光剪影）；"
                "浪头、冰碴用现成的 wave_front、ice_shatter，浪痕、水珠、冻住是代码的示意",
+    },
+    "ult": {
+        "panels": ult_panel,
+        "n": 4,
+        "hero": 2,
+        "title": "燃灯（大招）· 1.3 秒，接现在的三拍 · 分镜",
+        "sub": "《大智度论》：燃灯佛生时，身边如灯。元件：myth/ult_lotus_0..7（莲灯开合）、ult_rays（放射佛光，两张反向转）、ult_halo（头光）；"
+               "光迹、暗层提亮、化灰（烧边余烬、灰片上飘）是代码的示意",
     },
 }
 
